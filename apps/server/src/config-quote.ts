@@ -8,9 +8,11 @@ import {
   DslError,
   evalTableRows,
   splitShares,
+  splitWeights,
+  QTY_COL,
+  type ItemsTable,
   type ModelDef,
   type ResolvedLookups,
-  type TableDef,
   type TableRows,
   type Val,
 } from "@hera/config-engine";
@@ -65,8 +67,6 @@ function canonicalJson(v: unknown): string {
   return JSON.stringify(v ?? null);
 }
 
-type ItemsTable = Extract<TableDef, { role: "items" }>;
-
 /** The one items table a model may declare, if it declared one. checkModel caps it at one. */
 const itemsTableOf = (model: ModelDef): ItemsTable | undefined =>
   (model.tables ?? []).find((t): t is ItemsTable => t.role === "items");
@@ -117,7 +117,7 @@ export function buildQuoteLines(
           project.tables[items.key] ?? [],
           { ...bindings(model, lookups, cand.assignment, project.tables).values, qty: s.batchQty },
           lookups.tables,
-        ).filter((r) => typeof r[items.qtyCol] === "number" && (r[items.qtyCol] as number) > 0);
+        ).filter((r) => typeof r[QTY_COL] === "number" && (r[QTY_COL] as number) > 0);
 
     if (!items || rows.length === 0) {
       lines.push({
@@ -131,9 +131,10 @@ export function buildQuoteLines(
     }
 
     const total = out.unitPrice * s.batchQty;
-    const shares = splitShares(rows, items.qtyCol, items.basisCol, total);
+    const scope = { ...bindings(model, lookups, cand.assignment, project.tables).values, qty: s.batchQty };
+    const shares = splitShares(splitWeights(items, rows, scope, lookups.tables), total);
     rows.forEach((row, i) => {
-      const quantity = (row[items.qtyCol] as number) * s.batchQty;
+      const quantity = (row[QTY_COL] as number) * s.batchQty;
       const lineTotal = shares[i]!;
       const line: Record<string, unknown> = {
         // the configurator's generic item stays the B1 item; the customer-facing code rides along

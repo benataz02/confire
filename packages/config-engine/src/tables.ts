@@ -2,6 +2,8 @@ import { evaluate } from "./dsl";
 import {
   aggregateKey,
   refKeyCols,
+  QTY_COL,
+  type ItemsTable,
   type ModelDef,
   type Option,
   type ResolvedLookups,
@@ -94,22 +96,37 @@ export function tableAggregates(
   return out;
 }
 
+/** Each item row's weight in the split: `basisExpr` evaluated against the row (its own cells
+ *  shadow model identifiers, exactly as in a formula cell), times the row's quantity. Rows must
+ *  already be evaluated — evalTableRows first. */
+export function splitWeights(
+  def: ItemsTable,
+  rows: Record<string, Val>[],
+  scopeVars: Record<string, Val>,
+  tables?: Record<string, ResolvedTable>,
+): number[] {
+  return rows.map((row) => {
+    let basis: number;
+    try {
+      basis = numOf(evaluate(def.basisExpr, { vars: { ...scopeVars, ...row }, tables }));
+    } catch {
+      basis = 0; // an undecidable basis weighs nothing, like a blank column did
+    }
+    return basis * numOf(row[QTY_COL]);
+  });
+}
+
 /**
- * Split one configuration's total across the item rows by `basis × qty`.
+ * Split one configuration's total across the item rows by `splitWeights`.
  *
  * The joint cost of a merge run cannot be computed per item, only divided, so the configuration
  * total stays authoritative and the lines are derived from it. Largest-remainder to whole cents:
  * the cents rounding drops go to the biggest fractions, so `Σ shares === round(total, 2)`
  * exactly — otherwise the quotation's DocTotal would not match the stored `quotedValue`.
  */
-export function splitShares(
-  rows: Record<string, Val>[],
-  qtyCol: string,
-  basisCol: string,
-  total: number,
-): number[] {
-  if (rows.length === 0) return [];
-  let w = rows.map((r) => numOf(r[basisCol]) * numOf(r[qtyCol]));
+export function splitShares(weights: number[], total: number): number[] {
+  if (weights.length === 0) return [];
+  let w = weights;
   if (w.reduce((a, b) => a + b, 0) <= 0) w = w.map(() => 1); // nothing to weigh by -> equal split
   const sum = w.reduce((a, b) => a + b, 0);
   const cents = Math.round(total * 100);

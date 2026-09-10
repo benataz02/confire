@@ -1,17 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import {
   Bar, BusyIndicator, Button, Dialog, Icon, Input, SuggestionItem, Table, TableCell, TableGrowing,
-  TableHeaderCell, TableHeaderRow, TableRow, TableVirtualizer, Text,
+  TableHeaderCell, TableHeaderRow, TableRow, TableVirtualizer,
   type TableVirtualizerDomRef,
 } from "@ui5/webcomponents-react";
 import {
   displayColumns, refKeyCols,
-  type DomainOption, type LookupRef, type ModelDef, type ResolvedTable, type Val,
+  type DomainOption, type LookupRef, type ResolvedTable, type Val,
 } from "@hera/config-engine";
 import { orpc } from "../orpc.ts";
 import { EMPTY_SPEC, type FilterCond } from "../listSpec.ts";
-import { resolveEntry } from "./configurator/formHelpers.ts";
+import { optionsOf, resolveEntry } from "./configurator/formHelpers.ts";
 
 // Kill the dialog's default content padding so the table (and its sticky header) sit flush.
 // overflow:hidden so only the table scrolls — Dialog::part(content) is overflow:auto by default.
@@ -21,34 +21,26 @@ if (typeof document !== "undefined") {
   el.textContent = `.hera-vh-dialog::part(content){padding:0;overflow:hidden;}`;
 }
 
-/** Remote-search plumbing: pull page 1 on the first open/keystroke, then one round trip per
- *  250ms pause instead of one per keystroke. */
-export function useRemoteSearch(onSearch?: (q: string) => void) {
-  const primed = useRef(false);
+// A <Text> here is a custom element upgraded per cell on every range change — ~125 of them per
+// scroll tick. Rows are pinned to rowHeight anyway, so a span with ellipsis is the same picture.
+const CELL: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+
+/** Remote-search plumbing: one round trip per 250ms pause instead of one per keystroke. */
+function useRemoteSearch(onSearch: (q: string) => void) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const cancel = () => { if (timer.current) clearTimeout(timer.current); };
+  useEffect(() => cancel, []);
   return {
-    prime: () => {
-      if (primed.current || !onSearch) return;
-      primed.current = true;
-      onSearch("");
-    },
-    search: (q: string) => {
-      primed.current = true;
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => onSearch?.(q), 250);
-    },
-    cancel: () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
+    cancel,
+    search: (q: string) => { cancel(); timer.current = setTimeout(() => onSearch(q), 250); },
   };
 }
 
-// Fiori-style value help for query-sourced parameters: search across every displayed column,
-// click a row to pick it. With `onSearch` the search also runs remotely (the caller refreshes
-// `table`); the local filter then just narrows what came back.
-export function ValueHelpDialog({
-  open, headerText, table, valueCol, columns, hiddenValues, onSelect, onClose,
+// Fiori-style value help for query-sourced parameters: type to search, click a row to pick it.
+// The search is remote only — the caller refreshes `table`. Re-filtering the response locally
+// would hide a row the server matched on a column this dialog does not display.
+function ValueHelpDialog({
+  open, headerText, table, valueCol, columns, onSelect, onClose,
   onSearch, loading, hasMore, onLoadMore, columnLabels, hidden,
 }: {
   open: boolean;
@@ -57,19 +49,17 @@ export function ValueHelpDialog({
   valueCol: string;
   /** extra display columns (without valueCol) */
   columns: string[];
-  /** values eliminated by constraints — not offered */
-  hiddenValues?: Set<Val>;
   onSelect: (v: Val | undefined, row?: Val[]) => void;
   onClose: () => void;
   /** remote search — debounced; the caller refreshes `table` */
-  onSearch?: (q: string) => void;
+  onSearch: (q: string) => void;
   loading?: boolean;
   /** another page is available — growing loads it when the table is scrolled to the end */
   hasMore?: boolean;
   onLoadMore?: () => void;
   /** dialog headers; missing/blank → the key */
   columnLabels?: Record<string, string>;
-  /** keys omitted from the dialog (and local search). Still on the row for derived values. */
+  /** keys omitted from the dialog. Still on the row for derived values. */
   hidden?: string[];
 }) {
   const [q, setQ] = useState("");
@@ -80,23 +70,14 @@ export function ValueHelpDialog({
   const shown = visible.length ? visible : [valueCol];
   const idx = shown.map((c) => table.columns.indexOf(c));
   const vi = table.columns.indexOf(valueCol);
+  const rows = table.rows;
 
-  const rows = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return table.rows.filter((r) => {
-      if (vi < 0 || (hiddenValues?.has(r[vi] ?? null) ?? false)) return false;
-      return !needle || idx.some((i) => i >= 0 && String(r[i] ?? "").toLowerCase().includes(needle));
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [table, q, hiddenValues, hidden]);
-
+  // Reset on the search TERM, not on `rows`: a growing page-append also changes `rows`, and
+  // resetting there would yank the range back to the top while the user sits at the bottom.
   useEffect(() => {
     setRange({ first: 0, last: 20 });
     virtRef.current?.reset();
   }, [q]);
-
-  const start = Math.max(0, Math.min(range.first - 2, rows.length));
-  const end = Math.min(rows.length, Math.max(start, range.last + 3));
 
   return (
     <Dialog open={open} headerText={headerText} onClose={onClose} className="hera-vh-dialog"
@@ -127,7 +108,12 @@ export function ValueHelpDialog({
             // which sits below the whole rowCount*rowHeight spacer, so overstating it would put
             // load-more behind a wall of blank rows. Growing has no threshold prop either —
             // rootMargin 5px is the entire lookahead, so this fetches at the literal bottom.
-            <TableVirtualizer key="virt" ref={virtRef} rowCount={rows.length} rowHeight={44}
+            // extraRows is the overscan, and it has to be the virtualizer's own: it widens
+            // `first`/`last` AND the translateY it derives from rows[0].position, so the two can
+            // never disagree. Slicing wider by hand only widened one of them. 10 rows ~= 440px of
+            // slack, which is what covers the frame of lag between the rAF-throttled scroll
+            // handler and React committing the new slice — the gap that showed as blank rows.
+            <TableVirtualizer key="virt" ref={virtRef} rowCount={rows.length} rowHeight={44} extraRows={10}
               onRangeChange={(e) => {
                 const { first, last } = e.detail;
                 setRange((prev) => (prev.first === first && prev.last === last ? prev : { first, last }));
@@ -147,12 +133,12 @@ export function ValueHelpDialog({
               {shown.map((c) => <TableHeaderCell key={c}><span>{columnLabels?.[c] || c}</span></TableHeaderCell>)}
             </TableHeaderRow>
           }>
-          {rows.slice(start, end).map((r, j) => {
-            const i = start + j;
+          {rows.slice(range.first, range.last).map((r, j) => {
+            const i = range.first + j;
             return (
               <TableRow key={i} rowKey={String(i)} position={i} data-idx={String(i)} interactive>
                 {idx.map((ci, k) => (
-                  <TableCell key={k}><Text>{ci < 0 ? "" : String(r[ci] ?? "")}</Text></TableCell>
+                  <TableCell key={k}><span style={CELL}>{ci < 0 ? "" : String(r[ci] ?? "")}</span></TableCell>
                 ))}
               </TableRow>
             );
@@ -163,13 +149,16 @@ export function ValueHelpDialog({
   );
 }
 
-// The value-help input, usable anywhere: type to filter (or to search remotely via `onSearch`),
-// pick from the suggestions, or open the F4 dialog for the full table. The field shows the option's
-// **label** — the key only ever travels in `value`/`onChange`. Free text that matches no option is
-// rejected on blur/Enter and the field snaps back to the committed option.
-export function ValueHelp({
+// The value-help input: type to search remotely, pick from the suggestions, or open the F4 dialog
+// for the full table. The field shows the option's **label** — the key only ever travels in
+// `value`/`onChange`. Free text that matches no option is rejected on blur/Enter and the field
+// snaps back to the committed option.
+//
+// INVARIANT: `options` is index-aligned with `table.rows` (both wrappers below build it that way,
+// through optionsOf) — that alignment is how a picked row recovers its label.
+function ValueHelp({
   options, value, onChange, headerText, table, valueCol, columns, onSearch, disabled, readonly,
-  placeholder, id, valueState, loading, hasMore, onLoadMore, onOpen, columnLabels, hidden,
+  valueState, loading, hasMore, onLoadMore, onOpen, columnLabels, hidden,
 }: {
   options: DomainOption[];
   value: Val | undefined;
@@ -177,30 +166,27 @@ export function ValueHelp({
   /** dialog title */
   headerText: string;
   valueState?: "None" | "Positive" | "Critical" | "Negative" | "Information";
-  /** rich dialog source; without it the dialog lists `options` as Value/Description */
-  table?: ResolvedTable;
-  valueCol?: string;
-  columns?: string[];
+  table: ResolvedTable;
+  valueCol: string;
+  columns: string[];
   /** remote search — debounced here, then the caller refreshes `options`/`table` */
-  onSearch?: (q: string) => void;
+  onSearch: (q: string) => void;
   disabled?: boolean;
   /** display-only: the field stays focusable and copyable, and the F4 icon is not offered */
   readonly?: boolean;
-  placeholder?: string;
-  id?: string;
   /** a remote fetch is in flight: the field spins and F4 waits for it instead of opening empty */
   loading?: boolean;
   hasMore?: boolean;
   onLoadMore?: () => void;
-  /** query value help resets its outer search before opening; generic value helps keep prime-once */
-  onOpen?: () => void;
+  /** resets the caller's search before the dialog opens */
+  onOpen: () => void;
   columnLabels?: Record<string, string>;
   hidden?: string[];
 }) {
   const [typed, setTyped] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
-  // Remember what we committed: with a remote `onSearch` the picked row drops out of `options` on
-  // the next search, and the field must keep showing its label rather than falling back to the key.
+  // Remember what we committed: the picked row drops out of `options` on the next remote search,
+  // and the field must keep showing its label rather than falling back to the key.
   const [picked, setPicked] = useState<{ value: Val; label: string } | null>(null);
   const remote = useRemoteSearch(onSearch);
 
@@ -210,13 +196,9 @@ export function ValueHelp({
     (value === undefined || value === null ? "" : String(value));
   const shown = typed ?? label;
 
-  // filter="None" on the Input; we filter here so both key and label are searchable.
-  const q = (typed ?? "").trim().toLowerCase();
-  const items = (loading ? [] : options).filter(
-    (o) =>
-      !o.eliminatedBy &&
-      (!q || !!onSearch || o.label.toLowerCase().includes(q) || String(o.value ?? "").toLowerCase().includes(q)),
-  );
+  // filter="None" on the Input, and no local filter here: the server already searched for the same
+  // term, so re-filtering could only drop rows it deliberately matched.
+  const items = loading ? [] : options;
 
   const pick = (v: Val | undefined, row?: Val[], matchedLabel?: string) => {
     setPicked(v === undefined ? null : {
@@ -229,41 +211,23 @@ export function ValueHelp({
   const commit = (raw: string) => {
     const r = resolveEntry(options, raw);
     if (r.kind === "clear") pick(undefined);
-    else if (r.kind === "set") {
-      const row = table && valueCol ? table.rows[r.index] : [r.value, options[r.index]!.label];
-      pick(r.value, row, options[r.index]!.label);
-    }
+    else if (r.kind === "set") pick(r.value, table.rows[r.index], options[r.index]!.label);
     else setTyped(null); // reject: keep the last committed value
   };
 
-  const dlg = useMemo(
-    () =>
-      table && valueCol
-        ? { table, valueCol, columns: columns ?? [] }
-        : {
-            table: { columns: ["Value", "Description"], rows: options.map((o) => [o.value, o.label]) },
-            valueCol: "Value",
-            columns: ["Description"],
-          },
-    [table, valueCol, columns, options],
-  );
-  const eliminated = useMemo(
-    () => new Set(options.filter((o) => o.eliminatedBy).map((o) => o.value)),
-    [options],
-  );
   // Nothing to show yet: spin on the field and hold the dialog back until the first page lands.
-  const pending = !!loading && !dlg.table.rows.length;
+  const pending = !!loading && !table.rows.length;
 
   return (
     <>
-      <Input id={id} showSuggestions filter="None" value={shown} placeholder={placeholder ?? "Type or pick…"}
+      <Input showSuggestions filter="None" value={shown} placeholder="Type or pick…"
         showClearIcon={!readonly} style={{ width: "100%" }} disabled={disabled} readonly={readonly} valueState={valueState}
         icon={
           readonly ? undefined
             : loading ? <BusyIndicator active delay={0} size="S" />
             : <Icon name="value-help" style={{ cursor: "pointer" }} onClick={() => {
-                if (onOpen) { remote.cancel(); onOpen(); }
-                else remote.prime();
+                remote.cancel();
+                onOpen();
                 setOpen(true);
               }} />
         }
@@ -274,9 +238,9 @@ export function ValueHelp({
         ))}
       </Input>
       {open && !pending ? (
-        <ValueHelpDialog open headerText={headerText} table={dlg.table} valueCol={dlg.valueCol} columns={dlg.columns}
-          columnLabels={columnLabels} hidden={hidden} hiddenValues={eliminated} onSelect={(v, row) => {
-            const i = row ? dlg.table.rows.indexOf(row) : -1;
+        <ValueHelpDialog open headerText={headerText} table={table} valueCol={valueCol} columns={columns}
+          columnLabels={columnLabels} hidden={hidden} onSelect={(v, row) => {
+            const i = row ? table.rows.indexOf(row) : -1;
             pick(v, row, i < 0 ? undefined : options[i]?.label);
           }} onClose={() => setOpen(false)}
           onSearch={onSearch} loading={loading} hasMore={hasMore} onLoadMore={onLoadMore} />
@@ -303,20 +267,20 @@ const pagingProps = (page: {
   onLoadMore: () => { if (!page.isFetchingNextPage) void page.fetchNextPage(); },
 });
 
-/** Value help over a model's queryTable. Empty search starts from the canonical lookup page, then
- *  pages by row offset on scroll; non-empty search starts a separate remote page chain so a
- *  match past page 1 is still findable. */
 /** Which endpoint pages this table. Both name a masterdata row and let the server resolve the
  *  query from it — the builder preview included, now that a query is tenant masterdata and not
  *  part of the draft being edited. */
 export type QuerySource = { kind: "project" | "portal"; modelId: string };
 
+/** Value help over a model's query masterdata. Empty search starts from page 1, then pages by row
+ *  offset on scroll; a non-empty search starts a separate remote page chain so a match past page 1
+ *  is still findable. */
 export function QueryValueHelp({
   source, canonicalTable, lookupRef, value, onChange, onPick, headerText, disabled, readonly,
 }: {
   source: QuerySource;
-  /** canonical first page already resolved with the form's other lookups; carries the masterdata
-   *  row's own column list and value-help labels */
+  /** first page already resolved with the form's other lookups; carries the masterdata row's own
+   *  column list and value-help labels, and is what the field shows before any fetch */
   canonicalTable?: ResolvedTable;
   lookupRef: LookupRef;
   value: Val | undefined;
@@ -328,76 +292,51 @@ export function QueryValueHelp({
   readonly?: boolean;
 }) {
   const [search, setSearch] = useState<string | null>(null); // null = untouched; show canonical data without fetching
-  const queryClient = useQueryClient();
   const table = lookupRef.source === "manual" ? "" : lookupRef.table;
   // What the server searches: the ref's key/label columns as the masterdata row declares them (a
-  // query keeps its columns from Test fetch). The rendered key/label come from the response.
+  // query keeps its columns from Test fetch) — queryPageSource rejects anything else. The rendered
+  // key/label come from the response.
   const pinned = refKeyCols(lookupRef, canonicalTable?.columns);
   const searchCols = [pinned.valueCol, pinned.labelCol].filter((c): c is string => !!c);
-
-  // initialData only seeds a new cache entry. Replace the empty-search entry when the canonical
-  // lookup refreshes so its rows and its next-page offset cannot remain stale.
-  useEffect(() => {
-    if (!canonicalTable || !table) return;
-    const data = { pages: [canonicalTable], pageParams: [undefined as number | undefined] };
-    const key = (source.kind === "portal" ? orpc.portal.queryPage : orpc.configs.queryPage).infiniteKey({
-      input: () => ({ modelId: source.modelId, table, cursor: undefined, search: "", searchCols }),
-      initialPageParam: undefined as number | undefined,
-    });
-    let current = true;
-    void (async () => {
-      await queryClient.cancelQueries({ queryKey: key, exact: true });
-      if (current) queryClient.setQueryData(key, data);
-    })();
-    return () => { current = false; };
-  }, [canonicalTable, pinned.labelCol, pinned.valueCol, queryClient, source.kind, source.modelId, table]);
 
   // The cursor is a row offset, and the search rides with it on every page — the server rebuilds
   // the same query and only moves $skip. (It used to be B1's @odata.nextLink, which forced the
   // server to re-validate a client-supplied URL on every page.)
-  // The canonical first page is real cache data (offset included), not placeholder data: opening
-  // F4 or focusing an empty field cannot refetch page 1, and growing starts at page 2.
   // keepPreviousData matters beyond the flicker: without it a search refetch empties `rows`, which
   // makes ValueHelp's `pending` true and unmounts the open F4 dialog mid-search (losing what the
   // user just typed into it). The table shows its own `loading` state instead.
   const term = (search ?? "").trim();
-  const canonical = term === "" ? canonicalTable : undefined;
-  const common = {
-    initialPageParam: undefined as number | undefined,
-    initialData: canonical
-      ? { pages: [canonical], pageParams: [undefined as number | undefined] }
-      : undefined,
-    enabled: !!table && search !== null,
-    retry: false,
-    staleTime: canonical ? Infinity : 5 * 60_000,
-    placeholderData: keepPreviousData,
-  } as const;
   const page = useInfiniteQuery(
     (source.kind === "portal" ? orpc.portal.queryPage : orpc.configs.queryPage).infiniteOptions({
       input: (next: number | undefined) => ({ modelId: source.modelId, table, cursor: next, search: term, searchCols }),
       getNextPageParam: (last) => last.nextSkip,
-      ...common,
+      initialPageParam: undefined as number | undefined,
+      enabled: !!table && search !== null,
+      retry: false,
+      staleTime: 5 * 60_000,
+      placeholderData: keepPreviousData,
     }),
   );
 
+  // ponytail: the canonical page is a display-only fallback, not a cache seed — opening F4 costs
+  // one page-1 fetch, and in exchange the rows and the next-page offset can never be a stale mix
+  // of two resolves. Seed the query cache again if that round trip ever shows.
   const resolved = useMemo<ResolvedTable>(
-    () => ({
-      columns: page.data?.pages[0]?.columns ?? canonicalTable?.columns ?? [],
-      rows: (page.data?.pages ?? []).flatMap((p) => p.rows as Val[][]),
-    }),
-    [page.data, canonicalTable?.columns],
+    () =>
+      page.data
+        ? {
+            columns: page.data.pages[0]?.columns ?? canonicalTable?.columns ?? [],
+            rows: page.data.pages.flatMap((p) => p.rows as Val[][]),
+          }
+        : (canonicalTable ?? { columns: [], rows: [] }),
+    [page.data, canonicalTable],
   );
   // Columns come back with the page when the query has none pinned, so resolve key/label against
   // what we actually got.
   const { valueCol, labelCol } = refKeyCols(lookupRef, resolved.columns);
-  const options = useMemo<DomainOption[]>(() => {
-    const vi = resolved.columns.indexOf(valueCol);
-    const li = labelCol ? resolved.columns.indexOf(labelCol) : vi;
-    return vi < 0 ? [] : resolved.rows.map((r) => ({ value: r[vi] ?? null, label: String(r[li < 0 ? vi : li] ?? "") }));
-  }, [resolved, valueCol, labelCol]);
 
   return (
-    <ValueHelp options={options} value={value} headerText={headerText}
+    <ValueHelp options={optionsOf(resolved, valueCol, labelCol)} value={value} headerText={headerText}
       onChange={(nv, row) => {
         if (row) onPick?.({ columns: resolved.columns, rows: [row] });
         onChange(nv);
@@ -413,15 +352,13 @@ export function QueryValueHelp({
 /** Value help over a B1 entity set via `entities.rows`. Same dialog as QueryValueHelp; the
  *  query is a ListVariantDef compiled server-side (the browser never sends a $filter string). */
 export function EntityValueHelp({
-  entitySet, keyField, value, onChange, headerText, disabled, readonly, select, filter,
+  entitySet, keyField, value, onChange, headerText, select, filter,
 }: {
   entitySet: string;
   keyField: string;
   value: Val | undefined;
   onChange: (v: Val | undefined) => void;
   headerText: string;
-  disabled?: boolean;
-  readonly?: boolean;
   /** $select; omitted = every scalar */
   select?: string[];
   /** $filter, AND-combined */
@@ -471,17 +408,11 @@ export function EntityValueHelp({
     [rows, columns],
   );
 
-  const options = useMemo<DomainOption[]>(
-    () => table.rows.map((r) => ({ value: r[0] ?? null, label: String(r[1] ?? r[0] ?? "") })),
-    [table],
-  );
-
   return (
     <ValueHelp
-      options={options} value={value} onChange={onChange} headerText={headerText}
+      options={optionsOf(table, columns[0]!, columns[1])} value={value} onChange={onChange} headerText={headerText}
       table={table} valueCol={columns[0]!} columns={columns.slice(1)}
       onSearch={setSearch} onOpen={() => setSearch("")}
-      disabled={disabled} readonly={readonly}
       valueState={page.error ? "Negative" : undefined}
       {...pagingProps(page, search !== null)}
     />

@@ -10,6 +10,13 @@ describe("checkModel", () => {
     expect(checkModel(model, PRICES)).toEqual([]);
   });
 
+  test("a model without an items table cannot be saved", () => {
+    const bad = structuredClone(model);
+    bad.tables = [];
+    expect(checkModel(bad, PRICES).map((i) => i.message))
+      .toContain("a model needs an items table — it is what becomes the quotation lines");
+  });
+
   test("unknown identifier in a bom expr, with span and path", () => {
     const bad = structuredClone(model);
     bad.bom[0]!.qty = "sektion * 2";

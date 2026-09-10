@@ -98,19 +98,30 @@ This tab defines both **what** users answer and **how it's laid out**.
 
 ### Structure
 
-The form is a tree: **sections → groups → parameters**. Build it top-down:
+The tree **is** the form: **sections → groups → parameters, tables and formulas**. Everything the
+user will see lives in it, in the order they will see it. Build it top-down:
 
-1. **Add section** → **Add group** (adds to the last section) → **Add parameter**.
-2. **Rename** a section or group by clicking its edit action and typing a new title.
-3. **Reorder / move** by dragging rows. The drop marker only appears on **legal** targets:
+1. **Add section** → **Add group** (adds to the last section) → **Add parameter** / **Add table** /
+   **Add formula**. The toolbar buttons always attach to the last compatible row, so nothing is
+   ever created loose.
+2. **Rename** a section or group by clicking its row and typing a new title.
+3. **Open** a parameter or a table by clicking its row — each has its own dialog.
+4. **Reorder / move** by dragging rows. The drop marker only appears on **legal** targets:
    - a **parameter** can drop *into* a group, or before/after another parameter;
+   - a **table** can drop *into* a group, or before/after another table;
    - a **group** can drop *into* a section, or before/after another group;
    - a **section** can reorder before/after another section.
-4. **Delete** a row with its delete action. Deleting a **group or section** keeps its parameter
-   *definitions* — they just become unplaced (see below).
+5. **Delete** a row with its delete action. Deleting a **group or section** keeps its parameter
+   *definitions* — they just become unplaced (see below). The **item grid has no delete**: every
+   model needs one.
 
-If a parameter isn't in any group, a yellow strip lists it: *"Not shown on the form: … — drag
-them into a group or edit them to place them."* Unplaced parameters don't appear to users.
+Row backgrounds tell the levels apart at a glance — sections darkest, groups a shade lighter,
+leaves plain.
+
+A group renders its parameters first, then its tables, and that is what the form does too.
+
+If a parameter isn't in any group, a red strip lists it: *"Not shown where the tree says — place
+each into a group."* Unplaced parameters don't appear to users at all.
 
 ### Adding / editing a parameter
 
@@ -142,11 +153,16 @@ A half-built domain (a table with no value column, a query with no source) block
 so at the top of the **Value domain** tab. To see the resolved options, save and use the live
 preview pane — it runs the same resolution a real configuration does.
 
-### Computed values
+### Formulas (computed values)
 
-Below the structure, **Computed values** are named expressions derived from parameters (e.g.
-`area = cross_section * 1.1`). They're read-only in the preview and usable anywhere a parameter
-key is. Add, rename, edit, or delete them here.
+A **formula** is a named expression derived from parameters (e.g. `area = cross_section * 1.1`).
+It shows in the tree as a `ƒ` row **underneath a parameter** — purely so related things sit
+together. That link is cosmetic: a formula is global and usable anywhere a parameter key is, from
+any section, in BOM, routing, pricing or a rule.
+
+Click a formula row to edit its name and expression; it reads as plain text otherwise, so it lines
+up with the rows around it. The **Add formula** action on a parameter row puts a new one directly
+beneath that parameter.
 
 ---
 
@@ -184,7 +200,7 @@ In the live preview, a value made impossible by a constraint or combination tabl
 
 ---
 
-## 6. Tables tab — repeated rows, and several items from one configuration
+## 6. Tables — repeated rows, and several items from one configuration
 
 Some things a salesperson fills in are not one answer but *n rows*: the twelve machined holes in a
 sheet, or the four different panels that come out of one nesting run. A **table** is that: a grid
@@ -218,7 +234,7 @@ a row's own cells win over a parameter of the same name. Columns are evaluated *
 so a formula may use the columns above it but not the ones below — referencing a later column is
 reported as *unknown identifier* and blocks the save.
 
-**Worked example — machining time.** A calculation table `holes`, placed on the sheet's section:
+**Worked example — machining time.** A calculation table `holes`, placed in the sheet's group:
 
 | Key | Type | Cell | |
 |---|---|---|---|
@@ -232,22 +248,29 @@ Now a routing operation's **Run/unit (min)** can read `holes_perimeter / feed_ra
 Rows can be pasted straight from Excel — a block of tab-separated cells appends as rows, mapped
 positionally onto the columns you can type in (computed columns are skipped).
 
-### Item matrix — n items from one configuration
+### Item grid — n items from one configuration
 
-Set a table's **Role** to **Item matrix** and its rows additionally become **quotation lines**.
+Every model carries exactly one **item grid**, seeded when the model is created and impossible to
+delete: its rows are the **quotation lines**. (A model without one cannot be saved.)
 This is merge production: one configuration, one BOM, one routing, but several *different* items
 out of the run. The cost is genuinely joint, so it is not computed per item — the configuration's
 total is **split** across the rows.
 
-You nominate two numeric columns:
+Two things drive the split:
 
-- **Pieces** — how many of this item per finished unit. Line `Quantity` is pieces × batch quantity.
-- **Cost basis** — what the split is proportional to (area, weight, whatever your shop costs by).
+- The grid's **`quantity`** column — how many of this item per finished unit. Line `Quantity` is
+  `quantity × batch quantity`. The column is always called `quantity`; its key cannot be renamed
+  and it cannot be deleted.
+- **Cost basis** — an **expression**, written in the box above the field list, not a column the
+  salesperson fills in. It is evaluated **once per row**, with that row's own columns in scope
+  (plus every parameter, formula and table aggregate), and says what the split is proportional to:
+  `width * height / 1000000` for area, `weight` for mass, `1` to split by quantity alone.
 
-Each row's share is `basis × pieces ÷ Σ(basis × pieces)` of the configuration total, rounded to
-whole cents so **the lines add up to the quoted total exactly**. A row with zero pieces ships
-nothing and gets no share. Step 4 of a configuration shows the resulting lines with a line total,
-so the reconciliation is visible before anything is posted.
+Each row's share is `basis × quantity ÷ Σ(basis × quantity)` of the configuration total, rounded to
+whole cents so **the lines add up to the quoted total exactly**. A row with zero quantity ships
+nothing and gets no share; a basis that cannot be evaluated weighs nothing. Step 4 of a
+configuration shows the resulting lines with a line total, so the reconciliation is visible before
+anything is posted.
 
 **Item code without an article master.** Every line still carries the model's own
 `quoteItemCode` as the B1 `ItemCode` — you do not create an item per configuration. The
@@ -259,16 +282,18 @@ offered — the split owns them.
 > If SAP is unreachable the dropdown becomes a plain text box rather than disappearing, so a down
 > tunnel never stops you authoring a model.
 
-A model may have **one** item matrix. Without one, nothing changes: one configuration is one
-quotation line, exactly as before.
+Every other table you add is a **calculation table** — same shape, but its rows only feed numbers
+into your formulas.
 
 ### Where a table appears
 
-**Section** puts the table under one of your form's sections, full width beneath its fields.
-Leave it on *its own section* and the form appends it as a trailing section of its own — a table
-nobody can reach would be a table whose sums are permanently zero, so it is never simply hidden.
+Wherever you drag it in the structure tree: a table sits in a **group**, and the form draws it full
+width after that group's fields. A table left outside every group still renders — the form appends
+it as a trailing section of its own, because a table nobody can reach is a table whose sums are
+permanently zero.
 
-**Min rows / Max rows** bound how many rows the salesperson may end up with (0 = no bound).
+**Min rows / Max rows** bound how many rows a *calculation* table may end up with (0 = no bound).
+The item grid has neither: it always keeps at least one row and is never capped.
 
 ---
 
@@ -335,9 +360,9 @@ fix it, and Save lights up.
 | Offer choices from SAP | **Masterdata** → Create → kind **Query** → Parameter → domain **Query** |
 | Offer choices from a spreadsheet | **Masterdata** → Create → kind **Table** → Parameter → domain **Table** |
 | Enforce a rule between answers | **Rules** → Add constraint (or combination table) |
-| Add up n repeated features (holes, welds, bends) | **Tables** → Add calculation table |
-| Quote several items out of one configuration | **Tables** → Add item matrix |
-| Print a custom item code on the quotation | **Tables** → item matrix → column → **B1 line field** |
+| Add up n repeated features (holes, welds, bends) | **Parameters** → Add table |
+| Quote several items out of one configuration | **Parameters** → the model's item grid |
+| Print a custom item code on the quotation | **Parameters** → item grid → column → **B1 line field** |
 | Add a material / price line | **BOM** → Add line |
 | Add a labor step | **Routing** → Add operation |
 | Set the sell price / batch sizes | **Settings** |

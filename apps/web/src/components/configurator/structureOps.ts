@@ -1,14 +1,18 @@
-import type { ModelDef } from "@hera/config-engine";
+import { placedTables, type ModelDef } from "@hera/config-engine";
 
 // Pure structure-tree edits for the Parameters tab. All functions return new ModelDefs.
 
 export type RowRef =
   | { kind: "section"; s: number }
   | { kind: "group"; s: number; g: number }
-  | { kind: "param"; key: string };
+  | { kind: "param"; key: string }
+  | { kind: "table"; key: string };
 
 export const rowKeyOf = (r: RowRef): string =>
-  r.kind === "section" ? `s:${r.s}` : r.kind === "group" ? `g:${r.s}.${r.g}` : `p:${r.key}`;
+  r.kind === "section" ? `s:${r.s}`
+  : r.kind === "group" ? `g:${r.s}.${r.g}`
+  : r.kind === "table" ? `t:${r.key}`
+  : `p:${r.key}`;
 
 export function parseRowKey(k: string): RowRef {
   if (k.startsWith("s:")) return { kind: "section", s: Number(k.slice(2)) };
@@ -16,10 +20,14 @@ export function parseRowKey(k: string): RowRef {
     const [s, g] = k.slice(2).split(".").map(Number);
     return { kind: "group", s: s!, g: g! };
   }
+  if (k.startsWith("t:")) return { kind: "table", key: k.slice(2) };
   return { kind: "param", key: k.slice(2) };
 }
 
 export type Placement = "Before" | "After" | "On";
+
+/** Parameters and tables are both leaves of a group's content list — same drag rules, same ops. */
+const leaf = (r: RowRef) => r.kind === "param" || r.kind === "table";
 
 export function uniqueKey(base: string, taken: string[]): string {
   let k = base, n = 2;
@@ -31,11 +39,14 @@ export function canDrop(_def: ModelDef, srcKey: string, dstKey: string, placemen
   const src = parseRowKey(srcKey);
   const dst = parseRowKey(dstKey);
   if (srcKey === dstKey) return false;
-  if (src.kind === "param") return (dst.kind === "group" && placement === "On") || (dst.kind === "param" && placement !== "On");
+  // A table sits in the group's content list like a parameter does, so the two drag the same way:
+  // into a group, or beside any other leaf — a table can land between two fields.
+  if (leaf(src)) return (dst.kind === "group" && placement === "On") || (leaf(dst) && placement !== "On");
   if (src.kind === "group") return (dst.kind === "section" && placement === "On") || (dst.kind === "group" && placement !== "On");
   return dst.kind === "section" && placement !== "On";
 }
 
+/** Unplace a parameter or table from every group. Never deletes its definition. */
 const stripParam = (def: ModelDef, key: string): ModelDef => ({
   ...def,
   structure: {
@@ -70,14 +81,15 @@ export function applyMove(def: ModelDef, srcKey: string, dstKey: string, placeme
   const src = parseRowKey(srcKey);
   const dst = parseRowKey(dstKey);
 
-  if (src.kind === "param") {
-    const without = stripParam(def, src.key);
-    if (dst.kind === "group") return editGroup(without, dst.s, dst.g, (ps) => [...ps, src.key]);
+  if (leaf(src)) {
+    const key = (src as { key: string }).key;
+    const without = stripParam(def, key);
+    if (dst.kind === "group") return editGroup(without, dst.s, dst.g, (ps) => [...ps, key]);
     const at = findParam(without, (dst as { key: string }).key);
     if (!at) return def;
     return editGroup(without, at.s, at.g, (ps) => {
       const i = ps.indexOf((dst as { key: string }).key) + (placement === "After" ? 1 : 0);
-      return [...ps.slice(0, i), src.key, ...ps.slice(i)];
+      return [...ps.slice(0, i), key, ...ps.slice(i)];
     });
   }
 
@@ -116,7 +128,7 @@ export function applyMove(def: ModelDef, srcKey: string, dstKey: string, placeme
 }
 
 export function removeFromStructure(def: ModelDef, ref: RowRef): ModelDef {
-  if (ref.kind === "param") return stripParam(def, ref.key);
+  if (leaf(ref)) return stripParam(def, (ref as { key: string }).key);
   if (ref.kind === "group")
     return {
       ...def,
@@ -129,8 +141,15 @@ export function removeFromStructure(def: ModelDef, ref: RowRef): ModelDef {
   return { ...def, structure: { sections: def.structure.sections.filter((_, si) => si !== ref.s) } };
 }
 
+/** Append a parameter or table to a group, removing it from wherever it was. */
 export function placeParam(def: ModelDef, key: string, s: number, g: number): ModelDef {
   return editGroup(stripParam(def, key), s, g, (ps) => [...ps, key]);
+}
+
+/** Table keys the form would push into its trailing catch-all section. */
+export function unplacedTables(def: ModelDef): string[] {
+  const placed = new Set(placedTables(def));
+  return (def.tables ?? []).map((t) => t.key).filter((k) => !placed.has(k));
 }
 
 export function unplacedParams(def: ModelDef): string[] {

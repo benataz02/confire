@@ -55,7 +55,6 @@ const CELL = { display: "flex", alignItems: "center", gap: "0.5rem" } as const;
 
 // Toolbar draws a border-bottom on its host and has no prop to turn it off; sitting on a table it
 // doubles up with the header row's own line. Inline beats the `:host` rule.
-const NO_RULE = { borderBottom: "none" } as const;
 
 /** Keeps the text of a row that has no icon aligned with the text of the rows that do. */
 const iconSlot = <span style={{ width: "1rem", flex: "none" }} />;
@@ -251,7 +250,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
         <ObjectPageSection id="columns" titleText={`Columns (${d.columns.length})`}>
           <Form {...FULL}>
             <FormGroup accessibleName="Columns">
-              <Toolbar design="Transparent" accessibleName="Column actions" style={NO_RULE}>
+              <Toolbar design="Transparent" accessibleName="Column actions">
                 <ToolbarButton icon="add" design="Transparent" text="Add column" onClick={() => edit((x) => ({
                   ...x,
                   columns: [...x.columns, { key: "", label: "", type: "string" }],
@@ -396,7 +395,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
         <ObjectPageSection id="rows" titleText={`Rows (${d.rows.length})`}>
           <Form {...FULL}>
             <FormGroup accessibleName="Rows">
-              <Toolbar design="Transparent" accessibleName="Row actions" style={NO_RULE}>
+              <Toolbar design="Transparent" accessibleName="Row actions">
                 <ToolbarButton icon="add" design="Transparent" text="Add row" disabled={!d.columns.length}
                   onClick={() => edit((x) => ({ ...x, rows: [...x.rows, x.columns.map(() => null as Cell)] }))} />
               </Toolbar>

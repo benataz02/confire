@@ -245,7 +245,7 @@ describe("config tables (integration)", () => {
         domain: { kind: "options", ref: { source: "manual", options: [{ value: 2 }, { value: 3 }] } },
       },
     ],
-    structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["thickness"] }], tables: ["holes"] }] },
+    structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["thickness", "holes", "parts"] }] }] },
     computed: [],
     tables: [
       {
@@ -256,11 +256,11 @@ describe("config tables (integration)", () => {
         ],
       },
       {
-        role: "items", key: "parts", title: "Parts", qtyCol: "pieces", basisCol: "area",
+        role: "items", key: "parts", title: "Parts", basisExpr: "area",
         map: { code: "U_HERA_ItemCode" },
         columns: [
           { key: "code", label: "Code", type: "string", cell: { kind: "input" } },
-          { key: "pieces", label: "Pieces", type: "number", cell: { kind: "input" } },
+          { key: "quantity", label: "Pieces", type: "number", cell: { kind: "input" } },
           { key: "area", label: "Area", type: "number", cell: { kind: "input" } },
         ],
       },
@@ -276,8 +276,8 @@ describe("config tables (integration)", () => {
   const rows = {
     holes: [{ size: 10 }, { size: 20 }],
     parts: [
-      { code: "PART-A", pieces: 1, area: 2 },
-      { code: "PART-B", pieces: 1, area: 1 },
+      { code: "PART-A", quantity: 1, area: 2 },
+      { code: "PART-B", quantity: 1, area: 1 },
     ],
   };
 

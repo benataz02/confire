@@ -6,25 +6,23 @@ import {
   type TableHeaderRowDomRef,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/AddColumn.js";
-import { propagate, type Entries, type ResolvedLookups, type TableRows } from "@hera/config-engine";
-import type { Issue, ModelDef, Param } from "@hera/config-engine";
+import { itemsTable, propagate, type Entries, type ResolvedLookups, type TableRows } from "@hera/config-engine";
+import type { Issue, ModelDef, Param, TableDef } from "@hera/config-engine";
 import { confirm } from "../confirm.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { ParamDialog } from "./ParamDialog.tsx";
+import { TableDialog, newCalcTable } from "./TableDialog.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { ConfiguratorForm, ConsistencyStatus } from "./ConfiguratorForm.tsx";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
-import { applyMove, canDrop, duplicateParam, parseRowKey, placeParam, removeFromStructure, rowKeyOf, unplacedParams, type Placement, type RowRef } from "./structureOps.ts";
+import { applyMove, canDrop, duplicateParam, parseRowKey, placeParam, removeFromStructure, rowKeyOf, unplacedParams, unplacedTables, type Placement, type RowRef } from "./structureOps.ts";
 
 type Tables = TableCols[];
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
 
 const emptyParam = (): Param => ({ key: "", label: "", type: "string", ui: "select" });
 
-// Dashed hairline above the first formula row — the "soft visual link" tying the global
-// formulas (rendered at param level) to the structure above them.
-const SEP = { borderBlockStart: "1px dashed var(--sapList_BorderColor)", paddingBlockStart: "0.25rem" } as const;
 // UI5 cozy icon-button min width — reserved so leaf labels indent past group labels.
 const TOGGLE = "2.25rem";
 
@@ -53,10 +51,19 @@ function Gutter({ depth, children, collapse, style }: {
 
 // Param-row actions only: section/group/formula stay visible. Touch keeps param actions
 // visible — no hover, and opacity:0 would make delete/dup untappable.
-if (typeof document !== "undefined" && !document.getElementById("hera-params-row-actions")) {
+//
+// Section and group backgrounds have to come from here too: TableRow has no highlight/background
+// prop, and a document-level rule is the one thing that beats the shadow root's own `:host`.
+if (typeof document !== "undefined" && !document.getElementById("hera-params-rows")) {
   const el = document.createElement("style");
-  el.id = "hera-params-row-actions";
-  el.textContent = `@media (hover: hover){.hera-params-struct [ui5-table-row][row-key^="p:"] [ui5-table-row-action]{opacity:0;pointer-events:none}.hera-params-struct [ui5-table-row][row-key^="p:"]:hover [ui5-table-row-action],.hera-params-struct [ui5-table-row][row-key^="p:"]:focus-within [ui5-table-row-action]{opacity:1;pointer-events:auto}}`;
+  el.id = "hera-params-rows";
+  const R = `.hera-params-struct [ui5-table-row]`;
+  el.textContent =
+    `@media (hover: hover){${R}[row-key^="p:"] [ui5-table-row-action]{opacity:0;pointer-events:none}` +
+    `${R}[row-key^="p:"]:hover [ui5-table-row-action],${R}[row-key^="p:"]:focus-within [ui5-table-row-action]{opacity:1;pointer-events:auto}}` +
+    `${R}[row-key^="s:"]{background:var(--sapList_TableGroupHeaderBackground);` +
+    `border-block-end:1px solid var(--sapList_TableGroupHeaderBorderColor)}` +
+    `${R}[row-key^="g:"]{background:var(--sapList_Hover_Background)}`;
   document.head.appendChild(el);
 }
 
@@ -75,10 +82,15 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   lookups?: ResolvedLookups; lookupsError?: Error | null; onRetryLookups: () => void;
 }) {
   const [editing, setEditing] = useState<{ param: Param; isNew: boolean; place?: { s: number; g: number } } | null>(null);
+  // Table being edited in the dialog, by key — the dialog buffers its own copy.
+  const [tableEdit, setTableEdit] = useState<string | null>(null);
+  // Formula row switched to its live editors; every other row shows read-only text, which is the
+  // whole reason the rows are the same height.
+  const [fEdit, setFEdit] = useState<number | null>(null);
   // Inline title edit: keep the original so Escape can revert (edits apply live per keystroke).
   const [titleEdit, setTitleEdit] = useState<{ key: string; original: string } | null>(null);
   // Loose-param placement menu: which unplaced key is being placed, and the button that opened it.
-  const [placing, setPlacing] = useState<{ key: string; opener: string } | null>(null);
+  const [placing, setPlacing] = useState<{ key: string; opener: string; kind: "param" | "table" } | null>(null);
   // Keyed by stable section/group key (not row index) so collapse survives drag-reordering.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
@@ -87,6 +99,22 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   type StructRow = { kind: "struct"; key: string; depth: number; label: string; detail: string; ref: RowRef; collapseId?: string };
   type Row = StructRow | { kind: "formula"; key: string; idx: number };
   const rows: Row[] = [];
+  const defOf = (k: string): TableDef | undefined => (draft.tables ?? []).find((t) => t.key === k);
+
+  // A formula is global; `under` only says which parameter row it is drawn beneath. Nothing is
+  // ever left dangling: an anchor naming a parameter that is gone or unplaced re-homes onto the
+  // last placed one, which is also where the toolbar button puts a new formula.
+  const placedParams = draft.structure.sections
+    .flatMap((s) => s.groups.flatMap((g) => g.params))
+    .filter((k) => !defOf(k));
+  const lastParam = placedParams.at(-1);
+  const anchorFor = (under?: string) => (under && placedParams.includes(under) ? under : lastParam);
+  const byAnchor = new Map<string, number[]>();
+  draft.computed.forEach((c, i) => {
+    const at = anchorFor(c.under) ?? "";
+    byAnchor.set(at, [...(byAnchor.get(at) ?? []), i]);
+  });
+
   draft.structure.sections.forEach((s, si) => {
     const sId = `S:${s.key}`;
     rows.push({ kind: "struct", key: `s:${si}`, depth: 0, label: s.title, detail: `section · ${s.key}`, ref: { kind: "section", s: si }, collapseId: sId });
@@ -95,20 +123,35 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       const gId = `G:${s.key}/${g.key}`;
       rows.push({ kind: "struct", key: `g:${si}.${gi}`, depth: 1, label: g.title, detail: `group · ${g.key}`, ref: { kind: "group", s: si, g: gi }, collapseId: gId });
       if (collapsed.has(gId)) return;
-      g.params.forEach((pk) => {
-        const p = draft.parameters.find((x) => x.key === pk);
+      // One list, both kinds: a key a TableDef claims is a table row, anything else a parameter.
+      g.params.forEach((k) => {
+        const t = defOf(k);
+        if (t) {
+          rows.push({
+            kind: "struct", key: `t:${k}`, depth: 2, label: t.title || k,
+            detail: `${t.role === "items" ? "item grid" : "calculation table"} · ${t.columns.length} column${t.columns.length === 1 ? "" : "s"}`,
+            ref: { kind: "table", key: k },
+          });
+          return;
+        }
+        const p = draft.parameters.find((x) => x.key === k);
         rows.push({
-          kind: "struct", key: `p:${pk}`, depth: 2, label: p?.label || pk,
+          kind: "struct", key: `p:${k}`, depth: 2, label: p?.label || k,
           detail: p ? `${p.type} · ${p.ui}${p.domain ? (p.domain.kind === "range" ? " · range" : ` · ${p.domain.ref.source}`) : ""}${p.excludeFromDomains ? " · excluded" : ""}` : "missing definition",
-          ref: { kind: "param", key: pk },
+          ref: { kind: "param", key: k },
         });
+        for (const i of byAnchor.get(k) ?? []) rows.push({ kind: "formula", key: `c:${i}`, idx: i });
       });
     });
   });
-  // Formulas are global (ModelDef.computed) — appended at param level, soft-linked, not a section.
-  draft.computed.forEach((_, i) => rows.push({ kind: "formula", key: `c:${i}`, idx: i }));
+  // Only reachable with no parameter placed anywhere — there is no row to hang them under.
+  for (const i of byAnchor.get("") ?? []) rows.push({ kind: "formula", key: `c:${i}`, idx: i });
 
-  const loose = unplacedParams(draft);
+  // Anything the form would not show where the tree says it does. One list, one placement menu.
+  const loose = [
+    ...unplacedParams(draft).map((key) => ({ key, kind: "param" as const, label: draft.parameters.find((p) => p.key === key)?.label || key })),
+    ...unplacedTables(draft).map((key) => ({ key, kind: "table" as const, label: defOf(key)?.title || key })),
+  ];
   // Model-level issues have no row of their own (duplicate key, computed cycle, bad structure ref).
   const modelIssues = issues.filter((i) => i.path === "model" || i.path === "computed" || i.path === "structure");
 
@@ -126,6 +169,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
     update((d) => {
       let out = removeFromStructure(d, ref);
       if (ref.kind === "param") out = { ...out, parameters: out.parameters.filter((p) => p.key !== ref.key) };
+      if (ref.kind === "table") out = { ...out, tables: (out.tables ?? []).filter((t) => t.key !== ref.key) };
       return out;
     });
 
@@ -136,12 +180,18 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
     if (ref.kind === "section") {
       const sec = draft.structure.sections[ref.s];
       const groups = sec?.groups.length ?? 0;
-      const params = sec?.groups.reduce((n, g) => n + g.params.length, 0) ?? 0;
+      const params = sec?.groups.reduce((n, g) => n + g.params.filter((k) => !defOf(k)).length, 0) ?? 0;
       if (groups > 0) message = `Delete section "${sec?.title}" with its ${groups} group${groups === 1 ? "" : "s"}${params ? ` and ${params} placed parameter${params === 1 ? "" : "s"}` : ""}?`;
     } else if (ref.kind === "group") {
       const grp = draft.structure.sections[ref.s]?.groups[ref.g];
-      const params = grp?.params.length ?? 0;
-      if (params > 0) message = `Delete group "${grp?.title}" and unplace its ${params} parameter${params === 1 ? "" : "s"}?`;
+      const params = grp?.params.filter((k) => !defOf(k)).length ?? 0;
+      const tabs = grp?.params.filter((k) => defOf(k)).length ?? 0;
+      const what = [params && `${params} parameter${params === 1 ? "" : "s"}`, tabs && `${tabs} table${tabs === 1 ? "" : "s"}`]
+        .filter(Boolean).join(" and ");
+      if (what) message = `Delete group "${grp?.title}" and unplace its ${what}?`;
+    } else if (ref.kind === "table") {
+      const t = defOf(ref.key);
+      message = `Delete table "${t?.title || ref.key}"? Formulas reading ${ref.key}_count or its column sums will stop resolving.`;
     } else {
       const p = draft.parameters.find((x) => x.key === ref.key);
       message = `Delete parameter "${p?.label || ref.key}"? This removes its definition from the model.`;
@@ -179,10 +229,16 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       }),
     },
   }));
-  const addFormula = () => update((d) => ({
+  const addFormula = (under?: string) => update((d) => ({
     ...d,
-    computed: [...d.computed, { key: addKey("value", [...d.parameters.map((p) => p.key), ...d.computed.map((c) => c.key)]), expr: "0" }],
+    computed: [...d.computed, { key: addKey("value", [...d.parameters.map((p) => p.key), ...d.computed.map((c) => c.key)]), expr: "0", under }],
   }));
+  const addTable = () => update((d) => {
+    const t = newCalcTable((d.tables ?? []).map((x) => x.key));
+    const g = lastGroup();
+    const withTable = { ...d, tables: [...(d.tables ?? []), t] };
+    return g ? placeParam(withTable, t.key, g.s, g.g) : withTable;
+  });
   const lastGroup = () => {
     for (let s = draft.structure.sections.length - 1; s >= 0; s--) {
       const g = draft.structure.sections[s]!.groups.length - 1;
@@ -193,14 +249,22 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   const addUnder = (ref: RowRef) => {
     if (ref.kind === "section") addGroup(ref.s);
     else if (ref.kind === "group") setEditing({ param: emptyParam(), isNew: true, place: { s: ref.s, g: ref.g } });
+    else if (ref.kind === "param") addFormula(ref.key);
   };
 
-  const rowActions = (text: string, act: "add" | "dup" = "add") => (
-    <>
-      <TableRowAction icon={act === "dup" ? "copy" : "add"} text={text} data-act={act} />
-      <TableRowAction icon="delete" text="Delete" data-act="delete" />
-    </>
-  );
+  const del = <TableRowAction icon="delete" text="Delete" data-act="delete" />;
+  // The items grid is mandatory (checkModel enforces it), so it is the one row with no delete.
+  const actionsFor = (ref: RowRef) =>
+    ref.kind === "section" ? <><TableRowAction icon="add" text="Add group" data-act="add" />{del}</>
+    : ref.kind === "group" ? <><TableRowAction icon="add" text="Add parameter" data-act="add" />{del}</>
+    : ref.kind === "table" ? (defOf(ref.key)?.role === "items" ? undefined : del)
+    : (
+      <>
+        <TableRowAction icon="add" text="Add formula here" data-act="add" />
+        <TableRowAction icon="copy" text="Duplicate parameter" data-act="dup" />
+        {del}
+      </>
+    );
 
   return (
     <DynamicSideContent equalSplit sideContentVisibility="AlwaysShow" style={{ height: "100%", minHeight: "28rem" }}
@@ -221,7 +285,8 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
           <>
             <Button icon="add" onClick={addSection}>Add section</Button>
             <Button icon="add" onClick={() => setEditing({ param: emptyParam(), isNew: true, place: lastGroup() })}>Add parameter</Button>
-            <Button icon="add" onClick={addFormula}>Add formula</Button>
+            <Button icon="add" disabled={!lastGroup()} onClick={addTable}>Add table</Button>
+            <Button icon="add" disabled={!lastParam} onClick={() => addFormula(lastParam)}>Add formula</Button>
           </>
         }
       />
@@ -232,7 +297,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
           <IllustratedMessage name="AddColumn" design="Dot" titleText="No structure yet"
             subtitleText="Add a section to start structuring the form, then add groups and parameters." />
         }
-        rowActionCount={2}
+        rowActionCount={3}
         onMoveOver={(e) => {
           const src = (e.detail.source.element as HTMLElement | null)?.getAttribute("row-key");
           const dst = (e.detail.destination.element as HTMLElement | null)?.getAttribute("row-key");
@@ -253,8 +318,10 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
           const act = ((e.detail.action as unknown) as HTMLElement).dataset.act;
           if (rowKey.startsWith("c:")) {
             const i = Number(rowKey.slice(2));
-            if (act === "delete") update((d) => ({ ...d, computed: d.computed.filter((_, j) => j !== i) }));
-            else addFormula();
+            if (act === "delete") {
+              setFEdit(null);
+              update((d) => ({ ...d, computed: d.computed.filter((_, j) => j !== i) }));
+            } else addFormula(anchorFor(draft.computed[i]?.under));
             return;
           }
           const ref = parseRowKey(rowKey);
@@ -263,8 +330,12 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
           else addUnder(ref);
         }}
         onRowClick={(e) => {
-          const ref = parseRowKey(((e.detail.row as unknown) as HTMLElement).getAttribute("row-key")!);
-          if (ref.kind === "param") {
+          const rowKey = ((e.detail.row as unknown) as HTMLElement).getAttribute("row-key")!;
+          if (rowKey.startsWith("c:")) return setFEdit(Number(rowKey.slice(2)));
+          const ref = parseRowKey(rowKey);
+          if (ref.kind === "table") {
+            setTableEdit(ref.key);
+          } else if (ref.kind === "param") {
             const p = draft.parameters.find((x) => x.key === ref.key);
             if (p) setEditing({ param: structuredClone(p), isNew: false });
           } else {
@@ -283,31 +354,45 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       >
         {rows.map((r) =>
           r.kind === "formula" ? (
-            <TableRow key={r.key} rowKey={r.key} actions={rowActions("Add formula")}>
+            // Read-only until clicked: a row of live Inputs is taller than a row of Text, and that
+            // gap is what made the formula block look bolted on.
+            <TableRow key={r.key} rowKey={r.key} interactive
+              actions={<><TableRowAction icon="add" text="Add formula" data-act="add" />{del}</>}>
               <TableCell>
-                <Gutter depth={2} style={r.idx === 0 ? SEP : undefined}>
+                <Gutter depth={3}>
                   <span style={{ color: "var(--sapContent_LabelColor)", fontStyle: "italic", flex: "0 0 auto" }}>ƒ</span>
-                  <Input style={{ width: "100%" }} value={draft.computed[r.idx]!.key}
-                    onInput={(e) => update((d) => ({ ...d, computed: d.computed.map((x, j) => (j === r.idx ? { ...x, key: e.target.value } : x)) }))} />
+                  {fEdit === r.idx ? (
+                    <Input style={{ width: "100%" }} value={draft.computed[r.idx]!.key}
+                      onInput={(e) => update((d) => ({ ...d, computed: d.computed.map((x, j) => (j === r.idx ? { ...x, key: e.target.value } : x)) }))} />
+                  ) : (
+                    <Text>{draft.computed[r.idx]!.key}</Text>
+                  )}
                 </Gutter>
               </TableCell>
               <TableCell>
-                <div style={r.idx === 0 ? SEP : undefined}>
-                  <ExprInput value={draft.computed[r.idx]!.expr} model={draft} tables={tables} fieldId={`expr-computed[${r.idx}].expr`}
-                    issue={issueFor(issues, `computed[${r.idx}].expr`)}
-                    onChange={(v) => update((d) => ({ ...d, computed: d.computed.map((x, j) => (j === r.idx ? { ...x, expr: v ?? "" } : x)) }))} />
+                <div style={{ width: "100%" }}>
+                  {fEdit === r.idx ? (
+                    <ExprInput value={draft.computed[r.idx]!.expr} model={draft} tables={tables} fieldId={`expr-computed[${r.idx}].expr`}
+                      issue={issueFor(issues, `computed[${r.idx}].expr`)}
+                      onChange={(v) => update((d) => ({ ...d, computed: d.computed.map((x, j) => (j === r.idx ? { ...x, expr: v ?? "" } : x)) }))} />
+                  ) : (
+                    <Text style={{ color: issueFor(issues, `computed[${r.idx}].expr`) ? "var(--sapNegativeColor)" : undefined }}>
+                      {`= ${draft.computed[r.idx]!.expr}`}
+                    </Text>
+                  )}
                 </div>
               </TableCell>
             </TableRow>
           ) : (
-            <TableRow key={r.key} rowKey={r.key} movable interactive
-              actions={r.ref.kind === "param" ? rowActions("Duplicate parameter", "dup")
-                : rowActions(r.ref.kind === "section" ? "Add group" : "Add parameter")}>
+            <TableRow key={r.key} rowKey={r.key} movable interactive actions={actionsFor(r.ref)}>
               <TableCell>
                 <Gutter depth={r.depth} collapse={r.collapseId
                   ? { collapsed: collapsed.has(r.collapseId), onToggle: () => toggle(r.collapseId!) }
                   : undefined}>
-                  {titleEdit?.key === r.key && r.ref.kind !== "param" ? (
+                  {r.ref.kind === "table" ? (
+                    <span style={{ color: "var(--sapContent_LabelColor)", flex: "0 0 auto" }} aria-hidden>▦</span>
+                  ) : null}
+                  {titleEdit?.key === r.key && (r.ref.kind === "section" || r.ref.kind === "group") ? (
                     <Input
                       value={r.label}
                       onBlur={() => setTitleEdit(null)}
@@ -330,16 +415,37 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       </Table>
       </div>
 
+      {/* Legacy models only — nothing the builder creates can land here. A parameter goes missing
+          from the form entirely; a table gets a trailing section of its own. */}
       {loose.length ? (
         <MessageStrip design="Critical" hideCloseButton>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.375rem" }}>
-            <span>Not shown on the form — place each into a group (or drag it in above):</span>
-            {loose.map((k) => (
-              <Button key={k} id={`place-${k}`} icon="add" design="Transparent"
-                onClick={() => setPlacing({ key: k, opener: `place-${k}` })}>
-                {draft.parameters.find((p) => p.key === k)?.label || k}
+            <span>Not shown where the tree says — place each into a group (or drag it in above):</span>
+            {loose.map((l) => (
+              <Button key={`${l.kind}-${l.key}`} id={`place-${l.kind}-${l.key}`} icon="add" design="Transparent"
+                onClick={() => setPlacing({ key: l.key, opener: `place-${l.kind}-${l.key}`, kind: l.kind })}>
+                {l.label}
               </Button>
             ))}
+          </div>
+        </MessageStrip>
+      ) : null}
+
+      {/* Only reachable on a model saved before the item grid became mandatory. Deliberately not
+          repaired on render: materialising a table the author never asked for would mark their
+          draft dirty behind their back. */}
+      {(draft.tables ?? []).every((t) => t.role !== "items") ? (
+        <MessageStrip design="Negative" hideCloseButton>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.5rem" }}>
+            <span>This model has no item grid, so it cannot be saved — a quote has no lines without one.</span>
+            <Button icon="add" design="Transparent"
+              onClick={() => update((d) => {
+                const g = lastGroup();
+                const withTable = { ...d, tables: [...(d.tables ?? []), itemsTable()] };
+                return g ? placeParam(withTable, "items", g.s, g.g) : withTable;
+              })}>
+              Add item grid
+            </Button>
           </div>
         </MessageStrip>
       ) : null}
@@ -351,7 +457,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
             const s = Number(el.dataset.s);
             const g = Number(el.dataset.g);
             if (!Number.isNaN(s) && !Number.isNaN(g)) {
-              const key = placing.key;
+              const { key, kind } = placing;
               update((d) => placeParam(d, key, s, g));
             }
             setPlacing(null);
@@ -372,6 +478,28 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
             ))
           )}
         </Menu>
+      ) : null}
+
+      {tableEdit && defOf(tableEdit) ? (
+        <TableDialog
+          draft={draft} tables={tables} initial={defOf(tableEdit)!}
+          onCancel={() => setTableEdit(null)}
+          onOk={(t) => {
+            const was = tableEdit;
+            update((d) => ({
+              ...d,
+              tables: (d.tables ?? []).map((x) => (x.key === was ? t : x)),
+              // a rename has to follow into placement, or the table drops out of its group
+              structure: was === t.key ? d.structure : {
+                sections: d.structure.sections.map((sec) => ({
+                  ...sec,
+                  groups: sec.groups.map((g) => ({ ...g, params: g.params.map((k) => (k === was ? t.key : k)) })),
+                })),
+              },
+            }));
+            setTableEdit(null);
+          }}
+        />
       ) : null}
 
       {editing ? (

@@ -137,26 +137,34 @@ const TableBaseZ = {
   key: KeyZ,
   title: z.string(),
   columns: z.array(TableColumnZ).min(1),
-  minRows: z.number().int().nonnegative().optional(),
-  maxRows: z.number().int().positive().optional(),
 };
+
+/** The items grid's quantity column. Fixed, not a pointer field: every item row carries pieces,
+ *  and a configurable name only ever bought a way for it to dangle. */
+export const QTY_COL = "quantity";
 
 /** `calc` feeds sums into the model's formulas. `items` does that too, and additionally becomes
  *  n quotation lines: merge production is 1 config, 1 BOM, 1 routing, n items. */
 export const TableDefZ = z.discriminatedUnion("role", [
-  z.object({ ...TableBaseZ, role: z.literal("calc") }),
+  z.object({
+    ...TableBaseZ,
+    role: z.literal("calc"),
+    minRows: z.number().int().nonnegative().optional(),
+    maxRows: z.number().int().positive().optional(),
+  }),
   z.object({
     ...TableBaseZ,
     role: z.literal("items"),
-    /** number column: units of this item per finished configuration unit */
-    qtyCol: KeyZ,
-    /** number column the joint cost is split by (area, weight, whatever the shop uses) */
-    basisCol: KeyZ,
+    /** What the joint cost is divided in proportion to — evaluated per row, with that row's own
+     *  columns in scope, then weighted by the row's `quantity`. An items grid always holds at
+     *  least one row and is never capped, so it carries no minRows/maxRows. */
+    basisExpr: z.string(),
     /** column key -> B1 DocumentLine field. ItemCode/Quantity/UnitPrice are the split's, not yours. */
     map: z.record(z.string(), z.string()).optional(),
   }),
 ]);
 export type TableDef = z.infer<typeof TableDefZ>;
+export type ItemsTable = Extract<TableDef, { role: "items" }>;
 
 /** Per-project row data, by table key. Only input/option cells are stored: formula cells are
  *  re-evaluated on every read, like every other number in this engine. */
@@ -179,13 +187,22 @@ export const ModelDefZ = z.object({
       z.object({
         key: KeyZ,
         title: z.string(),
-        groups: z.array(z.object({ key: KeyZ, title: z.string(), params: z.array(KeyZ) })),
-        /** tables rendered full width under this section's fields */
-        tables: z.array(KeyZ).optional(),
+        groups: z.array(
+          z.object({
+            key: KeyZ,
+            title: z.string(),
+            /** The group's content in render order: parameter keys, and table keys placed among
+             *  them. One list because a table is sorted like a field is; the two namespaces are
+             *  disjoint (checkModel rejects a table key that collides with a parameter). */
+            params: z.array(KeyZ),
+          }),
+        ),
       }),
     ),
   }),
-  computed: z.array(z.object({ key: KeyZ, expr: z.string() })),
+  // `under` is a display anchor only — which parameter row the builder tree draws this formula
+  // beneath. Scope is unaffected: a computed value is global and usable in any expression.
+  computed: z.array(z.object({ key: KeyZ, expr: z.string(), under: KeyZ.optional() })),
   // optional, not .default([]): same reason as pricing.currency below — a zod default is required
   // in the inferred type and would force `tables: []` into every existing ModelDef literal.
   tables: z.array(TableDefZ).optional(),
@@ -251,3 +268,28 @@ export function displayColumns(ref: LookupRef, all: string[] | undefined): strin
 
 /** Derived value key for a param's source column, e.g. material_density. */
 export const derivedKey = (paramKey: string, col: string) => `${paramKey}_${col}`;
+
+/** The one mandatory item grid every model carries. `itemcode` rides to SAP as a UDF rather than
+ *  DocumentLine.ItemCode: the generic configurator item stays the B1 item (config-quote.ts, and
+ *  RESERVED_LINE_FIELDS enforces it), and the Crystal Report layouts read U_HERA_ItemCode.
+ *  Basis defaults to 1: the split is then weighted by `quantity` alone, which is the sane answer
+ *  before the author says what their shop actually costs by. */
+export const itemsTable = (): ItemsTable => ({
+  key: "items",
+  title: "Items",
+  role: "items",
+  basisExpr: "1",
+  map: { itemcode: "U_HERA_ItemCode", itemname: "ItemDescription" },
+  columns: [
+    { key: "itemcode", label: "Item code", type: "string", cell: { kind: "input" } },
+    { key: "itemname", label: "Item name", type: "string", cell: { kind: "input" } },
+    { key: QTY_COL, label: "Quantity", type: "number", cell: { kind: "input" } },
+  ],
+});
+
+/** Table keys the form actually shows, in render order. A table lives in a group's content list,
+ *  next to the parameters, and nowhere else. */
+export const placedTables = (model: ModelDef): string[] => {
+  const keys = new Set((model.tables ?? []).map((t) => t.key));
+  return model.structure.sections.flatMap((s) => s.groups.flatMap((g) => g.params.filter((k) => keys.has(k))));
+};

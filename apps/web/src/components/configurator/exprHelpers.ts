@@ -1,4 +1,4 @@
-import { FUNCS, aggregateKey, derivedColumns, derivedKey, type ModelDef, type Param } from "@hera/config-engine";
+import { FUNCS, aggregateKey, derivedColumns, derivedKey, type ModelDef, type Param, type TableDef } from "@hera/config-engine";
 
 // Suggestion machinery for ExprInput. Completion targets the TRAILING identifier of the
 // value — the common typing flow. // ponytail: caret-aware mid-expression completion needs
@@ -19,6 +19,12 @@ export type TableCols = { name: string; kind: "table" | "query"; columns: string
 export function modelWithParam(model: ModelDef, p: Param): ModelDef {
   if (!p.key) return model;
   return { ...model, parameters: [...model.parameters.filter((x) => x.key !== p.key), p] };
+}
+
+/** Same, for a table being edited in a dialog — its aggregates are in scope before it is saved. */
+export function modelWithTable(model: ModelDef, t: TableDef): ModelDef {
+  if (!t.key) return model;
+  return { ...model, tables: [...(model.tables ?? []).filter((x) => x.key !== t.key), t] };
 }
 
 export function scopeSuggestions(model: ModelDef, extraVars: string[] = [], tables: TableCols[] = []): Suggestion[] {

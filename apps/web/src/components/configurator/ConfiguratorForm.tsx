@@ -5,7 +5,7 @@ import {
   Text, Title, Token, Tokenizer,
 } from "@ui5/webcomponents-react";
 import {
-  displayColumns, domainOf, refKeyCols,
+  displayColumns, domainOf, placedTables, refKeyCols,
   type DomainOption, type Entries, type LookupRef, type ModelDef, type Propagation, type ResolvedLookups, type ResolvedTable, type TableRows, type Val,
 } from "@hera/config-engine";
 import { QueryValueHelp, type QuerySource } from "../ValueHelp.tsx";
@@ -46,9 +46,11 @@ export const UNPLACED_TABLES_SECTION = "__tables";
  *  and for an items table it would be the quotation's lines going missing. ConfigProcessPage
  *  renders one section at a time, so it needs the same list this does. */
 export function formSections(model: ModelDef): { key: string; title: string; tables: string[] }[] {
-  const placed = new Set(model.structure.sections.flatMap((s) => s.tables ?? []));
+  const placed = new Set(placedTables(model));
   const orphans = (model.tables ?? []).filter((t) => !placed.has(t.key));
-  const own = model.structure.sections.map((s) => ({ key: s.key, title: s.title, tables: s.tables ?? [] }));
+  // A placed table renders inside its group, in the group's own order, so a section's own list
+  // only ever holds orphans.
+  const own = model.structure.sections.map((s) => ({ key: s.key, title: s.title, tables: [] as string[] }));
   if (!orphans.length) return own;
   const title = orphans.length === 1 ? orphans[0]!.title : "Tables";
   return [...own, { key: UNPLACED_TABLES_SECTION, title, tables: orphans.map((t) => t.key) }];
@@ -56,6 +58,18 @@ export function formSections(model: ModelDef): { key: string; title: string; tab
 
 // labelSpan 12 everywhere = labels on top of their fields (natively left-aligned), field takes the full column.
 const FORM_PROPS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2", headerLevel: "H5" } as const;
+
+// A table is a FormItem like any other field, so it sorts among them — but it must not be one
+// column wide. Form.css lays a group's items with `column-count: <the group's colSpan>`, so a
+// group holding a table spans the whole Form (colSpan mirrors FORM_PROPS.layout) and the table
+// item breaks out of that column flow with the native `column-span: all`. Its label part is
+// hidden: ConfigTable draws its own title and Add-row toolbar.
+if (typeof document !== "undefined" && !document.getElementById("hera-table-item")) {
+  const el = document.createElement("style");
+  el.id = "hera-table-item";
+  el.textContent = `.hera-table-item{column-span:all}.hera-table-item::part(label){display:none}`;
+  document.head.appendChild(el);
+}
 
 export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, section, aiMarks, disabled, querySource, tables, onTablesChange }: {
   model: ModelDef;
@@ -202,9 +216,8 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   // section already gets its own ObjectPageSubSection (which supplies the title and the anchor), so
   // headerText is only needed when we stack the whole model ourselves (builder preview, portal wizard).
   //
-  // Tables render full width *below* their section's Form rather than inside a FormGroup: a table
-  // in a FormGroup would be squeezed into one grid column, and Form's single grouping level leaves
-  // nowhere else to put it.
+  // A group's content is one ordered list of parameter keys and table keys, so a table renders
+  // where the author put it, between the fields. See the style block above for the width.
   const byKey = new Map(model.structure.sections.map((s) => [s.key, s]));
   const defOf = (k: string) => (model.tables ?? []).find((t) => t.key === k);
   const shown = formSections(model).filter((s) => !section || s.key === section);
@@ -220,9 +233,21 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
         <div key={`${sec.key}:${si}`} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
         {s ? (
         <Form headerText={section ? undefined : sec.title} {...FORM_PROPS}>
-          {s.groups.map((g, gi) => (
-            <FormGroup key={`${g.key}:${gi}`} headerText={g.title}>
-              {g.params.filter((k) => prop.visible[k]).map((k) => {
+          {s.groups.map((g, gi) => {
+          const content = g.params.filter((k) => defOf(k) || prop.visible[k]);
+          return (
+            <FormGroup key={`${g.key}:${gi}`} headerText={g.title}
+              colSpan={content.some((k) => defOf(k)) ? FORM_PROPS.layout : undefined}>
+              {content.map((k) => {
+                const def = defOf(k);
+                if (def)
+                  return (
+                    <FormItem key={k} className="hera-table-item">
+                      <ConfigTable def={def} rows={tableRows[k] ?? []} scopeVars={prop.values}
+                        lookups={lk} querySource={querySource} disabled={disabled || !onTablesChange}
+                        onChange={(rows) => setRows(k, rows)} />
+                    </FormItem>
+                  );
                 const p = model.parameters.find((x) => x.key === k);
                 if (!p) return null;
                 const dom: DomainOption[] = prop.domains[k] ?? domainOf(model, lookups, k);
@@ -264,7 +289,8 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
                 );
               })}
             </FormGroup>
-          ))}
+          );
+          })}
         </Form>
         ) : section ? null : <Title level="H5">{sec.title}</Title>}
         {sec.tables.map((tk) => {

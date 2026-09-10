@@ -5,22 +5,21 @@ import {
   Bar, Button, Dialog, IllustratedMessage, Input, Label, MessageStrip, Toolbar, ToolbarButton,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/AddColumn.js";
-import type { ModelDef } from "@hera/config-engine";
+import { itemsTable, type ModelDef } from "@hera/config-engine";
 import { orpc } from "../../orpc.ts";
 import { listQuery, useListSpec, type ListColumn } from "../../variants.ts";
 import { ListReport } from "../ListReport.tsx";
 import { confirm } from "../confirm.ts";
 import { toast } from "../toast.ts";
-import { itemsTable } from "./TablesTab.tsx";
 
 // Minimal valid model a new draft starts from; passes checkModel (unitCost is in pricing scope).
-// The item grid is not optional — every model quotes through it, so it is seeded here rather than
-// left for the author to remember on the Tables tab.
+// The item grid is not optional — checkModel refuses a model without one — so it is seeded here,
+// already placed in the starter group.
 export function starterModel(name: string): ModelDef {
   return {
     name,
     parameters: [],
-    structure: { sections: [{ key: "main", title: "General", groups: [{ key: "general", title: "General", params: [] }] }] },
+    structure: { sections: [{ key: "main", title: "General", groups: [{ key: "general", title: "General", params: ["items"] }] }] },
     computed: [],
     constraints: [],
     tables: [itemsTable()],

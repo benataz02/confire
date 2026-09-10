@@ -1,0 +1,4 @@
+/* Toolbar's :host border-bottom; a document rule beats it without touching the shadow DOM. */
+[ui5-toolbar] {
+  border-bottom: none;
+}

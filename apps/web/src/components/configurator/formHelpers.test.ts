@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { DomainOption, ResolvedLookups } from "@hera/config-engine";
-import { mergeQueryPicks, resolveEntry, setEntry, setQueryPick } from "./formHelpers.ts";
+import { mergeQueryPicks, optionsOf, resolveEntry, setEntry, setQueryPick } from "./formHelpers.ts";
 
 const base: ResolvedLookups = {
   domains: { item: [{ value: "A", label: "Ay" }] },
@@ -40,6 +40,19 @@ describe("mergeQueryPicks", () => {
     const picks = setQueryPick({}, "item", "items", { columns: ["id", "name"], rows: [["A", "Ay"]] });
     expect(mergeQueryPicks(base, picks).tables.items?.rows).toEqual([["A", "Ay"]]);
   });
+});
+
+describe("optionsOf", () => {
+  const t = { columns: ["id", "name"], rows: [["A", "Ay"], ["B", null]] as (string | null)[][] };
+  test("index-aligned with the rows, blank label falls back to the key", () =>
+    expect(optionsOf(t, "id", "name")).toEqual([
+      { value: "A", label: "Ay" },
+      { value: "B", label: "B" },
+    ]));
+  test("no label column -> the key is the label", () =>
+    expect(optionsOf(t, "id")).toEqual([{ value: "A", label: "A" }, { value: "B", label: "B" }]));
+  test("unknown value column -> no options (never a column of undefined)", () =>
+    expect(optionsOf(t, "nope", "name")).toEqual([]));
 });
 
 describe("resolveEntry", () => {

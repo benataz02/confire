@@ -1,4 +1,4 @@
-import type { ModelDef, ResolvedLookups } from "../src/model";
+import { itemsTable, type ModelDef, type ResolvedLookups } from "../src/model";
 
 /** Cable assembly demo: exercises options/boolean/visibility, expr + table
  *  constraints, computed params, LOOKUP, scrap, setup amortization. */
@@ -46,6 +46,8 @@ export const model: ModelDef = {
     ],
   },
   computed: [{ key: "weight", expr: 'section * (material == "steel" ? 7.85 : 2.7) * 0.1' }],
+  // every model carries one: checkModel refuses a model that cannot produce quotation lines
+  tables: [itemsTable()],
   constraints: [
     { kind: "expr", assert: '!(material == "alu" && section == 25)', message: "25mm² not available in aluminium" },
     {

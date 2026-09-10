@@ -1,3 +1,4 @@
+import "./global.css";
 import "@ui5/webcomponents-react/dist/Assets.js";
 import "@ui5/webcomponents-icons/dist/AllIcons.js"; // registers the SAP-icons-v5 glyph loader (horizon); Assets.js only loads icon i18n. ponytail: AllIcons pulls the whole set — switch to per-icon imports if bundle size bites
 import { Modals, ThemeProvider } from "@ui5/webcomponents-react";

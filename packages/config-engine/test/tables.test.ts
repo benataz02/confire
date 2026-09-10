@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { checkModel } from "../src/check";
 import type { ModelDef, TableDef } from "../src/model";
 import { bindings } from "../src/propagate";
-import { evalTableRows, splitShares, tableAggregates } from "../src/tables";
+import { evalTableRows, splitShares, splitWeights, tableAggregates } from "../src/tables";
 import { lookups, model as base } from "./fixture";
 
 const known = [{ name: "prices", columns: ["code", "price"] }];
@@ -45,14 +45,13 @@ const parts: TableDef = {
   role: "items",
   key: "parts",
   title: "Items",
-  qtyCol: "pieces",
-  basisCol: "area",
+  basisExpr: "area",
   map: { code: "U_HERA_ItemCode", name: "ItemDescription" },
   columns: [
     { key: "code", label: "Item code", type: "string", cell: { kind: "input" } },
     { key: "name", label: "Description", type: "string", cell: { kind: "input" } },
     { key: "width", label: "Width", type: "number", unit: "mm", cell: { kind: "input" } },
-    { key: "pieces", label: "Pieces", type: "number", cell: { kind: "input" } },
+    { key: "quantity", label: "Pieces", type: "number", cell: { kind: "input" } },
     // reads a model parameter as well as its own row
     { key: "area", label: "Area", type: "number", cell: { kind: "formula", expr: "width * section" } },
   ],
@@ -62,7 +61,10 @@ const model: ModelDef = {
   ...base,
   tables: [holes, parts],
   structure: {
-    sections: [{ ...base.structure.sections[0]!, tables: ["holes"] }],
+    sections: [{
+      ...base.structure.sections[0]!,
+      groups: base.structure.sections[0]!.groups.map((g, i) => (i === 0 ? { ...g, params: [...g.params, "holes"] } : g)),
+    }],
   },
 };
 
@@ -84,7 +86,7 @@ describe("evalTableRows", () => {
   });
 
   test("a row formula reads model values, and row cells shadow them", () => {
-    const out = evalTableRows(parts, [{ width: 3, pieces: 1 }], { section: 10 }, lookups.tables);
+    const out = evalTableRows(parts, [{ width: 3, quantity: 1 }], { section: 10 }, lookups.tables);
     expect(out[0]!.area).toBe(30);
 
     // a column named after a parameter: the row's own `section` wins over the model's 10
@@ -143,29 +145,34 @@ describe("splitShares", () => {
   const sum = (xs: number[]) => Math.round(xs.reduce((a, b) => a + b, 0) * 100) / 100;
 
   test("a total that does not divide evenly still sums to the total", () => {
-    const three = [
-      { area: 1, pieces: 1 },
-      { area: 1, pieces: 1 },
-      { area: 1, pieces: 1 },
-    ];
-    const shares = splitShares(three, "pieces", "area", 100);
+    const shares = splitShares([1, 1, 1], 100);
     expect(sum(shares)).toBe(100);
     expect(shares).toEqual([33.34, 33.33, 33.33]);
   });
 
   test("weights by basis x qty", () => {
-    const shares = splitShares([{ area: 2, pieces: 1 }, { area: 1, pieces: 1 }], "pieces", "area", 10);
-    expect(shares).toEqual([6.67, 3.33]);
-    expect(sum(shares)).toBe(10);
+    expect(splitShares([2, 1], 10)).toEqual([6.67, 3.33]);
+    expect(sum(splitShares([2, 1], 10))).toBe(10);
   });
 
-  test("zero basis degenerates to an equal split, not a division by zero", () => {
-    const shares = splitShares([{ area: 0, pieces: 1 }, { area: 0, pieces: 2 }], "pieces", "area", 9);
-    expect(shares).toEqual([4.5, 4.5]);
+  test("zero weights degenerate to an equal split, not a division by zero", () => {
+    expect(splitShares([0, 0], 9)).toEqual([4.5, 4.5]);
   });
 
   test("no rows, no shares", () => {
-    expect(splitShares([], "pieces", "area", 10)).toEqual([]);
+    expect(splitShares([], 10)).toEqual([]);
+  });
+});
+
+describe("splitWeights", () => {
+  test("basis is evaluated per row, then weighted by that row's quantity", () => {
+    // rows arrive already evaluated, so the computed `area` column is there for basisExpr to read
+    const rows = [{ area: 20, quantity: 3 }, { area: 50, quantity: 1 }];
+    expect(splitWeights(parts, rows, {})).toEqual([60, 50]);
+  });
+
+  test("an undecidable basis weighs nothing rather than throwing", () => {
+    expect(splitWeights({ ...parts, basisExpr: "nope" }, [{ area: 2, quantity: 3 }], {})).toEqual([0]);
   });
 });
 
@@ -208,9 +215,14 @@ describe("checkModel", () => {
     expect(msgs(m)).toContain("'ItemCode' is set by the price split and cannot be mapped");
   });
 
-  test("qtyCol / basisCol must be number columns", () => {
-    const m: ModelDef = { ...model, tables: [holes, { ...parts, basisCol: "name" }] };
-    expect(msgs(m)).toContain("'name' is not a number column of this table");
+  test("a basis expression referencing a column the table does not have", () => {
+    const m: ModelDef = { ...model, tables: [holes, { ...parts, basisExpr: "width * depth" }] };
+    expect(msgs(m)).toContain("unknown identifier 'depth'");
+  });
+
+  test("an items table without a number 'quantity' column", () => {
+    const m: ModelDef = { ...model, tables: [holes, { ...parts, basisExpr: "1", columns: parts.columns.slice(0, 3) }] };
+    expect(msgs(m)).toContain("an items table needs a number column 'quantity'");
   });
 
   test("two items tables", () => {
@@ -218,11 +230,16 @@ describe("checkModel", () => {
     expect(msgs(m)).toContain("at most one items table per model");
   });
 
-  test("a section placing an undeclared table", () => {
+  test("a group placing a key that is neither parameter nor table", () => {
     const m: ModelDef = {
       ...model,
-      structure: { sections: [{ ...base.structure.sections[0]!, tables: ["nope"] }] },
+      structure: {
+        sections: [{
+          ...base.structure.sections[0]!,
+          groups: [{ ...base.structure.sections[0]!.groups[0]!, params: ["nope"] }],
+        }],
+      },
     };
-    expect(msgs(m)).toContain("structure references unknown table 'nope'");
+    expect(msgs(m)).toContain("structure references unknown parameter 'nope'");
   });
 });

@@ -54,6 +54,14 @@ export function setEntry(entries: Entries, key: string, v: Val | undefined): Ent
   return { ...entries, [key]: v };
 }
 
+/** Rows -> value-help options, index-aligned with `t.rows` — the value helps rely on that
+ *  alignment to recover a picked row's label. A blank label cell falls back to the key. */
+export function optionsOf(t: ResolvedTable, valueCol: string, labelCol?: string): DomainOption[] {
+  const vi = t.columns.indexOf(valueCol);
+  const li = labelCol ? t.columns.indexOf(labelCol) : vi;
+  return vi < 0 ? [] : t.rows.map((r) => ({ value: r[vi] ?? null, label: String(r[li] ?? r[vi] ?? "") }));
+}
+
 export type EntryResolution = { kind: "clear" } | { kind: "set"; value: Val; index: number } | { kind: "reject" };
 
 /** Map free text typed into a value-help input to a domain option. "reject" = not in the list. */

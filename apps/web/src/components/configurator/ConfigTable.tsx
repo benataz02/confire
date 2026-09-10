@@ -54,8 +54,10 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
     return out;
   }, [evaluated, def]);
 
-  const atMax = def.maxRows !== undefined && rows.length >= def.maxRows;
-  const atMin = rows.length <= (def.minRows ?? 0);
+  // An items grid is never capped and never empty: its rows are the quotation's lines.
+  const maxRows = def.role === "calc" ? def.maxRows : undefined;
+  const atMax = maxRows !== undefined && rows.length >= maxRows;
+  const atMin = rows.length <= (def.role === "calc" ? (def.minRows ?? 0) : 1);
 
   const cell = (ri: number, c: TableColumn) => {
     const stored = rows[ri]?.[c.key];
@@ -109,7 +111,6 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
       <Toolbar design="Transparent" accessibleName={`${def.title} actions`}>
-        <Title level="H5">{def.title}</Title>
         <ToolbarButton icon="add" design="Transparent" text="Add row" disabled={disabled || atMax}
           onClick={() => onChange(addRow(rows))} />
       </Toolbar>
@@ -119,7 +120,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
           // Only a grid becomes new rows; a single value belongs in the cell being pasted into.
           if (!/[\t\n]/.test(text) || disabled) return;
           e.preventDefault();
-          onChange(pasteRows(rows, def, text, def.maxRows));
+          onChange(pasteRows(rows, def, text, maxRows));
         }}>
         <Table
           // noDataText, not an IllustratedMessage: the illustration needs its own side-effect

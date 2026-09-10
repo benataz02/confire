@@ -5,7 +5,7 @@ import { orpc } from "../../orpc.ts";
 import type { TableCols } from "./exprHelpers.ts";
 import { toast } from "../toast.ts";
 
-export type TabKey = "params" | "rules" | "tables" | "bom" | "routing" | "history" | "settings";
+export type TabKey = "params" | "rules" | "bom" | "routing" | "history" | "settings";
 
 export const issueFor = (issues: Issue[], path: string) => issues.find((i) => i.path === path);
 
@@ -20,12 +20,11 @@ function colKeys(columns: unknown): string[] {
 }
 
 export function tabOf(path: string): TabKey {
-  if (path.startsWith("parameters") || path.startsWith("structure") || path.startsWith("computed") || path === "model")
+  // Tables live in the structure tree on the Parameters tab, so every one of these lands there.
+  if (path.startsWith("parameters") || path.startsWith("structure") || path.startsWith("computed")
+      || path.startsWith("tables") || path === "model")
     return "params";
   if (path.startsWith("constraints")) return "rules";
-  // before the structure branch above would have claimed it: a table placement issue is reported
-  // on "structure", but it is fixed on the Tables tab.
-  if (path.startsWith("tables")) return "tables";
   if (path.startsWith("bom")) return "bom";
   if (path.startsWith("routing")) return "routing";
   if (path.startsWith("history")) return "history";

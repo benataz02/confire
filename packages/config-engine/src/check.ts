@@ -1,5 +1,5 @@
 import { type Ast, DslError, parse } from "./dsl";
-import { aggregateKey, derivedKey, type ModelDef, type TableDef, derivedColumns, refKeyCols } from "./model";
+import { aggregateKey, derivedKey, type ModelDef, type TableDef, derivedColumns, refKeyCols, QTY_COL } from "./model";
 
 export type Issue = { path: string; message: string; from?: number; to?: number };
 
@@ -106,6 +106,10 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   });
   if (tableDefs.filter((t) => t.role === "items").length > 1)
     issues.push({ path: "tables", message: "at most one items table per model" });
+  // Not optional: without it a quote falls back to one generic line per candidate, which no
+  // Crystal layout and no downstream production step is built to read.
+  if (!tableDefs.some((t) => t.role === "items"))
+    issues.push({ path: "tables", message: "a model needs an items table — it is what becomes the quotation lines" });
 
   const derivedSet = new Set(derived);
   const base = new Set([...paramKeys, ...computedKeys, ...derived, ...aggregates]);
@@ -197,18 +201,16 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   };
   for (const k of computedKeys) visit(k, []);
 
-  // structure references
-  const placed = model.structure.sections.flatMap((s) => s.groups.flatMap((g) => g.params));
-  for (const pk of placed) {
-    if (!base.has(pk) || compSet.has(pk) || derivedSet.has(pk))
-      issues.push({ path: "structure", message: `structure references unknown parameter '${pk}'` });
-  }
-  const placedTables = model.structure.sections.flatMap((s) => s.tables ?? []);
+  // structure references. A group's list holds parameter keys and table keys — a key is a table
+  // when a TableDef claims it, and table keys can't collide with parameter keys (checked above).
   const seenPlaced = new Set<string>();
-  for (const tk of placedTables) {
-    if (!seenTable.has(tk)) issues.push({ path: "structure", message: `structure references unknown table '${tk}'` });
-    if (seenPlaced.has(tk)) issues.push({ path: "structure", message: `table '${tk}' is placed more than once` });
-    seenPlaced.add(tk);
+  for (const k of model.structure.sections.flatMap((s) => s.groups.flatMap((g) => g.params))) {
+    if (seenTable.has(k)) {
+      if (seenPlaced.has(k)) issues.push({ path: "structure", message: `table '${k}' is placed more than once` });
+      seenPlaced.add(k);
+    } else if (!base.has(k) || compSet.has(k) || derivedSet.has(k)) {
+      issues.push({ path: "structure", message: `structure references unknown parameter '${k}'` });
+    }
   }
 
   // LOOKUP table names when statically known (first arg is a string literal)
@@ -265,11 +267,12 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
       inRow.add(c.key);
     });
     if (t.role !== "items") return;
-    const numeric = new Set(t.columns.filter((c) => c.type === "number").map((c) => c.key));
+    // The basis sees the whole row, so it is checked once the loop above has admitted every column.
+    checkExpr(t.basisExpr, `tables[${i}].basisExpr`, inRow);
+    checkLookups(t.basisExpr, `tables[${i}].basisExpr`);
     const declared = new Set(t.columns.map((c) => c.key));
-    for (const [field, key] of [["qtyCol", t.qtyCol], ["basisCol", t.basisCol]] as const)
-      if (!numeric.has(key))
-        issues.push({ path: `tables[${i}].${field}`, message: `'${key}' is not a number column of this table` });
+    if (!t.columns.some((c) => c.key === QTY_COL && c.type === "number"))
+      issues.push({ path: `tables[${i}]`, message: `an items table needs a number column '${QTY_COL}'` });
     for (const [col, target] of Object.entries(t.map ?? {})) {
       if (!declared.has(col)) issues.push({ path: `tables[${i}].map`, message: `unknown column '${col}'` });
       if (RESERVED_LINE_FIELDS.has(target))
