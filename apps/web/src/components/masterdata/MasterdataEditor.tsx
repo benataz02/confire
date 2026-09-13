@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useBlocker, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar, BusyIndicator, Button, CheckBox, Form, FormGroup, FormItem, Icon, IllustratedMessage, Input,
-  Label, MessageStrip, ObjectPage, ObjectPageSection, ObjectPageTitle, ObjectStatus, Option, Select,
+  Label, MessageStrip, ObjectPage, ObjectPageSection, ObjectPageTitle, Option, Panel, Select,
   Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, TextArea,
   Title, Toolbar, ToolbarButton,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
+import type { PanelDomRef } from "@ui5/webcomponents-react";
 import type { ODataQuery, QuerySource, Val } from "@hera/config-engine";
 import { orpc } from "../../orpc.ts";
 import { colMinWidth } from "../configurator/tableWidths.ts";
@@ -30,26 +31,20 @@ const emptyDraft = (): Draft => ({
   query: { target: "b1", query: { entitySet: "" }, columns: [] },
 });
 
-// Details is one group of short pairs, so its two columns hold Name | Kind. The query form's two
-// columns are its two groups — Clauses | Preview — each stacking its own content.
-const PAIRS = { labelSpan: "S12 M3 L3 XL3", layout: "S1 M2 L2 XL2", accessibleMode: "Edit" } as const;
-const FIELDS = { labelSpan: "S12 M3 L3 XL3", layout: "S1 M1 L2 XL2", accessibleMode: "Edit" } as const;
-// A table is one full-width group at every breakpoint — nothing to put beside it.
-const FULL = { layout: "S1 M1 L1 XL1", accessibleMode: "Edit" } as const;
+// Two columns once there is room: the short field groups sit side by side, the table groups get a
+// row of their own.
+const FORM = {
+  layout: "S1 M1 L2 XL2", labelSpan: "S12 M3 L3 XL3", emptySpan: "S0 M0 L0 XL1", accessibleMode: "Edit",
+} as const;
+
+// One CSS var drives both a group's column span *and* the `column-count` of its own content, so a
+// group spanning both columns would fragment its table down the middle. `column-span: all` puts the
+// content back into a single column across the full width — it needs a box to apply to, hence the
+// `display: block` overriding the `display: contents` the Form sets on slotted groups.
+const WIDE = { columnSpan: 2, style: { display: "block", columnSpan: "all" } } as const;
 
 // A preview is a shape check, not a data browse — five rows read as $top=5, server-side.
 const PREVIEW_TOP = 5;
-
-// Mirrors the Form's own `.ui5-form-group-heading` (height token + 0.25rem indent) so a group
-// heading we draw ourselves sits on the same line as one the Form draws.
-const HEADING = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "0.5rem",
-  height: "var(--_ui5-form-group-heading-height, 2.75rem)",
-  paddingInlineStart: "0.25rem",
-} as const;
 
 const CELL = { display: "flex", alignItems: "center", gap: "0.5rem" } as const;
 
@@ -96,12 +91,21 @@ export function MasterdataEditor({ id }: { id?: string }) {
   const [dirty, setDirty] = useState(false);
   const [preview, setPreview] = useState<{ cols: string[]; rows: Cell[][] } | null>(null);
   const edit = (fn: (d: Draft) => Draft) => { setDraft((d) => (d ? fn(d) : d)); setDirty(true); };
+  const panelRef = useRef<PanelDomRef>(null);
+  // Panel only animates from its own toggle handler — assigning `collapsed` from outside just
+  // re-renders it open. Clicking its toggle button is the interaction path; a frame later, so the
+  // result is in the DOM when slideDown measures the height it animates to.
+  const expandPreview = () => requestAnimationFrame(() => {
+    if (panelRef.current?.collapsed)
+      panelRef.current.shadowRoot?.querySelector<HTMLElement>(".ui5-panel-header-button")?.click();
+  });
   const testFetch = useMutation(orpc.masterdata.queryPage.mutationOptions({
     onSuccess: (r) => {
       edit((x) => ({ ...x, query: pruneColUi({ ...x.query, columns: r.columns }) }));
       setPreview({ cols: r.columns, rows: r.rows as Cell[][] });
+      expandPreview();
     },
-    onError: () => setPreview(null),
+    onError: () => { setPreview(null); expandPreview(); },
   }));
 
   useEffect(() => {
@@ -192,8 +196,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
       titleArea={
         <ObjectPageTitle
           header={
-              <Title level="H4">{"Master data: " + (d.name || (id ? "Untitled" : "New table"))}</Title>
-
+              <Title level="H4">{"Master data " + (d.name || (id ? "Untitled" : "New table"))}</Title>
           }
           snappedContent={errorStrip}
           expandedContent={errorStrip}
@@ -226,30 +229,29 @@ export function MasterdataEditor({ id }: { id?: string }) {
         } />
       }
     >
-      <ObjectPageSection id="details" titleText="Details">
-        <Form {...PAIRS}>
-          <FormItem labelContent={<Label required>Name</Label>}>
-            <Input value={d.name} placeholder="prices" required
-              valueState={submitted && !d.name.trim() ? "Negative" : "None"}
-              onInput={(e) => edit((x) => ({ ...x, name: e.target.value }))} />
-          </FormItem>
-          <FormItem labelContent={<Label required>Kind</Label>}>
-            {/* Fixed once saved: the two kinds store different things, and a flip would throw
-                away either the maintained rows or the query. Read-only rather than disabled —
-                the choice still has to be readable after saving. */}
-            <Select readonly={!!id} required value={d.kind} accessibleName="Kind"
-              onChange={(e) => edit((x) => ({ ...x, kind: e.detail.selectedOption.value as Draft["kind"] }))}>
-              <Option value="table" additionalText="Maintained here">Table</Option>
-              <Option value="query" additionalText="Read live from SAP">Query</Option>
-            </Select>
-          </FormItem>
-        </Form>
-      </ObjectPageSection>
+      <ObjectPageSection id="general" titleText="General" hideTitleText>
+        <Form {...FORM}>
+          <FormGroup headerText="Details">
+            <FormItem labelContent={<Label required>Name</Label>}>
+              <Input value={d.name} placeholder="prices" required
+                valueState={submitted && !d.name.trim() ? "Negative" : "None"}
+                onInput={(e) => edit((x) => ({ ...x, name: e.target.value }))} />
+            </FormItem>
+            <FormItem labelContent={<Label required>Kind</Label>}>
+              {/* Fixed once saved: the two kinds store different things, and a flip would throw
+                  away either the maintained rows or the query. Read-only rather than disabled —
+                  the choice still has to be readable after saving. */}
+              <Select readonly={!!id} required value={d.kind} accessibleName="Kind"
+                onChange={(e) => edit((x) => ({ ...x, kind: e.detail.selectedOption.value as Draft["kind"] }))}>
+                <Option value="table" additionalText="Maintained here">Table</Option>
+                <Option value="query" additionalText="Read live from SAP">Query</Option>
+              </Select>
+            </FormItem>
+          </FormGroup>
 
-      {d.kind === "table" ? (
-        <ObjectPageSection id="columns" titleText={`Columns (${d.columns.length})`}>
-          <Form {...FULL}>
-            <FormGroup accessibleName="Columns">
+          {d.kind === "table" ? (
+            <>
+            <FormGroup headerText="Columns" {...WIDE}>
               <Toolbar design="Transparent" accessibleName="Column actions">
                 <ToolbarButton icon="add" design="Transparent" text="Add column" onClick={() => edit((x) => ({
                   ...x,
@@ -302,99 +304,8 @@ export function MasterdataEditor({ id }: { id?: string }) {
                 ))}
               </Table>
             </FormGroup>
-          </Form>
-        </ObjectPageSection>
-      ) : (
-        <ObjectPageSection id="query" titleText="Query">
-          {/* Two groups, one form: clauses left, the rows they produce right, so editing a
-              filter and reading the effect needs no scrolling. The Form's own grid stacks them
-              at M and below. */}
-          <Form {...FIELDS}>
-            <FormGroup headerText="Clauses">
-              <FormItem labelContent={<Label>Source</Label>}>
-                <Select value={d.query.target} accessibleName="Source"
-                  onChange={(e) => setQuery({ target: e.detail.selectedOption.value as QueryDef["target"] })}>
-                  <Option value="b1">B1</Option>
-                  <Option value="beas">Beas</Option>
-                </Select>
-              </FormItem>
-              <FormItem labelContent={<Label required>Entity set</Label>}>
-                <Input value={d.query.query.entitySet} placeholder="Items" required
-                  valueState={submitted && !d.query.query.entitySet ? "Negative" : "None"}
-                  onInput={(e) => setOData({ entitySet: e.target.value.trim() })} />
-              </FormItem>
-              <FormItem labelContent={<Label>Select</Label>}>
-                {/* Committed on change (Enter/focus-out), not on input: `columns` drives $select
-                    *and* the label/visibility bags, which would be pruned mid-word on every keystroke. */}
-                <Input value={d.query.columns.join(", ")} placeholder="ItemCode, ItemName"
-                  onChange={(e) => setQuery({ columns: [...new Set(e.target.value.split(/[,\s]+/).filter(Boolean))] })} />
-              </FormItem>
-              <FormItem labelContent={<Label>Filter</Label>}>
-                <TextArea growing growingMaxRows={4} rows={1} value={d.query.query.filter ?? ""}
-                  placeholder="ItemType eq 'itItems' and Frozen eq 'tNO'"
-                  onInput={(e) => setOData({ filter: e.target.value || undefined })} />
-              </FormItem>
-              <FormItem labelContent={<Label>Sort</Label>}>
-                <Input value={d.query.query.orderby ?? ""} placeholder="ItemName"
-                  onInput={(e) => setOData({ orderby: e.target.value || undefined })} />
-              </FormItem>
-            </FormGroup>
 
-            {/* The panel goes in the group directly, not through a FormItem: a FormItem always
-                reserves its label track, and a table has no business being indented into 8/12
-                of half a section. */}
-            <FormGroup accessibleName="Preview">
-              {/* The heading is hand-rolled rather than `headerText` because FormGroup has no
-                  header slot, and Test fetch belongs on the heading line. HEADING copies what
-                  the Form gives its own group headings so the two line up. */}
-              <div style={HEADING}>
-                <Title level="H5" size="H6">Preview</Title>
-                <Button design="Transparent" icon="refresh"
-                  disabled={testFetch.isPending || !d.query.query.entitySet}
-                  onClick={() => testFetch.mutate({
-                    target: d.query.target,
-                    query: d.query.query,
-                    columns: d.query.columns,
-                    top: PREVIEW_TOP,
-                  })}>
-                  {testFetch.isPending ? "Loading…" : "Test fetch"}
-                </Button>
-              </div>
-              {testFetch.error ? <MessageStrip design="Negative" hideCloseButton>{testFetch.error.message}</MessageStrip> : null}
-              {preview ? (
-                // Scroll, not Popin: popped-in columns stack *inside* the row, which is the row
-                // growing taller. Long values truncate (maxLines) and the table scrolls instead.
-                <Table noDataText="No rows returned."
-                  headerRow={
-                    <TableHeaderRow>
-                      {preview.cols.map((c) => (
-                        <TableHeaderCell key={c} minWidth="8rem"><span>{d.query.labels?.[c] || c}</span></TableHeaderCell>
-                      ))}
-                    </TableHeaderRow>
-                  }>
-                  {preview.rows.map((r, ri) => (
-                    <TableRow key={ri} rowKey={`q-${ri}`}>
-                      {r.map((cell, ci) => (
-                        <TableCell key={ci}>
-                          <Text maxLines={1} title={String(cell ?? "")}>{String(cell ?? "")}</Text>
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </Table>
-              ) : (
-                <IllustratedMessage name="NoData" design="Dot" titleText="No preview yet"
-                  subtitleText={`Run Test fetch to read the first ${PREVIEW_TOP} rows from SAP.`} />
-              )}
-            </FormGroup>
-          </Form>
-        </ObjectPageSection>
-      )}
-
-      {d.kind === "table" ? (
-        <ObjectPageSection id="rows" titleText={`Rows (${d.rows.length})`}>
-          <Form {...FULL}>
-            <FormGroup accessibleName="Rows">
+            <FormGroup headerText="Rows" {...WIDE}>
               <Toolbar design="Transparent" accessibleName="Row actions">
                 <ToolbarButton icon="add" design="Transparent" text="Add row" disabled={!d.columns.length}
                   onClick={() => edit((x) => ({ ...x, rows: [...x.rows, x.columns.map(() => null as Cell)] }))} />
@@ -447,13 +358,97 @@ export function MasterdataEditor({ id }: { id?: string }) {
                 </Table>
               </div>
             </FormGroup>
-          </Form>
-        </ObjectPageSection>
-      ) : (
-        <ObjectPageSection id="qcolumns" titleText={`Columns (${d.query.columns.length})`}>
-          <Form {...FULL}>
-            <FormGroup accessibleName="Query columns">
-              <MessageStrip design="Information" hideCloseButton>
+            </>
+          ) : (
+            <>
+            <FormGroup headerText="Clauses">
+              <FormItem labelContent={<Label>Source</Label>}>
+                <Select value={d.query.target} accessibleName="Source"
+                  onChange={(e) => setQuery({ target: e.detail.selectedOption.value as QueryDef["target"] })}>
+                  <Option value="b1">B1</Option>
+                  <Option value="beas">Beas</Option>
+                </Select>
+              </FormItem>
+              <FormItem labelContent={<Label required>Entity set</Label>}>
+                <Input value={d.query.query.entitySet} placeholder="Items" required
+                  valueState={submitted && !d.query.query.entitySet ? "Negative" : "None"}
+                  onInput={(e) => setOData({ entitySet: e.target.value.trim() })} />
+              </FormItem>
+              <FormItem labelContent={<Label>Select</Label>}>
+                {/* Committed on change (Enter/focus-out), not on input: `columns` drives $select
+                    *and* the label/visibility bags, which would be pruned mid-word on every keystroke. */}
+                <Input value={d.query.columns.join(", ")} placeholder="ItemCode, ItemName"
+                  onChange={(e) => setQuery({ columns: [...new Set(e.target.value.split(/[,\s]+/).filter(Boolean))] })} />
+              </FormItem>
+              <FormItem labelContent={<Label>Filter</Label>}>
+                <TextArea growing growingMaxRows={4} rows={1} value={d.query.query.filter ?? ""}
+                  placeholder="ItemType eq 'itItems' and Frozen eq 'tNO'"
+                  onInput={(e) => setOData({ filter: e.target.value || undefined })} />
+              </FormItem>
+              <FormItem labelContent={<Label>Sort</Label>}>
+                <Input value={d.query.query.orderby ?? ""} placeholder="ItemName"
+                  onInput={(e) => setOData({ orderby: e.target.value || undefined })} />
+              </FormItem>
+            </FormGroup>
+
+            {/* The panel goes in the group directly, not through a FormItem: a FormItem always
+                reserves its label track, and a table has no business being indented into 8/12
+                of half a section. */}
+            <FormGroup accessibleName="Preview" {...WIDE}>
+              {/* Panel draws the header row itself (and makes the preview collapsible), so the
+                  slot only carries the title and the action beside it. A custom header is not
+                  clickable — only the arrow toggles — so the button needs no stopPropagation.
+                  `headerText` is ignored whenever the `header` slot is filled. */}
+              {/* Collapsed until Test fetch has something to show — a result, or the error
+                  that explains why there is none. Uncontrolled from then on: the value never
+                  changes, so React never overwrites what the user toggled. */}
+              <Panel ref={panelRef} accessibleRole="Region" accessibleName="Preview" collapsed
+                header={
+                  <div style={{ ...CELL, flex: 1, justifyContent: "space-between", minWidth: 0 }}>
+                    <Title level="H5" size="H6">Preview</Title>
+                    <Button design="Transparent" icon="refresh"
+                      disabled={testFetch.isPending || !d.query.query.entitySet}
+                      onClick={() => testFetch.mutate({
+                        target: d.query.target,
+                        query: d.query.query,
+                        columns: d.query.columns,
+                        top: PREVIEW_TOP,
+                      })}>
+                      {testFetch.isPending ? "Loading…" : "Test fetch"}
+                    </Button>
+                  </div>
+                }>
+              {testFetch.error ? <MessageStrip design="Negative" hideCloseButton>{testFetch.error.message}</MessageStrip> : null}
+              {preview ? (
+                // Scroll, not Popin: popped-in columns stack *inside* the row, which is the row
+                // growing taller. Long values truncate (maxLines) and the table scrolls instead.
+                <Table noDataText="No rows returned."
+                  headerRow={
+                    <TableHeaderRow>
+                      {preview.cols.map((c) => (
+                        <TableHeaderCell key={c} minWidth="8rem"><span>{d.query.labels?.[c] || c}</span></TableHeaderCell>
+                      ))}
+                    </TableHeaderRow>
+                  }>
+                  {preview.rows.map((r, ri) => (
+                    <TableRow key={ri} rowKey={`q-${ri}`}>
+                      {r.map((cell, ci) => (
+                        <TableCell key={ci}>
+                          <Text maxLines={1} title={String(cell ?? "")}>{String(cell ?? "")}</Text>
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </Table>
+              ) : (
+                <IllustratedMessage name="NoData" design="Dot" titleText="No preview yet"
+                  subtitleText={`Run Test fetch to read the first ${PREVIEW_TOP} rows from SAP.`} />
+              )}
+              </Panel>
+            </FormGroup>
+
+            <FormGroup headerText="Query columns" {...WIDE}>
+              <MessageStrip design="Information" style={{ marginBlockEnd: "0.5rem" }}>
                 Labels and visibility apply to the value-help dialog only; every column still binds as a derived parameter.
               </MessageStrip>
               <Table
@@ -497,9 +492,10 @@ export function MasterdataEditor({ id }: { id?: string }) {
                 ))}
               </Table>
             </FormGroup>
-          </Form>
-        </ObjectPageSection>
-      )}
+            </>
+          )}
+        </Form>
+      </ObjectPageSection>
     </ObjectPage>
   );
 }
