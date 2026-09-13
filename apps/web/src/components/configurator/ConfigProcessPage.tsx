@@ -1,21 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Bar, Button, BusyIndicator, Dialog, DynamicSideContent, Label, MessageStrip, ObjectPage,
-  ObjectPageSection, ObjectPageSubSection, ObjectPageTitle, ObjectStatus, Tag,
-  Text, TextArea, Title, Toolbar,
+  Bar, Button, BusyIndicator, Dialog, DynamicSideContent, Form, FormGroup, FormItem, Input, Label,
+  MessageStrip, ObjectPage, ObjectPageSection, ObjectPageSubSection, ObjectPageTitle, ObjectStatus,
+  Option, Select, Tag, Text, TextArea, Title, Toolbar,
 } from "@ui5/webcomponents-react";
 import { propagate, type Entries, type TableRows, type Val } from "@hera/config-engine";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts";
 import { orpc } from "../../orpc.ts";
 import { toast } from "../toast.ts";
 import { cleanOverrides, statusUi, toggleSelection, type Sel } from "./runView.ts";
-import { BatchEditor, ConfiguratorForm, ConsistencyStatus, formSections } from "./ConfiguratorForm.tsx";
-import { ConfigGeneral, missingGeneral } from "./ConfigGeneral.tsx";
+import { BATCHES_SECTION, ConfiguratorForm, ConsistencyStatus, formSections } from "./ConfiguratorForm.tsx";
+import { EntityValueHelp } from "../ValueHelp.tsx";
 import { StepCandidatesReview } from "./StepCandidatesReview.tsx";
 import { StepCreateQuote } from "./StepCreateQuote.tsx";
 import { InsightsRail } from "./InsightsRail.tsx";
 import { buildCalculationUpdate, needsCalculation, sameEntries, sameTables } from "./configProcessState.ts";
+
+// Pinned so the picked row's CardName can be read back off it by name — EntityValueHelp aligns the
+// row with [keyField, ...select minus keyField]. Same pair the portal invite dialog uses.
+const CUSTOMER_SELECT = ["CardCode", "CardName"];
+const CUSTOMER_FILTER = [{ field: "CardType", op: "eq" as const, value: "cCustomer" }];
 
 // One scroll: Configure, Candidates, Create quote. Missing run or selection is an empty state.
 // Local overlays (override ?? server) until persist.
@@ -33,6 +38,8 @@ export function ConfigProcessPage({ id }: { id: string }) {
     placeholderData: keepPreviousData,
     retry: false, // agent-offline should show its message, not spin
   });
+
+  const models = useQuery(orpc.configs.models.queryOptions());
 
   const [picks, setPicks] = useState<QueryPicks>({});
   const [entriesOverride, setEntries] = useState<Entries | null>(null);
@@ -91,7 +98,12 @@ export function ConfigProcessPage({ id }: { id: string }) {
   const entriesDirty = !!project && !sameEntries(entries, project.entries);
   const batchesDirty = !!project && JSON.stringify(batches) !== JSON.stringify(project.batches);
   const tablesDirty = !!project && !sameTables(tables, project.tables);
-  const missing = missingGeneral({ name: project?.name ?? "", customer: project?.customer ?? null });
+  // Everything set on the configuration itself that Calculate needs. cardCode, not just a truthy
+  // customer: a half-filled one would otherwise pass the gate and reach the B1 quotation seed.
+  const missing = [
+    ...(project?.name.trim() ? [] : ["name"]),
+    ...(project?.customer?.cardCode ? [] : ["business partner"]),
+  ];
   const calcBusy = update.isPending || run.isPending;
   const shouldCalc = !!project && needsCalculation({
     conflicted,
@@ -212,14 +224,12 @@ export function ConfigProcessPage({ id }: { id: string }) {
       hidePinButton
       titleArea={
         <ObjectPageTitle
-          header={<Title>{project.name}</Title>}
+          header={<Title>{project.name.trim() || "New configuration"}</Title>}
           subHeader={
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-              <Text>{model.name}</Text>
+              {project.customer?.cardName ? <Text>{project.customer.cardName}</Text> : null}
               {project.status === "requested" ? (
-                <Text>
-                  Requested by {createdByEmail ?? "a portal user"} for {project.customer?.cardName ?? "—"}
-                </Text>
+                <Text>Requested by {createdByEmail ?? "a portal user"}</Text>
               ) : null}
             </div>
           }
@@ -239,17 +249,61 @@ export function ConfigProcessPage({ id }: { id: string }) {
     >
       <ObjectPageSection id="configure" titleText="Configure">
         <ObjectPageSubSection id="general" titleText="General">
-          <ConfigGeneral name={project.name} modelId={project.modelId} customer={project.customer ?? null}
-            disabled={update.isPending}
-            onChange={(patch) => {
-              // A model switch wipes entries/batches server-side; drop the local overlays too,
-              // or the old model's values would be re-applied on top of the new form.
-              if (patch.modelId) { setEntries(null); setBatches(null); setTables(null); setSel(null); setPicks({}); }
-              update.mutate({ id, ...patch });
-            }} />
+          {/* The configuration's own attributes. No draft state: each control commits on change
+              (UI5 fires that on blur/Enter) against the server value, and `required` + a negative
+              valueState on the empty case is the Fiori way to say the same thing the footer does. */}
+          <Form labelSpan="S12 M12 L12 XL12" layout="S1 M2 L2 XL2">
+            <FormGroup>
+              <FormItem labelContent={<Label for="cfg-name" required>Name</Label>}>
+                <Input id="cfg-name" value={project.name} style={{ width: "100%" }}
+                  disabled={update.isPending}
+                  valueState={project.name.trim() ? "None" : "Negative"}
+                  onChange={(e) => {
+                    const v = (e.target.value ?? "").trim();
+                    if (v && v !== project.name) update.mutate({ id, name: v });
+                  }} />
+              </FormItem>
+              <FormItem labelContent={<Label required>Model</Label>}>
+                <Select value={project.modelId} style={{ width: "100%" }} disabled={update.isPending}
+                  onChange={(e) => {
+                    const v = e.detail.selectedOption.value ?? "";
+                    if (!v || v === project.modelId) return;
+                    // A model switch wipes entries/batches/tables server-side; drop the local
+                    // overlays too, or the old model's values are re-applied on top of the new form.
+                    setEntries(null); setBatches(null); setTables(null); setSel(null); setPicks({});
+                    update.mutate({ id, modelId: v });
+                  }}>
+                  {(models.data ?? []).map((m) => (
+                    <Option key={m.id} value={m.id}>{m.name}</Option>
+                  ))}
+                </Select>
+              </FormItem>
+              <FormItem labelContent={<Label required>Customer</Label>}>
+                <EntityValueHelp entitySet="BusinessPartners" keyField="CardCode"
+                  select={CUSTOMER_SELECT} filter={CUSTOMER_FILTER}
+                  value={project.customer?.cardCode}
+                  valueState={project.customer?.cardCode ? "None" : "Negative"}
+                  headerText="Select a customer"
+                  onChange={(v, row) => update.mutate({
+                    id,
+                    customer: v == null || v === "" ? null : {
+                      cardCode: String(v),
+                      // by name, not a literal 1, so reordering CUSTOMER_SELECT can't swap the fields
+                      cardName: String(row?.[CUSTOMER_SELECT.indexOf("CardName")] ?? project.customer?.cardName ?? ""),
+                    },
+                  })} />
+              </FormItem>
+            </FormGroup>
+          </Form>
         </ObjectPageSubSection>
         <ObjectPageSubSection id="batches" titleText="Batch quantities">
-          <BatchEditor batches={batches} onChange={setBatches} />
+          {lookups.data && lk && prop ? (
+            <ConfiguratorForm section={BATCHES_SECTION} model={model.definition} lookups={lookups.data}
+              lk={lk} prop={prop} entries={entries} onChange={changeEntries}
+              onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
+              querySource={{ kind: "project", modelId: project.modelId }}
+              batches={batches} onBatchesChange={setBatches} />
+          ) : lookups.error ? null : <BusyIndicator active delay={0} />}
         </ObjectPageSubSection>
         {/* formSections, not structure.sections: a table the author never placed gets a trailing
             subsection of its own, and the anchor bar has to show it. */}

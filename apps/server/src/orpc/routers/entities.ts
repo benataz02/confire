@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db, b1NavPin, ListVariantDefZ, type B1NavPin } from "@hera/db";
 import { categoriesOf, categoryNames, coerceKey, type Key } from "@hera/b1";
-import { adminProcedure } from "../base.ts";
+import { adminProcedure, userProcedure } from "../base.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
 import { assertEntity, entityList, entitySchema } from "../../entity-meta.ts";
 import { missingRequired, pickEditable, profileOf } from "../../entity-profiles.ts";
@@ -17,8 +17,8 @@ import { DEFAULT_PAGE } from "../../lookups.ts";
 // entity-profiles.ts, and only on the fields those profiles name. That rule lives in `curated()`
 // below, not in whether a page happened to draw a button.
 //
-// adminProcedure: entity discovery (catalog, pins, generic browse) is admin/owner only. Live
-// configurator lookups do not go through this router.
+// adminProcedure: entity discovery (catalog, pins, schema, writes) is admin/owner only. `rows` is
+// the one exception — see the note on it.
 
 const EntityZ = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "must be an entity set name");
 const KeyZ = z.union([z.string(), z.number(), z.record(z.string(), z.union([z.string(), z.number()]))]);
@@ -68,8 +68,14 @@ export const entitiesRouter = {
     }),
 
   /** One page of rows for a saved list view. The spec is compiled to OData here — the browser
-   *  never sends a filter string. */
-  rows: adminProcedure
+   *  never sends a filter string.
+   *
+   *  userProcedure, not adminProcedure: the configurator's customer value help (EntityValueHelp
+   *  over BusinessPartners, in ConfigProcessPage) is used by every internal member, not just
+   *  admins. EntityZ is any entity set name, so this is a read over everything B1 exposes — still
+   *  tenant-scoped through b1Of(context.tenantId), and `schema`/`one`/`profile`/`update` stay
+   *  admin. ponytail: one open reader; narrow to an entity allowlist if the read surface matters. */
+  rows: userProcedure
     .input(z.object({
       entity: EntityZ,
       spec: ListVariantDefZ,

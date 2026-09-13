@@ -467,13 +467,13 @@ export const configsRouter = {
   create: userProcedure
     // No create dialog on the client: a new configuration is an empty draft, and name / model /
     // customer are filled in on its General section (configs.update).
-    .input(z.object({ modelId: z.uuid(), name: z.string().min(1).default("Untitled configuration") }))
+    .input(z.object({ modelId: z.uuid() }))
     .handler(async ({ input, context }) => {
       const model = await loadModel(context.tenantId, input.modelId);
       const [ins] = await db
         .insert(configProject)
         .values({
-          tenantId: context.tenantId, modelId: model.id, name: input.name,
+          tenantId: context.tenantId, modelId: model.id, name: "",
           batches: model.definition.batchDefaults, createdBy: context.userId,
         })
         .returning({ id: configProject.id });
@@ -486,6 +486,9 @@ export const configsRouter = {
         id: z.uuid(),
         name: z.string().min(1).optional(),
         modelId: z.uuid().optional(),
+        // ponytail: shape only, no SAP existence check — the UI picks CardCode through a
+        // BusinessPartners value help, so a bad code has to be hand-crafted against the API.
+        // Read the BP here (as portalClients.invite does) if that stops being good enough.
         customer: z.object({ cardCode: z.string(), cardName: z.string() }).nullable().optional(),
         entries: EntriesZ.optional(),
         batches: z.array(z.number().int().min(1)).optional(),

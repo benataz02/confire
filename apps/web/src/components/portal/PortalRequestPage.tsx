@@ -8,7 +8,7 @@ import "@ui5/webcomponents-icons/dist/paper-plane.js";
 import { propagate, type Entries, type TableRows } from "@hera/config-engine";
 import { orpc } from "../../orpc.ts";
 import { StepConfigure } from "../configurator/StepConfigure.tsx";
-import { StepBatches } from "../configurator/ConfiguratorForm.tsx";
+import { BATCHES_SECTION, ConfiguratorForm } from "../configurator/ConfiguratorForm.tsx";
 import { StepCandidates } from "../configurator/StepCandidates.tsx";
 import { candidateLabel, fmt, openKeys, toggleSelection, type Sel } from "../configurator/runView.ts";
 import { portalStatusUi, type PortalStatus } from "./portalUi.ts";
@@ -92,7 +92,7 @@ export function PortalRequestPage({ id }: { id: string }) {
     try {
       if (entriesDirty || batchesDirty || tablesDirty) await update.mutateAsync({ id, entries, batches, tables });
       run.mutate({ projectId: id });
-    } catch { /* update.error renders in StepBatches */ }
+    } catch { /* update.error renders in the Quantities step */ }
   };
 
   const keys = openKeys(model.definition, project.entries, project.candidates);
@@ -125,10 +125,35 @@ export function PortalRequestPage({ id }: { id: string }) {
             tables={tables} onTablesChange={setTables} />
         </WizardStep>
         <WizardStep titleText="Quantities" icon="multiselect-all" data-idx="1" selected={step === 1} disabled={conflicted}>
-          <StepBatches batches={batches} onChange={setBatches} onCalculate={() => void calculate()}
-            running={update.isPending || run.isPending}
-            error={update.error?.message ?? run.error?.message ?? null}
-            staleRun={project.candidates.length > 0 && (status === "draft" || entriesDirty || batchesDirty || tablesDirty)} />
+          {/* Same ConfiguratorForm the Configure step renders, asked for its batch section — the
+              quantity field has one implementation, shared with the internal ObjectPage. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+            <Title level="H5">Batch quantities</Title>
+            <Text>Each quantity gets its own price column — setup cost is spread across the batch.</Text>
+            {project.candidates.length > 0 && (status === "draft" || entriesDirty || batchesDirty || tablesDirty) ? (
+              <MessageStrip design="Critical" hideCloseButton>
+                Inputs changed since the last calculation — calculate again to refresh candidates.
+              </MessageStrip>
+            ) : null}
+            {update.error || run.error ? (
+              <MessageStrip design="Negative" hideCloseButton>
+                {update.error?.message ?? run.error?.message}
+              </MessageStrip>
+            ) : null}
+            {lookups.data && lk && prop ? (
+              <ConfiguratorForm section={BATCHES_SECTION} model={model.definition} lookups={lookups.data}
+                lk={lk} prop={prop} entries={entries} onChange={setEntries}
+                onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
+                querySource={{ kind: "portal", modelId: project.modelId }}
+                batches={batches} onBatchesChange={setBatches} />
+            ) : lookups.error ? null : <BusyIndicator active delay={0} />}
+            <Bar design="FloatingFooter" endContent={
+              <Button design="Emphasized" disabled={batches.length === 0 || update.isPending || run.isPending}
+                onClick={() => void calculate()}>
+                {update.isPending || run.isPending ? "Calculating…" : "Calculate"}
+              </Button>
+            } />
+          </div>
         </WizardStep>
         <WizardStep titleText="Prices" icon="grid" data-idx="2" selected={step === 2} disabled={!runReady}>
           {runReady ? (

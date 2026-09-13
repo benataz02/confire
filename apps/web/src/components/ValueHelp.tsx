@@ -352,17 +352,21 @@ export function QueryValueHelp({
 /** Value help over a B1 entity set via `entities.rows`. Same dialog as QueryValueHelp; the
  *  query is a ListVariantDef compiled server-side (the browser never sends a $filter string). */
 export function EntityValueHelp({
-  entitySet, keyField, value, onChange, headerText, select, filter,
+  entitySet, keyField, value, onChange, headerText, select, filter, valueState,
 }: {
   entitySet: string;
   keyField: string;
   value: Val | undefined;
-  onChange: (v: Val | undefined) => void;
+  /** `row` is index-aligned with the columns below — [keyField, ...select minus keyField] — so a
+   *  caller that pinned `select` can read a second field off the picked row without a round trip. */
+  onChange: (v: Val | undefined, row?: Val[]) => void;
   headerText: string;
   /** $select; omitted = every scalar */
   select?: string[];
   /** $filter, AND-combined */
   filter?: FilterCond[];
+  /** caller's state (e.g. required-but-empty); a fetch error still wins. */
+  valueState?: "None" | "Positive" | "Critical" | "Negative" | "Information";
 }) {
   const [search, setSearch] = useState<string | null>(null); // null = untouched: don't fetch yet
 
@@ -413,7 +417,7 @@ export function EntityValueHelp({
       options={optionsOf(table, columns[0]!, columns[1])} value={value} onChange={onChange} headerText={headerText}
       table={table} valueCol={columns[0]!} columns={columns.slice(1)}
       onSearch={setSearch} onOpen={() => setSearch("")}
-      valueState={page.error ? "Negative" : undefined}
+      valueState={page.error ? "Negative" : valueState}
       {...pagingProps(page, search !== null)}
     />
   );

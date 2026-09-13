@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef } from "react";
 import {
-  Bar, Button, CheckBox, Form, FormGroup, FormItem, Icon, Input, Label, MessageStrip,
-  MultiComboBox, MultiComboBoxItem, ObjectStatus, Option, RadioButton, Select, StepInput,
-  Text, Title, Token, Tokenizer,
+  Button, CheckBox, Form, FormGroup, FormItem, Icon, Input, Label, MultiComboBox, MultiComboBoxItem,
+  ObjectStatus, Option, RadioButton, Select, StepInput, Text, Title, Token, Tokenizer,
+  type StepInputDomRef,
 } from "@ui5/webcomponents-react";
 import {
   displayColumns, domainOf, placedTables, refKeyCols,
@@ -11,6 +11,7 @@ import {
 import { QueryValueHelp, type QuerySource } from "../ValueHelp.tsx";
 import { ConfigTable } from "./ConfigTable.tsx";
 import { setEntry } from "./formHelpers.ts";
+import { addBatch } from "./configProcessState.ts";
 import { money, paramPrices } from "./costElements.ts";
 
 /** The ref's display columns for one option value, joined — shown next to the option. */
@@ -24,8 +25,9 @@ function extraOf(ref: LookupRef, t: ResolvedTable | undefined, val: Val): string
 }
 
 // The one form both the builder preview and the wizard render. Fully controlled:
-// entries in, entries out; all engine work happens in propagate(). Optional batch quantities
-// keep the internal Configure step together; scrolling, footers and consistency stay with the caller.
+// entries in, entries out; all engine work happens in propagate(). Batch quantities are a field in
+// here too (BATCHES_SECTION) rather than a component of their own, so the internal ObjectPage and
+// the portal wizard cannot drift apart; scrolling, footers and consistency stay with the caller.
 
 /** The signature answer to "is this consistent and how big is it?" — one component so the
  *  string stays identical in the wizard bar, the preview footer and the portal step. */
@@ -40,6 +42,11 @@ export function ConsistencyStatus({ prop }: { prop: Propagation }) {
 
 /** Key of the synthetic section that catches tables the author never placed. */
 export const UNPLACED_TABLES_SECTION = "__tables";
+
+/** Key of the synthetic section holding batch quantities. Not in formSections(): it is not part of
+ *  the model, so a caller asks for it by name (the ObjectPage subsection, the portal wizard step)
+ *  and nothing renders it by accident. */
+export const BATCHES_SECTION = "__batches";
 
 /** The sections the form renders: the model's own, plus a trailing one holding any table the
  *  author forgot to place. A table nobody can reach is a table whose sums are permanently zero —
@@ -71,7 +78,7 @@ if (typeof document !== "undefined" && !document.getElementById("hera-table-item
   document.head.appendChild(el);
 }
 
-export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, section, disabled, querySource, tables, onTablesChange }: {
+export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, section, disabled, querySource, tables, onTablesChange, batches, onBatchesChange }: {
   model: ModelDef;
   /** Canonical first-page snapshot — seeds query value help. */
   lookups: ResolvedLookups;
@@ -90,12 +97,67 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   tables?: TableRows;
   /** omit to render the tables read-only (builder preview) */
   onTablesChange?: (next: TableRows) => void;
+  /** batch quantities, rendered only for section === BATCHES_SECTION */
+  batches?: number[];
+  /** omit to leave batch quantities out entirely (builder preview, portal Configure step) */
+  onBatchesChange?: (next: number[]) => void;
 }) {
   // Same source the rail's Costs card reads, so a badge and the card can never disagree.
   const priceOf = useMemo(
     () => new Map(paramPrices(model, prop, lk.tables).map((c) => [c.key, c.amount])),
     [model, prop, lk],
   );
+  // The quantity being dialled in. StepInput owns its own value (it formats and clamps it), so
+  // this is a ref, not state: nothing here re-renders when the number changes.
+  const qty = useRef<StepInputDomRef>(null);
+
+  // Batch quantities are a field, not a component: a StepInput for the number (numeric by
+  // contract — spinner, min, keyboard up/down, no text to parse) and a Tokenizer for the ones
+  // already added. Adding is an explicit action rather than StepInput's `change`, because change
+  // also fires on every +/- click (`_modifyValue(step, true)`) — committing there would token
+  // every step of the way up to 10.
+  if (section === BATCHES_SECTION) {
+    if (!onBatchesChange) return null;
+    const bs = batches ?? [];
+    // StepInput settles `value` on Enter (its own keydown handler), on blur and on each spin —
+    // all of which run before our keydown listener and before the Add button's click (focusout
+    // precedes click) — so the ref holds the committed number by the time we read it.
+    const add = () => onBatchesChange(addBatch(bs, String(qty.current?.value ?? "")));
+    return (
+      <Form {...FORM_PROPS}>
+        <FormGroup>
+          <FormItem labelContent={<Label required>Batch quantities</Label>}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
+                {/* value is set once on mount (React only writes a prop that changed), so the field
+                    keeps whatever the user last dialled in and they can spin on from it. */}
+                <StepInput ref={qty} value={1} min={1} step={1} required disabled={disabled}
+                  accessibleName="Batch quantity" style={{ flex: "1 1 auto" }}
+                  onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
+                <Button icon="add" design="Transparent" disabled={disabled}
+                  accessibleName="Add quantity" tooltip="Add quantity" onClick={add} />
+              </div>
+              {bs.length ? (
+                // multiLine: a quote can carry a dozen batch sizes and an n-more indicator would
+                // hide the very list the user is checking. showClearAll needs it too.
+                <Tokenizer multiLine showClearAll disabled={disabled} accessibleName="Batch quantities"
+                  onTokenDelete={(e) => {
+                    const gone = new Set(e.detail.tokens.map((t) => Number((t as HTMLElement).getAttribute("text"))));
+                    onBatchesChange(bs.filter((b) => !gone.has(b)));
+                  }}>
+                  {bs.map((b) => <Token key={b} text={String(b)} />)}
+                </Tokenizer>
+              ) : (
+                // Fiori: a required field with nothing in it carries the negative state, not just
+                // the asterisk. StepInput can't: it writes its own valueState in _updateValueState.
+                <ObjectStatus state="Negative">Add at least one quantity</ObjectStatus>
+              )}
+            </div>
+          </FormItem>
+        </FormGroup>
+      </Form>
+    );
+  }
 
   const set = (key: string, v: Val | undefined) => {
     if (v === undefined) {
@@ -300,67 +362,6 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
         </div>
       );
       })}
-    </div>
-  );
-}
-
-// The batch-quantity list editor shared by the internal Configure step and the portal wizard.
-export function BatchEditor({ batches, onChange, disabled }: {
-  batches: number[];
-  onChange: (next: number[]) => void;
-  disabled?: boolean;
-}) {
-  const [qty, setQty] = useState(1);
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
-      <Tokenizer accessibleName="Batch quantities" disabled={disabled}
-        onTokenDelete={(e) => {
-          const gone = new Set(e.detail.tokens.map((t) => Number((t as HTMLElement).getAttribute("text"))));
-          onChange(batches.filter((b) => !gone.has(b)));
-        }}>
-        {batches.map((b) => <Token key={b} text={String(b)} />)}
-      </Tokenizer>
-      {batches.length === 0 ? <Text>Add at least one quantity to calculate.</Text> : null}
-      <div style={{ display: "flex", alignItems: "flex-end", gap: "0.5rem" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-          <Label for="new-batch-qty">Quantity</Label>
-          <StepInput id="new-batch-qty" min={1} value={qty} disabled={disabled} onChange={(e) => setQty(e.target.value ?? 1)} />
-        </div>
-        <Button icon="add" disabled={disabled}
-          onClick={() => { if (!batches.includes(qty)) onChange([...batches, qty].sort((a, b) => a - b)); }}>
-          Add quantity
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-// Portal wizard "Quantities" step: BatchEditor plus the step's own copy and Calculate footer.
-// Each quantity becomes a column in the candidates matrix; setup cost is amortized by the engine.
-export function StepBatches({ batches, onChange, onCalculate, running, error, staleRun }: {
-  batches: number[];
-  onChange: (next: number[]) => void;
-  onCalculate: () => void;
-  running: boolean;
-  error: string | null;
-  staleRun: boolean;
-}) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <Title level="H5">Batch quantities</Title>
-      <Text>Each quantity gets its own price column — setup cost is spread across the batch.</Text>
-      {staleRun ? (
-        <MessageStrip design="Critical" hideCloseButton>
-          Inputs changed since the last calculation — calculate again to refresh candidates.
-        </MessageStrip>
-      ) : null}
-      {error ? <MessageStrip design="Negative" hideCloseButton>{error}</MessageStrip> : null}
-      <BatchEditor batches={batches} onChange={onChange} />
-      <Bar design="FloatingFooter" endContent={
-        <Button design="Emphasized" disabled={batches.length === 0 || running} onClick={onCalculate}>
-          {running ? "Calculating…" : "Calculate"}
-        </Button>
-      } />
     </div>
   );
 }

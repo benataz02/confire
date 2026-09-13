@@ -48,3 +48,12 @@ export function buildCalculationUpdate(
     ? { id, entries: nextEntries, batches: nextBatches, tables: nextTables }
     : null;
 }
+
+/** Parse one dialled-in quantity into the batch list: positive integers only, de-duped, ascending.
+ *  StepInput clamps to `min` but still yields 0 before the user touches it, and its value is a
+ *  number that can be NaN — so everything the guards reject here is reachable. */
+export function addBatch(batches: number[], raw: string): number[] {
+  const n = Number(raw.trim()); // "" and "  " both coerce to 0, which the n < 1 guard rejects
+  if (!Number.isInteger(n) || n < 1 || batches.includes(n)) return batches;
+  return [...batches, n].sort((a, b) => a - b);
+}
