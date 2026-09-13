@@ -9,8 +9,7 @@ import { decryptSecret, encryptSecret } from "./crypto.ts";
 import { viaB1 } from "./b1.ts";
 
 // The B1 read bodies, once. Two routers call these: entities.* (internal, admin) and
-// portal.docs.* (a client, fenced to their CardCode). Neither owns the implementation — the same
-// pattern portal.extract already uses with extraction.ts.
+// portal.docs.* (a client, fenced to their CardCode). Neither owns the implementation.
 //
 // The `schema` is a parameter rather than something these functions fetch. That is the whole
 // seam: the portal hands in a schema filtered to its allowlist, and compileList's existing rules

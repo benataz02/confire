@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Bar, Button, BusyIndicator, Form, FormGroup, FormItem, Label, MessageStrip, ObjectPage,
-  ObjectPageSection, ObjectPageSubSection, ObjectPageTitle, ObjectStatus, Tag, Title, Toolbar,
+  ObjectPageSection, ObjectPageSubSection, ObjectPageTitle, Tag, Title, Toolbar,
   ToolbarButton,
 } from "@ui5/webcomponents-react";
 import { coerceKey, parseKeyParam, type B1Field } from "@hera/b1";
@@ -30,8 +30,8 @@ import { PrintActions } from "./PrintActions.tsx";
 // and the anchor bar then draws a single blank tab instead of one per section.
 
 /** B1's BoStatus. Only the colour is ours; the text is the field's own enum label (bost_Open). */
-const STATUS_STATE: Record<string, "Information" | "Positive" | "None"> = {
-  O: "Information", C: "None", P: "Positive", D: "Positive",
+const STATUS_DESIGN: Record<string, "Information" | "Positive" | "Neutral"> = {
+  O: "Information", C: "Neutral", P: "Positive", D: "Positive",
 };
 
 /** The line that identifies the row: the profile's fields, else the first two non-key strings. */
@@ -99,11 +99,10 @@ export function EntityObjectPage({
   const editable = new Set(profile?.editable ?? []);
   const editing = draft !== null;
   const value = (name: string) => (editing && name in draft! ? draft![name] : row[name]);
-  const statusState = status ? STATUS_STATE[String(row.DocumentStatus)] : undefined;
+  const statusDesign = status ? STATUS_DESIGN[String(row.DocumentStatus)] : undefined;
 
   return (
     <ObjectPage
-      mode="IconTabBar"
       titleArea={
         <ObjectPageTitle
           header={<Title>{String(row[profile?.titleField ?? keys[0] ?? ""] ?? keys.map((k) => row[k]).join(" / "))}</Title>}
@@ -127,13 +126,13 @@ export function EntityObjectPage({
                   : navigate({ to: "/b1/$entity", params: { entity } }))} />
             </Toolbar>
           }>
-          {statusState ? (
-            <ObjectStatus state={statusState}>
+          {statusDesign ? (
+            <Tag design={statusDesign} style={{ alignSelf: "center" }}>
               {(status!.options?.find((o) => o.value === row.DocumentStatus)?.label ?? String(row.DocumentStatus))
                 .replace(/^bost_/, "")}
-            </ObjectStatus>
+            </Tag>
           ) : null}
-          <Tag design="Set2">{schema.data!.table}</Tag>
+          <Tag design="Set2" style={{ alignSelf: "center" }}>{schema.data!.table}</Tag>
         </ObjectPageTitle>
       }
       footerArea={

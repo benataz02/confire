@@ -1,9 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ModelBuilderPage } from "../../../components/configurator/ModelBuilderPage.tsx";
-import { sectionSearch } from "../../../sectionParam.ts";
+import { ModelBuilderPage } from "../../../components/model-builder/ModelBuilderPage.tsx";
 
 export const Route = createFileRoute("/_authed/models/$id")({
-  validateSearch: sectionSearch,
   component: Builder,
 });
 

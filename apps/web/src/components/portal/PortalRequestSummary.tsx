@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  Card, CardHeader, DynamicPage, DynamicPageTitle, MessageStrip, ObjectStatus,
+  Card, CardHeader, DynamicPage, DynamicPageTitle, MessageStrip, Tag,
   Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Text, Timeline, TimelineItem, Title,
   Toolbar,
   ToolbarButton,
@@ -106,15 +106,15 @@ export function PortalRequestSummary({ project, model, onWithdraw, onReopen, bus
           heading={<Title level="H3">{project.name}</Title>}
           subheading={<Text>{model.name}</Text>}
           actionsBar={
-            <Toolbar design="Transparent">
-              <>
+            project.status === "requested" || project.status === "rejected" ? (
+              <Toolbar design="Transparent">
                 {project.status === "requested" ? <ToolbarButton disabled={busy} onClick={onWithdraw} text="Withdraw" /> : null}
                 {project.status === "rejected" ? <ToolbarButton design="Emphasized" disabled={busy} onClick={onReopen} text="Reopen as draft" /> : null}
-                <ObjectStatus state={st.state}>{st.text}</ObjectStatus>
-              </>
-            </Toolbar>
-          }
-        />
+              </Toolbar>
+            ) : undefined
+          }>
+          <Tag design={st.state} style={{ alignSelf: "center" }}>{st.text}</Tag>
+        </DynamicPageTitle>
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>

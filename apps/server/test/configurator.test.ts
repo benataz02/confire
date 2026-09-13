@@ -204,12 +204,6 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     expect(again.candidateCount).toBe(first.candidateCount);
     expect(fetches).toBe(1);
 
-    // Chati's path asks for entries the project does not have yet — that cannot reuse, and it is
-    // the only case the entries/batches comparison decides on its own.
-    const proposed = await calculateProject(tenantId, id, counting, { entries: { size: "S" }, batches: [10] });
-    expect(proposed.reused).toBe(false);
-    expect(proposed.candidateCount).toBe(2); // size pinned to S, two grades left
-
     // A real edit through the API: configs.update writes entries AND resets the status, which is
     // the invariant that lets `status === "calculated"` stand in for "these entries produced these
     // candidates". Reuse must not fire.

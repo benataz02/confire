@@ -13,8 +13,8 @@ import { ExprInput } from "./ExprInput.tsx";
 import { ParamDialog } from "./ParamDialog.tsx";
 import { TableDialog, newCalcTable } from "./TableDialog.tsx";
 import type { TableCols } from "./exprHelpers.ts";
-import { ConfiguratorForm, ConsistencyStatus } from "./ConfiguratorForm.tsx";
-import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts";
+import { ConfiguratorForm, ConsistencyStatus } from "../configurator/ConfiguratorForm.tsx";
+import { mergeQueryPicks, setQueryPick, type QueryPicks } from "../configurator/formHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { applyMove, canDrop, duplicateParam, parseRowKey, placeParam, removeFromStructure, rowKeyOf, unplacedParams, unplacedTables, type Placement, type RowRef } from "./structureOps.ts";
 

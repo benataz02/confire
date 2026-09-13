@@ -14,13 +14,12 @@ export function needsCalculation(p: {
   missingCount: number;
   batchCount: number;
   lookupsReady: boolean;
-  assistantBusy: boolean;
   entriesDirty: boolean;
   batchesDirty: boolean;
   tablesDirty: boolean;
   runReady: boolean;
 }) {
-  if (p.conflicted || p.missingCount > 0 || p.batchCount === 0 || !p.lookupsReady || p.assistantBusy) return false;
+  if (p.conflicted || p.missingCount > 0 || p.batchCount === 0 || !p.lookupsReady) return false;
   return p.entriesDirty || p.batchesDirty || p.tablesDirty || !p.runReady;
 }
 

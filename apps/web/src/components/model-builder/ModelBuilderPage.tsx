@@ -6,7 +6,6 @@ import {
 } from "@ui5/webcomponents-react";
 import type { Issue, ModelDef } from "@hera/config-engine";
 import { tabOf, useDraftModel, type TabKey } from "./useDraftModel.ts";
-import { useSectionParam } from "../../sectionParam.ts";
 import { confirm } from "../confirm.ts";
 import { SettingsTab } from "./SettingsTab.tsx";
 import { ParamsTab } from "./ParamsTab.tsx";
@@ -22,21 +21,13 @@ const EMPTY_MODEL: ModelDef = {
   bom: [], routing: [], pricing: { priceExpr: "0", quoteItemCode: "X" }, batchDefaults: [1],
 };
 
-// Section ids, in render order — also the allow-list for `?section=` (a stale link must not
-// select a tab that no longer exists, which would render an empty page).
-const TABS: TabKey[] = ["params", "rules", "bom", "routing", "history", "settings"];
-
 export function ModelBuilderPage({ id }: { id: string }) {
   const m = useDraftModel(id);
-  const [section, setSection] = useSectionParam();
-  const tab = TABS.includes(section as TabKey) ? (section as TabKey) : "params";
 
   // Guard against losing an unsaved draft: intercept in-app navigation (including switching models,
   // which remounts via key={id}) and confirm; enableBeforeUnload covers hard reload / tab close.
   useBlocker({
     shouldBlockFn: async ({ current, next }) => {
-      // Switching tabs is a search-param navigation on this same page (see useSectionParam) —
-      // never a reason to prompt; only leaving the builder is.
       if (current.pathname === next.pathname) return false;
       if (!m.dirty || m.saving) return false;
       return !(await confirm({
@@ -51,7 +42,7 @@ export function ModelBuilderPage({ id }: { id: string }) {
 
   // Same lookups feed the params preview and RulesTab's combo-table cells. Query definitions are
   // tenant masterdata, so nothing about the unsaved draft affects them.
-  const lookups = usePreviewLookups(m.draft ?? EMPTY_MODEL, { enabled: tab === "params" && !!m.draft });
+  const lookups = usePreviewLookups(m.draft ?? EMPTY_MODEL, { enabled: !!m.draft });
   const allIssues: Issue[] = [...m.issues, ...m.serverIssues];
   const count = (t: TabKey) => allIssues.filter((i) => tabOf(i.path) === t).length;
 
@@ -63,7 +54,7 @@ export function ModelBuilderPage({ id }: { id: string }) {
   const draft = m.draft;
   const portalMeta = m.portalMeta;
 
-  // Anchor-bar label carries the section's open issue count, e.g. "Rules (2)".
+  // Section title carries the section's open issue count, e.g. "Rules (2)".
   const secTitle = (label: string, key: TabKey) => (count(key) ? `${label} (${count(key)})` : label);
 
   return (
@@ -71,16 +62,14 @@ export function ModelBuilderPage({ id }: { id: string }) {
       {m.saveError ? (
         <MessageStrip design="Negative" hideCloseButton>
           {m.serverIssues.length > 0
-            ? `Save failed — ${m.serverIssues.length} issue${m.serverIssues.length === 1 ? "" : "s"}; see the tab counts.`
+            ? `Save failed — ${m.serverIssues.length} issue${m.serverIssues.length === 1 ? "" : "s"}; see the section counts.`
             : m.saveError.message}
         </MessageStrip>
       ) : null}
 
       <ObjectPage
-        style={{ flex: 1, minHeight: 0, height: "100%" }}
         mode="IconTabBar"
-        selectedSectionId={tab}
-        onSelectedSectionChange={(e) => setSection(e.detail.selectedSectionId)}
+        style={{ flex: 1, minHeight: 0, height: "100%" }}
         titleArea={
           <ObjectPageTitle header={<Title level="H4">{draft.name || "Untitled model"}</Title>}
             subHeader={m.dirty ? <ObjectStatus state="Critical">Unsaved changes</ObjectStatus> : undefined}

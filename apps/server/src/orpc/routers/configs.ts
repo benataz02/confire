@@ -5,7 +5,6 @@ import {
   db, configModel, configProject, user,
   type ConfigCandidate, type ConfigSelection, type ProjectEvent,
 } from "@hera/db";
-import { assistantConversation } from "@hera/assistant/schema";
 import {
   computeOutputs, DslError, enumerate, EntriesZ, OutputOverridesZ, propagate, referencedTables, TableRowsZ,
   type Entries, type ModelDef, type Outputs, type ResolvedLookups, type TableRows, type Val,
@@ -143,15 +142,13 @@ export async function liveEngine(tenantId: string, project: { modelId: string; e
   return { model, lookups: await enrichedLookups(tenantId, model, project.entries) };
 }
 
-/** The calculate path, shared by configs.run, portal.run and Chati's calculate tool. `entries` /
- *  `batches` default to the project's own; Chati passes its turn's working values instead, and
- *  those are persisted as part of the same UPDATE.
+/** The calculate path, shared by configs.run and portal.run.
  *
- *  Reuse: a calculated project whose entries, batches and model are all unchanged keeps its
- *  candidates instead of re-enumerating. */
+ *  Reuse: a calculated project whose model is unchanged keeps its candidates instead of
+ *  re-enumerating. `status === "calculated"` is what proves those candidates still match
+ *  the project's own entries — every writer of entries/batches resets the status to draft. */
 export async function calculateProject(
   tenantId: string, projectId: string, run: QueryRunner,
-  override?: { entries: Entries; batches: number[] },
 ) {
   const [project] = await db
     .select({
@@ -163,26 +160,14 @@ export async function calculateProject(
     .where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId)))
     .limit(1);
   if (!project) throw new ORPCError("NOT_FOUND");
-  const entries = override?.entries ?? project.entries;
-  const batches = override?.batches ?? project.batches;
-  // not overridable: Chati proposes parameter values, never row data
-  const tableRows = project.tables;
+  const { entries, batches, tables: tableRows } = project;
   if (!batches.length) throw new ORPCError("BAD_REQUEST", { message: "Add at least one batch quantity" });
 
   const model = await loadModel(tenantId, project.modelId);
 
   // Runs before the lookups resolve: a no-op recalculate must not pay for a resolution it is about
   // to throw away. The process page auto-calculates ~1s after every field edit.
-  //
-  // `status === "calculated"` is what proves the stored candidates still match the project's own
-  // entries — every writer of entries/batches resets the status to draft. The comparison below
-  // only decides the override case (Chati proposing values the project does not hold yet), where
-  // it is the sole signal.
-  if (
-    project.status === "calculated" && project.calculatedAt && project.calculatedAt >= model.updatedAt &&
-    JSON.stringify(project.entries) === JSON.stringify(entries) &&
-    JSON.stringify(project.batches) === JSON.stringify(batches)
-  ) {
+  if (project.status === "calculated" && project.calculatedAt && project.calculatedAt >= model.updatedAt) {
     return {
       projectVersion: project.updatedAt.toISOString(), reused: true,
       candidateCount: project.candidates.length, capped: project.candidates.length >= 200,
@@ -542,17 +527,13 @@ export const configsRouter = {
     }),
 
   remove: userProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
-    await db.transaction(async (tx) => {
-      // Chati conversations for this project; FKs cascade turns/messages/tool_executions.
-      await tx.delete(assistantConversation).where(and(eq(assistantConversation.tenantId, context.tenantId), eq(assistantConversation.projectId, input.id)));
-      await tx.delete(configProject).where(and(eq(configProject.id, input.id), eq(configProject.tenantId, context.tenantId)));
-    });
+    await db.delete(configProject).where(and(eq(configProject.id, input.id), eq(configProject.tenantId, context.tenantId)));
     return { ok: true };
   }),
 
   // Resolved lookups for client-side live propagation (wizard step 1). Cached ~5 min; key includes
   // the model's updatedAt so a model save is picked up immediately. Query tables contain the same
-  // canonical first page used by runs, extraction, the assistant, and portal imports.
+  // canonical first page used by runs and portal imports.
   lookups: userProcedure
     .input(z.object({ modelId: z.uuid(), entries: EntriesZ.optional() }))
     .handler(async ({ input, context }) => {

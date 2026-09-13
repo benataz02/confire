@@ -19,11 +19,9 @@ import { bad, readOne, readRows } from "../../entity-read.ts";
 import { printDocument } from "../../print.ts";
 import { documentChain } from "../../doc-chain.ts";
 import {
-  applySelection, cachedLookups, calculateProject, CONFIG_FIELDS, enrichedLookups, liveEngine,
+  applySelection, calculateProject, CONFIG_FIELDS, enrichedLookups, liveEngine,
   loadModel, modelRunner, pushEvent, QueryPageZ, queryTablePage,
 } from "./configs.ts";
-
-import { ExtractFileZ, extractSuggestions } from "./extraction.ts";
 
 // The client portal API. Trust model: every clientProcedure handler is scoped by
 // tenantId + the client's bound CardCode + source='portal'; responses pass through
@@ -157,7 +155,6 @@ const toPortalModelDef = (d: ModelDef): ModelDef => ({
   // per-row formulas, never the cost expressions below.
   tables: d.tables,
   batchDefaults: d.batchDefaults,
-  extraction: d.extraction,
   bom: [],
   routing: [],
   pricing: { priceExpr: "0", quoteItemCode: "portal" },
@@ -626,14 +623,4 @@ export const portalRouter = {
     if (!model.portal) throw new ORPCError("BAD_REQUEST", { message: UNAVAILABLE });
     return queryTablePage(context.tenantId, input, model.definition);
   }),
-
-  // Drawing extraction for published models — one code path with the internal procedure.
-  extract: clientProcedure
-    .input(z.object({ modelId: z.uuid(), file: ExtractFileZ }))
-    .handler(async ({ input, context }) => {
-      const model = await loadModel(context.tenantId, input.modelId);
-      if (!model.portal) throw new ORPCError("BAD_REQUEST", { message: UNAVAILABLE });
-      const lookups = await cachedLookups(context.tenantId, model);
-      return extractSuggestions(model, lookups, input.file);
-    }),
 };

@@ -6,7 +6,7 @@ import {
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-icons/dist/paper-plane.js";
 import { propagate, type Entries, type TableRows } from "@hera/config-engine";
-import { client, orpc } from "../../orpc.ts";
+import { orpc } from "../../orpc.ts";
 import { StepConfigure } from "../configurator/StepConfigure.tsx";
 import { StepBatches } from "../configurator/ConfiguratorForm.tsx";
 import { StepCandidates } from "../configurator/StepCandidates.tsx";
@@ -122,8 +122,7 @@ export function PortalRequestPage({ id }: { id: string }) {
             onChange={setEntries}
             onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
             onNext={() => goto(1)} saving={update.isPending} conflicted={conflicted}
-            tables={tables} onTablesChange={setTables}
-            extract={(input) => client.portal.extract(input)} />
+            tables={tables} onTablesChange={setTables} />
         </WizardStep>
         <WizardStep titleText="Quantities" icon="multiselect-all" data-idx="1" selected={step === 1} disabled={conflicted}>
           <StepBatches batches={batches} onChange={setBatches} onCalculate={() => void calculate()}

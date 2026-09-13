@@ -71,7 +71,6 @@ export const ParamZ = z.object({
   excludeFromDomains: z.boolean().optional(),
   unit: z.string().optional(),
   help: z.string().optional(),
-  extractionHint: z.string().optional(),
 });
 export type Param = z.infer<typeof ParamZ>;
 
@@ -221,7 +220,6 @@ export const ModelDefZ = z.object({
   // and would force the key into every ModelDef literal. One `?? "EUR"` in money() covers it.
   pricing: z.object({ priceExpr: z.string(), quoteItemCode: z.string().min(1), currency: z.string().optional() }),
   batchDefaults: z.array(z.number().int().positive()),
-  extraction: z.object({ context: z.string().optional() }).optional(),
 });
 export type ModelDef = z.infer<typeof ModelDefZ>;
 

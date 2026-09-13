@@ -164,12 +164,6 @@ export function ParamDialog({ draft, tables, initial, isNew, onOk, onCancel }: {
                   onInput={(e) => set({ help: e.target.value || undefined })} />
               </FormItem>
 
-              <FormItem labelContent={lbl("Extraction hint", "Tells the assistant where to look for this value on a customer drawing.")}>
-                <TextArea rows={3} value={p.extractionHint ?? ""} style={W}
-                  placeholder="Where and how this appears on drawings, e.g. title block MATERIAL field"
-                  onInput={(e) => set({ extractionHint: e.target.value || undefined })} />
-              </FormItem>
-
               <FormItem labelContent={lbl("Options", "Read-only: the salesperson sees the value but cannot change it — right for anything a default formula owns. Exclude from domains: this parameter stops narrowing other parameters’ options, for when it is an outcome rather than a choice.")}>
                 <FlexBox direction="Column" gap="0.5rem">
                   <CheckBox text="Read-only" checked={!!p.readonly}

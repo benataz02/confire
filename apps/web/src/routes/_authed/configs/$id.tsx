@@ -1,9 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ConfigProcessPage } from "../../../components/configurator/ConfigProcessPage.tsx";
-import { sectionSearch } from "../../../sectionParam.ts";
 
 export const Route = createFileRoute("/_authed/configs/$id")({
-  validateSearch: sectionSearch,
   component: Process,
 });
 

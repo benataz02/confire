@@ -71,7 +71,7 @@ if (typeof document !== "undefined" && !document.getElementById("hera-table-item
   document.head.appendChild(el);
 }
 
-export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, section, aiMarks, disabled, querySource, tables, onTablesChange }: {
+export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, section, disabled, querySource, tables, onTablesChange }: {
   model: ModelDef;
   /** Canonical first-page snapshot — seeds query value help. */
   lookups: ResolvedLookups;
@@ -83,9 +83,6 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   onQueryPick: (paramKey: string, table: string, selected: ResolvedTable | undefined) => void;
   /** render only this section, without its own Form header — the caller shows the title (e.g. an ObjectPageSection) */
   section?: string;
-  /** paramKey → evidence tooltip, for values Chati just set — renders an "AI" chip next to the field */
-  aiMarks?: Map<string, string>;
-  /** disables every control while Chati is running a turn; manual edits stay blocked until it settles */
   disabled?: boolean;
   /** where a query field fetches its pages — nothing is fetched until the user opens or types */
   querySource: QuerySource;
@@ -264,8 +261,6 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
                         {p.label + (p.unit ? ` (${p.unit})` : "")}
                         {p.help ? <Icon name="message-information" accessibleName={p.help} title={p.help}
                           style={{ marginInlineStart: "0.375rem", cursor: "help", color: "var(--sapContent_IconColor)" }} /> : null}
-                        {aiMarks?.has(k) ? <Icon name="ai" accessibleName={aiMarks.get(k)} title={aiMarks.get(k)}
-                          style={{ marginInlineStart: "0.375rem", color: "var(--sapInformativeColor)" }} /> : null}
                       </Label>
                       {priceOf.has(k) ? (
                         <ObjectStatus style={{ marginInlineStart: "auto" }}>

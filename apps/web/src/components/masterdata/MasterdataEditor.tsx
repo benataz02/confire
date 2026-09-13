@@ -199,7 +199,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
               <Title level="H4">{"Master data " + (d.name || (id ? "Untitled" : "New table"))}</Title>
           }
           snappedContent={errorStrip}
-          expandedContent={errorStrip}
+          //expandedContent={errorStrip}
           actionsBar={
             <Toolbar design="Transparent" accessibleName="Table actions">
               {id ? (

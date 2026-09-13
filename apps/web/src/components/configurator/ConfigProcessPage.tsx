@@ -2,13 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar, Button, BusyIndicator, Dialog, DynamicSideContent, Label, MessageStrip, ObjectPage,
-  ObjectPageSection, ObjectPageSubSection, ObjectPageTitle, ObjectStatus,
-  Text, TextArea, Title, ToggleButton, Toolbar,
+  ObjectPageSection, ObjectPageSubSection, ObjectPageTitle, ObjectStatus, Tag,
+  Text, TextArea, Title, Toolbar,
 } from "@ui5/webcomponents-react";
 import { propagate, type Entries, type TableRows, type Val } from "@hera/config-engine";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts";
 import { orpc } from "../../orpc.ts";
-import { useSectionParam } from "../../sectionParam.ts";
 import { toast } from "../toast.ts";
 import { cleanOverrides, statusUi, toggleSelection, type Sel } from "./runView.ts";
 import { BatchEditor, ConfiguratorForm, ConsistencyStatus, formSections } from "./ConfiguratorForm.tsx";
@@ -16,12 +15,10 @@ import { ConfigGeneral, missingGeneral } from "./ConfigGeneral.tsx";
 import { StepCandidatesReview } from "./StepCandidatesReview.tsx";
 import { StepCreateQuote } from "./StepCreateQuote.tsx";
 import { InsightsRail } from "./InsightsRail.tsx";
-import { AssistantWindow } from "./AssistantWindow.tsx";
-import type { ChatChange } from "./assistantState.ts";
 import { buildCalculationUpdate, needsCalculation, sameEntries, sameTables } from "./configProcessState.ts";
 
-// ObjectPage IconTabBar: Configure / Candidates / Create quote. Tabs are always enabled;
-// missing run or selection is an empty state. Local overlays (override ?? server) until persist.
+// One scroll: Configure, Candidates, Create quote. Missing run or selection is an empty state.
+// Local overlays (override ?? server) until persist.
 export function ConfigProcessPage({ id }: { id: string }) {
   const qc = useQueryClient();
   const q = useQuery(orpc.configs.get.queryOptions({ input: { id } }));
@@ -37,7 +34,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
     retry: false, // agent-offline should show its message, not spin
   });
 
-  const [section, setSection] = useSectionParam();
   const [picks, setPicks] = useState<QueryPicks>({});
   const [entriesOverride, setEntries] = useState<Entries | null>(null);
   const [batchesOverride, setBatches] = useState<number[] | null>(null);
@@ -46,8 +42,8 @@ export function ConfigProcessPage({ id }: { id: string }) {
   const [runMeta, setRunMeta] = useState<{ capped: boolean; widest?: { key: string; size: number } } | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [note, setNote] = useState("");
-  // Which insight panels are expanded. Lives here (not in the rail) so switching Configure ↔
-  // Candidates doesn't reset it. Panel's `fixed` keeps the last open one from collapsing.
+  // Which insight panels are expanded. Lives here (not in the rail) so scrolling past Configure
+  // doesn't reset it. Panel's `fixed` keeps the last open one from collapsing.
   const [openPanels, setOpenPanels] = useState(new Set(["costs"]));
   const togglePanel = (k: string) =>
     setOpenPanels((o) => {
@@ -57,16 +53,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
       n.delete(k);
       return n;
     });
-  // Chati: the floating assistant window is always mounted (so its conversation survives close)
-  // and toggled via `chatOpen`. `aiMarks` drives the "AI" chip in ConfiguratorForm; `assistantBusy`
-  // gates form/batches/auto-calc/Save-selection while a turn is in flight; `assistantProjectVersion`
-  // tracks the project version Chati last observed (from its own `candidates` events) so a stale
-  // browser tab doesn't reuse a version that predates the run it just triggered.
-  const [chatOpen, setChatOpen] = useState(false);
-  const [assistantBusy, setAssistantBusy] = useState(false);
-  const [aiMarks, setAiMarks] = useState<Map<string, string>>(new Map());
-  const [assistantProjectVersion, setAssistantProjectVersion] = useState<string | null>(null);
-
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: orpc.configs.get.queryOptions({ input: { id } }).queryKey });
   const update = useMutation(orpc.configs.update.mutationOptions({ onSuccess: invalidate }));
@@ -87,7 +73,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
       setSel(null); // use persisted selection after save
       invalidate();
       toast("Selection saved");
-      setSection("quote");
     },
   }));
 
@@ -113,7 +98,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
     missingCount: missing.length,
     batchCount: batches.length,
     lookupsReady: !!lk,
-    assistantBusy,
     entriesDirty,
     batchesDirty,
     tablesDirty,
@@ -149,38 +133,9 @@ export function ConfigProcessPage({ id }: { id: string }) {
     setEntries(next); // fills only empty params; page-level propagate() takes it from here
   };
 
-  // ConfiguratorForm's onChange, wrapped: a manual edit to a key Chati just set means that AI value
-  // no longer describes what's on screen, so its "AI" chip must go — keep only the marks whose value
-  // survived the edit untouched.
   const changeEntries = (next: Entries) => {
     if (sameEntries(next, entries)) return;
     setEntries(next);
-    const kept = [...aiMarks].filter(([k]) => JSON.stringify(entries[k]) === JSON.stringify(next[k]));
-    if (kept.length !== aiMarks.size) setAiMarks(new Map(kept));
-  };
-
-  // Chati's onApply: reused for both a forward AI-set value and a revert (ChatChange.reverted).
-  // Forward rows merge `to` into entries and mark the key with its evidence; revert rows merge the
-  // restore target and clear the mark instead (the value is going back to what it was, not being
-  // freshly AI-set). `to` is a real Val on every row (never omitted — see ChangeRowZ); a revert
-  // that restores an originally-unset key encodes that as `to: null` (AssistantWindow's
-  // toRevertPayload), which we read as "delete the key", matching how the rest of this form
-  // treats an absent/null value as unset.
-  const applyAssistantChanges = (changes: ChatChange[]) => {
-    const next = { ...entries };
-    const nextMarks = new Map(aiMarks);
-    for (const c of changes) {
-      // `to === null` means "delete this key" (a revert of an originally-unset key). This relies on
-      // apps/server/src/extraction.ts's validateSuggestionSet filtering null-valued suggestions out
-      // before they ever become a forward ChangeRow — so a null `to` here can only be a revert, never
-      // a genuine AI-set value. Revisit this delete-convention if that filter ever changes.
-      if (c.to === null || c.to === undefined) delete next[c.key];
-      else next[c.key] = c.to as Val;
-      if (c.reverted) nextMarks.delete(c.key);
-      else nextMarks.set(c.key, c.evidence);
-    }
-    setEntries(next);
-    setAiMarks(nextMarks);
   };
 
   const saveSelection = () => {
@@ -197,32 +152,24 @@ export function ConfigProcessPage({ id }: { id: string }) {
   if (q.error)
     return <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{q.error.message}</MessageStrip>;
   if (!project || !model) return null;
+  const st = statusUi[project.status];
 
-  const sectionId = section ?? (project.status === "draft" ? "configure" : "candidates");
-
-  const configureFooter = (
+  const footer = (
     <Bar design="FloatingFooter"
       startContent={
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           {prop ? <ConsistencyStatus prop={prop} /> : null}
           {missing.length ? <ObjectStatus state="Critical">{missing.join(" and ")} required</ObjectStatus> : null}
           {shouldCalc || calcBusy ? <BusyIndicator active delay={0} size="S" /> : null}
+          {candidates.length > 0 ? (
+            <Text>
+              {selection.length} quotation line{selection.length === 1 ? "" : "s"} selected
+            </Text>
+          ) : null}
         </div>
       }
       endContent={
-        <Button design="Emphasized" style={{ minWidth: "4rem" }} onClick={() => setSection("candidates")}>Next</Button>
-      } />
-  );
-
-  const candidatesFooter = (
-    <Bar design="FloatingFooter"
-      startContent={
-        <Text>
-          {selection.length} quotation line{selection.length === 1 ? "" : "s"} selected
-        </Text>
-      }
-      endContent={
-        <Button design="Emphasized" disabled={select.isPending || selection.length === 0 || assistantBusy} onClick={saveSelection}>
+        <Button design="Emphasized" disabled={select.isPending || selection.length === 0} onClick={saveSelection}>
           {select.isPending ? "Saving…" : "Save selection"}
         </Button>
       } />
@@ -250,12 +197,10 @@ export function ConfigProcessPage({ id }: { id: string }) {
   // The rail sits OUTSIDE the ObjectPage: ObjectPage collects sub-tabs from direct children only,
   // so wrapping the subsections would silently drop Configure's sub-anchor tabs.
   // DynamicSideContent handles the responsive drop-below itself — no media queries, no animation.
-  // Its host sets container-type:inline-size, which makes it a containing block for position:fixed —
-  // so the floating Chati window stays a sibling, outside it, or it would anchor to this box.
   return (
     <>
     <DynamicSideContent
-      sideContentVisibility="AlwaysShow" hideSideContent={sectionId === "quote"}
+      sideContentVisibility="AlwaysShow"
       sideContent={
         <InsightsRail projectId={id} model={model.definition} lk={lk} prop={prop} entries={entries}
           onCopy={copyValues} open={openPanels} onToggle={togglePanel} />
@@ -263,17 +208,14 @@ export function ConfigProcessPage({ id }: { id: string }) {
     
     {messages}
     <ObjectPage
-      hidePinButton
       mode="IconTabBar"
-      selectedSectionId={sectionId}
-      onSelectedSectionChange={(e) => setSection(e.detail.selectedSectionId)}
+      hidePinButton
       titleArea={
         <ObjectPageTitle
-          header={<Title level="H5">{project.name}</Title>}
+          header={<Title>{project.name}</Title>}
           subHeader={
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
               <Text>{model.name}</Text>
-              <ObjectStatus state={statusUi[project.status].state}>{statusUi[project.status].text}</ObjectStatus>
               {project.status === "requested" ? (
                 <Text>
                   Requested by {createdByEmail ?? "a portal user"} for {project.customer?.cardName ?? "—"}
@@ -282,26 +224,23 @@ export function ConfigProcessPage({ id }: { id: string }) {
             </div>
           }
           actionsBar={
-            <Toolbar design="Transparent">
-              {project.status === "requested" ? (
+            project.status === "requested" ? (
+              <Toolbar design="Transparent">
                 <Button design="Negative" onClick={() => setRejectOpen(true)}>Reject</Button>
-              ) : null}
-              <ToggleButton icon="ai" pressed={chatOpen} onClick={() => setChatOpen(!chatOpen)}>
-                Chati
-              </ToggleButton>
-            </Toolbar>
-          }
-        />
+              </Toolbar>
+            ) : undefined
+          }>
+          <Tag design={st.state === "None" ? "Neutral" : st.state} style={{ alignSelf: "center" }}>
+            {st.text}
+          </Tag>
+        </ObjectPageTitle>
       }
-      footerArea={
-        sectionId === "candidates" ? candidatesFooter
-        : configureFooter
-      }
+      footerArea={footer}
     >
-      <ObjectPageSection id="configure" titleText="Configure" hideTitleText>
+      <ObjectPageSection id="configure" titleText="Configure">
         <ObjectPageSubSection id="general" titleText="General">
           <ConfigGeneral name={project.name} modelId={project.modelId} customer={project.customer ?? null}
-            disabled={assistantBusy || update.isPending}
+            disabled={update.isPending}
             onChange={(patch) => {
               // A model switch wipes entries/batches server-side; drop the local overlays too,
               // or the old model's values would be re-applied on top of the new form.
@@ -310,7 +249,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
             }} />
         </ObjectPageSubSection>
         <ObjectPageSubSection id="batches" titleText="Batch quantities">
-          <BatchEditor batches={batches} onChange={setBatches} disabled={assistantBusy} />
+          <BatchEditor batches={batches} onChange={setBatches} />
         </ObjectPageSubSection>
         {/* formSections, not structure.sections: a table the author never placed gets a trailing
             subsection of its own, and the anchor bar has to show it. */}
@@ -321,13 +260,12 @@ export function ConfigProcessPage({ id }: { id: string }) {
                 onChange={changeEntries}
                 onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
                 querySource={{ kind: "project", modelId: project.modelId }}
-                tables={tables} onTablesChange={setTables}
-                aiMarks={aiMarks} disabled={assistantBusy} />
+                tables={tables} onTablesChange={setTables} />
             ) : lookups.error ? null : <BusyIndicator active delay={0} />}
           </ObjectPageSubSection>
         ))}
       </ObjectPageSection>
-      <ObjectPageSection id="candidates" titleText="Candidates" hideTitleText>
+      <ObjectPageSection id="candidates" titleText="Candidates">
         {candidates.length > 0 && model && lk ? (
           <StepCandidatesReview model={model.definition} lookups={lk}
             entries={project!.entries} candidates={candidates}
@@ -341,7 +279,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
           <Text>No candidates yet.</Text>
         )}
       </ObjectPageSection>
-      <ObjectPageSection id="quote" titleText="Create quote" hideTitleText>
+      <ObjectPageSection id="quote" titleText="Create quote">
         {project?.selection?.length || select.isSuccess ? (
           <StepCreateQuote projectId={id} />
         ) : (
@@ -370,14 +308,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
         <TextArea id="reject-note" rows={4} value={note} onInput={(e) => setNote(e.target.value)} />
       </div>
     </Dialog>
-
-    <AssistantWindow open={chatOpen} onClose={() => setChatOpen(false)}
-      projectId={id} projectVersion={assistantProjectVersion ?? project.updatedAt.toISOString()}
-      model={model.definition} lookups={lookups.data} entries={entries} batches={batches}
-      onApply={applyAssistantChanges}
-      onCandidates={(e) => { invalidate(); setSel([]); setSection("candidates"); setAssistantProjectVersion(e.projectVersion); }}
-      onSelection={() => { invalidate(); setSel(null); setSection("quote"); }}
-      onBusyChange={setAssistantBusy} />
     </>
   );
 }

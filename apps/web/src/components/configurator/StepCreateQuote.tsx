@@ -87,7 +87,7 @@ export function StepCreateQuote({ projectId }: { projectId: string }) {
             <TextArea growing rows={2} value={comments} onInput={(e) => setComments(e.target.value)} />
           </FormItem>
           <FormItem labelContent={<Label>Valid until</Label>}>
-            <DatePicker formatPattern="yyyy-MM-dd" value={docDueDate}
+            <DatePicker valueFormat="yyyy-MM-dd" value={docDueDate}
               onChange={(e) => setDocDueDate(e.target.value ?? "")} />
           </FormItem>
         </FormGroup>

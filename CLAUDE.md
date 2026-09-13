@@ -24,7 +24,7 @@ tsconfig that covers everything, so a change can typecheck in one package and br
 
 ```bash
 bunx tsc -p apps/server/tsconfig.json --noEmit
-# projects: packages/{b1,config-engine,db,assistant}, apps/{agent,server,web}
+# projects: packages/{b1,config-engine,db}, apps/{agent,server,web}
 bun --cwd apps/web build                # also regenerates routeTree.gen.ts (gitignored)
 ```
 
@@ -157,20 +157,6 @@ file records the three verified 400s that prove it. The `DocEntry` equality **is
   what makes B1 close the source lines instead of creating an unlinked document. The line field
   list is an allowlist; `BaseLine` is the source `LineNum`, not the array index.
 
-## Chati — the configurator assistant
-
-`apps/server/src/assistant/` is a durable turn engine, not a chat wrapper. Every write in
-`turns.ts` is fenced on `leaseToken` matching the turn's *current* lease, so a stale owner can
-never overwrite a newer one; a turn survives a disconnect and resumes by `lastEventId`
-(`${turnId}:${seq}`). Streaming is an oRPC `eventIterator`; `signal` aborts on client disconnect.
-`packages/assistant` holds only the genuinely shared surface — tables, wire events, the eight tool
-declarations (strict zod in *and* out) — so the executors in `apps/server` stay adapter-free.
-Providers (Gemini/Anthropic/OpenAI) go through `provider.ts` + `adapter.ts`.
-
-Drawing extraction is separate and stateless: the drawing is never stored, and `extraction.ts`
-re-validates every LLM suggestion against the parameter's type/domain/range server-side. Invalid
-suggestions are flagged with a reason, never dropped and never auto-applied.
-
 ## Saved views (variants)
 
 `ListVariantDef` (select/filter/orderby/search) **is** the query. `apps/web/src/listSpec.ts`
@@ -201,7 +187,7 @@ is silently dropped (a saved view outliving a UDF should still open).
 ## Design docs
 
 `docs/superpowers/specs/` and `docs/superpowers/plans/` hold the design record per feature, dated.
-`docs/*.md` are the operator/user guides (model builder, history pane, drawing extraction, durable
+`docs/*.md` are the operator/user guides (model builder, history pane, durable
 writes) — update them when you change the surface they describe.
 
 ---

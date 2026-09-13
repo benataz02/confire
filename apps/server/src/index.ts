@@ -5,10 +5,9 @@ import { auth } from "./auth.ts";
 import { router } from "./orpc/router.ts";
 
 const app = new Hono();
-// 22MB: Chati's attachment cap (15MB decoded, ~20MB base64-inflated) plus headroom for the rest
-// of the chat turn's JSON payload. Streams the body and rejects (PAYLOAD_TOO_LARGE) as soon as
-// the running byte count crosses the cap — before the request body is ever fully buffered/parsed.
-const rpc = new RPCHandler(router, { plugins: [new BodyLimitPlugin({ maxBodySize: 22 * 1024 * 1024 })] });
+// Streams the body and rejects (PAYLOAD_TOO_LARGE) as soon as the running byte count
+// crosses the cap — before the request body is ever fully buffered/parsed.
+const rpc = new RPCHandler(router, { plugins: [new BodyLimitPlugin({ maxBodySize: 2 * 1024 * 1024 })] });
 
 // Layer 1 identity — Better Auth owns /api/auth/*.
 app.all("/api/auth/*", (c) => auth.handler(c.req.raw));
