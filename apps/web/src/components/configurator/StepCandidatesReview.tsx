@@ -14,7 +14,7 @@ import { CandidatesMatrix } from "./CandidatesMatrix.tsx";
 // output panel below. Two computeOutputs passes per panel: the display pass ignores remove
 // flags (removed rows stay visible, struck through) and the totals pass applies everything —
 // the numbers shown are exactly what the server will recompute and store on Save selection.
-export function StepCandidatesReview({ model, lookups, entries, candidates, selection, onToggle, onChange, capped, widest, error, saved }: {
+export function StepCandidatesReview({ model, lookups, entries, candidates, selection, onToggle, onChange, capped, widest, error, saved, readOnly }: {
   model: ModelDef;
   lookups: ResolvedLookups;
   entries: Entries;
@@ -26,6 +26,9 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
   widest?: { key: string; size: number };
   error: string | null;
   saved: boolean;
+  /** locked (quoted): every number stays readable, nothing is editable — configs.select would
+   *  refuse the write anyway (assertConfigMutable). Fields go readonly, actions go away. */
+  readOnly?: boolean;
 }) {
   const keys = openKeys(model, entries, candidates);
   const setOv = (i: number, ov: OutputOverrides) =>
@@ -58,7 +61,8 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
         : isEdited(ov, kind, id) ? <ObjectStatus state="Information">edited</ObjectStatus>
         : null;
     const rowActions = (kind: "bom" | "ops", id: string, added: boolean) =>
-      added ? <TableRowAction icon="delete" text="Remove" />
+      readOnly ? null
+      : added ? <TableRowAction icon="delete" text="Remove" />
         : isRemoved(ov, kind, id) ? <TableRowAction icon="refresh" text="Restore" />
         : (
           <>
@@ -85,7 +89,7 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
       <Panel key={`${s.candidateIdx}-${s.batchQty}`} fixed
         headerText={`${candidateLabel(keys, cand.assignment)} — qty ${fmt(s.batchQty)}`}>
         <Title level="H6" style={{ margin: "0 0 0.25rem" }}>Bill of materials</Title>
-        <Table rowActionCount={2} noDataText="No BOM lines."
+        <Table rowActionCount={readOnly ? 0 : 2} noDataText="No BOM lines."
           onRowActionClick={(e) => onAction("bom", e)}
           headerRow={
             <TableHeaderRow>
@@ -104,22 +108,22 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
                 actions={rowActions("bom", l.id, added)}>
                 <TableCell>
                   {added
-                    ? <Input value={l.itemCode} onInput={(e) => setOv(i, patchAddedBom(ov, l.id, { itemCode: e.target.value }))} />
+                    ? <Input readonly={readOnly} value={l.itemCode} onInput={(e) => setOv(i, patchAddedBom(ov, l.id, { itemCode: e.target.value }))} />
                     : <Text style={dim("bom", l.id)}>{l.itemCode}</Text>}
                 </TableCell>
                 <TableCell>
                   {added
-                    ? <Input value={l.desc} onInput={(e) => setOv(i, patchAddedBom(ov, l.id, { desc: e.target.value }))} />
+                    ? <Input readonly={readOnly} value={l.desc} onInput={(e) => setOv(i, patchAddedBom(ov, l.id, { desc: e.target.value }))} />
                     : <Text style={dim("bom", l.id)}>{l.desc}</Text>}
                 </TableCell>
                 <TableCell>
-                  <StepInput min={0} step={0.5} value={l.qtyPerUnit} disabled={isRemoved(ov, "bom", l.id)}
+                  <StepInput readonly={readOnly} min={0} step={0.5} value={l.qtyPerUnit} disabled={isRemoved(ov, "bom", l.id)}
                     onChange={(e) => setOv(i, added
                       ? patchAddedBom(ov, l.id, { qtyPerUnit: e.target.value ?? 0 })
                       : patchBom(ov, l.id, { qtyPerUnit: e.target.value ?? 0 }))} />
                 </TableCell>
                 <TableCell>
-                  <StepInput min={0} step={0.5} value={l.unitPrice} disabled={isRemoved(ov, "bom", l.id)}
+                  <StepInput readonly={readOnly} min={0} step={0.5} value={l.unitPrice} disabled={isRemoved(ov, "bom", l.id)}
                     onChange={(e) => setOv(i, added
                       ? patchAddedBom(ov, l.id, { unitPrice: e.target.value ?? 0 })
                       : patchBom(ov, l.id, { unitPrice: e.target.value ?? 0 }))} />
@@ -130,10 +134,10 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
             );
           })}
         </Table>
-        <Button icon="add" design="Transparent" onClick={() => setOv(i, addBomLine(ov))}>Add line</Button>
+        <Button icon="add" design="Transparent" disabled={readOnly} onClick={() => setOv(i, addBomLine(ov))}>Add line</Button>
 
         <Title level="H6" style={{ margin: "0.75rem 0 0.25rem" }}>Operations</Title>
-        <Table rowActionCount={2} noDataText="No operations."
+        <Table rowActionCount={readOnly ? 0 : 2} noDataText="No operations."
           onRowActionClick={(e) => onAction("ops", e)}
           headerRow={
             <TableHeaderRow>
@@ -155,19 +159,19 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
                 actions={rowActions("ops", l.id, added)}>
                 <TableCell>
                   {added
-                    ? <Input value={l.resource} onInput={(e) => setOv(i, patchAddedOp(ov, l.id, { resource: e.target.value }))} />
+                    ? <Input readonly={readOnly} value={l.resource} onInput={(e) => setOv(i, patchAddedOp(ov, l.id, { resource: e.target.value }))} />
                     : <Text style={dim("ops", l.id)}>{l.resource}</Text>}
                 </TableCell>
                 <TableCell>
-                  <StepInput min={0} value={l.setupMin} disabled={isRemoved(ov, "ops", l.id)}
+                  <StepInput readonly={readOnly} min={0} value={l.setupMin} disabled={isRemoved(ov, "ops", l.id)}
                     onChange={(e) => patch({ setupMin: e.target.value ?? 0 })} />
                 </TableCell>
                 <TableCell>
-                  <StepInput min={0} step={0.1} value={l.runMinPerUnit} disabled={isRemoved(ov, "ops", l.id)}
+                  <StepInput readonly={readOnly} min={0} step={0.1} value={l.runMinPerUnit} disabled={isRemoved(ov, "ops", l.id)}
                     onChange={(e) => patch({ runMinPerUnit: e.target.value ?? 0 })} />
                 </TableCell>
                 <TableCell>
-                  <StepInput min={0} value={rate(l)} disabled={isRemoved(ov, "ops", l.id)}
+                  <StepInput readonly={readOnly} min={0} value={rate(l)} disabled={isRemoved(ov, "ops", l.id)}
                     onChange={(e) => patch({ ratePerHour: e.target.value ?? 0 })} />
                 </TableCell>
                 <TableCell horizontalAlign="End"><Text style={dim("ops", l.id)}>{fmt(l.cost)}</Text></TableCell>
@@ -176,7 +180,7 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
             );
           })}
         </Table>
-        <Button icon="add" design="Transparent" onClick={() => setOv(i, addOpLine(ov))}>Add operation</Button>
+        <Button icon="add" design="Transparent" disabled={readOnly} onClick={() => setOv(i, addOpLine(ov))}>Add operation</Button>
 
         <Bar design="Footer" style={{ marginTop: "0.5rem" }}
           startContent={
@@ -198,7 +202,7 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
         selection and the server recomputes every number from the run snapshot.
       </Text>
       <CandidatesMatrix model={model} entries={entries} candidates={candidates.map(toPriced)}
-        selection={selection} onToggle={onToggle} capped={capped} widest={widest} />
+        selection={selection} onToggle={onToggle} capped={capped} widest={widest} disabled={readOnly} />
       {error ? <MessageStrip design="Negative" hideCloseButton>{error}</MessageStrip> : null}
       {saved ? <MessageStrip design="Positive" hideCloseButton>Selection saved — totals recomputed on the server.</MessageStrip> : null}
       {panels}

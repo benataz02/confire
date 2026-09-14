@@ -28,7 +28,7 @@ const header = (c: TableColumn) => c.label + (c.unit ? ` (${c.unit})` : "");
  * than stored. The cell controls follow ConfiguratorForm.control()'s branch order so a column and a
  * parameter of the same type look and behave the same.
  */
-export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled, querySource }: {
+export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled, readOnly, querySource }: {
   def: TableDef;
   rows: Row[];
   /** the model's current values — row formulas read these, and row cells shadow them */
@@ -36,6 +36,8 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
   lookups: ResolvedLookups;
   onChange: (rows: Row[]) => void;
   disabled?: boolean;
+  /** locked, not unavailable: cells keep their value and stay readable. See ConfiguratorForm. */
+  readOnly?: boolean;
   querySource: QuerySource;
 }) {
   // Same function the server runs, so the footer cannot disagree with the price.
@@ -67,7 +69,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
 
     if (c.type === "boolean")
       return (
-        <CheckBox checked={stored === true} disabled={disabled} accessibleName={header(c)}
+        <CheckBox checked={stored === true} disabled={disabled} readonly={readOnly} accessibleName={header(c)}
           onChange={(e) => set(e.target.checked)} />
       );
 
@@ -75,7 +77,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
       const ref = c.cell.ref;
       return (
         <QueryValueHelp source={querySource} canonicalTable={lookups.tables[ref.table]} lookupRef={ref}
-          value={stored ?? undefined} headerText={header(c)} disabled={disabled}
+          value={stored ?? undefined} headerText={header(c)} disabled={disabled} readonly={readOnly}
           onChange={(nv) => set(nv ?? null)} />
       );
     }
@@ -83,7 +85,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
     if (c.cell.kind === "options") {
       const opts = columnOptions(c, lookups);
       return (
-        <Select style={{ width: "100%" }} disabled={disabled}
+        <Select style={{ width: "100%" }} disabled={disabled} readonly={readOnly}
           value={stored === undefined || stored === null ? "" : JSON.stringify(stored)}
           onChange={(e) => {
             const j = (e.detail.selectedOption as HTMLElement).dataset.j;
@@ -100,7 +102,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
     return (
       <Input style={{ width: "100%" }} type={c.type === "number" ? "Number" : "Text"}
         accessibleName={header(c)} value={stored === undefined || stored === null ? "" : String(stored)}
-        disabled={disabled}
+        disabled={disabled} readonly={readOnly}
         onInput={(e) => {
           const raw = e.target.value ?? "";
           set(raw === "" ? null : c.type === "number" ? Number(raw) : raw);
@@ -111,14 +113,14 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
       <Toolbar design="Transparent" accessibleName={`${def.title} actions`}>
-        <ToolbarButton icon="add" design="Transparent" text="Add row" disabled={disabled || atMax}
+        <ToolbarButton icon="add" design="Transparent" text="Add row" disabled={disabled || readOnly || atMax}
           onClick={() => onChange(addRow(rows))} />
       </Toolbar>
       <div
         onPaste={(e) => {
           const text = e.clipboardData.getData("text");
           // Only a grid becomes new rows; a single value belongs in the cell being pasted into.
-          if (!/[\t\n]/.test(text) || disabled) return;
+          if (!/[\t\n]/.test(text) || disabled || readOnly) return;
           e.preventDefault();
           onChange(pasteRows(rows, def, text, maxRows));
         }}>
@@ -126,7 +128,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
           // noDataText, not an IllustratedMessage: the illustration needs its own side-effect
           // import to register a loader, and this is a small inline grid, not an empty page.
           noDataText="No rows yet. Add one, or paste a block of cells straight from a spreadsheet."
-          rowActionCount={disabled || atMin ? 0 : 1}
+          rowActionCount={disabled || readOnly || atMin ? 0 : 1}
           onRowActionClick={(e) => onChange(removeRow(rows, rowIndex(e.detail.row)))}
           headerRow={
             <TableHeaderRow>
@@ -139,7 +141,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
           }>
           {rows.map((_, ri) => (
             <TableRow key={ri} rowKey={`row-${ri}`}
-              actions={disabled || atMin ? undefined : <TableRowAction icon="delete" text="Delete" />}>
+              actions={disabled || readOnly || atMin ? undefined : <TableRowAction icon="delete" text="Delete" />}>
               {def.columns.map((c) => (
                 <TableCell key={c.key}>{cell(ri, c)}</TableCell>
               ))}

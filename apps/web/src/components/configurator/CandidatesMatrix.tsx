@@ -7,7 +7,7 @@ import { bestByBatch, candidateLabel, fmt, isSelected, openKeys, type PricedCand
 // The signature view: rows = candidates (labeled by their open-parameter values), columns =
 // batch quantities, every price cell IS the selection control. One pressed cell = one future
 // quotation line. Green marks the lowest price per column.
-export function CandidatesMatrix({ model, entries, candidates, selection, onToggle, capped, widest, onRowClick }: {
+export function CandidatesMatrix({ model, entries, candidates, selection, onToggle, capped, widest, onRowClick, disabled }: {
   model: ModelDef;
   entries: Entries;
   candidates: PricedCandidate[];
@@ -16,6 +16,8 @@ export function CandidatesMatrix({ model, entries, candidates, selection, onTogg
   capped: boolean;
   widest?: { key: string; size: number };
   onRowClick?: (idx: number) => void;
+  /** locked (quoted) — the cells still show their prices, they just stop being controls */
+  disabled?: boolean;
 }) {
   const keys = openKeys(model, entries, candidates);
   const best = bestByBatch(candidates);
@@ -52,7 +54,7 @@ export function CandidatesMatrix({ model, entries, candidates, selection, onTogg
                     <Icon name="accept" design="Positive" accessibleName="Lowest price for this quantity"
                       style={{ width: "0.875rem", height: "0.875rem" }} />
                   ) : null}
-                  <ToggleButton pressed={isSelected(selection, i, b.batchQty)}
+                  <ToggleButton pressed={isSelected(selection, i, b.batchQty)} disabled={disabled}
                     tooltip={best[b.batchQty] === i ? "Lowest price for this quantity" : undefined}
                     onClick={(e) => { e.stopPropagation(); onToggle(i, b.batchQty); }}>
                     {fmt(b.unitPrice)}

@@ -2,3 +2,13 @@
 [ui5-toolbar] {
   border-bottom: none;
 }
+
+/* The insights rail's slide. DynamicSideContent hides its side column with a hard display:none and
+   ships no transition of its own, so the movement lives on the slotted element instead. */
+.hera-rail { animation: hera-rail-in 200ms ease }
+.hera-rail-out { animation: hera-rail-out 200ms ease forwards }
+@keyframes hera-rail-in { from { transform: translateX(100%); opacity: 0 } }
+@keyframes hera-rail-out { to { transform: translateX(100%); opacity: 0 } }
+@media (prefers-reduced-motion: reduce) {
+  .hera-rail, .hera-rail-out { animation: none }
+}

@@ -4,6 +4,8 @@ import type { Entries, TableRows } from "@hera/config-engine";
  *  `runReady` is "the server already holds candidates". The second trigger is what calculates a
  *  freshly created configuration, or one whose model was just switched, without an edit. */
 export function needsCalculation(p: {
+  /** quoted => the server refuses every write; never fire the autosave calculate */
+  locked: boolean;
   conflicted: boolean;
   missingCount: number;
   batchCount: number;
@@ -11,7 +13,7 @@ export function needsCalculation(p: {
   dirty: boolean;
   runReady: boolean;
 }) {
-  if (p.conflicted || p.missingCount > 0 || p.batchCount === 0 || !p.lookupsReady) return false;
+  if (p.locked || p.conflicted || p.missingCount > 0 || p.batchCount === 0 || !p.lookupsReady) return false;
   return p.dirty || !p.runReady;
 }
 

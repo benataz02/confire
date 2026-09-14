@@ -61,6 +61,10 @@ export function ConfigProcessPage({ id }: { id: string }) {
   // Which insight panels are expanded. Lives here (not in the rail) so scrolling past Configure
   // doesn't reset it. Panel's `fixed` keeps the last open one from collapsing.
   const [openPanels, setOpenPanels] = useState(new Set(["costs"]));
+  // Rail visibility. Two flags, not one: DynamicSideContent hides its side column with a hard
+  // display:none, so the exit animation has to finish before the column goes.
+  const [railOpen, setRailOpen] = useState(true);
+  const [railMounted, setRailMounted] = useState(true);
   const togglePanel = (k: string) =>
     setOpenPanels((o) => {
       if (!o.has(k)) return new Set(o).add(k);
@@ -111,6 +115,9 @@ export function ConfigProcessPage({ id }: { id: string }) {
   const { entries, batches, tables } = draft ?? {
     entries: project?.entries ?? {}, batches: project?.batches ?? [], tables: project?.tables ?? {},
   };
+  // Quoted is the server's lock (assertConfigMutable fences update/calculate/select). The page
+  // goes read-only rather than letting every edit walk into a CONFLICT.
+  const locked = project?.status === "quoted";
   const candidates = project?.candidates ?? [];
   const selection = selOverride ?? project?.selection ?? [];
   // Candidates are emptied by the same write that changes their inputs, so holding any is proof
@@ -137,6 +144,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
   ];
   const calcBusy = update.isPending || calc.isPending;
   const shouldCalc = !!project && needsCalculation({
+    locked,
     conflicted,
     missingCount: missing.length,
     batchCount: batches.length,
@@ -152,6 +160,16 @@ export function ConfigProcessPage({ id }: { id: string }) {
     const t = setTimeout(() => calc.mutate({ id, ...(draft ?? {}) }), 1000);
     return () => clearTimeout(t);
   }, [shouldCalc, calcBusy, calc.isError, draft, id]);
+
+  // A quoted configuration has nothing to configure, so the rail starts collapsed and stays that
+  // way. ponytail: one timer matched to the keyframe, not an animationend listener — if the two
+  // durations ever drift apart, swap this for onAnimationEnd on the rail.
+  const railShown = railOpen && !locked;
+  useEffect(() => {
+    if (railShown) { setRailMounted(true); return; }
+    const t = setTimeout(() => setRailMounted(false), 200);
+    return () => clearTimeout(t);
+  }, [railShown]);
 
   const copyValues = (values: Record<string, Val>) => {
     const next = { ...entries };
@@ -193,19 +211,25 @@ export function ConfigProcessPage({ id }: { id: string }) {
         </div>
       }
       endContent={
-        <Button design="Emphasized" disabled={select.isPending || selection.length === 0} onClick={saveSelection}>
+        <Button design="Emphasized" disabled={locked || select.isPending || selection.length === 0}
+          onClick={saveSelection}>
           {select.isPending ? "Saving…" : "Save selection"}
         </Button>
       } />
   );
 
   // No ObjectPageHeader: the "requested" context moved into the title's subHeader (with Reject next
-  // to the other title actions), and the errors below the title — they render only when there is
-  // something to say, so nothing eats vertical space in the normal case.
-  const messages = lookups.error || update.error || calc.error || duplicate.error || remove.error ? (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.5rem 1rem 0" }}>
+  // to the other title actions), and the errors into the title's own content slot — they render
+  // only when there is something to say, so nothing eats vertical space in the normal case.
+  const messages = locked || lookups.error || update.error || calc.error || duplicate.error || remove.error ? (
+    <div style={{ paddingBlockStart: "0.5rem", display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
+      {locked ? (
+        <MessageStrip design="Information" hideCloseButton>
+          Quoted — this configuration is read-only. Duplicate it to make changes.
+        </MessageStrip>
+      ) : null}
       {lookups.error ? (
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <div style={{ display: "flex", alignItems: "center"}}>
           <MessageStrip design="Negative" hideCloseButton style={{ flex: 1 }}>{lookups.error.message}</MessageStrip>
           <Button onClick={() => lookups.refetch()}>Retry</Button>
         </div>
@@ -220,17 +244,19 @@ export function ConfigProcessPage({ id }: { id: string }) {
 
   // The rail sits OUTSIDE the ObjectPage: ObjectPage collects sub-tabs from direct children only,
   // so wrapping the subsections would silently drop Configure's sub-anchor tabs.
-  // DynamicSideContent handles the responsive drop-below itself — no media queries, no animation.
+  // DynamicSideContent handles the responsive drop-below itself — no media queries. Its own
+  // show/hide is a hard display:none though, so the slide lives on the rail (.hera-rail).
   return (
     <>
     <DynamicSideContent
       sideContentVisibility="AlwaysShow"
+      hideSideContent={!railShown && !railMounted}
       sideContent={
         <InsightsRail projectId={id} model={model.definition} lk={lk} prop={prop} entries={entries}
-          onCopy={copyValues} open={openPanels} onToggle={togglePanel} />
+          onCopy={copyValues} open={openPanels} onToggle={togglePanel}
+          className={railShown ? "hera-rail" : "hera-rail hera-rail-out"} />
       }>
-    
-    {messages}
+
     <ObjectPage
       mode="IconTabBar"
       hidePinButton
@@ -247,6 +273,11 @@ export function ConfigProcessPage({ id }: { id: string }) {
           }
           actionsBar={
             <Toolbar design="Transparent">
+              <Button design="Transparent" disabled={locked}
+                icon={railShown ? "close-command-field" : "open-command-field"}
+                tooltip={locked ? "A quoted configuration has nothing left to configure"
+                  : railShown ? "Hide insights" : "Show insights"}
+                onClick={() => setRailOpen((o) => !o)} />
               {/* Duplicate copies what is stored and recalculates it, so an unsaved draft would
                   not be in the copy — disabled until the pending edits have been calculated. */}
               <Button icon="copy" design="Transparent" disabled={draft !== null || duplicate.isPending}
@@ -261,7 +292,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
                     // configs.remove has no status guard — a quoted one goes too, and the SAP
                     // quotation it produced stays behind.
                     // Same fallback as the title: a configuration is created unnamed.
-                    message: project.status === "quoted"
+                    message: locked
                       ? `Delete "${project.name.trim() || "New configuration"}"? It has been quoted; the SAP document stays. This can't be undone.`
                       : `Delete "${project.name.trim() || "New configuration"}"? This can't be undone.`,
                     actionText: "Delete", destructive: true,
@@ -273,7 +304,14 @@ export function ConfigProcessPage({ id }: { id: string }) {
                 <Button design="Negative" onClick={() => setRejectOpen(true)}>Reject</Button>
               ) : null}
             </Toolbar>
-          }>
+          }
+          // ObjectPageTitle has no `snappedHeading` — that is DynamicPageTitle's. Its content rows
+          // are snapped/expandedContent, and `snappedHeader` would *replace* the Title. With no
+          // headerArea this title is permanently snapped (ObjectPage only sets
+          // data-header-content-visible when there is one), so snappedContent is the one that
+          // renders; expandedContent is fed the same node for the day a headerArea appears.
+          snappedContent={messages}
+          expandedContent={messages}>
           <Tag design={st.state === "None" ? "Neutral" : st.state} style={{ alignSelf: "center" }}>
             {st.text}
           </Tag>
@@ -286,11 +324,15 @@ export function ConfigProcessPage({ id }: { id: string }) {
           {/* The configuration's own attributes. No draft state: each control commits on change
               (UI5 fires that on blur/Enter) against the server value, and `required` + a negative
               valueState on the empty case is the Fiori way to say the same thing the footer does. */}
-          <Form labelSpan="S12 M12 L12 XL12" layout="S1 M2 L2 XL2">
+          {/* accessibleMode swaps the markup/ARIA the Form emits — it does NOT block input.
+              `readonly` on each field is what locks it, and read-only beats disabled here: a
+              quoted configuration's values exist to be read, copied and screen-reader announced. */}
+          <Form labelSpan="S12 M12 L12 XL12" layout="S1 M2 L2 XL2"
+            accessibleMode={locked ? "Display" : "Edit"} itemSpacing={locked ? "Large" : "Normal"}>
             <FormGroup>
               <FormItem labelContent={<Label for="cfg-name" required>Name</Label>}>
                 <Input id="cfg-name" value={project.name} style={{ width: "100%" }}
-                  disabled={update.isPending}
+                  disabled={update.isPending} readonly={locked}
                   valueState={project.name.trim() ? "None" : "Negative"}
                   onChange={(e) => {
                     const v = (e.target.value ?? "").trim();
@@ -303,7 +345,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
                     field simply stops being editable once there is anything to lose — which is
                     also why configs.calculate does not bother returning the model definition. */}
                 <Select value={project.modelId} style={{ width: "100%" }}
-                  disabled={update.isPending || modelLocked}
+                  disabled={update.isPending || modelLocked} readonly={locked}
                   onChange={(e) => {
                     const v = e.detail.selectedOption.value ?? "";
                     if (!v || v === project.modelId) return;
@@ -320,6 +362,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
               <FormItem labelContent={<Label required>Customer</Label>}>
                 <EntityValueHelp entitySet="BusinessPartners" keyField="CardCode"
                   select={CUSTOMER_SELECT} filter={CUSTOMER_FILTER}
+                  readonly={locked}
                   value={project.customer?.cardCode}
                   valueState={project.customer?.cardCode ? "None" : "Negative"}
                   headerText="Select a customer"
@@ -340,7 +383,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
             <ConfiguratorForm section={BATCHES_SECTION} model={model.definition} lookups={lookups.data}
               lk={lk} prop={prop} entries={entries} onChange={(next) => edit({ entries: next })}
               onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
-              querySource={{ kind: "project", modelId: project.modelId }}
+              querySource={{ kind: "project", modelId: project.modelId }} readOnly={locked}
               batches={batches} onBatchesChange={(next) => edit({ batches: next })} />
           ) : lookups.error ? null : <BusyIndicator active delay={0} />}
         </ObjectPageSubSection>
@@ -352,7 +395,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
               <ConfiguratorForm section={s.key} model={model.definition} lookups={lookups.data} lk={lk} prop={prop} entries={entries}
                 onChange={(next) => edit({ entries: next })}
                 onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
-                querySource={{ kind: "project", modelId: project.modelId }}
+                querySource={{ kind: "project", modelId: project.modelId }} readOnly={locked}
                 tables={tables} onTablesChange={(next) => edit({ tables: next })} />
             ) : lookups.error ? null : <BusyIndicator active delay={0} />}
           </ObjectPageSubSection>
@@ -367,7 +410,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
             onChange={(next) => { if (select.isSuccess) select.reset(); setSel(next); }}
             capped={q.data.capped}
             widest={q.data.widest}
-            error={select.error?.message ?? null} saved={select.isSuccess} />
+            error={select.error?.message ?? null} saved={select.isSuccess} readOnly={locked} />
         ) : (
           <Text>No candidates yet.</Text>
         )}

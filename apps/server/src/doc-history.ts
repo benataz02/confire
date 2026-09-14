@@ -14,7 +14,12 @@ import { escapeLiteral, type CrossJoinSpec } from "@hera/b1";
 
 export type DocRow = {
   docType: "order" | "quotation";
-  docNum: number; docDate: string; cardCode: string; cardName: string;
+  /** the B1 key — what /b1/$entity/$key navigates by. */
+  docEntry: number;
+  docNum: number; docDate: string;
+  /** the *document's* currency, not the model's: unitPrice is meaningless without it. */
+  currency: string;
+  cardCode: string; cardName: string;
   itemCode: string; itemDescription: string; quantity: number; unitPrice: number;
   matched: "both" | "customer" | "item";
 };
@@ -33,7 +38,7 @@ export function docHistoryQuery(
   return {
     entities: [entity, `${entity}/DocumentLines`],
     expand: [
-      { entity, select: ["DocNum", "DocDate", "CardCode", "CardName"] },
+      { entity, select: ["DocEntry", "DocNum", "DocDate", "DocCurrency", "CardCode", "CardName"] },
       { entity: `${entity}/DocumentLines`, select: ["ItemCode", "ItemDescription", "Quantity", "UnitPrice"] },
     ],
     filter: `${entity}/DocEntry eq ${entity}/DocumentLines/DocEntry and (${clauses.join(" or ")})`,
@@ -60,7 +65,9 @@ export function flattenDocs(
     if (!itemMatch && !custMatch) continue; // B1 already filtered; this just guards `matched`
     out.push({
       docType,
+      docEntry: Number(d.DocEntry ?? 0),
       docNum: Number(d.DocNum ?? 0), docDate: String(d.DocDate ?? ""),
+      currency: String(d.DocCurrency ?? ""),
       cardCode: String(d.CardCode ?? ""), cardName: String(d.CardName ?? ""),
       itemCode: String(l.ItemCode ?? ""), itemDescription: String(l.ItemDescription ?? ""),
       quantity: Number(l.Quantity ?? 0), unitPrice: Number(l.UnitPrice ?? 0),

@@ -352,7 +352,7 @@ export function QueryValueHelp({
 /** Value help over a B1 entity set via `entities.rows`. Same dialog as QueryValueHelp; the
  *  query is a ListVariantDef compiled server-side (the browser never sends a $filter string). */
 export function EntityValueHelp({
-  entitySet, keyField, value, onChange, headerText, select, filter, valueState,
+  entitySet, keyField, value, onChange, headerText, select, filter, valueState, disabled, readonly,
 }: {
   entitySet: string;
   keyField: string;
@@ -367,6 +367,9 @@ export function EntityValueHelp({
   filter?: FilterCond[];
   /** caller's state (e.g. required-but-empty); a fetch error still wins. */
   valueState?: "None" | "Positive" | "Critical" | "Negative" | "Information";
+  disabled?: boolean;
+  /** locked: the picked code stays readable, the dialog just won't open */
+  readonly?: boolean;
 }) {
   const [search, setSearch] = useState<string | null>(null); // null = untouched: don't fetch yet
 
@@ -417,6 +420,7 @@ export function EntityValueHelp({
       options={optionsOf(table, columns[0]!, columns[1])} value={value} onChange={onChange} headerText={headerText}
       table={table} valueCol={columns[0]!} columns={columns.slice(1)}
       onSearch={setSearch} onOpen={() => setSearch("")}
+      disabled={disabled} readonly={readonly}
       valueState={page.error ? "Negative" : valueState}
       {...pagingProps(page, search !== null)}
     />

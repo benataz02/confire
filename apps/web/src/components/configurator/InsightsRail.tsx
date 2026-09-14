@@ -7,7 +7,7 @@ import { DocHistory, Similar } from "./HistoryPane.tsx";
 // The process page's persistent right-hand rail: cost elements, B1 document history, similar past
 // configurations. Three Panels rather than cards — `collapsed`/`onToggle` are native, and `fixed`
 // on the only open one keeps at least one expanded without an accordion state machine.
-export function InsightsRail({ projectId, model, lk, prop, entries, onCopy, open, onToggle, slot }: {
+export function InsightsRail({ projectId, model, lk, prop, entries, onCopy, open, onToggle, slot, className }: {
   projectId: string;
   model: ModelDef;
   lk?: ResolvedLookups;
@@ -19,6 +19,8 @@ export function InsightsRail({ projectId, model, lk, prop, entries, onCopy, open
   /** DynamicSideContent's `sideContent` is a web-component slot: the wrapper passes `slot` down and
    *  the outermost DOM element must carry it, or the content lands in the default (main) slot. */
   slot?: string;
+  /** the caller's slide animation — same element as `slot`, so no extra DOM node */
+  className?: string;
 }) {
   const panel = (key: string, title: string, body: ReactNode) => (
     <Panel headerText={title} collapsed={!open.has(key)} fixed={open.has(key) && open.size === 1}
@@ -29,7 +31,8 @@ export function InsightsRail({ projectId, model, lk, prop, entries, onCopy, open
 
   return (
     // no height/overflow here: the side area (.ui5-dsc-side) brings its own scrollbar.
-    <div slot={slot} style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.5rem" }}>
+    <div slot={slot} className={className}
+      style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.5rem" }}>
       {panel("costs", "Cost elements", lk && prop
         ? <Costs model={model} lookups={lk} prop={prop} />
         : <Text>No priced parameters yet — fill the form, or add price formulas in the model builder.</Text>)}
