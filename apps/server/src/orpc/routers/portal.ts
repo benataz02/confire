@@ -529,7 +529,7 @@ export const portalRouter = {
       };
     }),
 
-  // calculated → requested. Selection is validated against the stored candidates and saved with
+  // draft → requested. Selection is validated against the stored candidates and saved with
   // the transition; never ack a submit without the guarded UPDATE landing.
   submit: clientProcedure
     .input(z.object({

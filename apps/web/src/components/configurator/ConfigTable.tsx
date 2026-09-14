@@ -8,6 +8,7 @@ import {
   type ResolvedLookups, type TableColumn, type TableDef, type Val,
 } from "@hera/config-engine";
 import { QueryValueHelp, type QuerySource } from "../ValueHelp.tsx";
+import { displayValue } from "./formHelpers.ts";
 import { addRow, pasteRows, removeRow, setCell, type Row } from "./configTableOps.ts";
 import { colMinWidth } from "./tableWidths.ts";
 
@@ -36,7 +37,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
   lookups: ResolvedLookups;
   onChange: (rows: Row[]) => void;
   disabled?: boolean;
-  /** locked, not unavailable: cells keep their value and stay readable. See ConfiguratorForm. */
+  /** quoted/locked: cells are Text, add/delete are gone. See ConfiguratorForm. */
   readOnly?: boolean;
   querySource: QuerySource;
 }) {
@@ -66,10 +67,16 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
     const set = (v: Val) => onChange(setCell(rows, ri, c.key, v));
 
     if (c.cell.kind === "formula") return <Text>{show(evaluated[ri]?.[c.key] ?? null)}</Text>;
+    if (readOnly) {
+      if (c.type === "boolean")
+        return <Text>{displayValue(stored, [{ value: true, label: "Yes" }, { value: false, label: "No" }])}</Text>;
+      if (c.cell.kind === "options") return <Text>{displayValue(stored, columnOptions(c, lookups))}</Text>;
+      return <Text>{displayValue(stored, [])}</Text>;
+    }
 
     if (c.type === "boolean")
       return (
-        <CheckBox checked={stored === true} disabled={disabled} readonly={readOnly} accessibleName={header(c)}
+        <CheckBox checked={stored === true} disabled={disabled} accessibleName={header(c)}
           onChange={(e) => set(e.target.checked)} />
       );
 
@@ -77,7 +84,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
       const ref = c.cell.ref;
       return (
         <QueryValueHelp source={querySource} canonicalTable={lookups.tables[ref.table]} lookupRef={ref}
-          value={stored ?? undefined} headerText={header(c)} disabled={disabled} readonly={readOnly}
+          value={stored ?? undefined} headerText={header(c)} disabled={disabled}
           onChange={(nv) => set(nv ?? null)} />
       );
     }
@@ -85,7 +92,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
     if (c.cell.kind === "options") {
       const opts = columnOptions(c, lookups);
       return (
-        <Select style={{ width: "100%" }} disabled={disabled} readonly={readOnly}
+        <Select style={{ width: "100%" }} disabled={disabled}
           value={stored === undefined || stored === null ? "" : JSON.stringify(stored)}
           onChange={(e) => {
             const j = (e.detail.selectedOption as HTMLElement).dataset.j;
@@ -102,7 +109,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
     return (
       <Input style={{ width: "100%" }} type={c.type === "number" ? "Number" : "Text"}
         accessibleName={header(c)} value={stored === undefined || stored === null ? "" : String(stored)}
-        disabled={disabled} readonly={readOnly}
+        disabled={disabled}
         onInput={(e) => {
           const raw = e.target.value ?? "";
           set(raw === "" ? null : c.type === "number" ? Number(raw) : raw);
@@ -112,10 +119,12 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+      {readOnly ? null : (
       <Toolbar design="Transparent" accessibleName={`${def.title} actions`}>
-        <ToolbarButton icon="add" design="Transparent" text="Add row" disabled={disabled || readOnly || atMax}
+        <ToolbarButton icon="add" design="Transparent" text="Add row" disabled={disabled || atMax}
           onClick={() => onChange(addRow(rows))} />
       </Toolbar>
+      )}
       <div
         onPaste={(e) => {
           const text = e.clipboardData.getData("text");

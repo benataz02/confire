@@ -10,7 +10,7 @@ import {
 } from "@hera/config-engine";
 import { QueryValueHelp, type QuerySource } from "../ValueHelp.tsx";
 import { ConfigTable } from "./ConfigTable.tsx";
-import { setEntry } from "./formHelpers.ts";
+import { displayValue, setEntry } from "./formHelpers.ts";
 import { addBatch } from "./configProcessState.ts";
 import { money, paramPrices } from "./costElements.ts";
 
@@ -91,9 +91,8 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   /** render only this section, without its own Form header — the caller shows the title (e.g. an ObjectPageSection) */
   section?: string;
   disabled?: boolean;
-  /** Locked (a quoted configuration), which is NOT `disabled`: accessibleMode="Display" only
-   *  changes the markup and ARIA the Form emits, it never blocks input. Fields go `readonly` so
-   *  the values stay legible, focusable and copyable — the whole point of a quoted config. */
+  /** Locked (a quoted configuration). Form goes accessibleMode="Display" and fields render as
+   *  Text — the UI5 display-form pattern. Not `disabled`: a pending save still shows inputs. */
   readOnly?: boolean;
   /** where a query field fetches its pages — nothing is fetched until the user opens or types */
   querySource: QuerySource;
@@ -120,31 +119,47 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   // already added. Adding is an explicit action rather than StepInput's `change`, because change
   // also fires on every +/- click (`_modifyValue(step, true)`) — committing there would token
   // every step of the way up to 10.
+  const formMode = {
+    accessibleMode: readOnly ? "Display" : "Edit",
+    itemSpacing: readOnly ? "Large" : "Normal",
+  } as const;
+
   if (section === BATCHES_SECTION) {
-    if (!onBatchesChange) return null;
     const bs = batches ?? [];
+    if (readOnly) {
+      return (
+        <Form {...FORM_PROPS} {...formMode}>
+          <FormGroup>
+            <FormItem labelContent={<Label>Batch quantities</Label>}>
+              <Text>{bs.join(", ")}</Text>
+            </FormItem>
+          </FormGroup>
+        </Form>
+      );
+    }
+    if (!onBatchesChange) return null;
     // StepInput settles `value` on Enter (its own keydown handler), on blur and on each spin —
     // all of which run before our keydown listener and before the Add button's click (focusout
     // precedes click) — so the ref holds the committed number by the time we read it.
     const add = () => onBatchesChange(addBatch(bs, String(qty.current?.value ?? "")));
     return (
-      <Form {...FORM_PROPS} accessibleMode={disabled || readOnly ? "Display" : "Edit"}>
+      <Form {...FORM_PROPS} {...formMode}>
         <FormGroup>
           <FormItem labelContent={<Label required>Batch quantities</Label>}>
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
                 {/* value is set once on mount (React only writes a prop that changed), so the field
                     keeps whatever the user last dialled in and they can spin on from it. */}
-                <StepInput ref={qty} value={1} min={1} step={1} required disabled={disabled} readonly={readOnly}
+                <StepInput ref={qty} value={1} min={1} step={1} required disabled={disabled}
                   accessibleName="Batch quantity" style={{ flex: "1 1 auto" }}
                   onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
-                <Button icon="add" design="Transparent" disabled={disabled || readOnly}
+                <Button icon="add" design="Transparent" disabled={disabled}
                   accessibleName="Add quantity" tooltip="Add quantity" onClick={add} />
               </div>
               {bs.length ? (
                 // multiLine: a quote can carry a dozen batch sizes and an n-more indicator would
                 // hide the very list the user is checking. showClearAll needs it too.
-                <Tokenizer multiLine showClearAll disabled={disabled} readonly={readOnly} accessibleName="Batch quantities"
+                <Tokenizer multiLine showClearAll disabled={disabled} accessibleName="Batch quantities"
                   onTokenDelete={(e) => {
                     const gone = new Set(e.detail.tokens.map((t) => Number((t as HTMLElement).getAttribute("text"))));
                     onBatchesChange(bs.filter((b) => !gone.has(b)));
@@ -177,18 +192,13 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     const p = model.parameters.find((x) => x.key === key)!;
     const dom: DomainOption[] = prop.domains[key] ?? domainOf(model, lookups, key);
     const v = prop.values[key];
-    // readonly, not disabled: a read-only field stays focusable, copyable and screen-reader
-    // announced — and these fields exist precisely to be read. A locked form (a quoted
-    // configuration) wants exactly that treatment for every param, not just the authored ones.
-    const ro = !!p.readonly || !!readOnly;
-
-    const ref = p.domain?.kind === "options" ? p.domain.ref : undefined;
+    if (readOnly || p.readonly) return <Text>{displayValue(v, dom)}</Text>;
 
     if (p.ui === "radio")
       return (
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem 1rem" }}>
           {dom.map((o, i) => (
-            <RadioButton key={i} name={`cfg-${key}`} text={o.label} checked={v === o.value} readonly={ro}
+            <RadioButton key={i} name={`cfg-${key}`} text={o.label} checked={v === o.value}
               disabled={disabled || !!o.eliminatedBy}
               // tooltip is a runtime ui5 prop the React typing omits (like Option's disabled).
               {...(o.eliminatedBy ? ({ tooltip: `Unavailable: ${o.eliminatedBy}` } as Record<string, unknown>) : {})}
@@ -201,7 +211,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       // a checkbox can only be toggled if flipping it isn't eliminated — that reason is also the tooltip.
       const blocked = dom.find((o) => o.value === (v !== true))?.eliminatedBy;
       return (
-        <CheckBox checked={v === true} readonly={ro} disabled={disabled || !!blocked}
+        <CheckBox checked={v === true} disabled={disabled || !!blocked}
           // tooltip is a runtime ui5 prop the React typing omits.
           {...(blocked ? ({ tooltip: `Unavailable: ${blocked}` } as Record<string, unknown>) : {})}
           onChange={(e) => set(key, e.target.checked)} />
@@ -211,7 +221,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     if (p.ui === "multicombo")
       return (
         // MultiComboBoxItem has no disabled prop -> eliminated options are filtered out.
-        <MultiComboBox style={{ width: "100%" }} disabled={disabled} readonly={ro}
+        <MultiComboBox style={{ width: "100%" }} disabled={disabled}
           onSelectionChange={(e) => {
             const texts = e.detail.items.map((i) => (i as HTMLElement).getAttribute("text")!);
             set(key, texts.length ? texts : undefined);
@@ -226,7 +236,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       const r = p.domain?.kind === "range" ? p.domain : undefined;
       return (
         <StepInput value={typeof v === "number" ? v : undefined} min={r?.min} max={r?.max} step={r?.step ?? 1}
-          style={{ width: "100%" }} disabled={disabled} readonly={ro}
+          style={{ width: "100%" }} disabled={disabled}
           onChange={(e) => set(key, e.target.value ?? undefined)} />
       );
     }
@@ -236,7 +246,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       return (
         <QueryValueHelp source={querySource} canonicalTable={lookups.tables[ref.table]} lookupRef={ref}
           value={v} onChange={(nv) => set(key, nv)} headerText={p.label}
-          disabled={disabled} readonly={ro}
+          disabled={disabled}
           onPick={(t) => onQueryPick(key, ref.table, t)} />
       );
     }
@@ -245,7 +255,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       const tref = p.domain?.kind === "options" && p.domain.ref.source === "table" ? p.domain.ref : undefined;
       const tbl = tref ? lk.tables[tref.table] : undefined;
       return (
-        <Select value={v === undefined ? "" : JSON.stringify(v)} style={{ width: "100%" }} disabled={disabled} readonly={ro}
+        <Select value={v === undefined ? "" : JSON.stringify(v)} style={{ width: "100%" }} disabled={disabled}
           onChange={(e) => {
             const j = (e.detail.selectedOption as HTMLElement).dataset.j;
             set(key, j === undefined || j === "" ? undefined : (JSON.parse(j) as Val));
@@ -266,7 +276,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
 
     return (
       <Input type={p.type === "number" ? "Number" : "Text"} value={v === undefined || v === null ? "" : String(v)}
-        style={{ width: "100%" }} disabled={disabled} readonly={ro}
+        style={{ width: "100%" }} disabled={disabled}
         onChange={(e) => {
           const raw = e.target.value ?? "";
           set(key, raw === "" ? undefined : p.type === "number" ? Number(raw) : raw);
@@ -296,8 +306,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       return (
         <div key={`${sec.key}:${si}`} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
         {s ? (
-        <Form headerText={section ? undefined : sec.title} {...FORM_PROPS}
-          accessibleMode={disabled || readOnly ? "Display" : "Edit"}>
+        <Form headerText={section ? undefined : sec.title} {...FORM_PROPS} {...formMode}>
           {s.groups.map((g, gi) => {
           const content = g.params.filter((k) => defOf(k) || prop.visible[k]);
           return (
@@ -319,7 +328,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
                 const eliminated = dom.filter((o) => o.eliminatedBy).length;
                 // MultiComboBox filters eliminated options out (no per-item disabled in UI5 v2), so
                 // unlike Select/Radio it can't show them greyed — explain the gap with a count instead.
-                const showEliminatedNote = p.ui === "multicombo" && eliminated > 0;
+                const showEliminatedNote = !readOnly && !p.readonly && p.ui === "multicombo" && eliminated > 0;
                 return (
                   <FormItem key={k} labelContent={
                     // labelSpan is 12, so the label owns a full-width row above its control — its

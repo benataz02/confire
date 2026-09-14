@@ -417,6 +417,37 @@ describe.skipIf(!process.env.DATABASE_URL)("configs.duplicate (integration)", ()
   });
 });
 
+describe.skipIf(!process.env.DATABASE_URL)("configs.remove (integration)", () => {
+  test("refuses a quoted configuration, including in a mixed batch, and still deletes a draft", async () => {
+    const { tenantId: tid, slug } = await makeTenant();
+    const member = await makeUser("member", tid);
+    const ctx = { context: { headers: tenantHeaders(slug, member.cookie) } };
+
+    const [m] = await db.insert(configModel)
+      .values({ tenantId: tid, name: TEST_MODEL.name, definition: TEST_MODEL })
+      .returning({ id: configModel.id });
+    const [quoted] = await db.insert(configProject).values({
+      tenantId: tid, modelId: m!.id, name: "Quoted cable", createdBy: member.userId,
+      status: "quoted", b1DocEntry: 1, quotedAt: new Date(),
+    }).returning({ id: configProject.id });
+    const [draft] = await db.insert(configProject).values({
+      tenantId: tid, modelId: m!.id, name: "Draft cable", createdBy: member.userId,
+    }).returning({ id: configProject.id });
+
+    await expect(call(router.configs.remove, { ids: [quoted!.id] }, ctx))
+      .rejects.toThrow(/quoted and locked/);
+    expect(await db.select().from(configProject).where(eq(configProject.id, quoted!.id))).toHaveLength(1);
+
+    await expect(call(router.configs.remove, { ids: [quoted!.id, draft!.id] }, ctx))
+      .rejects.toThrow(/quoted and locked/);
+    expect(await db.select().from(configProject).where(eq(configProject.id, draft!.id))).toHaveLength(1);
+
+    await call(router.configs.remove, { ids: [draft!.id] }, ctx);
+    expect(await db.select().from(configProject).where(eq(configProject.id, draft!.id))).toHaveLength(0);
+    expect(await db.select().from(configProject).where(eq(configProject.id, quoted!.id))).toHaveLength(1);
+  });
+});
+
 describe.skipIf(!process.env.DATABASE_URL)("configs.create (integration)", () => {
   test("inserts the name and customer the new page collected — not an empty draft", async () => {
     const { tenantId: tid, slug } = await makeTenant();

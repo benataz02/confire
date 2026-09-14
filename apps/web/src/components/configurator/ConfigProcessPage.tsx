@@ -11,7 +11,7 @@ import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts
 import { client, orpc } from "../../orpc.ts";
 import { confirm } from "../confirm.ts";
 import { toast } from "../toast.ts";
-import { cleanOverrides, statusFor, toggleSelection, type Sel } from "./runView.ts";
+import { cleanOverrides, statusUi, toggleSelection, type Sel } from "./runView.ts";
 import { BATCHES_SECTION, ConfiguratorForm, ConsistencyStatus, formSections } from "./ConfiguratorForm.tsx";
 import { EntityValueHelp } from "../ValueHelp.tsx";
 import { StepCandidatesReview } from "./StepCandidatesReview.tsx";
@@ -115,8 +115,9 @@ export function ConfigProcessPage({ id }: { id: string }) {
   const { entries, batches, tables } = draft ?? {
     entries: project?.entries ?? {}, batches: project?.batches ?? [], tables: project?.tables ?? {},
   };
-  // Quoted is the server's lock (assertConfigMutable fences update/calculate/select). The page
-  // goes read-only rather than letting every edit walk into a CONFLICT.
+  // Quoted is the server's lock (assertConfigMutable fences update/calculate/select; remove
+  // refuses quoted with the same CONFLICT). The page goes read-only rather than letting every
+  // edit walk into that error.
   const locked = project?.status === "quoted";
   const candidates = project?.candidates ?? [];
   const selection = selOverride ?? project?.selection ?? [];
@@ -194,7 +195,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
   if (q.error)
     return <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{q.error.message}</MessageStrip>;
   if (!project || !model) return null;
-  const st = statusFor(project);
+  const st = statusUi[project.status] ?? statusUi.draft;
 
   const footer = (
     <Bar design="FloatingFooter"
@@ -223,11 +224,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
   // only when there is something to say, so nothing eats vertical space in the normal case.
   const messages = locked || lookups.error || update.error || calc.error || duplicate.error || remove.error ? (
     <div style={{ paddingBlockStart: "0.5rem", display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
-      {locked ? (
-        <MessageStrip design="Information" hideCloseButton>
-          Quoted — this configuration is read-only. Duplicate it to make changes.
-        </MessageStrip>
-      ) : null}
       {lookups.error ? (
         <div style={{ display: "flex", alignItems: "center"}}>
           <MessageStrip design="Negative" hideCloseButton style={{ flex: 1 }}>{lookups.error.message}</MessageStrip>
@@ -285,16 +281,13 @@ export function ConfigProcessPage({ id }: { id: string }) {
                 onClick={() => duplicate.mutate({ id })}>
                 {duplicate.isPending ? "Duplicating…" : "Duplicate"}
               </Button>
-              <Button icon="delete" design="Transparent" disabled={remove.isPending}
+              <Button icon="delete" design="Transparent" disabled={locked || remove.isPending}
+                tooltip={locked ? "A quoted configuration cannot be deleted" : "Delete configuration"}
                 onClick={async () => {
                   if (await confirm({
                     title: "Delete configuration",
-                    // configs.remove has no status guard — a quoted one goes too, and the SAP
-                    // quotation it produced stays behind.
                     // Same fallback as the title: a configuration is created unnamed.
-                    message: locked
-                      ? `Delete "${project.name.trim() || "New configuration"}"? It has been quoted; the SAP document stays. This can't be undone.`
-                      : `Delete "${project.name.trim() || "New configuration"}"? This can't be undone.`,
+                    message: `Delete "${project.name.trim() || "New configuration"}"? This can't be undone.`,
                     actionText: "Delete", destructive: true,
                   })) remove.mutate({ ids: [id] });
                 }}>
@@ -317,35 +310,38 @@ export function ConfigProcessPage({ id }: { id: string }) {
           </Tag>
         </ObjectPageTitle>
       }
-      footerArea={footer}
+      footerArea={!locked ? footer : undefined}
     >
       <ObjectPageSection id="configure" titleText="Configure">
         <ObjectPageSubSection id="general" titleText="General">
           {/* The configuration's own attributes. No draft state: each control commits on change
               (UI5 fires that on blur/Enter) against the server value, and `required` + a negative
-              valueState on the empty case is the Fiori way to say the same thing the footer does. */}
-          {/* accessibleMode swaps the markup/ARIA the Form emits — it does NOT block input.
-              `readonly` on each field is what locks it, and read-only beats disabled here: a
-              quoted configuration's values exist to be read, copied and screen-reader announced. */}
-          <Form labelSpan="S12 M12 L12 XL12" layout="S1 M2 L2 XL2"
+              valueState on the empty case is the Fiori way to say the same thing the footer does.
+              Display mode is Text, matching ConfiguratorForm — accessibleMode only announces it. */}
+          <Form labelSpan="S12 M12 L12 XL12" layout="S1 M2 L3 XL3"
             accessibleMode={locked ? "Display" : "Edit"} itemSpacing={locked ? "Large" : "Normal"}>
             <FormGroup>
-              <FormItem labelContent={<Label for="cfg-name" required>Name</Label>}>
+              <FormItem labelContent={<Label for={locked ? undefined : "cfg-name"} required>Name</Label>}>
+                {locked ? <Text>{project.name}</Text> : (
                 <Input id="cfg-name" value={project.name} style={{ width: "100%" }}
-                  disabled={update.isPending} readonly={locked}
+                  disabled={update.isPending}
                   valueState={project.name.trim() ? "None" : "Negative"}
                   onChange={(e) => {
                     const v = (e.target.value ?? "").trim();
                     if (v && v !== project.name) update.mutate({ id, name: v });
                   }} />
+                )}
               </FormItem>
               <FormItem labelContent={<Label required>Model</Label>}>
-                {/* Switching the model wipes every entry, batch and table row, because a param key
+                {locked ? (
+                  <Text>{(models.data ?? []).find((m) => m.id === project.modelId)?.name ?? ""}</Text>
+                ) : (
+                /* Switching the model wipes every entry, batch and table row, because a param key
                     only means something inside its own model. Rather than warn about that, the
                     field simply stops being editable once there is anything to lose — which is
-                    also why configs.calculate does not bother returning the model definition. */}
+                    also why configs.calculate does not bother returning the model definition. */
                 <Select value={project.modelId} style={{ width: "100%" }}
-                  disabled={update.isPending || modelLocked} readonly={locked}
+                  disabled={update.isPending || modelLocked}
                   onChange={(e) => {
                     const v = e.detail.selectedOption.value ?? "";
                     if (!v || v === project.modelId) return;
@@ -358,11 +354,12 @@ export function ConfigProcessPage({ id }: { id: string }) {
                     <Option key={m.id} value={m.id}>{m.name}</Option>
                   ))}
                 </Select>
+                )}
               </FormItem>
               <FormItem labelContent={<Label required>Customer</Label>}>
+                {locked ? <Text>{project.customer?.cardName ?? ""}</Text> : (
                 <EntityValueHelp entitySet="BusinessPartners" keyField="CardCode"
                   select={CUSTOMER_SELECT} filter={CUSTOMER_FILTER}
-                  readonly={locked}
                   value={project.customer?.cardCode}
                   valueState={project.customer?.cardCode ? "None" : "Negative"}
                   headerText="Select a customer"
@@ -374,6 +371,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
                       cardName: String(row?.[CUSTOMER_SELECT.indexOf("CardName")] ?? project.customer?.cardName ?? ""),
                     },
                   })} />
+                )}
               </FormItem>
             </FormGroup>
           </Form>

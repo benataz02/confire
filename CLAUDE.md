@@ -101,8 +101,7 @@ quoted configuration is re-priced against what SAP says now rather than what it 
 **Inputs and candidates move in one statement.** `candidates` is emptied in the same `UPDATE` that
 writes `entries`/`batches`/`tables`, so a reader sees either the old inputs with their candidates or
 the new inputs with none — never a mismatched pair. That is why there is no `calculated` status:
-`calculatedAt !== null` is the whole freshness signal, and the UI derives the "Calculated" badge
-from `candidates.length` (`statusFor` in `runView.ts`). A quoted project is locked by
+`calculatedAt !== null` is the whole freshness signal. A quoted project is locked by
 `assertConfigMutable`.
 
 **One edit is one call.** `configs.calculate` writes the inputs and recomputes in a single handler,

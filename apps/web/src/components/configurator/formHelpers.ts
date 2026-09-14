@@ -62,6 +62,13 @@ export function optionsOf(t: ResolvedTable, valueCol: string, labelCol?: string)
   return vi < 0 ? [] : t.rows.map((r) => ({ value: r[vi] ?? null, label: String(r[li] ?? r[vi] ?? "") }));
 }
 
+/** Display-mode string for a field: option label when the domain has one, else the raw value. */
+export function displayValue(v: Val | undefined, dom: DomainOption[]): string {
+  if (v === undefined || v === null) return "";
+  if (Array.isArray(v)) return v.map((x) => displayValue(x, dom)).join(", ");
+  return dom.find((o) => o.value === v)?.label ?? String(v);
+}
+
 export type EntryResolution = { kind: "clear" } | { kind: "set"; value: Val; index: number } | { kind: "reject" };
 
 /** Map free text typed into a value-help input to a domain option. "reject" = not in the list. */

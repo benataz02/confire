@@ -30,7 +30,7 @@ import {
   validateSelectionPairs,
   DEDUP_UDF,
 } from "../../config-quote.ts";
-// The configuration process API: any member drives a project (draft -> calculated).
+// The configuration process API: any member drives a project (draft -> quoted).
 // Trust model: browser propagates for preview; THESE handlers compute the numbers that get
 // stored. Lookups: ~5-min cache for interactive use, always fresh inside calculateProject.
 
@@ -620,7 +620,21 @@ export const configsRouter = {
 
   // One delete path: the object page passes its single id in the same array the list report's
   // bulk action passes. One statement either way, so a partial delete is not a state that exists.
+  // Quoted is the same lock as update/calculate/select (the SAP document stays the system of
+  // record). Checked up front so a mixed list selection is all-or-nothing, like models.remove —
+  // not assertConfigMutable per id, which would NOT_FOUND a stale row the current delete ignores.
   remove: userProcedure.input(z.object({ ids: z.array(z.uuid()).min(1) })).handler(async ({ input, context }) => {
+    const quoted = await db
+      .select({ id: configProject.id })
+      .from(configProject)
+      .where(and(
+        inArray(configProject.id, input.ids),
+        eq(configProject.tenantId, context.tenantId),
+        eq(configProject.status, "quoted"),
+      ))
+      .limit(1);
+    if (quoted.length)
+      throw new ORPCError("CONFLICT", { message: "Configuration is quoted and locked" });
     await db.delete(configProject).where(and(inArray(configProject.id, input.ids), eq(configProject.tenantId, context.tenantId)));
     return { ok: true };
   }),

@@ -9,7 +9,7 @@ const STALE_QUOTE_DAYS = 7;
 export type ProjectRow = {
   id: string; name: string; status: ProjectStatus; source: ProjectSource;
   createdBy: string; createdAt: Date; customerName: string | null;
-  quotedAt: Date | null; b1DocEntry: number | null; calculatedAt: Date | null;
+  quotedAt: Date | null; b1DocEntry: number | null;
   quotedValue: number | null; quotedCost: number | null;
 };
 
@@ -144,8 +144,6 @@ export function buildOverview(input: {
 
   const ordered = projects.filter(isOrdered);
   const stage = (...s: ProjectStatus[]) => projects.filter((p) => s.includes(p.status)).length;
-  // "Calculated" is no longer a status — a draft holding candidates is what it always meant.
-  const calculated = (p: ProjectRow) => p.status === "draft" && p.calculatedAt !== null;
 
   const attention = projects
     .filter((p) => p.status === "requested" || p.status === "rejected" ||
@@ -179,8 +177,7 @@ export function buildOverview(input: {
       value: marginValue, cost: marginCost, covered: withMargin.length, of: quoted.length,
     },
     funnel: [
-      { stage: "Draft", count: projects.filter((p) => p.status === "draft" && !calculated(p)).length },
-      { stage: "Calculated", count: projects.filter(calculated).length + stage("requested", "rejected") },
+      { stage: "Draft", count: stage("draft", "requested", "rejected") },
       { stage: "Quoted", count: stage("quoted") },
       { stage: "Ordered", count: ordered.length },
     ],

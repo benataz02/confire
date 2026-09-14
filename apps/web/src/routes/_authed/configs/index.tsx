@@ -113,26 +113,30 @@ function Configs() {
       hasMore={page.hasNextPage}
       onLoadMore={() => { if (!page.isFetchingNextPage) void page.fetchNextPage(); }}
       onRowClick={(row) => navigate({ to: "/configs/$id", params: { id: String(row.id) } })}
-      actions={({ rows: sel, clear }) => (
-        <>
-          <Button
-            design="Transparent"
-            disabled={!first}
-            tooltip={first ? undefined : "No configurator models yet — an admin creates those first."}
-            onClick={() => { void navigate({ to: "/configs/new" }); }}
-          >
-            New configuration
-          </Button>
-          <Button design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}
-            onClick={() => duplicate.mutate({ id: String(sel[0]!.id) })}>
-            {duplicate.isPending ? "Duplicating…" : "Duplicate"}
-          </Button>
-          <Button icon="delete" design="Transparent" disabled={!sel.length || remove.isPending}
-            onClick={() => void del(sel, clear)}>
-            Delete
-          </Button>
-        </>
-      )}
+      actions={({ rows: sel, clear }) => {
+        const quotedSel = sel.some((r) => r.status === "quoted");
+        return (
+          <>
+            <Button
+              design="Transparent"
+              disabled={!first}
+              tooltip={first ? undefined : "No configurator models yet — an admin creates those first."}
+              onClick={() => { void navigate({ to: "/configs/new" }); }}
+            >
+              New configuration
+            </Button>
+            <Button design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}
+              onClick={() => duplicate.mutate({ id: String(sel[0]!.id) })}>
+              {duplicate.isPending ? "Duplicating…" : "Duplicate"}
+            </Button>
+            <Button icon="delete" design="Transparent" disabled={!sel.length || quotedSel || remove.isPending}
+              tooltip={quotedSel ? "A quoted configuration cannot be deleted" : undefined}
+              onClick={() => void del(sel, clear)}>
+              Delete
+            </Button>
+          </>
+        );
+      }}
     />
   );
 }

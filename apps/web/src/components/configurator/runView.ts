@@ -24,14 +24,6 @@ export const statusUi = {
   rejected: { state: "Negative", text: "Rejected" },
 } as const;
 
-/** "Calculated" is no longer a stored status — a draft that still holds candidates IS one, and
- *  candidates are emptied by the same write that changes their inputs. Derived, so the badge can
- *  never disagree with what the Candidates section is showing. */
-export function statusFor(p: { status: string; candidates: unknown[] }) {
-  if (p.status === "draft" && p.candidates.length) return { state: "Information", text: "Calculated" } as const;
-  return statusUi[p.status as keyof typeof statusUi] ?? statusUi.draft;
-}
-
 // Params the calculation left open (assigned per candidate, not fixed in the project's entries),
 // in model parameter order so labels are stable across candidates.
 export function openKeys(model: ModelDef, entries: Entries, candidates: { assignment: Entries }[]): string[] {

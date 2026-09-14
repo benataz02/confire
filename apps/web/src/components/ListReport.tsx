@@ -325,13 +325,13 @@ export function ListReport({
           heading={heading}
           snappedHeading={heading}
           style={titleStyle}
-          actionsBar={
+          actionsBar={b1 ? (
             <Toolbar design="Transparent">
               <ToolbarButton design="Transparent" icon="refresh" tooltip="Refresh schema"
                 accessibleName="Refresh schema" disabled={refresh.isPending}
                 onClick={() => refresh.mutate()} />
             </Toolbar>
-          }
+          ) : undefined}
         />
       }
       headerArea={
