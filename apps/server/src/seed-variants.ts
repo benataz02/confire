@@ -139,7 +139,7 @@ export function entityVariantDefs(entity: string): { list: ListVariantDef; objec
 }
 
 /** The `entity` key a B1 page saves its views under — `b1:` namespaced so a B1 entity set can
- *  never collide with a HERA list key like "models". Must match EntityListPage's `b1:${entity}`. */
+ *  never collide with a HERA list key like "models". Must match the list route's `b1:${entity}`. */
 export const b1VariantKey = (entity: string) => `b1:${entity}`;
 
 /** Standard list + object views for every curated B1 entity. Idempotent. */

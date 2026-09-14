@@ -5,7 +5,7 @@ import type { Entries, ModelDef, ResolvedLookups } from "@hera/config-engine";
 import { applySelection, calculateProject } from "../src/orpc/routers/configs.ts";
 import { buildQuoteLines, configDocumentCommandId } from "../src/config-quote.ts";
 import { router } from "../src/orpc/router.ts";
-import { call, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
+import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
 import type { QueryRunner } from "../src/lookups.ts";
 
 const tenantId = `test-cfg-${crypto.randomUUID()}`;
@@ -97,7 +97,7 @@ describe("configDocumentCommandId", () => {
 
   // The reason the hash covers assignments and not indices: a recalculate replaces the candidate
   // list, so "candidate 0" can silently come to mean a different configuration. If the key did not
-  // move with it, the U_HERA_DedupKey pre-check would hand back a quotation for the old one.
+  // move with it, the U_CF_Key pre-check would hand back a quotation for the old one.
   test("the same index against a different calculation is a different key", () => {
     const a = id([{ candidateIdx: 0, batchQty: 10 }]);
     const recalculated = [
@@ -124,7 +124,7 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     expect(res.capped).toBe(false);
 
     const project = await load(id);
-    expect(project.status).toBe("calculated");
+    expect(project.status).toBe("draft"); // "calculated" is calculatedAt, not a status
     expect(project.calculatedAt).not.toBeNull();
     expect(project.candidates).toHaveLength(4);
 
@@ -204,10 +204,11 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     expect(again.candidateCount).toBe(first.candidateCount);
     expect(fetches).toBe(1);
 
-    // A real edit through the API: configs.update writes entries AND resets the status, which is
-    // the invariant that lets `status === "calculated"` stand in for "these entries produced these
-    // candidates". Reuse must not fire.
-    await db.update(configProject).set({ entries: { size: "L" }, status: "draft" }).where(eq(configProject.id, id));
+    // A real edit through the API: configs.calculate writes entries AND empties candidates in one
+    // statement, which is the invariant that lets a non-null calculatedAt stand in for "these
+    // entries produced these candidates". Reuse must not fire.
+    await db.update(configProject).set({ entries: { size: "L" }, candidates: [], calculatedAt: null })
+      .where(eq(configProject.id, id));
     const edited = await calculateProject(tenantId, id, counting);
     expect(edited.reused).toBe(false);
     expect(edited.candidateCount).toBe(2); // size pinned to L, two grades left
@@ -251,7 +252,7 @@ describe("config tables (integration)", () => {
       },
       {
         role: "items", key: "parts", title: "Parts", basisExpr: "area",
-        map: { code: "U_HERA_ItemCode" },
+        map: { code: "U_CF_ItemCode" },
         columns: [
           { key: "code", label: "Code", type: "string", cell: { kind: "input" } },
           { key: "quantity", label: "Pieces", type: "number", cell: { kind: "input" } },
@@ -294,7 +295,7 @@ describe("config tables (integration)", () => {
     const { lines, value } = buildQuoteLines(withPick, tableModel, { domains: {}, tables: {} });
 
     expect(lines).toHaveLength(2);
-    expect(lines.map((l) => l.U_HERA_ItemCode)).toEqual(["PART-A", "PART-B"]);
+    expect(lines.map((l) => l.U_CF_ItemCode)).toEqual(["PART-A", "PART-B"]);
     // Quantity is row pieces x batch qty, and the generic configurator item stays the B1 ItemCode
     expect(lines.map((l) => l.Quantity)).toEqual([3, 3]);
     expect(new Set(lines.map((l) => l.ItemCode))).toEqual(new Set(["SHEET-CFG"]));
@@ -324,9 +325,9 @@ describe("config tables (integration)", () => {
     expect(lines[0]!.Quantity).toBe(3);
   });
 
-  // The third writer the schema's ponytail note warns about: every writer of the calculation's
-  // inputs must reset the status, or `status === "calculated"` stops meaning what it claims.
-  test("editing rows through configs.update makes the stored calculation stale", async () => {
+  // The invariant, now that no status flag restates it: writing the calculation's inputs empties
+  // the candidates they produced, so a stored non-null calculatedAt can never describe stale rows.
+  test("editing rows through configs.calculate recomputes instead of reusing", async () => {
     const { tenantId: tid, slug } = await makeTenant();
     const admin = await makeUser("admin", tid);
     const ctx = { context: { headers: tenantHeaders(slug, admin.cookie) } };
@@ -339,14 +340,101 @@ describe("config tables (integration)", () => {
     const projectId = p!.id;
 
     await calculateProject(tid, projectId, noFetch);
-    const statusOf = async () =>
-      (await db.select().from(configProject).where(eq(configProject.id, projectId)))[0]!.status;
-    expect(await statusOf()).toBe("calculated");
+    const stored = async () =>
+      (await db.select().from(configProject).where(eq(configProject.id, projectId)))[0]!;
+    const before = await stored();
+    expect(before.calculatedAt).not.toBeNull();
+    expect(before.candidates.length).toBeGreaterThan(0);
 
-    await call(router.configs.update, { id: projectId, tables: { ...rows, holes: [{ size: 99 }] } }, ctx);
-    expect(await statusOf()).toBe("draft");
+    // One call does the write and the recompute. The returned payload is what `get` returns, so
+    // the client never needs a follow-up read.
+    const res = await call(
+      router.configs.calculate, { id: projectId, tables: { ...rows, holes: [{ size: 99 }] } }, ctx,
+    );
+    expect(res.project.tables).toEqual({ ...rows, holes: [{ size: 99 }] });
+    expect(res.project.candidates.length).toBeGreaterThan(0);
+
+    // Not the reuse path: the edit nulled calculatedAt, so this is a fresh calculation.
+    const after = await stored();
+    expect(after.calculatedAt!.getTime()).toBeGreaterThan(before.calculatedAt!.getTime());
+    expect(after.status).toBe("draft"); // still a draft — "calculated" is not a status any more
 
     await db.delete(configProject).where(eq(configProject.tenantId, tid));
     await db.delete(configModel).where(eq(configModel.tenantId, tid));
+  });
+});
+
+describe.skipIf(!process.env.DATABASE_URL)("configs.duplicate (integration)", () => {
+  // TEST_MODEL names no query masterdata, so the recalculate inside duplicate resolves its lookups
+  // without an agent — the copy still comes back genuinely calculated.
+  test("a quoted configuration copies its inputs, drops everything quote-shaped, and recalculates", async () => {
+    const { tenantId: tid, slug } = await makeTenant();
+    const admin = await makeUser("admin", tid);
+    const ctx = { context: { headers: tenantHeaders(slug, admin.cookie) } };
+
+    const [m] = await db.insert(configModel)
+      .values({ tenantId: tid, name: TEST_MODEL.name, definition: TEST_MODEL })
+      .returning({ id: configModel.id });
+    const entries: Entries = { material: "steel", coated: false };
+    const [src] = await db.insert(configProject).values({
+      tenantId: tid, modelId: m!.id, name: "Bridge cable", createdBy: admin.userId,
+      customer: { cardCode: "C0001", cardName: "Acme" },
+      entries, batches: [100],
+      // A portal request that was quoted: every field the copy must not inherit, set.
+      source: "portal", status: "quoted", b1DocEntry: 4711, quotedAt: new Date(),
+      quotedValue: "1234.5600", quotedCost: "600.0000", calculatedAt: new Date(),
+      selection: [], rejectionNote: null,
+    }).returning({ id: configProject.id });
+
+    const { id: copyId } = await call(router.configs.duplicate, { id: src!.id }, ctx);
+    const [copy] = await db.select().from(configProject).where(eq(configProject.id, copyId));
+
+    expect(copy!.name).toBe("Bridge cable (copy)");
+    expect(copy!.modelId).toBe(m!.id);
+    expect(copy!.entries).toEqual(entries);
+    expect(copy!.batches).toEqual([100]);
+    expect(copy!.customer).toEqual({ cardCode: "C0001", cardName: "Acme" });
+
+    expect(copy!.status).toBe("draft");
+    // Not "portal": an internal copy must not surface in that client's own request list.
+    expect(copy!.source).toBe("internal");
+    // b1DocEntry is the quote idempotency record — inheriting it would make the copy unquotable.
+    expect(copy!.b1DocEntry).toBeNull();
+    expect(copy!.quotedAt).toBeNull();
+    expect(copy!.quotedValue).toBeNull();
+    expect(copy!.quotedCost).toBeNull();
+    expect(copy!.selection).toBeNull();
+
+    // The recalculate ran: candidates and calculatedAt land together, as everywhere else.
+    expect(copy!.calculatedAt).not.toBeNull();
+    expect(copy!.candidates.length).toBeGreaterThan(0);
+
+    // The source is untouched and still locked.
+    const [after] = await db.select().from(configProject).where(eq(configProject.id, src!.id));
+    expect(after!.status).toBe("quoted");
+    expect(after!.b1DocEntry).toBe(4711);
+    expect(after!.name).toBe("Bridge cable");
+  });
+});
+
+describe.skipIf(!process.env.DATABASE_URL)("configs.create (integration)", () => {
+  test("inserts the name and customer the new page collected — not an empty draft", async () => {
+    const { tenantId: tid, slug } = await makeTenant();
+    const member = await makeUser("member", tid);
+    const ctx = { context: { headers: tenantHeaders(slug, member.cookie) } };
+
+    const [m] = await db.insert(configModel)
+      .values({ tenantId: tid, name: TEST_MODEL.name, definition: TEST_MODEL })
+      .returning({ id: configModel.id });
+
+    const { id } = await call(router.configs.create, {
+      modelId: m!.id, name: "North hall",
+      customer: { cardCode: "C0001", cardName: "Acme" },
+    }, ctx);
+    const [row] = await db.select().from(configProject).where(eq(configProject.id, id));
+    expect(row!.name).toBe("North hall");
+    expect(row!.customer).toEqual({ cardCode: "C0001", cardName: "Acme" });
+    expect(row!.modelId).toBe(m!.id);
+    expect(row!.batches).toEqual(TEST_MODEL.batchDefaults);
   });
 });

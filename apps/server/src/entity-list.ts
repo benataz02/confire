@@ -38,6 +38,14 @@ const literal = (f: B1Field, value: string | number | boolean): string => {
 const condition = (cond: FilterCond, f: B1Field): string => {
   if (cond.op === "contains" || cond.op === "startswith")
     return `${cond.op}(${f.name},'${escapeLiteral(String(cond.value))}')`;
+  // B1's $filter has no reliable `in`; OR of eq is what search already emits, and andFilter
+  // parenthesizes each clause so this cannot steal later ANDs.
+  if (cond.op === "in") {
+    const values = Array.isArray(cond.value) ? cond.value : [cond.value];
+    if (!values.length) return "1 eq 0";
+    return values.map((v) => `${f.name} eq ${literal(f, v)}`).join(" or ");
+  }
+  if (Array.isArray(cond.value)) throw new Error(`Filter '${cond.field}' ${cond.op} needs a single value`);
   return `${f.name} ${cond.op} ${literal(f, cond.value)}`;
 };
 

@@ -26,6 +26,12 @@ const expr = (f: SqlField): SQL => sql`${f.col}`;
 
 const condition = (cond: FilterCond, f: SqlField): SQL => {
   const col = expr(f);
+  if (cond.op === "in") {
+    const values = Array.isArray(cond.value) ? cond.value : [cond.value];
+    // Empty IN matches nothing (dropping it would show more rows than asked).
+    return values.length ? or(...values.map((v) => eq(col, v)))! : sql`false`;
+  }
+  if (Array.isArray(cond.value)) throw new Error(`Filter '${cond.field}' ${cond.op} needs a single value`);
   switch (cond.op) {
     // ilike, not like: applySpec lowercased both sides, so case-insensitive is what every saved
     // view was written against.

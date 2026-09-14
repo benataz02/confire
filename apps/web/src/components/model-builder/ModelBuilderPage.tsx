@@ -1,12 +1,15 @@
-import { useBlocker } from "@tanstack/react-router";
+import { useBlocker, useNavigate } from "@tanstack/react-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Button, BusyIndicator, MessageStrip,
   ObjectPage, ObjectPageSection, ObjectPageTitle, ObjectStatus,
   Title, Toolbar,
 } from "@ui5/webcomponents-react";
 import type { Issue, ModelDef } from "@hera/config-engine";
+import { orpc } from "../../orpc.ts";
 import { tabOf, useDraftModel, type TabKey } from "./useDraftModel.ts";
 import { confirm } from "../confirm.ts";
+import { toast } from "../toast.ts";
 import { SettingsTab } from "./SettingsTab.tsx";
 import { ParamsTab } from "./ParamsTab.tsx";
 import { RulesTab } from "./RulesTab.tsx";
@@ -21,8 +24,23 @@ const EMPTY_MODEL: ModelDef = {
   bom: [], routing: [], pricing: { priceExpr: "0", quoteItemCode: "X" }, batchDefaults: [1],
 };
 
-export function ModelBuilderPage({ id }: { id: string }) {
+export function ModelBuilderPage({ id }: { id?: string }) {
   const m = useDraftModel(id);
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  // Both keys: `list` backs GlobalSearch, `rows` backs the paged list page.
+  const invalidateLists = () => {
+    void qc.invalidateQueries({ queryKey: orpc.models.list.queryOptions().queryKey });
+    void qc.invalidateQueries({ queryKey: orpc.models.rows.key() });
+  };
+  // Copies the *persisted* model, hence disabled while dirty. Delete is not dirty-gated —
+  // discarding the edits is the point — so it clears the flag before the blocker can ask.
+  const duplicate = useMutation(orpc.models.duplicate.mutationOptions({
+    onSuccess: (r) => { invalidateLists(); toast("Model duplicated"); void navigate({ to: "/models/$id", params: { id: r.id } }); },
+  }));
+  const remove = useMutation(orpc.models.remove.mutationOptions({
+    onSuccess: () => { m.setDirty(false); invalidateLists(); toast("Model deleted"); void navigate({ to: "/models" }); },
+  }));
 
   // Guard against losing an unsaved draft: intercept in-app navigation (including switching models,
   // which remounts via key={id}) and confirm; enableBeforeUnload covers hard reload / tab close.
@@ -66,16 +84,41 @@ export function ModelBuilderPage({ id }: { id: string }) {
             : m.saveError.message}
         </MessageStrip>
       ) : null}
+      {/* The server refuses a model that configurations still use, and the confirm dialog cannot
+          know that in advance — so the refusal has to be readable here. */}
+      {(remove.error ?? duplicate.error) ? (
+        <MessageStrip design="Negative" hideCloseButton>{(remove.error ?? duplicate.error)!.message}</MessageStrip>
+      ) : null}
 
       <ObjectPage
         mode="IconTabBar"
         style={{ flex: 1, minHeight: 0, height: "100%" }}
         titleArea={
-          <ObjectPageTitle header={<Title level="H4">{draft.name || "Untitled model"}</Title>}
+          <ObjectPageTitle
+            header={<Title level="H4">{draft.name.trim() || "New model"}</Title>}
             subHeader={m.dirty ? <ObjectStatus state="Critical">Unsaved changes</ObjectStatus> : undefined}
             actionsBar={
               <Toolbar design="Transparent">
-                <Button design="Emphasized" disabled={m.issues.length > 0 || !m.dirty || m.saving} onClick={() => void m.save()}>
+                {id ? (
+                  <Button icon="copy" design="Transparent" disabled={m.dirty || duplicate.isPending}
+                    tooltip={m.dirty ? "Save first" : "Duplicate model"}
+                    onClick={() => duplicate.mutate({ id })}>
+                    Duplicate
+                  </Button>
+                ) : null}
+                {id ? (
+                  <Button icon="delete" design="Transparent" disabled={remove.isPending}
+                    onClick={async () => {
+                      if (await confirm({
+                        title: "Delete model",
+                        message: `Delete "${draft.name || "this model"}"? A model used by a configuration can't be deleted. This cannot be undone.`,
+                        actionText: "Delete", destructive: true,
+                      })) remove.mutate({ ids: [id] });
+                    }}>
+                    Delete
+                  </Button>
+                ) : null}
+                <Button design="Emphasized" disabled={m.issues.length > 0 || !m.dirty || m.saving || !draft.name.trim()} onClick={() => void m.save()}>
                   {m.saving ? "Saving…" : "Save"}
                 </Button>
               </Toolbar>
@@ -83,8 +126,12 @@ export function ModelBuilderPage({ id }: { id: string }) {
           />
         }
       >
+        <ObjectPageSection id="settings" titleText={secTitle("Settings", "settings")}>
+          <SettingsTab draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
+            portalMeta={portalMeta} setPortalMeta={m.setPortalMeta} />
+        </ObjectPageSection>
         <ObjectPageSection id="params" titleText={secTitle("Parameters", "params")}>
-          <ParamsTab modelId={id} draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
+          <ParamsTab modelId={id ?? ""} draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
             lookups={lookups.data} lookupsError={lookups.error} onRetryLookups={() => void lookups.refetch()} />
         </ObjectPageSection>
         <ObjectPageSection id="rules" titleText={secTitle("Rules", "rules")}>
@@ -97,11 +144,7 @@ export function ModelBuilderPage({ id }: { id: string }) {
           <RoutingTab draft={draft} update={m.update} issues={allIssues} tables={m.tableCols} />
         </ObjectPageSection>
         <ObjectPageSection id="history" titleText={secTitle("History", "history")}>
-          <HistoryTab draft={draft} update={m.update} issues={allIssues} modelId={id} dirty={m.dirty} />
-        </ObjectPageSection>
-        <ObjectPageSection id="settings" titleText={secTitle("Settings", "settings")}>
-          <SettingsTab draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
-            portalMeta={portalMeta} setPortalMeta={m.setPortalMeta} />
+          <HistoryTab draft={draft} update={m.update} issues={allIssues} modelId={id ?? ""} dirty={m.dirty} />
         </ObjectPageSection>
       </ObjectPage>
     </div>

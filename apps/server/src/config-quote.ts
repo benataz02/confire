@@ -22,7 +22,7 @@ export type ConfigProjectRow = typeof configProject.$inferSelect;
 /** UDF on OQUT carrying configDocumentCommandId, so a retried createQuote finds the quotation it
  *  already posted instead of posting a second one. Must exist in the customer's B1 — the install
  *  step is one alphanumeric UDF of length 64 on Sales Quotation (Title). */
-export const DEDUP_UDF = "U_HERA_DedupKey";
+export const DEDUP_UDF = "U_CF_Key";
 
 /** Deterministic create command id / SAP dedup UDF value for a project's current selection.
  *  Keyed on what is being quoted, not a version counter: the same picks retried yield the same id

@@ -15,14 +15,23 @@ what a user will see.
 
 1. Sign in and open your tenant (e.g. `acme.lvh.me`).
 2. In the left navigation, click **Configurator models** (below Settings).
-3. You land on the **models list**. Click **New model**, give it a name, **Create** — you're
-   dropped straight into the builder for the new model.
+3. You land on the **models list**. Click **New model** — you're dropped straight into the
+   builder. Nothing is stored until you **Save**.
 
-To edit an existing model, click its row. To delete one, use the row's delete action. A model
-that is already used by a saved configuration can't be deleted — you'll get a message saying so.
+**New model**, **Duplicate** and **Delete** all sit on the bar directly above the table, next to
+the row count. To edit an existing model, click its row.
+
+- **Delete** removes every ticked model. One that is already used by a saved configuration can't be
+  deleted — you'll get a message saying so.
+- **Duplicate** needs exactly one model ticked. It copies the whole definition — parameters, rules,
+  tables, BOM, routing, pricing — under the name `<name> (copy)`, and opens it. The copy is
+  **never published to the client portal**, even when the original is: publish it yourself once
+  you've looked it over.
 
 A brand-new model starts minimal but valid: one empty section, a default price of `unitCost * 1.2`,
-and batch sizes `1, 10, 100`. Nothing is required until you add it.
+and batch sizes `1, 10, 100`. The page title is **New model** until you name it on the **Settings**
+tab; **Save** is the first write.
+Nothing else is required until you add it.
 
 ---
 
@@ -348,6 +357,10 @@ errors. After saving, "Unsaved changes" clears; reload the page any time — you
 
 If you left something broken, open the **message button**, click a problem to jump to its field,
 fix it, and Save lights up.
+
+**Duplicate** and **Delete** sit beside Save in the builder's header, and do the same as on the
+list. Duplicate copies what is *saved*, so it greys out while "Unsaved changes" is showing — save
+first. Delete does not: it discards whatever you were editing along with the model.
 
 ---
 

@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, count, eq, max } from "drizzle-orm";
+import { and, count, eq, inArray, max } from "drizzle-orm";
 import { db, configHistory, configModel, configProject } from "@hera/db";
 import { checkModel, ModelDefZ, RESERVED_LINE_FIELDS } from "@hera/config-engine";
 import { adminProcedure } from "../base.ts";
@@ -10,6 +10,7 @@ import { runnerFor, tenantConnector } from "../../b1.ts";
 import { syncModelHistory } from "../../history-sync.ts";
 import { compileSpec, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { entitySchema } from "../../entity-meta.ts";
+import { copyName } from "../../copy-name.ts";
 import { viaB1 } from "../../b1.ts";
 
 // Admin-only configurator model builder API. save is the gate: a model that passes
@@ -92,14 +93,49 @@ export const modelsRouter = {
       return ins!;
     }),
 
-  remove: adminProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
-    const [inUse] = await db
-      .select({ id: configProject.id })
+  // Copy under the first free name. Server-side because `save` only accepts a definition, so a
+  // client-side copy would silently drop portalDescription (a column, not part of the jsonb).
+  // No checkModel: a byte-identical copy of a stored definition either already passed on save, or
+  // now fails only because masterdata was deleted since — an unhelpful error on an unedited copy.
+  // config_history is not copied; the definition keeps history.query, so "Sync now" repopulates it.
+  duplicate: adminProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
+    const [row] = await db
+      .select()
+      .from(configModel)
+      .where(and(eq(configModel.id, input.id), eq(configModel.tenantId, context.tenantId)));
+    if (!row) throw new ORPCError("NOT_FOUND");
+    const taken = await db
+      .select({ name: configModel.name })
+      .from(configModel)
+      .where(eq(configModel.tenantId, context.tenantId));
+    const name = copyName(row.name, taken.map((t) => t.name));
+    // `portal` is deliberately left at its false default: a copy of a published model must not
+    // publish itself to the client portal before anyone has looked at it.
+    const [ins] = await db
+      .insert(configModel)
+      .values({
+        tenantId: context.tenantId, name,
+        definition: { ...row.definition, name },
+        portalDescription: row.portalDescription,
+      })
+      .returning();
+    return ins!;
+  }),
+
+  // One delete path for the object page (one id) and the list report (many). All-or-nothing: if
+  // any model in the batch is in use the whole batch is refused, so there is no half-deleted
+  // selection to explain — and the message names which ones, which a per-id loop could not.
+  remove: adminProcedure.input(z.object({ ids: z.array(z.uuid()).min(1) })).handler(async ({ input, context }) => {
+    const inUse = await db
+      .selectDistinct({ name: configModel.name })
       .from(configProject)
-      .where(and(eq(configProject.tenantId, context.tenantId), eq(configProject.modelId, input.id)))
-      .limit(1);
-    if (inUse) throw new ORPCError("BAD_REQUEST", { message: "Model is used by existing configurations" });
-    await db.delete(configModel).where(and(eq(configModel.id, input.id), eq(configModel.tenantId, context.tenantId)));
+      .innerJoin(configModel, eq(configModel.id, configProject.modelId))
+      .where(and(eq(configProject.tenantId, context.tenantId), inArray(configProject.modelId, input.ids)));
+    if (inUse.length)
+      throw new ORPCError("BAD_REQUEST", {
+        message: `${inUse.map((m) => m.name).join(", ")} ${inUse.length === 1 ? "is" : "are"} used by existing configurations`,
+      });
+    await db.delete(configModel).where(and(inArray(configModel.id, input.ids), eq(configModel.tenantId, context.tenantId)));
     return { ok: true };
   }),
 

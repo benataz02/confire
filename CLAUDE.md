@@ -96,9 +96,21 @@ which query rows a resolve actually fetches — a model naming none never touche
 `entries` + `candidates` + `selection`, and a recalculate overwrites them in place. Model and
 lookups are resolved *live* on every read (`liveEngine` in `orpc/routers/configs.ts`), so a
 quoted configuration is re-priced against what SAP says now rather than what it said then —
-`quotedValue`/`quotedCost` are the only frozen numbers, captured for the dashboard. `status ===
-"calculated"` is the invariant that ties the two together: every writer of `entries`/`batches`
-also resets the status to `draft`. A quoted project is locked by `assertConfigMutable`.
+`quotedValue`/`quotedCost` are the only frozen numbers, captured for the dashboard.
+
+**Inputs and candidates move in one statement.** `candidates` is emptied in the same `UPDATE` that
+writes `entries`/`batches`/`tables`, so a reader sees either the old inputs with their candidates or
+the new inputs with none — never a mismatched pair. That is why there is no `calculated` status:
+`calculatedAt !== null` is the whole freshness signal, and the UI derives the "Calculated" badge
+from `candidates.length` (`statusFor` in `runView.ts`). A quoted project is locked by
+`assertConfigMutable`.
+
+**One edit is one call.** `configs.calculate` writes the inputs and recomputes in a single handler,
+and returns exactly what `configs.get` returns; `update`/`select`/`reject` return the same payload.
+The client sets its query cache from the response (`setProject` in `ConfigProcessPage.tsx`) rather
+than invalidating, so the page holds one `draft` object and `draft !== null` is its whole dirty
+check. The portal still runs `update` → `run` → `get`: it calculates on a button press, not per
+keystroke.
 
 ## `packages/b1` — the SAP connector
 
@@ -148,7 +160,7 @@ file records the three verified 400s that prove it. The `DocEntry` equality **is
   exposes is read-only.
 - **Idempotent quote write-back.** `configDocumentCommandId()` (SHA-256 over
   `tenant|project|canonicalJson(selected assignments)`, keys sorted because Postgres reorders
-  jsonb) is written to `U_HERA_DedupKey` and checked before create. It hashes the selected
+  jsonb) is written to `U_CF_Key` and checked before create. It hashes the selected
   *assignments*, not their indices — an index only means something against the candidate list that
   produced it, and a recalculate replaces that list. `config_project.b1DocEntry` covers a double
   click; the UDF covers the case where B1 created the document and the response never arrived.

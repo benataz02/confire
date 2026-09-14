@@ -311,7 +311,7 @@ export function QueryValueHelp({
       input: (next: number | undefined) => ({ modelId: source.modelId, table, cursor: next, search: term, searchCols }),
       getNextPageParam: (last) => last.nextSkip,
       initialPageParam: undefined as number | undefined,
-      enabled: !!table && search !== null,
+      enabled: !!table && search !== null && !!source.modelId,
       retry: false,
       staleTime: 5 * 60_000,
       placeholderData: keepPreviousData,

@@ -1,8 +1,7 @@
 import { useMemo } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
-import { IllustratedMessage, ObjectStatus, Text, Toolbar, ToolbarButton } from "@ui5/webcomponents-react";
-import "@ui5/webcomponents-fiori/dist/illustrations/NoEntries.js";
+import { Button, ObjectStatus, Text } from "@ui5/webcomponents-react";
 import { orpc } from "../../../orpc.ts";
 import { listQuery, useListSpec, type ListColumn } from "../../../variants.ts";
 import { ListReport } from "../../../components/ListReport.tsx";
@@ -29,15 +28,6 @@ const COLUMNS: ListColumn[] = [
   },
   { name: "updatedAt", type: "date", label: "Updated" },
 ];
-
-const noData = (reason: "Empty" | "Filtered") =>
-  reason === "Filtered" ? (
-    <IllustratedMessage name="NoEntries" design="Auto" titleText="Nothing in this view"
-      subtitleText="Try a different filter." />
-  ) : (
-    <IllustratedMessage name="NoEntries" design="Auto" titleText="No requests yet"
-      subtitleText="Configure a product and request a quote from your supplier." />
-  );
 
 function MyRequests() {
   const navigate = useNavigate();
@@ -70,13 +60,8 @@ function MyRequests() {
       hasMore={page.hasNextPage}
       onLoadMore={() => { if (!page.isFetchingNextPage) void page.fetchNextPage(); }}
       onRowClick={(row) => navigate({ to: "/portal/$id", params: { id: String(row.id) } })}
-      noData={noData}
-      actions={
-        <Toolbar design="Transparent">
-          {/* "New request" left the nav in favour of five document items; it lives here now. */}
-          <ToolbarButton design="Emphasized" text="New request" onClick={() => navigate({ to: "/portal/new" })} />
-        </Toolbar>
-      }
+      /* "New request" left the nav in favour of five document items; it lives here now. */
+      actions={() => <Button design="Emphasized" onClick={() => navigate({ to: "/portal/new" })}>New request</Button>}
     />
   );
 }

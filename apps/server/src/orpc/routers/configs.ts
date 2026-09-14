@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   db, configModel, configProject, user,
   type ConfigCandidate, type ConfigSelection, type ProjectEvent,
@@ -20,6 +20,7 @@ import {
 import { compileSpec, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { loadHistoryRows } from "../../history-sync.ts";
 import { scoreRows } from "../../similarity.ts";
+import { copyName } from "../../copy-name.ts";
 import { docHistoryQuery, flattenDocs, sortDocRows, type DocRow } from "../../doc-history.ts";
 import {
   assertConfigMutable,
@@ -142,13 +143,17 @@ export async function liveEngine(tenantId: string, project: { modelId: string; e
   return { model, lookups: await enrichedLookups(tenantId, model, project.entries) };
 }
 
-/** The calculate path, shared by configs.run and portal.run.
+/** The calculate path, shared by configs.calculate and portal.run.
  *
- *  Reuse: a calculated project whose model is unchanged keeps its candidates instead of
- *  re-enumerating. `status === "calculated"` is what proves those candidates still match
- *  the project's own entries — every writer of entries/batches resets the status to draft. */
+ *  Reuse: a project whose model is unchanged keeps its candidates instead of re-enumerating.
+ *  `calculatedAt` is what proves those candidates still match the project's own entries — every
+ *  writer of entries/batches/tables empties `candidates` and nulls `calculatedAt` in the same
+ *  statement, so a non-null one cannot describe stale inputs.
+ *
+ *  `run` stays injectable for tests and for portal.run; omitted, enrichedLookups builds it from
+ *  the model — and only past the reuse check, so a no-op recalculate never pays for it. */
 export async function calculateProject(
-  tenantId: string, projectId: string, run: QueryRunner,
+  tenantId: string, projectId: string, run?: QueryRunner,
 ) {
   const [project] = await db
     .select({
@@ -165,9 +170,9 @@ export async function calculateProject(
 
   const model = await loadModel(tenantId, project.modelId);
 
-  // Runs before the lookups resolve: a no-op recalculate must not pay for a resolution it is about
-  // to throw away. The process page auto-calculates ~1s after every field edit.
-  if (project.status === "calculated" && project.calculatedAt && project.calculatedAt >= model.updatedAt) {
+  // Runs before the runner and the lookups resolve: a no-op recalculate must not pay for a
+  // resolution it is about to throw away. The process page auto-calculates ~1s after every edit.
+  if (project.calculatedAt && project.calculatedAt >= model.updatedAt) {
     return {
       projectVersion: project.updatedAt.toISOString(), reused: true,
       candidateCount: project.candidates.length, capped: project.candidates.length >= 200,
@@ -193,11 +198,11 @@ export async function calculateProject(
       })),
     }));
 
-    // One row, overwritten in place: entries and candidates move together, which is what lets
-    // status === "calculated" stand in for "these entries produced these candidates".
+    // One row, overwritten in place: entries and candidates move together. calculatedAt going
+    // non-null here is the only claim that they match — there is no status flag restating it.
     const now = new Date();
     const updated = await db.update(configProject)
-      .set({ entries, batches, candidates, calculatedAt: now, status: "calculated", updatedAt: now })
+      .set({ entries, batches, candidates, calculatedAt: now, updatedAt: now })
       .where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId)))
       .returning({ id: configProject.id });
     if (!updated.length) throw new ORPCError("NOT_FOUND");
@@ -406,6 +411,41 @@ export const CONFIG_FIELDS: SqlFields = {
   updatedAt: { col: configProject.updatedAt, kind: "date" },
 };
 
+/** The project row and the two facts about its last calculation — what a mutation returns, so the
+ *  client patches its query cache from the response instead of refetching. Deliberately no model:
+ *  it is a large jsonb document that cannot change under a calculate (the Model field locks as
+ *  soon as a configuration has any input), so re-sending it on every keystroke would put the
+ *  biggest thing on the wire for the one thing that never moved. */
+async function projectState(
+  tenantId: string,
+  id: string,
+  calc?: { capped: boolean; widest?: { key: string; size: number } },
+) {
+  const [project] = await db
+    .select()
+    .from(configProject)
+    .where(and(eq(configProject.id, id), eq(configProject.tenantId, tenantId)))
+    .limit(1);
+  if (!project) throw new ORPCError("NOT_FOUND");
+  return {
+    project,
+    capped: calc?.capped ?? project.candidates.length >= 200,
+    // ponytail: `widest` is a run-time hint only — a plain get (page reload) has no run to report,
+    // same as calculateProject's reuse path. Store it on the row if the hint has to survive one.
+    widest: calc?.widest,
+  };
+}
+
+/** projectState plus the two things only a page load or a model switch can change. */
+async function projectPayload(tenantId: string, id: string) {
+  const state = await projectState(tenantId, id);
+  const [model, [creator]] = await Promise.all([
+    loadModel(tenantId, state.project.modelId),
+    db.select({ email: user.email }).from(user).where(eq(user.id, state.project.createdBy)).limit(1),
+  ]);
+  return { ...state, model, createdByEmail: creator?.email ?? null };
+}
+
 export const configsRouter = {
   // Members can list models (id + name only) to start a configuration; editing stays admin-only.
   models: userProcedure.handler(({ context }) =>
@@ -452,33 +492,71 @@ export const configsRouter = {
     return listPage(raw, input.top, input.skip);
   }),
 
-  get: userProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
-    const [project] = await db
-      .select()
-      .from(configProject)
-      .where(and(eq(configProject.id, input.id), eq(configProject.tenantId, context.tenantId)))
-      .limit(1);
-    if (!project) throw new ORPCError("NOT_FOUND");
-    const model = await loadModel(context.tenantId, project.modelId);
-    const [creator] = await db.select({ email: user.email }).from(user).where(eq(user.id, project.createdBy)).limit(1);
-    return { project, model, createdByEmail: creator?.email ?? null };
-  }),
+  get: userProcedure
+    .input(z.object({ id: z.uuid() }))
+    .handler(({ input, context }) => projectPayload(context.tenantId, input.id)),
 
   create: userProcedure
-    // No create dialog on the client: a new configuration is an empty draft, and name / model /
-    // customer are filled in on its General section (configs.update).
-    .input(z.object({ modelId: z.uuid() }))
+    // The new page collects these before insert. Name is required so a cancelled /configs/new
+    // never leaves an unnamed row; customer can wait for the process page (needs a live B1).
+    .input(z.object({
+      modelId: z.uuid(),
+      name: z.string().min(1),
+      customer: z.object({ cardCode: z.string(), cardName: z.string() }).nullable().optional(),
+    }))
     .handler(async ({ input, context }) => {
       const model = await loadModel(context.tenantId, input.modelId);
       const [ins] = await db
         .insert(configProject)
         .values({
-          tenantId: context.tenantId, modelId: model.id, name: "",
+          tenantId: context.tenantId, modelId: model.id, name: input.name,
+          customer: input.customer ?? null,
           batches: model.definition.batchDefaults, createdBy: context.userId,
         })
         .returning({ id: configProject.id });
       return { id: ins!.id };
     }),
+
+  // Copy the inputs, then recalculate so the copy opens against what SAP says now. Deliberately
+  // no assertConfigMutable: duplicating a *quoted* configuration is the point — the source stays
+  // locked and the copy is a fresh draft. Everything not named below takes its column default,
+  // which is what clears status/candidates/calculatedAt/quoted*/b1DocEntry. b1DocEntry especially:
+  // it is the quote idempotency record, so a copy inheriting it would refuse to post.
+  duplicate: userProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
+    const [row] = await db
+      .select()
+      .from(configProject)
+      .where(and(eq(configProject.id, input.id), eq(configProject.tenantId, context.tenantId)));
+    if (!row) throw new ORPCError("NOT_FOUND");
+    const taken = await db
+      .select({ name: configProject.name })
+      .from(configProject)
+      .where(eq(configProject.tenantId, context.tenantId));
+    const [ins] = await db
+      .insert(configProject)
+      .values({
+        tenantId: context.tenantId, modelId: row.modelId,
+        // configs.create inserts an empty name, so a copy of a not-yet-named draft would be
+        // called " (copy)" without the fallback.
+        name: copyName(row.name.trim() || "Configuration", taken.map((t) => t.name)),
+        customer: row.customer, entries: row.entries, batches: row.batches, tables: row.tables,
+        // Not row.source: an internal copy of a portal request must not show up in that client's
+        // "My requests" list, which filters on source = "portal".
+        createdBy: context.userId,
+      })
+      .returning({ id: configProject.id });
+    const id = ins!.id;
+    // ponytail: roll the copy back on a failed recompute, so a Duplicate that errors leaves
+    // nothing behind. Two lines to flip to "keep it as an uncalculated draft" if failing on a
+    // down agent turns out to annoy more than the orphan row would.
+    try {
+      await calculateProject(context.tenantId, id);
+    } catch (e) {
+      await db.delete(configProject).where(and(eq(configProject.id, id), eq(configProject.tenantId, context.tenantId)));
+      throw e;
+    }
+    return { id };
+  }),
 
   update: userProcedure
     .input(
@@ -490,18 +568,15 @@ export const configsRouter = {
         // BusinessPartners value help, so a bad code has to be hand-crafted against the API.
         // Read the BP here (as portalClients.invite does) if that stops being good enough.
         customer: z.object({ cardCode: z.string(), cardName: z.string() }).nullable().optional(),
-        entries: EntriesZ.optional(),
-        batches: z.array(z.number().int().min(1)).optional(),
-        tables: TableRowsZ.optional(),
       }),
     )
     .handler(async ({ input, context }) => {
       await assertConfigMutable(context.tenantId, input.id);
       const { id, ...rest } = input;
       const fields: Partial<typeof configProject.$inferInsert> = { ...rest, updatedAt: new Date() };
-      // Changing what gets computed invalidates a previous run's "calculated" claim.
-      if (input.entries !== undefined || input.batches !== undefined || input.tables !== undefined)
-        fields.status = "draft";
+      // entries/batches/tables are configs.calculate's, not this handler's: they cannot be written
+      // without recomputing what they produce.
+      //
       // Switching the model invalidates every entry (a param key only means something inside its
       // own model), so entries/batches start over. Only on an actual change — re-sending the same
       // modelId must not wipe a configuration. loadModel also proves the model is this tenant's.
@@ -517,7 +592,10 @@ export const configsRouter = {
           fields.entries = {};
           fields.batches = model.definition.batchDefaults;
           fields.tables = {}; // a table key only means something inside its own model, like a param key
-          fields.status = "draft";
+          // Candidates go with the inputs that produced them, or the page renders the old model's
+          // assignments against the new definition.
+          fields.candidates = [];
+          fields.calculatedAt = null;
         }
       }
       const updated = await db
@@ -526,11 +604,13 @@ export const configsRouter = {
         .where(and(eq(configProject.id, id), eq(configProject.tenantId, context.tenantId)))
         .returning({ id: configProject.id });
       if (!updated.length) throw new ORPCError("NOT_FOUND");
-      return { ok: true };
+      return projectPayload(context.tenantId, id);
     }),
 
-  remove: userProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
-    await db.delete(configProject).where(and(eq(configProject.id, input.id), eq(configProject.tenantId, context.tenantId)));
+  // One delete path: the object page passes its single id in the same array the list report's
+  // bulk action passes. One statement either way, so a partial delete is not a state that exists.
+  remove: userProcedure.input(z.object({ ids: z.array(z.uuid()).min(1) })).handler(async ({ input, context }) => {
+    await db.delete(configProject).where(and(inArray(configProject.id, input.ids), eq(configProject.tenantId, context.tenantId)));
     return { ok: true };
   }),
 
@@ -562,20 +642,36 @@ export const configsRouter = {
     .input(z.object({ id: z.uuid(), entries: EntriesZ }))
     .handler(({ input, context }) => searchSimilarRows(context.tenantId, input.id, input.entries)),
 
-  run: userProcedure.input(z.object({ projectId: z.uuid() })).handler(async ({ input, context }) => {
-    await assertConfigMutable(context.tenantId, input.projectId);
-    const [project] = await db
-      .select({ modelId: configProject.modelId })
-      .from(configProject)
-      .where(and(eq(configProject.id, input.projectId), eq(configProject.tenantId, context.tenantId)))
-      .limit(1);
-    if (!project) throw new ORPCError("NOT_FOUND");
-    const model = await loadModel(context.tenantId, project.modelId);
-    const { candidateCount, capped, widest } = await calculateProject(
-      context.tenantId, input.projectId, await modelRunner(context.tenantId, model.definition),
-    );
-    return { candidateCount, capped, widest };
-  }),
+  // Edit and recalculate in one round trip. The process page auto-calculates ~1s after every field
+  // edit, and update -> get -> run -> get was four calls for one keystroke's worth of change.
+  // Returns exactly what `get` returns, so the client sets its cache from the response.
+  calculate: userProcedure
+    .input(z.object({
+      id: z.uuid(),
+      entries: EntriesZ.optional(),
+      batches: z.array(z.number().int().min(1)).optional(),
+      tables: TableRowsZ.optional(),
+    }))
+    .handler(async ({ input, context }) => {
+      await assertConfigMutable(context.tenantId, input.id);
+      const { id, ...edits } = input;
+      // Inputs and candidates move in ONE statement: a concurrent reader sees either the old pair
+      // or the new inputs with no candidates, never a mismatched pair. That is what replaces the
+      // old `status === "calculated"` convention. Deliberately not one transaction with the
+      // recompute — a calc that throws (conflict, no valid candidate) must still keep the edits,
+      // and calculateProject's own UPDATE is what makes the result durable.
+      if (Object.keys(edits).length) {
+        const written = await db
+          .update(configProject)
+          .set({ ...edits, candidates: [], calculatedAt: null, updatedAt: new Date() })
+          .where(and(eq(configProject.id, id), eq(configProject.tenantId, context.tenantId)))
+          .returning({ id: configProject.id });
+        if (!written.length) throw new ORPCError("NOT_FOUND");
+      }
+      // No edits is the live case, not a no-op: it is how a fresh draft, or one whose model was
+      // just switched, gets its first calculation.
+      return projectState(context.tenantId, id, await calculateProject(context.tenantId, id));
+    }),
 
   // Store the user's candidate/batch/override picks; totals are recomputed HERE against the live
   // model and lookups — client-sent numbers are never persisted. The FOR UPDATE below is the fence.
@@ -595,22 +691,25 @@ export const configsRouter = {
       if (!pre) throw new ORPCError("NOT_FOUND");
       const { model, lookups } = await liveEngine(context.tenantId, pre);
 
-      return db.transaction(async (tx) => {
+      await db.transaction(async (tx) => {
         const [project] = await tx
-          .select({ status: configProject.status, candidates: configProject.candidates, tables: configProject.tables })
+          .select({ candidates: configProject.candidates, tables: configProject.tables })
           .from(configProject)
           .where(and(eq(configProject.id, input.projectId), eq(configProject.tenantId, context.tenantId)))
           .for("update");
         if (!project) throw new ORPCError("NOT_FOUND");
         await assertConfigMutable(context.tenantId, input.projectId, tx);
         validateSelectionPairs(project.candidates, input.selection);
-        const selections = applySelection(model.definition, lookups, project.candidates, input.selection, project.tables);
+        // Pricing gate, result discarded: validateSelectionPairs proves the candidate/batch pairs
+        // exist, but only computeOutputs proves the user's *overrides* can be priced at all. Let a
+        // DslError through here and it resurfaces at quoteDraft, against a locked project.
+        applySelection(model.definition, lookups, project.candidates, input.selection, project.tables);
         await tx
           .update(configProject)
           .set({ selection: input.selection })
           .where(and(eq(configProject.id, input.projectId), eq(configProject.tenantId, context.tenantId)));
-        return { selections };
       });
+      return projectState(context.tenantId, input.projectId);
     }),
 
   // What will be posted to B1, recomputed from the persisted project. The commandId comes back
@@ -643,6 +742,6 @@ export const configsRouter = {
         ))
         .returning({ id: configProject.id });
       if (!updated.length) throw new ORPCError("BAD_REQUEST", { message: "Only a requested configuration can be rejected" });
-      return { ok: true };
+      return projectState(context.tenantId, input.id);
     }),
 };

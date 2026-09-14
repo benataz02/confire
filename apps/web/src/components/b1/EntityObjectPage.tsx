@@ -54,7 +54,10 @@ export function EntityObjectPage({
       ? orpc.portal.docs.schema.queryOptions({ input: { entity } })
       : orpc.entities.schema.queryOptions({ input: { entity } })),
     retry: false,
-    staleTime: 60 * 60_000,
+    // The server answers this from entity_meta in Postgres and never re-reads $metadata on its
+    // own, so a day in the browser cache costs nothing: the Refresh button writes through with
+    // setQueryData, and a reload falls back to the row.
+    staleTime: 24 * 60 * 60_000,
   });
   const key = useMemo(() => (schema.data ? coerceKey(schema.data, parsed) : parsed), [schema.data, parsed]);
   // No profile fetch on the portal: nothing there is editable and entities.profile is admin-only.

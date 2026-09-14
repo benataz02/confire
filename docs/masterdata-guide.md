@@ -20,11 +20,20 @@ same definition, so a price list is maintained once.
 | **Source** | `Maintained here`, or `B1 · Items` for a query. |
 | **Columns** / **Rows** | size; a query says `Live` — its rows come from SAP at read time. |
 
+The buttons sit on the bar directly above the table, next to the row count.
+
 - Click a row to open it.
 - Tick rows and press **Delete** to remove several at once. Deletion is immediate and cannot be
   undone: a model that references a deleted name fails its lookups the next time it resolves them
   (names live inside the model document, so nothing can check them for you first).
+- Tick **exactly one** row and press **Duplicate** to copy it. The copy is named
+  `<name> (copy)` — or `(copy 2)`, `(copy 3)` if that is taken — and opens straight away. Both
+  kinds copy whole: a table brings its columns and rows, a query brings its query. Duplicate is
+  hidden when several rows are ticked, since there would be nothing to open.
 - **Create** opens an empty table on its own page.
+
+Open a table and the same **Duplicate** and **Delete** sit in its header. Duplicate copies what is
+*saved*, so it greys out while you have unsaved changes — save first, or reload to drop them.
 
 ---
 

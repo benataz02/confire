@@ -1,4 +1,4 @@
-import { useNavigate, type ErrorComponentProps, type NotFoundRouteProps } from "@tanstack/react-router";
+import { useNavigate, useRouter, type ErrorComponentProps, type NotFoundRouteProps } from "@tanstack/react-router";
 import { Button, IllustratedMessage } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/ErrorScreen.js";
 import "@ui5/webcomponents-fiori/dist/illustrations/PageNotFound.js";
@@ -9,6 +9,7 @@ import "@ui5/webcomponents-fiori/dist/illustrations/tnt/CodePlaceholder.js";
 
 // `reset()` is router.invalidate() under the hood — it re-runs the loader, so retry is real.
 export function RouteError({ error, reset }: ErrorComponentProps) {
+  const router = useRouter();
   return (
     <IllustratedMessage
       name="ErrorScreen"
@@ -18,7 +19,8 @@ export function RouteError({ error, reset }: ErrorComponentProps) {
       subtitleText={error.message}
     >
       <Button design="Emphasized" onClick={() => reset()}>Try again</Button>
-      <Button onClick={() => window.location.reload()}>Reload page</Button>
+      {/* IllustratedMessage's default slot is IButton[] with no inter-button gap in UI5 2.26. */}
+      <Button style={{ marginInlineStart: "0.5rem" }} onClick={() => router.history.back()}>Go back</Button>
     </IllustratedMessage>
   );
 }

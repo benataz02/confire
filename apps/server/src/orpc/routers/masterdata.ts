@@ -1,12 +1,13 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, configMasterdata, configModel } from "@hera/db";
 import { ODataQueryZ, QuerySourceZ, ValZ, referencedTables } from "@hera/config-engine";
 import { adminProcedure } from "../base.ts";
 import { bumpMasterdata, DEFAULT_PAGE, fetchQueryTable, withSearch, type MasterdataRow } from "../../lookups.ts";
 import { compileSpec, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { runnerFor, tenantConnector } from "../../b1.ts";
+import { copyName } from "../../copy-name.ts";
 
 // Tenant masterdata: one entity, two kinds. "table" keeps its values here; "query" keeps a live
 // B1/Beas read. Models reference either by name and never hold the definition, so the same query
@@ -136,26 +137,61 @@ export const masterdataRouter = {
     }
   }),
 
+  // Copy under the first free name. Server-side because the list page holds only the display
+  // projection (no columns/rows/query), so a client-side copy would have to refetch the row first.
+  duplicate: adminProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
+    const [row] = await db
+      .select()
+      .from(configMasterdata)
+      .where(and(eq(configMasterdata.id, input.id), eq(configMasterdata.tenantId, context.tenantId)));
+    if (!row) throw new ORPCError("NOT_FOUND");
+    const taken = await db
+      .select({ name: configMasterdata.name })
+      .from(configMasterdata)
+      .where(eq(configMasterdata.tenantId, context.tenantId));
+    const [ins] = await db
+      .insert(configMasterdata)
+      .values({
+        tenantId: context.tenantId,
+        name: copyName(row.name, taken.map((t) => t.name)),
+        kind: row.kind, columns: row.columns, rows: row.rows, query: row.query,
+      })
+      .returning({ id: configMasterdata.id });
+    bumpMasterdata(context.tenantId);
+    return { id: ins!.id };
+  }),
+
   // Refuses while a model still names the table: the alternative is a dangling reference that only
   // shows up at resolve time as "Unknown lookup table '<name>'", on a configuration, to whoever
   // opened it. ponytail: names live inside jsonb, so this is a scan over the tenant's models —
   // tens of documents. A reference table maintained on model save only if that stops being true.
-  remove: adminProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
-    const [row] = await db
+  // One delete path for the object page (one id) and the list report (many). All-or-nothing: one
+  // referenced table refuses the whole batch, so nothing is half-deleted and the message can name
+  // every offender at once — a per-id loop would stop at the first and leave the rest guessing.
+  remove: adminProcedure.input(z.object({ ids: z.array(z.uuid()).min(1) })).handler(async ({ input, context }) => {
+    const rows = await db
       .select({ name: configMasterdata.name })
       .from(configMasterdata)
-      .where(and(eq(configMasterdata.id, input.id), eq(configMasterdata.tenantId, context.tenantId)));
-    if (!row) throw new ORPCError("NOT_FOUND");
+      .where(and(inArray(configMasterdata.id, input.ids), eq(configMasterdata.tenantId, context.tenantId)));
+    if (rows.length !== input.ids.length) throw new ORPCError("NOT_FOUND");
     const models = await db
       .select({ name: configModel.name, definition: configModel.definition })
       .from(configModel)
       .where(eq(configModel.tenantId, context.tenantId));
-    const used = models.filter((m) => referencedTables(m.definition).has(row.name)).map((m) => m.name);
-    if (used.length)
+    // table name -> the models still naming it. Still one scan over the tenant's models whatever
+    // the batch size (see the ponytail note above).
+    const used = new Map<string, string[]>();
+    for (const m of models) {
+      const refs = referencedTables(m.definition);
+      for (const r of rows) if (refs.has(r.name)) used.set(r.name, [...(used.get(r.name) ?? []), m.name]);
+    }
+    if (used.size)
       throw new ORPCError("CONFLICT", {
-        message: `'${row.name}' is used by ${used.length === 1 ? "model" : "models"} ${used.join(", ")}. Remove the reference there first.`,
+        message: `${[...used]
+          .map(([name, ms]) => `'${name}' is used by ${ms.length === 1 ? "model" : "models"} ${ms.join(", ")}`)
+          .join("; ")}. Remove the reference there first.`,
       });
-    await db.delete(configMasterdata).where(and(eq(configMasterdata.id, input.id), eq(configMasterdata.tenantId, context.tenantId)));
+    await db.delete(configMasterdata).where(and(inArray(configMasterdata.id, input.ids), eq(configMasterdata.tenantId, context.tenantId)));
     bumpMasterdata(context.tenantId);
     return { ok: true };
   }),

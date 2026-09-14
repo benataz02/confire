@@ -1,9 +1,11 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { checkModel, type Issue, type ModelDef } from "@hera/config-engine";
 import { orpc } from "../../orpc.ts";
 import type { TableCols } from "./exprHelpers.ts";
 import { toast } from "../toast.ts";
+import { starterModel } from "./starterModel.ts";
 
 export type TabKey = "params" | "rules" | "bom" | "routing" | "history" | "settings";
 
@@ -33,14 +35,17 @@ export function tabOf(path: string): TabKey {
 
 // One draft ModelDef in memory; checkModel on every change is the same gate the server runs
 // on save, so "0 issues" here means the save cannot be rejected for model errors.
-export function useDraftModel(id: string) {
+export function useDraftModel(id?: string) {
   const qc = useQueryClient();
-  const rec = useQuery(orpc.models.get.queryOptions({ input: { id } }));
+  const navigate = useNavigate();
+  const rec = useQuery({ ...orpc.models.get.queryOptions({ input: { id: id! } }), enabled: !!id });
   const tablesQ = useQuery(orpc.masterdata.list.queryOptions());
-  const [draft, setDraft] = useState<ModelDef | null>(null);
+  const [draft, setDraft] = useState<ModelDef | null>(() => (id ? null : starterModel("")));
   const [dirty, setDirty] = useState(false);
   const [serverIssues, setServerIssues] = useState<Issue[]>([]);
-  const [portalMeta, setPortalMetaState] = useState<{ portal: boolean; portalDescription: string } | null>(null);
+  const [portalMeta, setPortalMetaState] = useState<{ portal: boolean; portalDescription: string } | null>(
+    () => (id ? null : { portal: false, portalDescription: "" }),
+  );
 
   useEffect(() => {
     if (rec.data && draft === null) setDraft(rec.data.definition);
@@ -63,7 +68,7 @@ export function useDraftModel(id: string) {
     [tables],
   );
   // Commit model: dialogs (ParamDialog, ComboTableDialog) buffer edits and commit on OK; inline
-  // editors (RulesTab, SettingsTab, title edits) mutate this draft directly per keystroke. Validation
+  // editors (RulesTab, SettingsTab) mutate this draft directly per keystroke. Validation
   // runs against a deferred draft so checkModel lags fast typing instead of blocking every keystroke.
   const deferredDraft = useDeferredValue(draft);
   const modelIssues = useMemo(
@@ -77,9 +82,11 @@ export function useDraftModel(id: string) {
         setDirty(false);
         setServerIssues([]);
         qc.invalidateQueries({ queryKey: orpc.models.list.queryOptions().queryKey });
+        qc.invalidateQueries({ queryKey: orpc.models.rows.key() });
         // save RETURNs the saved row, so seed the cache with it instead of refetching models.get.
-        qc.setQueryData(orpc.models.get.queryOptions({ input: { id } }).queryKey, row);
+        qc.setQueryData(orpc.models.get.queryOptions({ input: { id: row.id } }).queryKey, row);
         toast("Model saved");
+        if (!id) void navigate({ to: "/models/$id", params: { id: row.id }, replace: true });
       },
       onError: (e) => {
         // models.save rejects invalid definitions with BAD_REQUEST + data.issues (span Issues).
@@ -99,21 +106,24 @@ export function useDraftModel(id: string) {
     issues: modelIssues,
     serverIssues,
     dirty,
+    /** Clear the unsaved-changes blocker before navigating away deliberately (Delete). */
+    setDirty,
     portalMeta,
     setPortalMeta: (p: { portal: boolean; portalDescription: string }) => {
       setPortalMetaState(p);
       setDirty(true);
     },
     save: () => {
-      if (!draft || !portalMeta) return;
+      if (!draft || !portalMeta || !draft.name.trim()) return;
       saveMut.mutate({
-        id, definition: draft,
+        ...(id ? { id } : {}),
+        definition: draft,
         portal: portalMeta.portal, portalDescription: portalMeta.portalDescription || null,
       });
     },
     saving: saveMut.isPending,
     saveError: saveMut.error as Error | null,
-    loading: rec.isPending,
+    loading: !!id && rec.isPending,
     loadError: rec.error as Error | null,
     tableCols,
   };

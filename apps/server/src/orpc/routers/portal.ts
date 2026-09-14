@@ -126,8 +126,6 @@ const ownProject = (id: string, ctx: { tenantId: string; cardCode: string }) =>
     sql`${configProject.customer}->>'cardCode' = ${ctx.cardCode}`,
   );
 
-const EDITABLE = ["draft", "calculated"] as const;
-
 const event = (kind: ProjectEvent["kind"], note?: string): ProjectEvent =>
   ({ at: new Date().toISOString(), kind, ...(note ? { note } : {}) });
 
@@ -390,12 +388,16 @@ export const portalRouter = {
       .handler(async ({ input, context }) => {
         const { id, ...rest } = input;
         const fields: Partial<typeof configProject.$inferInsert> = { ...rest, updatedAt: new Date() };
-        if (input.entries !== undefined || input.batches !== undefined || input.tables !== undefined)
-          fields.status = "draft";
+        // Candidates are emptied in the same statement as the inputs that produced them — that
+        // pairing is the invariant, in place of a `calculated` status flag restating it.
+        if (input.entries !== undefined || input.batches !== undefined || input.tables !== undefined) {
+          fields.candidates = [];
+          fields.calculatedAt = null;
+        }
         const updated = await db
           .update(configProject)
           .set(fields)
-          .where(and(ownProject(id, context), inArray(configProject.status, [...EDITABLE])))
+          .where(and(ownProject(id, context), eq(configProject.status, "draft")))
           .returning({ id: configProject.id });
         if (!updated.length) {
           const [exists] = await db.select({ id: configProject.id }).from(configProject)
@@ -409,7 +411,7 @@ export const portalRouter = {
     remove: clientProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
       const del = await db
         .delete(configProject)
-        .where(and(ownProject(input.id, context), inArray(configProject.status, [...EDITABLE])))
+        .where(and(ownProject(input.id, context), eq(configProject.status, "draft")))
         .returning({ id: configProject.id });
       if (!del.length) throw new ORPCError("NOT_FOUND");
       return { ok: true };
@@ -536,7 +538,8 @@ export const portalRouter = {
     }))
     .handler(async ({ input, context }) => {
       const p = await loadOwnProject(input.projectId, context);
-      if (!p.candidates.length) throw new ORPCError("BAD_REQUEST", { message: "Calculate prices before submitting." });
+      if (!p.candidates.length || !p.calculatedAt)
+        throw new ORPCError("BAD_REQUEST", { message: "Calculate prices before submitting." });
       for (const s of input.selection) {
         const cand = p.candidates[s.candidateIdx];
         if (!cand || !cand.perBatch.some((b) => b.batchQty === s.batchQty))
@@ -547,7 +550,13 @@ export const portalRouter = {
       const updated = await db
         .update(configProject)
         .set({ status: "requested", selection: input.selection, events: pushEvent("submitted"), updatedAt: new Date() })
-        .where(and(ownProject(p.id, context), eq(configProject.status, "calculated")))
+        // calculatedAt, not just the status: a recalculate between the read above and this write
+        // replaces the candidates we just validated, and a status flag would not notice.
+        .where(and(
+          ownProject(p.id, context),
+          eq(configProject.status, "draft"),
+          eq(configProject.calculatedAt, p.calculatedAt),
+        ))
         .returning({ id: configProject.id });
       if (!updated.length)
         throw new ORPCError("BAD_REQUEST", { message: "This request changed since prices were calculated — recalculate and try again." });
@@ -592,10 +601,12 @@ export const portalRouter = {
     return { lines };
   }),
 
-  // Same engine path as configs.run; response is counts only — candidates come from projects.get, sanitized.
+  // Same engine path as configs.calculate; response is counts only — candidates come from
+  // projects.get, sanitized. Still a separate endpoint: the portal calculates on an explicit
+  // button press, not per keystroke, so collapsing the round trip buys it much less.
   run: clientProcedure.input(z.object({ projectId: z.uuid() })).handler(async ({ input, context }) => {
     const p = await loadOwnProject(input.projectId, context);
-    if (p.status !== "draft" && p.status !== "calculated")
+    if (p.status !== "draft")
       throw new ORPCError("BAD_REQUEST", { message: "A submitted request is locked — withdraw it to make changes." });
     const model = await loadModel(context.tenantId, p.modelId);
     if (!model.portal) throw new ORPCError("BAD_REQUEST", { message: UNAVAILABLE });

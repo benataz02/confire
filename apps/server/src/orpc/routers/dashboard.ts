@@ -13,6 +13,7 @@ async function loadProjects(tenantId: string): Promise<ProjectRow[]> {
       source: configProject.source, createdBy: configProject.createdBy,
       createdAt: configProject.createdAt, customer: configProject.customer,
       quotedAt: configProject.quotedAt, b1DocEntry: configProject.b1DocEntry,
+      calculatedAt: configProject.calculatedAt,
       quotedValue: configProject.quotedValue, quotedCost: configProject.quotedCost,
     })
     .from(configProject)
@@ -21,7 +22,7 @@ async function loadProjects(tenantId: string): Promise<ProjectRow[]> {
     id: r.id, name: r.name, status: r.status, source: r.source,
     createdBy: r.createdBy, createdAt: r.createdAt,
     customerName: r.customer?.cardName ?? null,
-    quotedAt: r.quotedAt, b1DocEntry: r.b1DocEntry,
+    quotedAt: r.quotedAt, b1DocEntry: r.b1DocEntry, calculatedAt: r.calculatedAt,
     quotedValue: r.quotedValue === null ? null : Number(r.quotedValue),
     quotedCost: r.quotedCost === null ? null : Number(r.quotedCost),
   }));

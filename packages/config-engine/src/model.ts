@@ -269,7 +269,7 @@ export const derivedKey = (paramKey: string, col: string) => `${paramKey}_${col}
 
 /** The one mandatory item grid every model carries. `itemcode` rides to SAP as a UDF rather than
  *  DocumentLine.ItemCode: the generic configurator item stays the B1 item (config-quote.ts, and
- *  RESERVED_LINE_FIELDS enforces it), and the Crystal Report layouts read U_HERA_ItemCode.
+ *  RESERVED_LINE_FIELDS enforces it), and the Crystal Report layouts read U_CF_ItemCode.
  *  Basis defaults to 1: the split is then weighted by `quantity` alone, which is the sane answer
  *  before the author says what their shop actually costs by. */
 export const itemsTable = (): ItemsTable => ({
@@ -277,7 +277,7 @@ export const itemsTable = (): ItemsTable => ({
   title: "Items",
   role: "items",
   basisExpr: "1",
-  map: { itemcode: "U_HERA_ItemCode", itemname: "ItemDescription" },
+  map: { itemcode: "U_CF_ItemCode", itemname: "ItemDescription" },
   columns: [
     { key: "itemcode", label: "Item code", type: "string", cell: { kind: "input" } },
     { key: "itemname", label: "Item name", type: "string", cell: { kind: "input" } },

@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { sql, type SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import type { ListVariantDef } from "@hera/db";
+import { compileList } from "../src/entity-list.ts";
 import { compileListSql, nextSkipOf, type SqlFields } from "../src/list-sql.ts";
+import type { B1EntitySchema } from "@hera/b1";
 import { configProject } from "@hera/db";
 
 // The SQL executor of a saved view. Same spec, same rules as entity-list.ts's OData compilation —
@@ -47,6 +49,20 @@ describe("compileListSql", () => {
     }
   });
 
+  test("in is an OR of equals, and an empty in matches nothing", () => {
+    const q = toSql(compileListSql(fields, spec({
+      filter: [{ field: "status", op: "in", value: ["quoted", "requested"] }],
+    })).where)!;
+    expect(q.sql).toContain(" or ");
+    expect(q.params).toEqual(["quoted", "requested"]);
+
+    const empty = toSql(compileListSql(fields, spec({
+      filter: [{ field: "status", op: "in", value: [] }],
+    })).where)!;
+    expect(empty.sql).toContain("false");
+    expect(empty.params).toEqual([]);
+  });
+
   test("conditions are ANDed", () => {
     const q = toSql(compileListSql(fields, spec({
       filter: [{ field: "name", op: "contains", value: "bolt" }, { field: "status", op: "eq", value: "quoted" }],
@@ -79,6 +95,22 @@ describe("compileListSql", () => {
     expect(orderBy).toHaveLength(2);
     expect(toSql(orderBy[0])!.sql).toContain('"updated_at" desc');
     expect(toSql(orderBy[1])!.sql).toContain('"name" asc');
+  });
+});
+
+describe("compileList in", () => {
+  const schema: B1EntitySchema = {
+    name: "Items", entityType: "Item", table: "OITM", label: "Items", entityClass: "standard",
+    keys: ["ItemCode"],
+    fields: [
+      { name: "ItemCode", kind: "string", edmType: "Edm.String" },
+      { name: "Status", kind: "enum", edmType: "Edm.String" },
+    ],
+  };
+
+  test("in becomes an OR of eq so B1 does not need an in operator", () => {
+    const q = compileList(schema, spec({ filter: [{ field: "Status", op: "in", value: ["A", "B"] }] }), { pageSize: 20 });
+    expect(q.filter).toBe("Status eq 'A' or Status eq 'B'");
   });
 });
 

@@ -7,19 +7,17 @@ import {
 // B1's $metadata, cached. The full EDMX is ~1.7 MB; both reads here use the scoped query the
 // Service Layer already supports, so a schema costs one entity's worth of XML, not the lot.
 
-const TTL_MS = 24 * 60 * 60_000;
+const LIST_TTL_MS = 24 * 60 * 60_000;
 
 /** Bump this whenever metadata.ts changes what a parsed schema looks like. A row parsed by the
- *  old code is stale however fresh it is, and without this every tenant keeps serving the old
- *  shape for a day — which is how BoYesNoEnum kept rendering as a tYES/tNO dropdown after it
- *  became a boolean. */
+ *  old code is stale however fresh it is, and this is now the *only* thing that expires one — a
+ *  stored schema is otherwise kept until someone presses Refresh, because B1 metadata changes
+ *  when an admin adds a UDF, not on a clock. Without this every tenant would keep serving the old
+ *  shape forever, which is how BoYesNoEnum kept rendering as a tYES/tNO dropdown after it became
+ *  a boolean. */
 //  Must be a past timestamp: `Math.min` with process start so a future one can only ever be a
 //  no-op, never a re-read of $metadata on every single request.
 const PARSER_EPOCH = Math.min(Date.parse("2026-08-28T07:55:00Z"), Date.now());
-
-/** A cached schema is usable if it is inside the TTL and was parsed by the current parser. */
-export const cacheIsFresh = (fetchedAt: Date, now = Date.now()): boolean =>
-  fetchedAt.getTime() >= PARSER_EPOCH && now - fetchedAt.getTime() < TTL_MS;
 
 /** The entity list is small and shared by every browse page — a per-process cache is enough,
  *  and it self-heals on restart. The per-entity schemas go to Postgres because there are ~420
@@ -28,7 +26,7 @@ const listCache = new Map<string, { at: number; list: Promise<B1EntityRef[]> }>(
 
 export function entityList(tenantId: string, b1: B1Transport, refresh = false): Promise<B1EntityRef[]> {
   const hit = listCache.get(tenantId);
-  if (!refresh && hit && Date.now() - hit.at < TTL_MS) return hit.list;
+  if (!refresh && hit && Date.now() - hit.at < LIST_TTL_MS) return hit.list;
   const list = b1
     .metadata({ scope: "entityset", annotation: "labelWithTable" })
     .then(parseEntityList);
@@ -50,15 +48,18 @@ export async function entitySchema(
   name: string,
   refresh = false,
 ): Promise<B1EntitySchema> {
-  await assertEntity(tenantId, b1, name);
   if (!refresh) {
     const [row] = await db
       .select()
       .from(entityMeta)
       .where(and(eq(entityMeta.tenantId, tenantId), eq(entityMeta.entityName, name)))
       .limit(1);
-    if (row && cacheIsFresh(row.fetchedAt)) return row.json;
+    // A hit returns before assertEntity on purpose: the row only exists because the name was
+    // checked against the entity list when it was written, so a stored schema costs one Postgres
+    // read and no agent call at all — which is the whole point of storing it.
+    if (row && row.fetchedAt.getTime() >= PARSER_EPOCH) return row.json;
   }
+  await assertEntity(tenantId, b1, name);
 
   // dependency=true pulls the ComplexTypes and EnumTypes this entity's properties reference,
   // which is what makes one scoped call enough to render a whole form.

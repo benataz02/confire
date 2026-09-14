@@ -61,7 +61,7 @@ export function PortalRequestPage({ id }: { id: string }) {
   const { project, model } = q.data;
   const status = project.status as PortalStatus;
 
-  if (status !== "draft" && status !== "calculated") {
+  if (status !== "draft") {
     return (
       <PortalRequestSummary project={{ ...project, status }} model={model}
         onWithdraw={() => withdraw.mutate({ projectId: id })}
@@ -74,8 +74,10 @@ export function PortalRequestPage({ id }: { id: string }) {
   const batches = batchesOverride ?? project.batches;
   const tables = tablesOverride ?? project.tables;
   const selection = selOverride ?? (project.selection as Sel[] | null) ?? [];
-  const runReady = project.candidates.length > 0 && status === "calculated";
-  const step = stepOverride ?? (status === "draft" ? 0 : 2);
+  // Candidates and the inputs that produced them are written together, so holding any is the
+  // whole "is it calculated" signal — there is no status to consult.
+  const runReady = project.candidates.length > 0;
+  const step = stepOverride ?? (runReady ? 2 : 0);
 
   const lk = lookups.data ? mergeQueryPicks(lookups.data, picks) : undefined;
   const prop = lk ? propagate(model.definition, lk, entries, tables) : null;

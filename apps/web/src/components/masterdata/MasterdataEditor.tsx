@@ -119,7 +119,12 @@ export function MasterdataEditor({ id }: { id?: string }) {
     });
   }, [row, draft]);
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: orpc.masterdata.list.queryOptions().queryKey });
+  // Both keys: `list` is what this editor and useDraftModel read, `rows` is the list page's
+  // display projection. A write invalidates both or the list shows a stale row.
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: orpc.masterdata.list.queryOptions().queryKey });
+    void qc.invalidateQueries({ queryKey: orpc.masterdata.rows.key() });
+  };
   const saveOpts = orpc.masterdata.save.mutationOptions({
     onSuccess: (r) => {
       setDirty(false);
@@ -145,6 +150,10 @@ export function MasterdataEditor({ id }: { id?: string }) {
   const remove = useMutation(orpc.masterdata.remove.mutationOptions({
     onSuccess: () => { setDirty(false); invalidate(); toast("Table deleted"); void navigate({ to: "/masterdata" }); },
   }));
+  // Copies the *persisted* row, which is why the button is disabled while dirty — see the toolbar.
+  const duplicate = useMutation(orpc.masterdata.duplicate.mutationOptions({
+    onSuccess: (r) => { invalidate(); toast("Table duplicated"); void navigate({ to: "/masterdata/$id", params: { id: r.id } }); },
+  }));
 
   useBlocker({
     shouldBlockFn: async () => {
@@ -167,7 +176,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
     return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
   }
   const d = draft;
-  const error = save.error ?? remove.error;
+  const error = save.error ?? remove.error ?? duplicate.error;
   // Both title states: a delete the server refuses has to be readable without scrolling the
   // header shut first.
   const errorStrip = error
@@ -203,13 +212,20 @@ export function MasterdataEditor({ id }: { id?: string }) {
           actionsBar={
             <Toolbar design="Transparent" accessibleName="Table actions">
               {id ? (
+                // Disabled while dirty: duplicate copies what is stored, not what is on screen,
+                // and a clean copy also never trips the unsaved-changes blocker on the way out.
+                <ToolbarButton text="Duplicate" icon="copy" tooltip={dirty ? "Save first" : "Duplicate table"}
+                  accessibleName="Duplicate table" disabled={dirty || duplicate.isPending}
+                  onClick={() => duplicate.mutate({ id })} />
+              ) : null}
+              {id ? (
                 <ToolbarButton text="Delete" icon="delete" tooltip="Delete table" accessibleName="Delete table" disabled={remove.isPending}
                   onClick={async () => {
                     if (await confirm({
                       title: "Delete table",
                       message: `Delete "${d.name}"? A table used by a model can't be deleted. This cannot be undone.`,
                       actionText: "Delete", destructive: true,
-                    })) remove.mutate({ id });
+                    })) remove.mutate({ ids: [id] });
                   }} />
               ) : null}
             </Toolbar>

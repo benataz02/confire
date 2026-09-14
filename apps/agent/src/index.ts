@@ -71,13 +71,16 @@ const server = Bun.serve({
     if (!authorized(req)) return fail(401, null, "Bad agent secret");
     if (req.method !== "POST") return fail(405, null, "Method not allowed");
 
-    logger.info(`${req.method} ${pathname}`);
+    // The body is the whole request: an operation POST carries no query string, so a log line
+    // without it does not say what was asked for.
+    const raw = await req.text();
+    logger.info(`${req.method} ${pathname} ${raw}`);
     try {
       // Print is not a B1Transport operation: it talks to a different service on a different
       // port, so it sits beside the /{target}/{operation} split rather than inside it.
       if (pathname === "/print") {
         if (!gateway) throw new B1Error(503, null, "No apiGateway block in agent.json — printing is not configured");
-        const b = (await req.json()) as { entity?: unknown; docEntry?: unknown };
+        const b = JSON.parse(raw) as { entity?: unknown; docEntry?: unknown };
         return Response.json(await gateway.exportPdf(String(b.entity ?? ""), Number(b.docEntry)));
       }
 
@@ -87,7 +90,7 @@ const server = Bun.serve({
       if (!transport) return fail(404, null, `Unknown target '${target}'`);
       if (!handler) return fail(404, null, `Unknown operation '${pathname}'`);
 
-      return Response.json(await handler(transport, await req.json()));
+      return Response.json(await handler(transport, JSON.parse(raw)));
     } catch (e) {
       if (e instanceof B1Error) {
         logger.warn(`${pathname}: ${e.message}`);

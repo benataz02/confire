@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, eq, ne, or } from "drizzle-orm";
-import { db, uiVariant, user, ListVariantDefZ, ObjectVariantDefZ, WidthsZ, type ListVariantDef } from "@hera/db";
+import { db, uiVariant, user, ListVariantDefZ, ObjectVariantDefZ } from "@hera/db";
 import { userProcedure } from "../base.ts";
 
 // Saved list/object "views". Per-user, plus admin-published `shared` (public) views.
@@ -151,22 +151,4 @@ export const variantsRouter = {
     await db.delete(uiVariant).where(eq(uiVariant.id, input.id));
     return { ok: true };
   }),
-
-  // Narrow write path for column-resize drag: reusing `save` would force choosing between
-  // blocking non-admins entirely or letting them overwrite a whole shared view.
-  setWidths: userProcedure
-    .input(z.object({ id: z.uuid(), widths: WidthsZ }))
-    .handler(async ({ input, context }) => {
-      const [row] = await db
-        .select({ definition: uiVariant.definition, userId: uiVariant.userId, shared: uiVariant.shared })
-        .from(uiVariant)
-        .where(and(eq(uiVariant.id, input.id), eq(uiVariant.tenantId, context.tenantId)))
-        .limit(1);
-      if (!row) throw new ORPCError("NOT_FOUND");
-      // Low-stakes display state: anyone who can SEE the view (own or shared-in-tenant) may set widths.
-      if (!(row.userId === context.userId || row.shared)) throw new ORPCError("FORBIDDEN");
-      const def = { ...(row.definition as ListVariantDef), widths: input.widths };
-      await db.update(uiVariant).set({ definition: def, updatedAt: new Date() }).where(eq(uiVariant.id, input.id));
-      return { ok: true };
-    }),
 };

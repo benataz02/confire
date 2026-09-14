@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   DynamicPage, DynamicPageHeader, DynamicPageTitle,
   FilterBar, FilterGroupItem, VariantManagement, VariantItem,
-  AnalyticalTable, Bar, Title, Input, Select, Option, DatePicker,
-  Button, Dialog, CheckBox,
+  AnalyticalTable, Bar, Title, Input, MultiComboBox, MultiComboBoxItem, DatePicker,
+  Button, Dialog, CheckBox, IllustratedMessage,
   Table, TableHeaderRow, TableHeaderCell, TableRow, TableCell,
-  MessageStrip,
+  MessageStrip, Toolbar, ToolbarButton,
 } from "@ui5/webcomponents-react";
-import type { AnalyticalTableInstance, UI5WCSlotsNode } from "@ui5/webcomponents-react";
+import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
+import { client, orpc } from "../orpc.ts";
 import {
-  sameDef, truthy, visibleColumns, formatCell, isTextType, boolFilterState, nextBoolFilter,
+  truthy, visibleColumns, formatCell, isTextType, boolFilterState, nextBoolFilter, optionFilterValues,
   type FilterCond, type FilterOp, type ListColumn, type ListSpec, type ListVariantDef,
 } from "../variants.ts";
 
@@ -30,23 +32,25 @@ export type ListReportProps = {
   hasMore?: boolean;
   onLoadMore?: () => void;
   onRowClick: (row: Row) => void;
-  /** page-level actions (New …) rendered in the title bar */
-  actions?: UI5WCSlotsNode;
-  /** enables the bulk Delete button in the count bar. Return false to keep the selection (cancel). */
-  onDelete?: (rows: Row[]) => Promise<boolean | void> | boolean | void;
-  /** Extra count-bar actions driven by the current selection. Rendered left of Delete; return
-   *  null to draw nothing. ListReport never learns what these actions are.
-   *  This cashes in the old `// ponytail: one bulk action; swap for a render-prop slot`. */
-  selectionActions?: (rows: Row[]) => ReactNode;
-  /** must be a stable reference */
-  noData?: (reason: "Empty" | "Filtered") => ReactNode;
+  /** Every button in the table's count bar, in render order. Called with the current selection,
+   *  so a page-level action (New …) and a selection-driven one (Duplicate, Delete) are the same
+   *  kind of thing here — ListReport never learns what any of them do. `clear` exists because the
+   *  selection is this component's state: react-table keys it by row *index*, so after a delete
+   *  the surviving rows shift under the old ids and the caller must be able to reset it. */
+  actions?: (selection: { rows: Row[]; clear: () => void }) => ReactNode;
 };
 
 const NO_SELECTION: { ids: Record<string, boolean>; rows: Row[] } = { ids: {}, rows: [] };
 
-// Select matches its `value` against `option.getAttribute("value") || option.textContent`, so an
-// empty value silently matches on the label instead. The "no filter" entry needs a real sentinel.
-const NO_FILTER = "__none__";
+// Trims the title bar down to the variant switcher's own height: the default padding and 4rem
+// min-height leave dead space above and below it. Skip this on B1 lists — the refresh ToolbarButton
+// needs the stock row. // ponytail: private theme vars, revisit if they get renamed.
+const titleStyle = {
+  "--_ui5_dynamic_page_title_padding_top": "0.25rem",
+  "--_ui5_dynamic_page_title_padding_bottom": "0.25rem",
+  "--_ui5_dynamic_page_title_min_height": "2rem",
+  "--_ui5_dynamic_page_title_heading_padding_top": "0",
+} as CSSProperties;
 
 const tableStyle: CSSProperties = {
   maxHeight: "100%",
@@ -61,25 +65,28 @@ const tableStyle: CSSProperties = {
 // processing (manualSortBy/manualFilters), so both sources behave identically.
 export function ListReport({
   listSpec, title, columns: cols, keyField, rows, total,
-  loading, error, hasMore, onLoadMore, onRowClick, actions, onDelete, selectionActions, noData,
+  loading, error, hasMore, onLoadMore, onRowClick, actions,
 }: ListReportProps) {
-  const { entity, spec, setSpec, variants, selectedName, setSelectedName, applyVariant, dirty, isAdmin, readOnly, save, remove, setWidths } = listSpec;
+  const { entity, spec, setSpec, variants, selectedName, setSelectedName, applyVariant, applyDefault, dirty, isAdmin, readOnly, save, remove } = listSpec;
+  const b1 = entity.startsWith("b1:") ? entity.slice(3) : "";
+  const qc = useQueryClient();
+  // ponytail: the title bar is here, so the button is here. Portal lists are `portal:`, not `b1:`.
+  // refetch() alone would return the same cached row — the re-read has to be asked for.
+  const refresh = useMutation({
+    mutationFn: () => client.entities.schema({ entity: b1, refresh: true }),
+    onSuccess: (fresh) => {
+      qc.setQueryData(orpc.entities.schema.queryOptions({ input: { entity: b1 } }).queryKey, fresh);
+    },
+  });
+  const err = error ?? refresh.error;
 
   const [selected, setSelected] = useState(NO_SELECTION);
-  const [deleting, setDeleting] = useState(false);
-  const [colsOpen, setColsOpen] = useState(false);
   // FilterBar has no liveMode: values live here until Go. spec.filter/search stay the applied query.
   const [filterDraft, setFilterDraft] = useState<{ filter: FilterCond[]; search: string }>(
     () => ({ filter: spec.filter, search: spec.search ?? "" }),
   );
-  const filterDraftRef = useRef(filterDraft);
-  filterDraftRef.current = filterDraft;
   // Column-picker draft: checkbox/drag/rename mutate ONLY this; Confirm commits it to spec once.
   const [draft, setDraft] = useState<{ name: string; visible: boolean; label: string }[] | null>(null);
-  // Column widths live in react-table's internal reducer; read back on pointer release (see below).
-  const tableInstanceRef = useRef<AnalyticalTableInstance | null>(null);
-  const lastWidthsRef = useRef<Record<string, number>>({});
-  const widthsSaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Variant / Restore rewrite spec.filter|search; copy that into the bar so the fields match the query.
   useEffect(() => {
@@ -89,13 +96,15 @@ export function ListReport({
   const setDraftCond = (field: string, op: FilterOp, value: FilterCond["value"] | "") =>
     setFilterDraft((d) => {
       const rest = d.filter.filter((c) => c.field !== field);
-      const empty = value === "" || value == null;
+      const empty = value === "" || value == null || (Array.isArray(value) && !value.length);
       return { ...d, filter: empty ? rest : [...rest, { field, op, value }] };
     });
 
+  // `search` is dropped when empty, not written as "": the seeded Standard has no `search` key at
+  // all, so writing one would make a Go that changed nothing report the view as unsaved.
   const applyFilters = (over: Partial<ListVariantDef> = {}) => {
-    const { filter, search } = filterDraftRef.current;
-    setSpec((s) => ({ ...s, filter, search, ...over }));
+    const { filter, search } = filterDraft;
+    setSpec(({ search: _drop, ...s }) => ({ ...s, filter, ...(search ? { search } : {}), ...over }));
   };
 
   const visibleCols = useMemo(() => visibleColumns(spec, cols), [spec, cols]);
@@ -111,7 +120,6 @@ export function ListReport({
           // A custom Cell wants the raw value; everything else is pre-formatted to a string.
           accessor: c.Cell ? c.name : (row: Row) => formatCell(row[c.name], c.type),
           ...(c.Cell ? { Cell: c.Cell } : {}),
-          ...(spec.widths?.[c.name] ? { width: spec.widths[c.name] } : {}),
         })),
     [visibleCols, spec, cols],
   );
@@ -122,25 +130,26 @@ export function ListReport({
       autoResetSortBy: false, autoResetFilters: false, autoResetSelectedRows: false,
       autoResetPage: false, autoResetHiddenColumns: false,
       manualSortBy: true, manualFilters: true, manualGlobalFilter: true,
+      // Columns are sized by the view, not by dragging. useColumnResizing reads this table-level
+      // flag, so no resizer handle is rendered on any header and there is no width state to persist.
+      disableResizing: true,
     }),
     [],
   );
 
-  // ponytail: identity changes remount the (stateless) illustration; not worth a stable wrapper.
+  // ponytail: identity changes remount the (stateless) illustration; title is stable per page.
   const NoDataComponent = useMemo(
-    () => (noData ? ({ noDataReason }: { noDataReason: "Empty" | "Filtered" }) => <>{noData(noDataReason)}</> : undefined),
-    [noData],
+    () =>
+      function NoData({ noDataReason }: { noDataReason: "Empty" | "Filtered" }) {
+        return noDataReason === "Filtered" ? (
+          <IllustratedMessage name="NoData" design="Auto" titleText="Nothing in this view"
+            subtitleText="Try a different filter or pick another view." />
+        ) : (
+          <IllustratedMessage name="NoData" design="Auto" titleText={`No ${title.toLowerCase()} yet`} />
+        );
+      },
+    [title],
   );
-
-  const runDelete = async () => {
-    if (!onDelete || !selected.rows.length) return;
-    setDeleting(true);
-    try {
-      if ((await onDelete(selected.rows)) !== false) setSelected(NO_SELECTION);
-    } finally {
-      setDeleting(false);
-    }
-  };
 
   // ---- Column picker: a draft copy of visibility/order/labels; only Confirm touches spec. ----
   const openColumns = () => {
@@ -152,9 +161,8 @@ export function ListReport({
         label: spec.labels?.[name] ?? cols.find((c) => c.name === name)?.label ?? name,
       })),
     );
-    setColsOpen(true);
   };
-  const closeColumns = () => { setDraft(null); setColsOpen(false); };
+  const closeColumns = () => setDraft(null);
   const confirmColumns = () => {
     if (!draft) return closeColumns();
     const order = draft.filter((d) => d.visible).map((d) => d.name);
@@ -163,28 +171,18 @@ export function ListReport({
     const labels = Object.fromEntries(
       draft.filter((d) => d.label !== (cols.find((c) => c.name === d.name)?.label ?? d.name)).map((d) => [d.name, d.label]),
     );
-    setSpec((s) => ({ ...s, select: isDefaultOrder ? [] : order, labels }));
+    // Same rule as `search`: no renames means no `labels` key, not an empty one.
+    setSpec(({ labels: _drop, ...s }) => ({
+      ...s,
+      select: isDefaultOrder ? [] : order,
+      ...(Object.keys(labels).length ? { labels } : {}),
+    }));
     closeColumns();
-  };
-
-  // ponytail: no resize event; read react-table state on pointer release, debounce the save.
-  const onColumnResizeEnd = () => {
-    setTimeout(() => {
-      const widths = tableInstanceRef.current?.state?.columnResizing?.columnWidths as Record<string, number> | undefined;
-      if (!widths || sameDef(widths, lastWidthsRef.current)) return;
-      lastWidthsRef.current = widths;
-      setSpec((s) => ({ ...s, widths }));
-      // variants.setWidths is userProcedure; a portal client would only ever get a FORBIDDEN.
-      if (readOnly) return;
-      const row = variants.find((v) => v.name === selectedName);
-      if (!row) return;
-      clearTimeout(widthsSaveTimer.current);
-      widthsSaveTimer.current = setTimeout(() => setWidths.mutate({ id: row.id, widths }), 400);
-    }, 0);
   };
 
   const variantManagement = (
     <VariantManagement
+      closeOnItemSelect
       dirtyState={dirty}
       hideShare={!isAdmin}
       hideApplyAutomatically
@@ -201,17 +199,27 @@ export function ListReport({
         const row = variants.find((v) => v.name === selectedName);
         if (row) save.mutate({ id: row.id, page: "list", entity, name: row.name, definition: spec, shared: row.shared, isDefault: row.isDefault });
       }}
+      // VariantManagement keys its rows by name and reads `selected` only on first paint, so both
+      // branches here have to move `selectedName` themselves — otherwise Save looks up a name that
+      // no longer exists and silently writes nothing.
       onSaveManageViews={(e) => {
-        for (const del of e.detail.deletedVariants) {
-          const r = variants.find((v) => v.name === String(del.children));
+        const deleted = e.detail.deletedVariants.map((d) => String(d.children));
+        for (const name of deleted) {
+          const r = variants.find((v) => v.name === name);
           if (r) remove.mutate({ id: r.id });
         }
         for (const up of e.detail.updatedVariants) {
           const prevName = up.prevVariant?.children ? String(up.prevVariant.children) : String(up.children);
           const r = variants.find((v) => v.name === prevName);
           // Belt-and-suspenders: readOnly already blocks this in the dialog, but never rename Standard.
-          if (r && !r.isStandard) save.mutate({ id: r.id, page: "list", entity, name: String(up.children), definition: r.definition as ListVariantDef, shared: truthy(up.global), isDefault: truthy(up.isDefault) });
+          if (!r || r.isStandard) continue;
+          const name = String(up.children);
+          save.mutate({ id: r.id, page: "list", entity, name, definition: r.definition as ListVariantDef, shared: truthy(up.global), isDefault: truthy(up.isDefault) });
+          if (selectedName === prevName) setSelectedName(name);
         }
+        // The applied view was deleted: fall back the same way the initial load does. `deleted` is
+        // excluded by name because the variants query has not refetched yet.
+        if (deleted.includes(selectedName)) applyDefault(deleted);
       }}
     >
       {variants.map((v) => (
@@ -247,19 +255,21 @@ export function ListReport({
     const inBar = (bar.length ? bar.includes(c.name) : c.name === keyField || !!c.options || isTextType(c.type)) || !!cond;
     let control;
     if (c.options) {
+      // One value stays `eq` so a saved single-status view (e.g. Requested) is not dirtied by Go.
       control = (
-        <Select
-          value={cond ? String(cond.value) : NO_FILTER}
-          onChange={(e) => {
-            const v = e.detail.selectedOption.value ?? "";
-            setDraftCond(c.name, "eq", v === NO_FILTER ? "" : v);
+        <MultiComboBox
+          filter="Contains"
+          selectedValues={optionFilterValues(cond)}
+          onSelectionChange={(e) => {
+            const values = e.detail.items.flatMap((i) => (i.value ? [i.value] : []));
+            if (values.length <= 1) setDraftCond(c.name, "eq", values[0] ?? "");
+            else setDraftCond(c.name, "in", values);
           }}
         >
-          <Option value={NO_FILTER}>All</Option>
           {c.options.map((o) => (
-            <Option key={o.value} value={o.value}>{o.text}</Option>
+            <MultiComboBoxItem key={o.value} text={o.text} value={o.value} />
           ))}
-        </Select>
+        </MultiComboBox>
       );
     } else if (isBool) {
       // A boolean is a checkbox here too, not a dropdown — but a filter has a third state the
@@ -298,13 +308,8 @@ export function ListReport({
       startContent={<Title level="H5">{title} ({selected.rows.length}/{total})</Title>}
       endContent={
         <>
-          {selectionActions?.(selected.rows)}
-          {onDelete ? (
-            <Button icon="delete" design="Transparent" disabled={!selected.rows.length || deleting} onClick={runDelete}>
-              Delete
-            </Button>
-          ) : null}
-          <Button icon="action-settings" design="Transparent" onClick={() => (colsOpen ? closeColumns() : openColumns())}>Columns</Button>
+          {actions?.({ rows: selected.rows, clear: () => setSelected(NO_SELECTION) })}
+          <Button icon="action-settings" design="Transparent" onClick={() => (draft ? closeColumns() : openColumns())}></Button>
         </>
       }
     />
@@ -313,15 +318,20 @@ export function ListReport({
   return (
     <DynamicPage
       hidePinButton
-      // `heading` is unslotted when the page snaps (UI5 swaps to the `snappedHeading` slot), so feed
-      // both to keep VariantManagement visible after the filter header collapses. Inline vars trim the
-      // title padding (0.5rem→0.25rem). // ponytail: private theme vars, revisit if they get renamed.
       titleArea={
         <DynamicPageTitle
+          // `heading` is unslotted when the page snaps (UI5 swaps to the `snappedHeading` slot), so
+          // feed both to keep VariantManagement visible after the filter header collapses.
           heading={heading}
           snappedHeading={heading}
-          actionsBar={actions}
-          style={{ "--_ui5_dynamic_page_title_padding_top": "0.25rem", "--_ui5_dynamic_page_title_padding_bottom": "0.25rem" } as CSSProperties}
+          style={titleStyle}
+          actionsBar={
+            <Toolbar design="Transparent">
+              <ToolbarButton design="Transparent" icon="refresh" tooltip="Refresh schema"
+                accessibleName="Refresh schema" disabled={refresh.isPending}
+                onClick={() => refresh.mutate()} />
+            </Toolbar>
+          }
         />
       }
       headerArea={
@@ -331,6 +341,7 @@ export function ListReport({
             enableReordering
             showGoOnFB
             showClearOnFB
+            showRestoreOnFB
             onGo={() => applyFilters()}
             onClear={() => setFilterDraft({ filter: [], search: "" })}
             // Adapt Filters Go: persist which filters are in the bar, and apply values like the bar Go.
@@ -351,11 +362,11 @@ export function ListReport({
           DynamicPage's content padding is `1rem 1rem 0`, so the bottom gap is ours to add — as
           padding here, not a margin below the table, which would overflow the 100% again. */}
       <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", height: "100%", paddingBottom: "1rem", boxSizing: "border-box" }}>
-        {error ? <MessageStrip design="Negative" hideCloseButton>{error.message}</MessageStrip> : null}
+        {err ? <MessageStrip design="Negative" hideCloseButton>{err.message}</MessageStrip> : null}
         {/* Plain div, not a Card: AutoWithEmptyRows measures this element and the table ends up a
             whole number of rows short of it, so the frame goes on the table itself — otherwise the
             rounded bottom floats below the last row. This box only supplies the height. */}
-        <div style={{ flex: 1, minHeight: 0 }} onPointerUp={onColumnResizeEnd}>
+        <div style={{ flex: 1, minHeight: 0 }}>
         <AnalyticalTable
           columns={columns}
           data={rows}
@@ -378,8 +389,6 @@ export function ListReport({
           // Default is 20, which against a 100-row page means the first fetch only starts ~80 rows
           // down. Half a page of lead time instead.
           infiniteScrollThreshold={40}
-          tableInstance={tableInstanceRef}
-          retainColumnWidth
           NoDataComponent={NoDataComponent}
           // Passed straight through, not wrapped in `if (hasMore)`: UI5 records the row count in its
           // fired-once set whether or not we act on the event, so swallowing one here disarms the
@@ -420,7 +429,7 @@ export function ListReport({
         </div>
       </div>
       <Dialog
-        open={colsOpen}
+        open={!!draft}
         onClose={closeColumns}
         headerText="Columns"
         style={{ width: 480 }}

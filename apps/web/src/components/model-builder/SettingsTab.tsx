@@ -25,8 +25,11 @@ export function SettingsTab({ draft, update, issues, tables, portalMeta, setPort
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "1rem" }}>
       <Form labelSpan="S12 M4" layout="S1 M1 L2 XL2">
         <FormGroup headerText="Model">
-          <FormItem labelContent={<Label required>Name</Label>}>
-            <Input value={draft.name} onInput={(e) => update((d) => ({ ...d, name: e.target.value }))} />
+          <FormItem labelContent={<Label for="model-name" required>Name</Label>}>
+            <Input id="model-name" value={draft.name} required
+              valueState={draft.name.trim() ? "None" : "Negative"}
+              valueStateMessage={<div>Enter a name</div>}
+              onInput={(e) => update((d) => ({ ...d, name: e.target.value }))} />
           </FormItem>
           <FormItem labelContent={<Label>Default batch sizes</Label>}>
             <Input value={batchText} placeholder="1, 10, 100" onInput={(e) => setBatches(e.target.value)}

@@ -38,7 +38,7 @@ export function HistoryTab({ draft, update, issues, modelId, dirty }: {
     onError: () => setPreview(null),
   }));
 
-  const info = useQuery(orpc.models.historyInfo.queryOptions({ input: { id: modelId } }));
+  const info = useQuery({ ...orpc.models.historyInfo.queryOptions({ input: { id: modelId } }), enabled: !!modelId });
   const sync = useMutation(orpc.models.syncHistory.mutationOptions({
     onSuccess: () => qc.invalidateQueries({ queryKey: orpc.models.historyInfo.queryOptions({ input: { id: modelId } }).queryKey }),
   }));
@@ -215,7 +215,7 @@ export function HistoryTab({ draft, update, issues, modelId, dirty }: {
             <FormItem>
               <MessageStrip design="Information" hideCloseButton>Add a history query first.</MessageStrip>
             </FormItem>
-          ) : dirty ? (
+          ) : dirty || !modelId ? (
             <FormItem>
               <MessageStrip design="Critical" hideCloseButton>Save the model first — sync runs the saved query.</MessageStrip>
             </FormItem>
@@ -236,7 +236,7 @@ export function HistoryTab({ draft, update, issues, modelId, dirty }: {
           ) : null}
           {h.query ? (
             <FormItem>
-              <Button icon="synchronize" loading={sync.isPending} disabled={dirty} onClick={() => sync.mutate({ id: modelId })}>
+              <Button icon="synchronize" loading={sync.isPending} disabled={dirty || !modelId} onClick={() => sync.mutate({ id: modelId })}>
                 Sync now
               </Button>
             </FormItem>

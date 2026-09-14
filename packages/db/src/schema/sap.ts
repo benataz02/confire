@@ -21,9 +21,10 @@ export const sapConnection = pgTable("sap_connection", {
 
 export type SapConnection = typeof sapConnection.$inferSelect;
 
-// Parsed B1 entity schemas, cached per tenant. B1's own $metadata is the source of truth; this is
-// a TTL cache with a manual Refresh action behind it.
-// ponytail: TTL + manual refresh; no push-invalidation until a stale-UDF bug actually appears.
+// Parsed B1 entity schemas, cached per tenant. B1's own $metadata is the source of truth, but a
+// row here is kept until someone presses Refresh — there is no TTL, because metadata changes when
+// an admin adds a UDF, not on a clock. fetchedAt is only read against entity-meta.ts' PARSER_EPOCH.
+// ponytail: manual refresh only; no push-invalidation until a stale-UDF bug actually appears.
 export const entityMeta = pgTable(
   "entity_meta",
   {

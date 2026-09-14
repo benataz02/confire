@@ -46,7 +46,7 @@ const parts: TableDef = {
   key: "parts",
   title: "Items",
   basisExpr: "area",
-  map: { code: "U_HERA_ItemCode", name: "ItemDescription" },
+  map: { code: "U_CF_ItemCode", name: "ItemDescription" },
   columns: [
     { key: "code", label: "Item code", type: "string", cell: { kind: "input" } },
     { key: "name", label: "Description", type: "string", cell: { kind: "input" } },

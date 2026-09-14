@@ -294,7 +294,7 @@ function LineFieldSelect({ value, fields, loading, onChange }: {
         placeholder={loading ? "reading SAP..." : "U_... (SAP unreachable)"}
         onInput={(e) => onChange(e.target.value)} />
     );
-  // A seeded mapping (U_HERA_ItemCode) only resolves if the tenant actually created the UDF. Keep
+  // A seeded mapping (U_CF_ItemCode) only resolves if the tenant actually created the UDF. Keep
   // the value and say so, rather than letting the Select fall blank and drop the mapping silently:
   // the alternative surfaces as a 400 from B1 at the moment the quote is posted.
   const missing = !!value && !fields.some((f) => f.name === value);

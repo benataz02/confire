@@ -52,7 +52,7 @@ export const configMasterdata = pgTable(
 );
 export type ConfigMasterdata = typeof configMasterdata.$inferSelect;
 
-export type ProjectStatus = "draft" | "calculated" | "quoted" | "requested" | "rejected";
+export type ProjectStatus = "draft" | "quoted" | "requested" | "rejected";
 export type ProjectSource = "internal" | "portal";
 export type ProjectCustomer = { cardCode: string; cardName: string };
 // Client-facing history; appended inside each transition. Feeds the portal Timeline and
@@ -72,12 +72,10 @@ export type ConfigSelection = { candidateIdx: number; batchQty: number; override
 // `candidates` in place.
 //
 // `candidates` are the entries in this same row, enumerated: there is no second copy of `entries`
-// because every writer of `entries`/`batches`/`tables` also sets `status = 'draft'` (configs.update,
-// portal.projects.update), so `status === 'calculated'` already means "these entries produced
-// these candidates".
-// ponytail: that invariant is enforced by convention, not a constraint — a trigger only if a
-//           third writer ever appears. `tables` joined `entries`/`batches` as an input to the
-//           calculation, so it is subject to the same rule.
+// because `candidates` is emptied in the SAME statement that writes `entries`/`batches`/`tables`.
+// A reader therefore sees either the old inputs with their own candidates, or the new inputs with
+// none — never a mismatched pair. That is structural, which is why there is no `calculated` status
+// flag claiming it: `calculatedAt !== null` is the whole freshness signal.
 export const configProject = pgTable(
   "config_project",
   {
@@ -98,8 +96,9 @@ export const configProject = pgTable(
     tables: jsonb("tables").$type<TableRows>().notNull().default({}),
     candidates: jsonb("candidates").$type<ConfigCandidate[]>().notNull().default([]),
     selection: jsonb("selection").$type<ConfigSelection[]>(),
-    // When `candidates` was computed. Compared against config_model.updatedAt to decide whether a
-    // recalculate can be skipped — cheaper than the ModelDef deep-compare it replaces.
+    // When `candidates` was computed, and null whenever they are empty. Compared against
+    // config_model.updatedAt to decide whether a recalculate can be skipped — cheaper than the
+    // ModelDef deep-compare it replaces. Also the fence portal.submit guards on.
     calculatedAt: timestamp("calculated_at", { withTimezone: true }),
     b1DocEntry: integer("b1_doc_entry"),
     quotedAt: timestamp("quoted_at", { withTimezone: true }),

@@ -50,7 +50,7 @@ export function DashboardPage() {
           d.computedAt ? ` · SAP data as of ${new Date(d.computedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}` : ""
         }`}
         headerText={greeting(new Date(), firstName)}
-        actions={<Button icon="add" design="Emphasized" onClick={() => navigate({ to: "/configs" })}>New configuration</Button>}
+        actions={<Button icon="add" design="Emphasized" onClick={() => navigate({ to: "/configs/new" })}>New configuration</Button>}
       >
         <FlexBox direction="Column" style={{ gap: "0.25rem" }}>
           {nextActions(d).map((a) => (

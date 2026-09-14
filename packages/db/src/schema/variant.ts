@@ -7,22 +7,22 @@ import { z } from "zod";
 
 // A list view IS the OData call: the agent compiles select/filter/orderby/top/skip into the
 // Service Layer GET. No client-side processing — the table renders exactly what comes back.
-export const FilterOpZ = z.enum(["eq", "ne", "contains", "startswith", "gt", "ge", "lt", "le"]);
+export const FilterOpZ = z.enum(["eq", "ne", "contains", "startswith", "gt", "ge", "lt", "le", "in"]);
 export type FilterOp = z.infer<typeof FilterOpZ>;
+export const FilterScalarZ = z.union([z.string(), z.number(), z.boolean()]);
 export const FilterCondZ = z.object({
   field: z.string(),
   op: FilterOpZ,
-  value: z.union([z.string(), z.number(), z.boolean()]),
+  // `in` is an OR of equals (MultiComboBox); every other op is a single scalar.
+  value: z.union([FilterScalarZ, z.array(FilterScalarZ)]),
 });
 export type FilterCond = z.infer<typeof FilterCondZ>;
-export const WidthsZ = z.record(z.string(), z.number());
 export const ListVariantDefZ = z.object({
   select: z.array(z.string()), // $select + column order; [] = all fields
   filter: z.array(FilterCondZ), // $filter, AND-combined
   orderby: z.array(z.object({ field: z.string(), dir: z.enum(["asc", "desc"]) })), // $orderby
   filterBar: z.array(z.string()), // field names shown in the FilterBar (Adapt Filters); [] = default set
   search: z.string().optional(), // free-text contains() across string fields (FilterBar search slot)
-  widths: WidthsZ.optional(), // px per field, from manual column resize
   labels: z.record(z.string(), z.string()).optional(), // custom header text per field
 });
 export type ListVariantDef = z.infer<typeof ListVariantDefZ>;
@@ -33,7 +33,6 @@ const FieldDefZ = z.object({
   name: z.string(),
   visible: z.boolean(),
   label: z.string().optional(),
-  width: z.number().positive().max(2000).optional(),
 });
 export const ObjectVariantDefZ = z.object({
   header: z.array(FieldDefZ),
