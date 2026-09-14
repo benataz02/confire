@@ -8,7 +8,7 @@
  * needed after this. Idempotent: re-running skips whatever already exists.
  */
 import { eq } from "drizzle-orm";
-import { db, pool, organization, user as userTable } from "@hera/db";
+import { db, pool, organization, user as userTable } from "@confire/db";
 import { auth } from "../apps/server/src/auth.ts";
 
 const slug = process.argv[2] ?? process.env.SLUG ?? "alumigraf";

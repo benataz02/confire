@@ -1,5 +1,5 @@
 import { boolean, jsonb, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
-import type { B1EntitySchema } from "@hera/b1";
+import type { B1EntitySchema } from "@confire/b1";
 
 // One row per tenant: where that tenant's on-prem agent is and how to authenticate to it.
 // No company column — the agent owns its company DB, so a tenant points at one agent URL.

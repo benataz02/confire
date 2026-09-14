@@ -1,4 +1,4 @@
-import type { Entries, TableRows } from "@hera/config-engine";
+import type { Entries, TableRows } from "@confire/config-engine";
 
 /** Should the page fire a calculate? `dirty` is "the user has edits the server has not seen";
  *  `runReady` is "the server already holds candidates". The second trigger is what calculates a

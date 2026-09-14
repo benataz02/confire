@@ -8,9 +8,9 @@
  * Read-only. It does not post a quotation — do that from the Create quote step in the UI, where
  * the dedup UDF and the run's own commandId are in play.
  */
-import { db, pool, organization, sapConnection } from "@hera/db";
+import { db, pool, organization, sapConnection } from "@confire/db";
 import { eq } from "drizzle-orm";
-import { countOf, nextLinkOf, rowsOf } from "@hera/b1";
+import { countOf, nextLinkOf, rowsOf } from "@confire/b1";
 import { tenantConnector } from "../apps/server/src/b1.ts";
 import { docHistoryQuery, flattenDocs } from "../apps/server/src/doc-history.ts";
 import { snapshotQueries } from "../apps/server/src/dashboard-snapshot.ts";

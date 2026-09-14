@@ -1,4 +1,4 @@
-import type { TableColumn, TableDef, Val } from "@hera/config-engine";
+import type { TableColumn, TableDef, Val } from "@confire/config-engine";
 
 /** One stored row: only the author-declared input/option cells. Formula cells are re-evaluated. */
 export type Row = Record<string, Val>;

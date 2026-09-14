@@ -1,4 +1,12 @@
-import { itemsTable, type ModelDef, type ResolvedLookups } from "../src/model";
+import { isTableGroup, itemsTable, type FieldGroup, type ModelDef, type ResolvedLookups } from "../src/model";
+
+/** A group is either a table or a list of fields, so indexing into `groups` gives the union.
+ *  Every group in this fixture is a field group; this narrows to one so tests can push params. */
+export function fieldGroup(m: ModelDef, s = 0, g = 0): FieldGroup {
+  const grp = m.structure.sections[s]!.groups[g]!;
+  if (isTableGroup(grp)) throw new Error(`group ${s}.${g} is a table group`);
+  return grp;
+}
 
 /** Cable assembly demo: exercises options/boolean/visibility, expr + table
  *  constraints, computed params, LOOKUP, scrap, setup amortization. */

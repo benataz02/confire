@@ -1,4 +1,4 @@
-# HERA B2B Client Portal — Design Spec (2026-07-07)
+# Confire B2B Client Portal — Design Spec (2026-07-07)
 
 ## Context
 

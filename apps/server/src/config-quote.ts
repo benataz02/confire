@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { ORPCError } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
-import { db, configProject, type ConfigCandidate, type ConfigSelection } from "@hera/db";
+import { db, configProject, type ConfigCandidate, type ConfigSelection } from "@confire/db";
 import {
   bindings,
   computeOutputs,
@@ -15,7 +15,7 @@ import {
   type ResolvedLookups,
   type TableRows,
   type Val,
-} from "@hera/config-engine";
+} from "@confire/config-engine";
 
 export type ConfigProjectRow = typeof configProject.$inferSelect;
 

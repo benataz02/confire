@@ -225,7 +225,7 @@ git commit -m "feat(db): config_history table"
 ```ts
 import { describe, expect, test } from "bun:test";
 import { scoreRows } from "../src/similarity.ts";
-import type { ModelDef } from "@hera/config-engine";
+import type { ModelDef } from "@confire/config-engine";
 
 const history: NonNullable<ModelDef["history"]> = {
   mappings: [
@@ -287,7 +287,7 @@ Expected: FAIL — module `../src/similarity.ts` not found.
 - [ ] **Step 3: Implement** — `apps/server/src/similarity.ts`:
 
 ```ts
-import type { Entries, ModelDef, Val } from "@hera/config-engine";
+import type { Entries, ModelDef, Val } from "@confire/config-engine";
 
 // Weighted per-param similarity over cached historic rows. Pure — no DB, no agent — so it has
 // a network-free test. Score = Σ(weight × match) / Σ(weight of params the user filled).
@@ -595,8 +595,8 @@ git commit -m "feat(server): configs.docHistory — live B1 order/quotation hist
 
 ```ts
 import { and, eq, sql } from "drizzle-orm";
-import { db, configHistory, configModel } from "@hera/db";
-import type { ModelDef, Val } from "@hera/config-engine";
+import { db, configHistory, configModel } from "@confire/db";
+import type { ModelDef, Val } from "@confire/config-engine";
 import { fetchQueryTable, type QueryFetcher } from "./lookups.ts";
 import { assertAgentReady, runRequest } from "./orpc/routers/entities.ts";
 
@@ -669,7 +669,7 @@ export function startHistorySync(): void {
 
 - [ ] **Step 2: Add `models.syncHistory` + `models.historyInfo`** — in `apps/server/src/orpc/routers/models.ts`:
 
-Imports: add `configHistory` to the `@hera/db` import, `count, max` to the `drizzle-orm` import, and:
+Imports: add `configHistory` to the `@confire/db` import, `count, max` to the `drizzle-orm` import, and:
 
 ```ts
 import { syncModelHistory } from "../../history-sync.ts";
@@ -745,7 +745,7 @@ similar: userProcedure
   }),
 ```
 
-Also add `Val` to the `@hera/config-engine` type import in configs.ts.
+Also add `Val` to the `@confire/config-engine` type import in configs.ts.
 
 - [ ] **Step 4: Start the interval** — in `apps/server/src/index.ts`, after the imports:
 
@@ -803,7 +803,7 @@ import {
   Button, Input, Label, MessageStrip, MultiComboBox, MultiComboBoxItem, Option, Select, StepInput,
   Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, Title,
 } from "@ui5/webcomponents-react";
-import type { Issue, ModelDef } from "@hera/config-engine";
+import type { Issue, ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { issueFor } from "./useDraftModel.ts";
 
@@ -998,7 +998,7 @@ import {
   BusyIndicator, Button, MessageStrip, Tab, TabContainer, Table, TableCell, TableHeaderCell,
   TableHeaderRow, TableRow, Tag, Text, Toolbar, ToolbarButton, ToolbarSpacer,
 } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef, Val } from "@hera/config-engine";
+import type { Entries, ModelDef, Val } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 
 // The process page's right-hand help pane: live B1 doc history + similar past configurations.
@@ -1092,7 +1092,7 @@ function Similar(_props: { projectId: string; model: ModelDef; entries: Entries;
 Imports: add `SplitterElement, SplitterLayout, ToggleButton` to the `@ui5/webcomponents-react` import, plus:
 
 ```tsx
-import type { Val } from "@hera/config-engine";
+import type { Val } from "@confire/config-engine";
 import { HistoryPane } from "./HistoryPane.tsx";
 ```
 
@@ -1142,7 +1142,7 @@ return (
 );
 ```
 
-And add the toggle to the existing header (`.hera-wizard-header` div), after the `ObjectStatus`:
+And add the toggle to the existing header (`.confire-wizard-header` div), after the `ObjectStatus`:
 
 ```tsx
 <ToggleButton icon="history" pressed={paneOpen} style={{ marginLeft: "auto" }}

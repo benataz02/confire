@@ -1,4 +1,4 @@
-import { escapeLiteral, type CrossJoinSpec } from "@hera/b1";
+import { escapeLiteral, type CrossJoinSpec } from "@confire/b1";
 
 // Exact help: latest Orders/Quotations for the configured item and/or the project customer,
 // fetched live through the B1 transport. Pure helpers here (testable); the oRPC handler in

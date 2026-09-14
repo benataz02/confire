@@ -5,9 +5,9 @@ import { randomBytes } from "node:crypto";
 import {
   db, configModel, configProject, ListVariantDefZ, member, organization, portalClient, uiVariant, user,
   type ConfigCandidate, type ProjectEvent,
-} from "@hera/db";
-import { EntriesZ, TableRowsZ, type Entries, type ModelDef } from "@hera/config-engine";
-import { escapeLiteral, type B1EntitySchema } from "@hera/b1";
+} from "@confire/db";
+import { EntriesZ, TableRowsZ, type Entries, type ModelDef } from "@confire/config-engine";
+import { escapeLiteral, type B1EntitySchema } from "@confire/b1";
 import { adminProcedure, base, baseDomain, clientProcedure, sessionProcedure } from "../base.ts";
 import { hashToken } from "../../crypto.ts";
 import { tenantSlugFromHost } from "../../tenant.ts";
@@ -464,7 +464,7 @@ export const portalRouter = {
         return printDocument(context.tenantId, input.entity, input.docEntry);
       }),
 
-    /** The live SAP document chain for one of this client's projects: the quotation HERA wrote,
+    /** The live SAP document chain for one of this client's projects: the quotation Confire wrote,
      *  then whatever SAP has since made of it. Empty until the project is quoted — before that
      *  there is no b1DocEntry to walk from. */
     chain: clientProcedure

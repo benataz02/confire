@@ -1,12 +1,12 @@
 import { useMemo } from "react";
 import {
   CheckBox, Input, Option, Select, Table, TableCell, TableHeaderCell,
-  TableHeaderRow, TableRow, TableRowAction, Text, Title, Toolbar, ToolbarButton,
+  TableHeaderRow, TableRow, TableRowAction, Text, Toolbar, ToolbarButton,
 } from "@ui5/webcomponents-react";
 import {
   aggregateKey, columnOptions, evalTableRows,
   type ResolvedLookups, type TableColumn, type TableDef, type Val,
-} from "@hera/config-engine";
+} from "@confire/config-engine";
 import { QueryValueHelp, type QuerySource } from "../ValueHelp.tsx";
 import { displayValue } from "./formHelpers.ts";
 import { addRow, pasteRows, removeRow, setCell, type Row } from "./configTableOps.ts";

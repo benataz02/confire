@@ -4,7 +4,7 @@ import {
   Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, Title,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
-import type { Constraint, Issue, ModelDef, ResolvedLookups, Val } from "@hera/config-engine";
+import type { Constraint, Issue, ModelDef, ResolvedLookups, Val } from "@confire/config-engine";
 import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";

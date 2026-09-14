@@ -44,7 +44,7 @@ import {
   CheckBox, Form, FormGroup, FormItem, Input, Label, MultiComboBox, MultiComboBoxItem,
   ObjectStatus, Option, RadioButton, Select, StepInput, Text,
 } from "@ui5/webcomponents-react";
-import { propagate, type DomainOption, type Entries, type ModelDef, type ResolvedLookups, type Val } from "@hera/config-engine";
+import { propagate, type DomainOption, type Entries, type ModelDef, type ResolvedLookups, type Val } from "@confire/config-engine";
 
 // The one form both the builder preview and the wizard render. Fully controlled:
 // entries in, entries out; all engine work happens in propagate(). Renders sections
@@ -380,7 +380,7 @@ git commit -m "refactor(web): extract BatchEditor from StepBatches"
 import {
   MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Text, ToggleButton,
 } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef } from "@hera/config-engine";
+import type { Entries, ModelDef } from "@confire/config-engine";
 import { bestByBatch, candidateLabel, fmt, isSelected, openKeys, type PricedCandidate, type Sel } from "./runView.ts";
 
 // The signature view: rows = candidates (labeled by their open-parameter values), columns =
@@ -445,7 +445,7 @@ export function CandidatesMatrix({ model, runEntries, candidates, selection, onT
 ```tsx
 import { useState, type ReactNode } from "react";
 import { Bar, Button, Text, Title } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef } from "@hera/config-engine";
+import type { Entries, ModelDef } from "@confire/config-engine";
 import { candidateLabel, openKeys, type PricedCandidate, type Sel } from "./runView.ts";
 import { CandidatesMatrix } from "./CandidatesMatrix.tsx";
 
@@ -517,7 +517,7 @@ import {
   Bar, Button, Input, MessageStrip, ObjectStatus, Panel, StepInput, Table, TableCell,
   TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, Title,
 } from "@ui5/webcomponents-react";
-import { computeOutputs, type Entries, type ModelDef, type OutputOverrides, type Outputs, type ResolvedLookups } from "@hera/config-engine";
+import { computeOutputs, type Entries, type ModelDef, type OutputOverrides, type Outputs, type ResolvedLookups } from "@confire/config-engine";
 import {
   addBomLine, addOpLine, candidateLabel, fmt, isEdited, isRemoved, openKeys, patchAddedBom,
   patchAddedOp, patchBom, patchOp, removeAddedBom, removeAddedOp, resetLine, toPriced, withoutRemovals,
@@ -719,7 +719,7 @@ export function StepCandidatesReview({ model, lookups, runEntries, candidates, s
       {error ? <MessageStrip design="Negative" hideCloseButton>{error}</MessageStrip> : null}
       {saved ? <MessageStrip design="Positive" hideCloseButton>Selection saved — totals recomputed on the server.</MessageStrip> : null}
       {panels}
-      <Bar design="FloatingFooter" className="hera-step-bar"
+      <Bar design="FloatingFooter" className="confire-step-bar"
         startContent={
           <Text>
             Total across {selection.length} line{selection.length === 1 ? "" : "s"}: <span style={{ fontWeight: 700 }}>{fmt(grand)}</span>
@@ -762,22 +762,22 @@ git commit -m "feat(web): merged candidates+review step component"
 ```css
 /* Full-height wizard: the wrapper owns the header overlay; step bars stick to the bottom
    of the wizard scroll area. */
-.hera-wizard-wrap {
+.confire-wizard-wrap {
   position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
-.hera-wizard {
+.confire-wizard {
   flex: 1;
   min-height: 0;
 }
 /* Reserve room on the right of the steps bar for the overlay header. */
-.hera-wizard::part(navigator) {
+.confire-wizard::part(navigator) {
   padding-inline-end: 24rem;
 }
-.hera-wizard-header {
+.confire-wizard-header {
   position: absolute;
   top: 0;
   right: 1rem;
@@ -787,7 +787,7 @@ git commit -m "feat(web): merged candidates+review step component"
   align-items: center;
   gap: 0.75rem;
 }
-.hera-step-bar {
+.confire-step-bar {
   position: sticky;
   bottom: 0;
   z-index: 2;
@@ -803,7 +803,7 @@ import {
   Bar, Button, BusyIndicator, Dialog, Form, FormGroup, FormItem, Label, MessageStrip,
   ObjectStatus, Text, TextArea, Title, Wizard, WizardStep,
 } from "@ui5/webcomponents-react";
-import { propagate, type Entries } from "@hera/config-engine";
+import { propagate, type Entries } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { cleanOverrides, statusUi, toggleSelection, type Sel } from "./runView.ts";
 import { ConfiguratorForm, ConsistencyStatus } from "./ConfiguratorForm.tsx";
@@ -914,7 +914,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
       {update.error || run.error ? (
         <MessageStrip design="Negative" hideCloseButton>{update.error?.message ?? run.error?.message}</MessageStrip>
       ) : null}
-      <Bar design="FloatingFooter" className="hera-step-bar"
+      <Bar design="FloatingFooter" className="confire-step-bar"
         startContent={
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             <ConsistencyStatus model={model.definition} lookups={lookups.data} entries={entries} />
@@ -942,13 +942,13 @@ export function ConfigProcessPage({ id }: { id: string }) {
           <Button design="Negative" onClick={() => setRejectOpen(true)}>Reject</Button>
         </div>
       ) : null}
-      <div className="hera-wizard-wrap">
-        <div className="hera-wizard-header">
+      <div className="confire-wizard-wrap">
+        <div className="confire-wizard-header">
           <Title level="H5">{project.name}</Title>
           <Text>{model.name}</Text>
           <ObjectStatus state={statusUi[project.status].state}>{statusUi[project.status].text}</ObjectStatus>
         </div>
-        <Wizard className="hera-wizard" contentLayout="SingleStep"
+        <Wizard className="confire-wizard" contentLayout="SingleStep"
           onStepChange={(e) => goto(Number((e.detail.step as HTMLElement).dataset.idx))}>
           <WizardStep titleText="Configure" icon="settings" data-idx="0" selected={step === 0}>
             {configureBody}
@@ -1531,7 +1531,7 @@ import { useMemo, useState } from "react";
 import {
   Bar, Button, Dialog, Icon, Input, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Text,
 } from "@ui5/webcomponents-react";
-import type { ResolvedTable, Val } from "@hera/config-engine";
+import type { ResolvedTable, Val } from "@confire/config-engine";
 
 // Fiori-style value help for query-sourced parameters: search across every displayed column,
 // click a row to pick it. ponytail: client-side filter over already-resolved rows; move the
@@ -1607,7 +1607,7 @@ export function ValueHelpDialog({ open, headerText, table, valueCol, columns, hi
 
 In `ConfiguratorForm.tsx`:
 
-1. Add imports: `Icon` from `@ui5/webcomponents-react`, `refColumns` from `@hera/config-engine`, `useState` from react, `ValueHelpDialog` from `./ValueHelpDialog.tsx`.
+1. Add imports: `Icon` from `@ui5/webcomponents-react`, `refColumns` from `@confire/config-engine`, `useState` from react, `ValueHelpDialog` from `./ValueHelpDialog.tsx`.
 2. Add state at the top of `ConfiguratorForm`: `const [vhKey, setVhKey] = useState<string | null>(null);`
 3. Inside `control(key)`, insert **before** the `if (dom.length)` select branch:
 
@@ -1683,7 +1683,7 @@ git commit -m "feat(web): value-help dialog for query params; table selects show
 Update `TablesTab` to accept props and manage which editor shows:
 
 ```tsx
-import type { ModelDef, Val, Option as EngineOption } from "@hera/config-engine";
+import type { ModelDef, Val, Option as EngineOption } from "@confire/config-engine";
 import { client } from "../../orpc.ts";
 
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
@@ -2029,7 +2029,7 @@ Run: `bun test apps/web/src/components/configurator/exprHelpers.test.ts` — exp
 In `exprHelpers.ts`, extend `Suggestion`'s `kind` union with `"derived"` and update:
 
 ```ts
-import { FUNCS, refColumns, derivedKey, type ModelDef } from "@hera/config-engine";
+import { FUNCS, refColumns, derivedKey, type ModelDef } from "@confire/config-engine";
 
 export function scopeSuggestions(model: ModelDef, extraVars: string[] = []): Suggestion[] {
   // ponytail: tenant-table columns aren't available here, so default-all tenant refs get no

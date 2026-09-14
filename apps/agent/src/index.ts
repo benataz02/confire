@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { DirectTransport, ServiceLayer, B1Error, type B1Transport } from "@hera/b1";
+import { DirectTransport, ServiceLayer, B1Error, type B1Transport } from "@confire/b1";
 import { ApiGateway, type ApiGatewayConfig } from "./api-gateway.ts";
 
 // One agent service, one B1 company database. A second company DB means a second agent on a
@@ -19,7 +19,7 @@ type ServiceConfig = {
 };
 type AgentConfig = { port?: number; secret: string; b1: ServiceConfig; beas?: ServiceConfig; apiGateway?: ApiGatewayConfig };
 
-const configPath = process.env.HERA_AGENT_CONFIG ?? "agent.json";
+const configPath = process.env.CONFIRE_AGENT_CONFIG ?? "agent.json";
 const config = JSON.parse(readFileSync(configPath, "utf8")) as AgentConfig;
 if (!config.secret) throw new Error(`${configPath}: "secret" is required — it is the only auth in dev`);
 
@@ -102,7 +102,7 @@ const server = Bun.serve({
   },
 });
 
-console.log(`hera-agent on :${server.port} — services: ${Object.keys(services).join(", ")}${gateway ? " + print" : ""}`);
+console.log(`confire-agent on :${server.port} — services: ${Object.keys(services).join(", ")}${gateway ? " + print" : ""}`);
 
 // Release the B1 licence slot when the service stops.
 for (const sig of ["SIGINT", "SIGTERM"] as const) {

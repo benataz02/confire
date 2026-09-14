@@ -1,8 +1,8 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
-import { db, b1NavPin, ListVariantDefZ, type B1NavPin } from "@hera/db";
-import { categoriesOf, categoryNames, coerceKey, type Key } from "@hera/b1";
+import { db, b1NavPin, ListVariantDefZ, type B1NavPin } from "@confire/db";
+import { categoriesOf, categoryNames, coerceKey, type Key } from "@confire/b1";
 import { adminProcedure, userProcedure } from "../base.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
 import { assertEntity, entityList, entitySchema } from "../../entity-meta.ts";
@@ -28,7 +28,7 @@ const b1Of = async (tenantId: string) => (await tenantConnector(tenantId)).b1;
 /** Writes are curated-only, and the rule lives here rather than in whether the UI drew a button. */
 const curated = (entity: string) => {
   const p = profileOf(entity);
-  if (!p) throw new ORPCError("FORBIDDEN", { message: `${entity} is read-only in HERA` });
+  if (!p) throw new ORPCError("FORBIDDEN", { message: `${entity} is read-only in Confire` });
   return p;
 };
 

@@ -1,5 +1,5 @@
 {
-  "name": "@hera/server",
+  "name": "@confire/server",
   "type": "module",
   "private": true,
   "exports": {
@@ -12,9 +12,9 @@
     "better-auth-generate": "bunx @better-auth/cli generate --config src/auth.ts --output ../../packages/db/src/schema/auth.ts -y"
   },
   "dependencies": {
-    "@hera/b1": "workspace:*",
-    "@hera/config-engine": "workspace:*",
-    "@hera/db": "workspace:*",
+    "@confire/b1": "workspace:*",
+    "@confire/config-engine": "workspace:*",
+    "@confire/db": "workspace:*",
     "@orpc/client": "^1.14.6",
     "@orpc/server": "^1.14.6",
     "better-auth": "^1.6.19",

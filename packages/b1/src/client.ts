@@ -18,7 +18,7 @@ const pageHeader = (q?: QueryOptions): Record<string, string> | undefined => {
   return size === undefined ? undefined : { Prefer: `odata.maxpagesize=${size}` };
 };
 
-/** Expanded port of b1-mcp-server's B1Client (MIT). Every capability HERA needs is a named,
+/** Expanded port of b1-mcp-server's B1Client (MIT). Every capability Confire needs is a named,
  *  typed method — there is deliberately no generic escape hatch, so no caller can hand the
  *  agent an arbitrary URL. Added over the sample: etag, prefer, expand, count, readNext,
  *  crossJoin, metadata. */

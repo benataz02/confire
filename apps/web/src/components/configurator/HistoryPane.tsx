@@ -2,7 +2,7 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type CSSProperties } from "react";
 import { BusyIndicator, Button, List, ListItemCustom, MessageStrip, Tag, Text } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef, Val } from "@hera/config-engine";
+import type { Entries, ModelDef, Val } from "@confire/config-engine";
 import { money } from "./costElements.ts";
 import { formatCell } from "../../listSpec.ts";
 import { orpc } from "../../orpc.ts";

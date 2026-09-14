@@ -1,8 +1,8 @@
 import {
   AnalyticalTable, CheckBox, DatePicker, Input, Option, Select, StepInput, Text, TextArea,
 } from "@ui5/webcomponents-react";
-import { decodeBool, encodeBool, type B1Field } from "@hera/b1";
-import type { Val } from "@hera/config-engine";
+import { decodeBool, encodeBool, type B1Field } from "@confire/b1";
+import type { Val } from "@confire/config-engine";
 import { formatCell } from "../../listSpec.ts";
 import { EntityValueHelp } from "../ValueHelp.tsx";
 

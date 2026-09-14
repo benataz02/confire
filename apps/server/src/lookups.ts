@@ -1,8 +1,8 @@
-import { refKeyCols, referencedTables } from "@hera/config-engine";
+import { refKeyCols, referencedTables } from "@confire/config-engine";
 import type {
   Entries, LookupRef, ModelDef, ODataQuery, Option, QuerySource, ResolvedLookups, ResolvedTable, Val,
-} from "@hera/config-engine";
-import { andFilter, escapeLiteral } from "@hera/b1";
+} from "@confire/config-engine";
+import { andFilter, escapeLiteral } from "@confire/b1";
 import { ORPCError } from "@orpc/server";
 
 // Resolve a model's external references (manual lists, and the tenant's masterdata — rows
@@ -13,7 +13,7 @@ import { ORPCError } from "@orpc/server";
 // Nothing here builds a URL any more: a query is `{ entitySet, filter, orderby, top }` and
 // packages/b1's query.ts is the only place that turns one into a path.
 
-/** Rows per B1 page: the `$top` HERA asks for, and (via packages/b1's pageHeader) the
+/** Rows per B1 page: the `$top` Confire asks for, and (via packages/b1's pageHeader) the
  *  `Prefer: odata.maxpagesize` that goes with it. The Service Layer's own default is **20**, so
  *  without both a "give me 100" read quietly comes back with 20.
  *  `B1_PAGE_SIZE` tunes it per install — a slow WAN wants smaller pages, a fast LAN larger ones. */

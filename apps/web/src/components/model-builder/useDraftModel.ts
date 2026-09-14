@@ -1,7 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { checkModel, type Issue, type ModelDef } from "@hera/config-engine";
+import { checkModel, type Issue, type ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import type { TableCols } from "./exprHelpers.ts";
 import { toast } from "../toast.ts";

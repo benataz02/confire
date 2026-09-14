@@ -1,5 +1,5 @@
-import { andFilter, encodeBool, escapeLiteral, isYesNo, type B1Field, type B1EntitySchema, type QueryOptions } from "@hera/b1";
-import type { FilterCond, ListVariantDef } from "@hera/db";
+import { andFilter, encodeBool, escapeLiteral, isYesNo, type B1Field, type B1EntitySchema, type QueryOptions } from "@confire/b1";
+import type { FilterCond, ListVariantDef } from "@confire/db";
 
 // Compile a saved list view (ListVariantDef) into a B1 read. The browser-side counterpart is
 // listSpec.ts's applySpec, which does the same thing over an in-memory array — same spec, same

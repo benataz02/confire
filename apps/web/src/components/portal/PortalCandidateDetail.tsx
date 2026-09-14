@@ -1,5 +1,5 @@
 import { CheckBox, Form, FormItem, Label, Panel, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Text, Title } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef } from "@hera/config-engine";
+import type { Entries, ModelDef } from "@confire/config-engine";
 import { fmt, isSelected, type Sel } from "../configurator/runView.ts";
 
 export type PortalCandidate = { assignment: Entries; perBatch: { batchQty: number; unitPrice: number; total: number }[] };

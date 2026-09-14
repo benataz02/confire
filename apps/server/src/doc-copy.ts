@@ -80,7 +80,7 @@ export function buildCopy(
     CardCode: source.CardCode,
     ...(source.DocDate ? { DocDate: source.DocDate } : {}),
     ...(source.DocDueDate ? { DocDueDate: source.DocDueDate } : {}),
-    Comments: opts.comments ?? `Created from ${flow.source} ${String(source.DocNum ?? docEntry)} in HERA`,
+    Comments: opts.comments ?? `Created from ${flow.source} ${String(source.DocNum ?? docEntry)} in Confire`,
     DocumentLines,
   };
 }

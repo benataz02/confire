@@ -30,7 +30,7 @@
 
 ```ts
 import { expect, test } from "bun:test";
-import type { ModelDef } from "@hera/config-engine";
+import type { ModelDef } from "@confire/config-engine";
 import { buildAssistPrompt } from "../src/prompt.ts";
 
 const model: ModelDef = {

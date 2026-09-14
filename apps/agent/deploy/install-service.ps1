@@ -1,14 +1,14 @@
-# Registers hera-agent (and optionally cloudflared) as Windows services.
-# Run elevated, from the folder holding hera-agent.exe and agent.json.
+# Registers confire-agent (and optionally cloudflared) as Windows services.
+# Run elevated, from the folder holding confire-agent.exe and agent.json.
 #
-#   bun run build                       # produces hera-agent.exe
+#   bun run build                       # produces confire-agent.exe
 #   .\deploy\install-service.ps1        # dev / LAN: no tunnel
 #   .\deploy\install-service.ps1 -TunnelToken <token>
 #
 # ponytail: sc.exe, not NSSM or a service wrapper. A compiled Bun binary is a normal exe and
 # Windows restarts it on failure by itself.
 param(
-  [string]$ExePath = (Join-Path $PSScriptRoot "..\hera-agent.exe"),
+  [string]$ExePath = (Join-Path $PSScriptRoot "..\confire-agent.exe"),
   [string]$ConfigPath = (Join-Path $PSScriptRoot "..\agent.json"),
   [string]$TunnelToken
 )
@@ -17,20 +17,20 @@ $ErrorActionPreference = "Stop"
 $exe = (Resolve-Path $ExePath).Path
 $cfg = (Resolve-Path $ConfigPath).Path
 
-if ((sc.exe query hera-agent 2>$null) -match "SERVICE_NAME") {
-  Write-Host "hera-agent exists - stopping and deleting first"
-  sc.exe stop hera-agent | Out-Null
+if ((sc.exe query confire-agent 2>$null) -match "SERVICE_NAME") {
+  Write-Host "confire-agent exists - stopping and deleting first"
+  sc.exe stop confire-agent | Out-Null
   Start-Sleep -Seconds 2
-  sc.exe delete hera-agent | Out-Null
+  sc.exe delete confire-agent | Out-Null
   Start-Sleep -Seconds 2
 }
 
-# HERA_AGENT_CONFIG is read by src/index.ts; the service has no working directory of its own.
-sc.exe create hera-agent binPath= "`"$exe`"" start= auto DisplayName= "HERA on-prem agent"
-sc.exe description hera-agent "Bridges HERA cloud to the local SAP B1 Service Layer."
-sc.exe failure hera-agent reset= 86400 actions= restart/5000/restart/5000/restart/30000
-[Environment]::SetEnvironmentVariable("HERA_AGENT_CONFIG", $cfg, "Machine")
-sc.exe start hera-agent
+# CONFIRE_AGENT_CONFIG is read by src/index.ts; the service has no working directory of its own.
+sc.exe create confire-agent binPath= "`"$exe`"" start= auto DisplayName= "Confire on-prem agent"
+sc.exe description confire-agent "Bridges Confire cloud to the local SAP B1 Service Layer."
+sc.exe failure confire-agent reset= 86400 actions= restart/5000/restart/5000/restart/30000
+[Environment]::SetEnvironmentVariable("CONFIRE_AGENT_CONFIG", $cfg, "Machine")
+sc.exe start confire-agent
 
 if ($TunnelToken) {
   # Production only: cloudflared dials out, so no inbound firewall hole. The agent URL in

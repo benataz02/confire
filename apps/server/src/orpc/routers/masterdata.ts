@@ -1,8 +1,8 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { db, configMasterdata, configModel } from "@hera/db";
-import { ODataQueryZ, QuerySourceZ, ValZ, referencedTables } from "@hera/config-engine";
+import { db, configMasterdata, configModel } from "@confire/db";
+import { ODataQueryZ, QuerySourceZ, ValZ, referencedTables } from "@confire/config-engine";
 import { adminProcedure } from "../base.ts";
 import { bumpMasterdata, DEFAULT_PAGE, fetchQueryTable, withSearch, type MasterdataRow } from "../../lookups.ts";
 import { compileSpec, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";

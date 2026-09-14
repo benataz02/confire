@@ -4,13 +4,13 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   db, configModel, configProject, user,
   type ConfigCandidate, type ConfigSelection, type ProjectEvent,
-} from "@hera/db";
+} from "@confire/db";
 import {
   computeOutputs, DslError, enumerate, EntriesZ, OutputOverridesZ, propagate, referencedTables, TableRowsZ,
   type Entries, type ModelDef, type Outputs, type ResolvedLookups, type TableRows, type Val,
-} from "@hera/config-engine";
+} from "@confire/config-engine";
 import { userProcedure } from "../base.ts";
-import { B1Error, rowsOf } from "@hera/b1";
+import { B1Error, rowsOf } from "@confire/b1";
 import { runnerFor, tenantConnector, viaB1 } from "../../b1.ts";
 import { masterdataRows } from "./masterdata.ts";
 import {

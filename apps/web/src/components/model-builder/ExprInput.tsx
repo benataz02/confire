@@ -1,6 +1,6 @@
 import { useMemo, type CSSProperties } from "react";
 import { Input, SuggestionItemCustom, TextArea } from "@ui5/webcomponents-react";
-import { DslError, parse, type Issue, type ModelDef } from "@hera/config-engine";
+import { DslError, parse, type Issue, type ModelDef } from "@confire/config-engine";
 import { complete, matches, scopeSuggestions, type TableCols } from "./exprHelpers.ts";
 
 // The one expression editor used everywhere in the builder: monospace, parse-on-change with
@@ -8,10 +8,10 @@ import { complete, matches, scopeSuggestions, type TableCols } from "./exprHelpe
 // suggestion's text is the *completed* expression, so picking one just fires onInput with it.
 
 // Monospace inside the shadow DOM via the exposed `input`/`textarea` CSS parts.
-if (typeof document !== "undefined" && !document.getElementById("hera-expr-style")) {
+if (typeof document !== "undefined" && !document.getElementById("confire-expr-style")) {
   const el = document.createElement("style");
-  el.id = "hera-expr-style";
-  el.textContent = `.hera-expr::part(input),.hera-expr::part(textarea){font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}`;
+  el.id = "confire-expr-style";
+  el.textContent = `.confire-expr::part(input),.confire-expr::part(textarea){font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}`;
   document.head.appendChild(el);
 }
 
@@ -71,7 +71,7 @@ export function ExprInput({
     return (
       <TextArea
         id={fieldId}
-        className="hera-expr"
+        className="confire-expr"
         style={{ width: "100%", ...style }}
         rows={rows}
         growing
@@ -89,7 +89,7 @@ export function ExprInput({
     <Input
       id={fieldId}
       style={{ width: "100%", ...style }}
-      className="hera-expr" // fontFamily via CSS part
+      className="confire-expr" // fontFamily via CSS part
       value={text}
       placeholder={placeholder}
       valueState={error ? "Negative" : "None"}

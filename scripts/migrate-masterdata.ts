@@ -13,7 +13,7 @@
  * means rewriting the refs inside that model, which is a human decision.
  */
 import { and, eq } from "drizzle-orm";
-import { db, configMasterdata, configModel, type MasterdataQuery } from "@hera/db";
+import { db, configMasterdata, configModel, type MasterdataQuery } from "@confire/db";
 
 type LegacyQueryTable = MasterdataQuery & { name: string };
 

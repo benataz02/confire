@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { ModelDef } from "@hera/config-engine";
+import type { ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 
 // Only domain refs affect lookup resolution. Sending this skeleton (instead of the full draft)

@@ -1,10 +1,10 @@
-# HERA Product Configurator — Design Spec (2026-07-03)
+# Confire Product Configurator — Design Spec (2026-07-03)
 
 ## Context
 
-HERA's backbone (auth → tenancy → agent bridge → B1 sync) is proven. This milestone adds the CPQ core: a **Teamcenter-concept product configurator** — parameters with domains, constraint propagation, a formula layer, 150% BOM + routing outputs with calculated quantities/times/costs — plus a **model builder** for admins and a **configuration process** page that ends in a real B1 Sales Quotation. Emphasis: solid engine design + exceptional UI/UX (UI5 Web Components, verified against @ui5/webcomponents-react 2.23).
+Confire's backbone (auth → tenancy → agent bridge → B1 sync) is proven. This milestone adds the CPQ core: a **Teamcenter-concept product configurator** — parameters with domains, constraint propagation, a formula layer, 150% BOM + routing outputs with calculated quantities/times/costs — plus a **model builder** for admins and a **configuration process** page that ends in a real B1 Sales Quotation. Emphasis: solid engine design + exceptional UI/UX (UI5 Web Components, verified against @ui5/webcomponents-react 2.23).
 
-Designed from scratch per user instruction; dead config-engine remnants (broken `@hera/config-engine` symlink, orphan migrations `config_*` in `packages/db/drizzle/`, `mdResolveKey` in `apps/web/src/orpc.ts`) are ignored and must be cleaned up during implementation.
+Designed from scratch per user instruction; dead config-engine remnants (broken `@confire/config-engine` symlink, orphan migrations `config_*` in `packages/db/drizzle/`, `mdResolveKey` in `apps/web/src/orpc.ts`) are ignored and must be cleaned up during implementation.
 
 ## Decisions (settled in brainstorming)
 
@@ -14,7 +14,7 @@ Designed from scratch per user instruction; dead config-engine remnants (broken 
 | Rule authoring | One expression DSL everywhere + combination tables (allow/forbid rows) for compatibility constraints |
 | Outputs | 150% BOM + 150% routing: superset lines/ops with condition + formulas, filtered per configuration |
 | Data sources | Unified lookup concept: Manual list \| DB table \| Query (agent-backed GET to **B1 and Beas**, both in v1) |
-| B1 output | Sales Quotation only (one line per selected candidate); BOM/routing stay in HERA as costing evidence |
+| B1 output | Sales Quotation only (one line per selected candidate); BOM/routing stay in Confire as costing evidence |
 | Lifecycle | Mutable model + immutable **snapshot-on-run** (model + lookups + outputs frozen per engine run) |
 | Enumeration | Valid completions of **open parameters × batches**, hard cap (default 200) |
 | Process anchor | New "Configurations" document (project): customer + model + entries + batches + runs → one B1 quotation |
@@ -69,7 +69,7 @@ House style: `uuid` PK `defaultRandom()`, `tenant_id text` (no FK), timestamps `
 ## Agent (`apps/agent/src/`)
 
 - `query.fetch` kind: `{ target: "b1"|"beas", path }` → GET via `ServiceLayerClient` (b1) or new thin `BeasClient` (base URL + auth from agent `.env` — credentials never in cloud DB, same rule as B1).
-- `quote.create` kind: POST `/Quotations` with `NumAtCard = "HERA-" + shortRunId`. Retry discipline identical to BP flow: attempts==1 → POST; attempts>1 → GET filter by NumAtCard, ack if found. `// ponytail: NumAtCard anchor; U_CpqExtId UDF when real docs need it`
+- `quote.create` kind: POST `/Quotations` with `NumAtCard = "Confire-" + shortRunId`. Retry discipline identical to BP flow: attempts==1 → POST; attempts>1 → GET filter by NumAtCard, ack if found. `// ponytail: NumAtCard anchor; U_CpqExtId UDF when real docs need it`
 
 ## Web (`apps/web/src/routes/_authed/`)
 
@@ -110,7 +110,7 @@ Shared **`ExprInput`**: monospace input, parse-on-change against draft model, `v
 - `bun test` in `packages/config-engine`: parser goldens incl. error spans; propagation fixtures (table + expr constraints); enumeration (cap, completeness on small models); output math vs hand-computed fixtures (batch amortization, scrap, margin).
 - Server integration test: project → run → snapshot persisted → createQuote enqueues with stable dedupKey.
 - Manual e2e: seed a demo model (e.g. cable assembly: material × cross-section × coating, 2 constraints, 1 combination table, 5 BOM lines, 3 ops), run `bun dev`, walk builder live-preview loop, then wizard through to a real B1 Quotation in the sandbox; verify retry produces no duplicate (kill agent mid-POST).
-- Cleanup check: dead `@hera/config-engine` references removed; `bun install && bun run build` green.
+- Cleanup check: dead `@confire/config-engine` references removed; `bun install && bun run build` green.
 
 ## Implementation phases
 

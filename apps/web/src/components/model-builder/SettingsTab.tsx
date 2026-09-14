@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Form, FormGroup, FormItem, Input, Label, MessageStrip, Switch } from "@ui5/webcomponents-react";
-import type { Issue, ModelDef } from "@hera/config-engine";
+import type { Issue, ModelDef } from "@confire/config-engine";
+import { EntityValueHelp } from "../ValueHelp.tsx";
 import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
@@ -44,9 +45,11 @@ export function SettingsTab({ draft, update, issues, tables, portalMeta, setPort
               onChange={(v) => update((d) => ({ ...d, pricing: { ...d.pricing, priceExpr: v ?? "" } }))} />
           </FormItem>
           <FormItem labelContent={<Label required>Quote item code</Label>}>
-            <Input value={draft.pricing.quoteItemCode}
+            <EntityValueHelp entitySet="Items" keyField="ItemCode" select={["ItemCode", "ItemName"]}
+              value={draft.pricing.quoteItemCode || undefined}
               valueState={draft.pricing.quoteItemCode ? "None" : "Negative"}
-              onInput={(e) => update((d) => ({ ...d, pricing: { ...d.pricing, quoteItemCode: e.target.value } }))} />
+              headerText="Select an item"
+              onChange={(v) => update((d) => ({ ...d, pricing: { ...d.pricing, quoteItemCode: v == null ? "" : String(v) } }))} />
           </FormItem>
           {/* free text, because B1 currency codes are free text; blank = EUR (see money()) */}
           <FormItem labelContent={<Label>Currency</Label>}>

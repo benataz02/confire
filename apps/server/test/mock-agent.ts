@@ -1,5 +1,5 @@
-import { db, sapConnection } from "@hera/db";
-import { entitySetPath } from "@hera/b1";
+import { db, sapConnection } from "@confire/db";
+import { entitySetPath } from "@confire/b1";
 import { encryptSecret } from "../src/crypto.ts";
 
 // A stand-in for the on-prem agent: the same operation-shaped HTTP surface over a tiny in-memory

@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from "bun:test";
-import type { ModelDef } from "@hera/config-engine";
+import type { ModelDef } from "@confire/config-engine";
 import { complete, matches, scopeSuggestions, trailingIdent, modelWithParam } from "./exprHelpers.ts";
 
 const model = {

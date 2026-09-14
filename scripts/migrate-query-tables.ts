@@ -10,8 +10,8 @@
  * than being guessed at — those need a human decision, and there should be none in practice.
  */
 import { eq } from "drizzle-orm";
-import { db, configModel } from "@hera/db";
-import type { ODataQuery } from "@hera/config-engine";
+import { db, configModel } from "@confire/db";
+import type { ODataQuery } from "@confire/config-engine";
 
 const BASE = "https://migrate.invalid/";
 const ENTITY = /^[A-Za-z_][A-Za-z0-9_]*$/;

@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { agentPost } from "@hera/b1";
+import { agentPost } from "@confire/b1";
 import { agentTarget, viaB1 } from "./b1.ts";
 import { PRINTABLE } from "./entity-profiles.ts";
 

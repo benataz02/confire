@@ -1,11 +1,11 @@
-# Sales dashboard: SAP B1 sales figures over HERA configuration data
+# Sales dashboard: SAP B1 sales figures over Confire configuration data
 
 Date: 2026-08-19
 
 ## Purpose
 
 Replace the placeholder at `apps/web/src/routes/_authed/index.tsx` with the signed-in home page:
-a single-scroll overview that answers "how is the business doing, and what did HERA contribute".
+a single-scroll overview that answers "how is the business doing, and what did Confire contribute".
 
 It must show:
 
@@ -18,7 +18,7 @@ It must show:
 - Quotes requiring attention
 - Integration and configuration exceptions
 
-Each figure is tenant-wide, with the HERA-originated slice shown as a sub-indicator. A user
+Each figure is tenant-wide, with the Confire-originated slice shown as a sub-indicator. A user
 mapped to a B1 sales employee can additionally switch to their own numbers.
 
 ## Verified facts
@@ -31,7 +31,7 @@ Read from the code and the connected B1 v2 Service Layer, on 2026-08-19.
   (`packages/config-engine/src/output.ts:23`), and `config_run.candidates[].perBatch[].outputs`
   persists them per quote with `selection` naming the chosen candidate and batch. Margin needs
   no SAP call.
-- `config_run.b1DocEntry` is the B1 Quotation `DocEntry` and is the only join between HERA and
+- `config_run.b1DocEntry` is the B1 Quotation `DocEntry` and is the only join between Confire and
   B1 sales documents (`apps/server/src/config-quote.ts:181`).
 - `config_project` carries `status` (`draft|calculated|quoted|requested|rejected`), `source`
   (`internal|portal`), `createdBy`, and an append-only `events[]` with `at` and `kind`. The
@@ -91,7 +91,7 @@ with an unanswered visible-and-required parameter.
 | Median quote turnaround | `config_project.events[created].at` → `config_run.quotedAt` | live SQL |
 | Gross margin | `config_run.quotedValue` / `quotedCost`, captured at quote time | live SQL |
 | Config → order funnel | `config_project.status` + `b1DocEntry` ∩ snapshot orders | live SQL |
-| Open pipeline by age | B1 open `Quotations`; HERA slice via `b1DocEntry` | snapshot |
+| Open pipeline by age | B1 open `Quotations`; Confire slice via `b1DocEntry` | snapshot |
 | Quotes requiring attention | `config_project` requested / rejected / stale | live SQL |
 | Exceptions | `agent_request.status='failed'`, `tenant_integration.lastSeenAt` | live SQL |
 
@@ -187,7 +187,7 @@ type B1Snapshot = {
 
 `openQuotes` is capped at 1000 rows, newest first, and the cap is reported rather than applied
 silently — the age chart footnotes it when `openQuotesTruncated` is true. The list is kept, not
-pre-aggregated, because the HERA slice needs to intersect `docEntry` with `config_run.b1DocEntry`.
+pre-aggregated, because the Confire slice needs to intersect `docEntry` with `config_run.b1DocEntry`.
 
 One new column on `tenant_integration`:
 
@@ -276,7 +276,7 @@ non-sticky page-top, so there is no `DynamicPage` wrapper; the page scrolls insi
   <Card>
     <AnalyticalCardHeader titleText="Order value" value="1.24" scale="M €" trend="Up"
                           subtitleText="This quarter" state="Good">
-      <NumericSideIndicator titleText="via HERA" number="284" unit="k €" />
+      <NumericSideIndicator titleText="via Confire" number="284" unit="k €" />
     </AnalyticalCardHeader>
   </Card>
   {/* Conversion · Turnaround · Configured margin — same shape */}
@@ -304,7 +304,7 @@ Three deliberate touches:
   this is what keeps the single-scroll layout cheap.
 - **`onDataPointClick` on the age chart filters the attention list below it.** Without this the
   chart and the list say the same thing twice. Clicking `30d+` narrows the list to those quotes.
-- **`NumericSideIndicator` carries the HERA segment inside each tenant-wide tile.** One number,
+- **`NumericSideIndicator` carries the Confire segment inside each tenant-wide tile.** One number,
   one sub-number, no second dashboard.
 
 ### Layout

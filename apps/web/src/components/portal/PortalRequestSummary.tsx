@@ -13,7 +13,7 @@ import "@ui5/webcomponents-icons/dist/paper-plane.js";
 import "@ui5/webcomponents-icons/dist/sales-quote.js";
 import "@ui5/webcomponents-icons/dist/decline.js";
 import "@ui5/webcomponents-icons/dist/undo.js";
-import type { Entries, ModelDef } from "@hera/config-engine";
+import type { Entries, ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { candidateLabel, fmt, openKeys, type Sel } from "../configurator/runView.ts";
 import { portalStatusUi, type PortalStatus } from "./portalUi.ts";
@@ -61,7 +61,7 @@ export function PortalRequestSummary({ project, model, onWithdraw, onReopen, bus
   });
   const navigate = useNavigate();
 
-  // The SAP chain only exists once HERA has written the quotation, which is exactly `quoted`.
+  // The SAP chain only exists once Confire has written the quotation, which is exactly `quoted`.
   // Before that the timeline is what it has always been.
   const chain = useQuery({
     ...orpc.portal.docs.chain.queryOptions({ input: { projectId: project.id } }),
@@ -80,7 +80,7 @@ export function PortalRequestSummary({ project, model, onWithdraw, onReopen, bus
           doc: { entity: d.entity, docEntry: d.docEntry, docNum: d.docNum },
         })),
       ]
-        // ISO strings compare correctly as strings; B1 dates are date-only, HERA events are full
+        // ISO strings compare correctly as strings; B1 dates are date-only, Confire events are full
         // timestamps, so a same-day document sorts below the event that produced it. Good enough.
         .sort((a, b) => b.at.localeCompare(a.at)),
     [project.events, chain.data],

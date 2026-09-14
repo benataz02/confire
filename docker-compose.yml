@@ -23,12 +23,12 @@ services:
       dockerfile: apps/server/Dockerfile
       # Subdomain base domain is baked into the SPA at build time.
       args:
-        VITE_APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-hera.local}
+        VITE_APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-confire.local}
     environment:
       DATABASE_URL: postgres://hera:hera@db:5432/hera
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev-secret-change-me-min-32-chars-long}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
-      APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-hera.local}
+      APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-confire.local}
       PORT: 3000
     depends_on:
       db:
@@ -40,7 +40,7 @@ services:
   caddy:
     image: caddy:2
     environment:
-      APP_DOMAIN: ${APP_BASE_DOMAIN:-hera.local}
+      APP_DOMAIN: ${APP_BASE_DOMAIN:-confire.local}
     ports:
       - "80:80"
       - "443:443"

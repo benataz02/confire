@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-process.env.HERA_SECRET_KEY ??= "test-key-for-cursor-sealing-min-length";
+process.env.CONFIRE_SECRET_KEY ??= "test-key-for-cursor-sealing-min-length";
 const { readRows } = await import("../src/entity-read.ts");
 
 // The list cursor is B1's own @odata.nextLink, encrypted. These cover the reason it is sealed

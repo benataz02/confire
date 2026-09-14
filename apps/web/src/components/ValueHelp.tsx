@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import {
   Bar, BusyIndicator, Button, Dialog, Icon, Input, SuggestionItem, Table, TableCell, TableGrowing,
   TableHeaderCell, TableHeaderRow, TableRow, TableVirtualizer,
-  type TableVirtualizerDomRef,
+  type TableRowDomRef, type TableVirtualizerDomRef,
 } from "@ui5/webcomponents-react";
 import {
   displayColumns, refKeyCols,
   type DomainOption, type LookupRef, type ResolvedTable, type Val,
-} from "@hera/config-engine";
+} from "@confire/config-engine";
 import { orpc } from "../orpc.ts";
 import { EMPTY_SPEC, type FilterCond } from "../listSpec.ts";
 import { optionsOf, resolveEntry } from "./configurator/formHelpers.ts";
@@ -16,13 +16,14 @@ import { optionsOf, resolveEntry } from "./configurator/formHelpers.ts";
 // Kill the dialog's default content padding so the table (and its sticky header) sit flush.
 // overflow:hidden so only the table scrolls — Dialog::part(content) is overflow:auto by default.
 if (typeof document !== "undefined") {
-  let el = document.getElementById("hera-vh-style");
-  if (!el) { el = document.createElement("style"); el.id = "hera-vh-style"; document.head.appendChild(el); }
-  el.textContent = `.hera-vh-dialog::part(content){padding:0;overflow:hidden;}`;
+  let el = document.getElementById("confire-vh-style");
+  if (!el) { el = document.createElement("style"); el.id = "confire-vh-style"; document.head.appendChild(el); }
+  el.textContent = `.confire-vh-dialog::part(content){padding:0;overflow:hidden;}`;
 }
 
 // A <Text> here is a custom element upgraded per cell on every range change — ~125 of them per
-// scroll tick. Rows are pinned to rowHeight anyway, so a span with ellipsis is the same picture.
+// scroll tick. A span draws the same line. The nowrap is load-bearing beyond looks: it keeps every
+// row exactly one line tall, which is what lets one measured row speak for all of them (rowHeight).
 const CELL: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 
 /** Remote-search plumbing: one round trip per 250ms pause instead of one per keystroke. */
@@ -66,6 +67,28 @@ function ValueHelpDialog({
   const [range, setRange] = useState({ first: 0, last: 20 });
   const virtRef = useRef<TableVirtualizerDomRef>(null);
   const remote = useRemoteSearch(onSearch);
+
+  // The virtualizer never SETS a row height, it assumes one (#rows = rowCount*rowHeight, each slice
+  // translated by position*rowHeight) while the row itself is only min-height:
+  // --_ui5_list_item_base_height — 44px cozy, 32px compact, and AppShell switches density at
+  // runtime, so any pinned number (UI5's own default is 45) drifts the rows off the scrollbar in
+  // the other density. Measured, not read off that var: it is shadow-scoped (`:host{}`, adopted per
+  // component — the document does not have it), private, rem, and a MIN. Written as a property
+  // rather than a prop: no state, and the range is right on the same tick it is measured.
+  const measureRow = useCallback((el: TableRowDomRef | null) => {
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => {
+      // Rounded: blockSize is fractional and a sub-pixel wobble would reset the range for nothing.
+      // Half a pixel of error per row is well inside extraRows.
+      const h = Math.round(e?.borderBoxSize[0]?.blockSize ?? 0);
+      const virt = virtRef.current;
+      if (!h || !virt || virt.rowHeight === h) return;
+      virt.rowHeight = h;
+      virt.reset(); // nothing else re-fires range-change, and every range it gave out used the old h
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const visible = [valueCol, ...columns].filter((c) => !hidden?.includes(c));
   const shown = visible.length ? visible : [valueCol];
   const idx = shown.map((c) => table.columns.indexOf(c));
@@ -80,7 +103,7 @@ function ValueHelpDialog({
   }, [q]);
 
   return (
-    <Dialog open={open} headerText={headerText} onClose={onClose} className="hera-vh-dialog"
+    <Dialog open={open} headerText={headerText} onClose={onClose} className="confire-vh-dialog"
       style={{ width: "min(52rem, 95vw)" }}
       footer={
         <Bar design="Footer" endContent={
@@ -95,25 +118,16 @@ function ValueHelpDialog({
           <Input icon={<Icon name="search" />} placeholder="Search" value={q} showClearIcon
             onInput={(e) => { const v = e.target.value ?? ""; setQ(v); remote.search(v); }} style={{ width: "100%" }} />
         </div>
-        {/* overflowMode=Scroll sets #table { height:100% }. That only clips if the host has a
-            definite height — maxHeight is not enough, so the virtualizer's rowCount*rowHeight
-            spacer overflowed the Dialog as a second scroller. The definite height is load-bearing
-            twice over: TableGrowing's Scroll mode is `#table.clientHeight >= #table.scrollHeight`,
-            so a #table that never clips silently degrades to a "More" button while the virtualizer's
-            scroll listener sits on an element that never scrolls. */}
+        {/* The height has to be DEFINITE (flex:1 + height:100%, not maxHeight): overflowMode=Scroll
+            sets #table{height:100%}, and a host that never clips lets the rowCount*rowHeight spacer
+            overflow the Dialog as a second scroller — and TableGrowing's Scroll mode, which is
+            `#table.clientHeight >= #table.scrollHeight`, degrades to a "More" button. */}
         <Table noDataText="No matching rows." loading={loading} overflowMode="Scroll"
           style={{ flex: 1, height: "100%", minHeight: 0 }}
           features={[
-            // rowCount is the LOADED count, never a server total: growing observes #table-end-row,
-            // which sits below the whole rowCount*rowHeight spacer, so overstating it would put
-            // load-more behind a wall of blank rows. Growing has no threshold prop either —
-            // rootMargin 5px is the entire lookahead, so this fetches at the literal bottom.
-            // extraRows is the overscan, and it has to be the virtualizer's own: it widens
-            // `first`/`last` AND the translateY it derives from rows[0].position, so the two can
-            // never disagree. Slicing wider by hand only widened one of them. 10 rows ~= 440px of
-            // slack, which is what covers the frame of lag between the rAF-throttled scroll
-            // handler and React committing the new slice — the gap that showed as blank rows.
-            <TableVirtualizer key="virt" ref={virtRef} rowCount={rows.length} rowHeight={44} extraRows={10}
+            // rowCount is the LOADED count, never a server total: growing observes a row that sits
+            // below the whole spacer, so overstating it buries load-more under blank rows.
+            <TableVirtualizer key="virt" ref={virtRef} rowCount={rows.length} extraRows={10}
               onRangeChange={(e) => {
                 const { first, last } = e.detail;
                 setRange((prev) => (prev.first === first && prev.last === last ? prev : { first, last }));
@@ -121,8 +135,9 @@ function ValueHelpDialog({
             hasMore ? <TableGrowing key="grow" mode="Scroll" onLoadMore={() => onLoadMore?.()} /> : undefined,
           ]}
           onRowClick={(e) => {
-            const i = Number((e.detail.row as HTMLElement).dataset.idx);
-            const r = rows[i];
+            // `position` is the index we set below — the virtualizer needs it anyway, so the row
+            // carries its own identity and no data-* attribute has to be parsed back out.
+            const r = rows[e.detail.row.position ?? -1];
             if (r && vi >= 0) {
               onSelect(r[vi] ?? null, r);
               onClose();
@@ -136,7 +151,8 @@ function ValueHelpDialog({
           {rows.slice(range.first, range.last).map((r, j) => {
             const i = range.first + j;
             return (
-              <TableRow key={i} rowKey={String(i)} position={i} data-idx={String(i)} interactive>
+              <TableRow key={i} rowKey={String(i)} position={i} interactive
+                ref={j === 0 ? measureRow : undefined}>
                 {idx.map((ci, k) => (
                   <TableCell key={k}><span style={CELL}>{ci < 0 ? "" : String(r[ci] ?? "")}</span></TableCell>
                 ))}

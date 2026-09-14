@@ -1,7 +1,7 @@
 import {
   Icon, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Text, ToggleButton,
 } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef } from "@hera/config-engine";
+import type { Entries, ModelDef } from "@confire/config-engine";
 import { bestByBatch, candidateLabel, fmt, isSelected, openKeys, type PricedCandidate, type Sel } from "./runView.ts";
 
 // The signature view: rows = candidates (labeled by their open-parameter values), columns =

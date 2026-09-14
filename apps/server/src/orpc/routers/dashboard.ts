@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { db, configProject, dashboardSnapshot } from "@hera/db";
+import { db, configProject, dashboardSnapshot } from "@confire/db";
 import { userProcedure } from "../base.ts";
 import { buildOverview, type ProjectRow } from "../../dashboard.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";

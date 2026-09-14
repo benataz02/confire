@@ -1,7 +1,7 @@
 import { describe, expect, it, test } from "bun:test";
 import { checkModel, referencedTables } from "../src/check";
 import type { ModelDef } from "../src/model";
-import { model } from "./fixture";
+import { fieldGroup, model } from "./fixture";
 
 const PRICES = [{ name: "prices", columns: ["code", "price"] }];
 
@@ -83,7 +83,7 @@ describe("checkModel", () => {
 
   test("structure referencing a missing param", () => {
     const bad = structuredClone(model);
-    bad.structure.sections[0]!.groups[0]!.params.push("ghost");
+    fieldGroup(bad).params.push("ghost");
     expect(checkModel(bad, PRICES).some((i) => i.message.includes("ghost"))).toBe(true);
   });
 
@@ -211,7 +211,7 @@ describe("lookup ref validation", () => {
 
   it("flags a derived key placed in the structure like a real parameter", () => {
     const bad = withRef({ source: "table", table: "prices", valueCol: "code" });
-    bad.structure.sections[0]!.groups[0]!.params.push("pick_price");
+    fieldGroup(bad).params.push("pick_price");
     const issues = checkModel(bad, [{ name: "prices", columns: ["code", "price"] }]);
     expect(issues.some((i) => i.path === "structure" && i.message.includes("pick_price"))).toBe(true);
   });

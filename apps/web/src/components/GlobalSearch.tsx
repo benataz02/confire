@@ -11,18 +11,18 @@ import { orpc } from "../orpc.ts";
 // truly centred field has to leave the flow. The bar spans the full viewport width and sits at
 // the top, so viewport centre == bar centre. The height var is inherited from the ShellBar host
 // through the slot, which keeps the vertical centring theme-correct (2.75rem / 3.25rem).
-if (typeof document !== "undefined" && !document.getElementById("hera-shell-search-style")) {
+if (typeof document !== "undefined" && !document.getElementById("confire-shell-search-style")) {
   const el = document.createElement("style");
-  el.id = "hera-shell-search-style";
+  el.id = "confire-shell-search-style";
   el.textContent = `
-.hera-shell-search{position:fixed;top:0;left:50%;transform:translateX(-50%);
+.confire-shell-search{position:fixed;top:0;left:50%;transform:translateX(-50%);
   height:var(--_ui5_shellbar_root_height,3.25rem);display:flex;align-items:center;
   width:min(34rem,42vw)}
-.hera-shell-search>*{width:100%}
-ui5-search.hera-shellbar-search{background-image:none}
+.confire-shell-search>*{width:100%}
+ui5-search.confire-shellbar-search{background-image:none}
 /* ponytail: below this the centred field would sit on top of the branding — drop it rather than
    overlap. Move to the ShellBar's own collapsible search slot if mobile search is ever needed. */
-@media (max-width:900px){.hera-shell-search{display:none}}`;
+@media (max-width:900px){.confire-shell-search{display:none}}`;
   document.head.appendChild(el);
 }
 
@@ -98,9 +98,9 @@ export function GlobalSearch({ entries, isAdmin }: { entries: SearchEntry[]; isA
   };
 
   return (
-    <div className="hera-shell-search" slot="content" data-hide-order="99">
+    <div className="confire-shell-search" slot="content" data-hide-order="99">
       <Search
-        className="hera-shellbar-search"
+        className="confire-shellbar-search"
         placeholder="Search menus, objects and settings"
         value={q}
         showClearIcon

@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Package name `@hera/config-engine`; exports TS source directly like `@hera/db` (`"." : "./src/index.ts"`).
+- Package name `@confire/config-engine`; exports TS source directly like `@confire/db` (`"." : "./src/index.ts"`).
 - `dependencies`: exactly `{ "zod": "^4.4.3" }`. Nothing else. No I/O, no `fetch`, no DB imports anywhere in the package.
 - All DSL errors are `DslError` carrying `{ from, to }` character spans into the source string.
 - DSL value type: `number | string | boolean | null | string[]` (`string[]` only for multicombo params; usable only in `HAS`).
@@ -18,7 +18,7 @@
 - Units (fixed): `setupMin` = minutes per batch, `runMinPerUnit` = minutes per finished unit, `ratePerHour` = cost per hour, BOM `qty` expr = quantity per finished unit, `scrapPct` = percent. Batch quantity is exposed to expressions as identifier `qty`; computed unit cost as `unitCost` (pricing only).
 - Enumeration cap default = 200.
 - Naming note vs spec: the spec's `pricing.marginExpr` is implemented as `pricing.priceExpr` (it computes the unit price, with `unitCost` in scope).
-- Commit after every task. Run commands from the repo root `/home/benataz02/dev/hera`.
+- Commit after every task. Run commands from the repo root `/home/benataz02/dev/confire`.
 
 ## File Structure
 
@@ -39,7 +39,7 @@ packages/config-engine/
     model.test.ts  dsl.test.ts  check.test.ts  propagate.test.ts  enumerate.test.ts  output.test.ts
 ```
 
-Pre-existing workspace facts (verified): root `package.json` and `apps/web/package.json` already declare `"@hera/config-engine": "workspace:*"` (stale refs healed by Task 1); root script `"test:engine": "bun packages/config-engine/src/selfcheck.ts"` is stale and gets rewritten in Task 1; `packages/db/tsconfig.json` is `{ "extends": "../../tsconfig.base.json", "include": ["src", "drizzle.config.ts"] }`.
+Pre-existing workspace facts (verified): root `package.json` and `apps/web/package.json` already declare `"@confire/config-engine": "workspace:*"` (stale refs healed by Task 1); root script `"test:engine": "bun packages/config-engine/src/selfcheck.ts"` is stale and gets rewritten in Task 1; `packages/db/tsconfig.json` is `{ "extends": "../../tsconfig.base.json", "include": ["src", "drizzle.config.ts"] }`.
 
 ---
 
@@ -63,7 +63,7 @@ Pre-existing workspace facts (verified): root `package.json` and `apps/web/packa
 
 ```json
 {
-  "name": "@hera/config-engine",
+  "name": "@confire/config-engine",
   "type": "module",
   "private": true,
   "exports": {
@@ -1992,7 +1992,7 @@ export type { BomResult, OpResult, Outputs } from "./output";
 Run: `bun test packages/config-engine`
 Expected: all tests pass, 0 fail.
 
-Run: `bun -e 'import { propagate, ModelDefZ } from "@hera/config-engine"; console.log(typeof propagate, typeof ModelDefZ.parse)'`
+Run: `bun -e 'import { propagate, ModelDefZ } from "@confire/config-engine"; console.log(typeof propagate, typeof ModelDefZ.parse)'`
 Expected: `function function`
 
 - [ ] **Step 3: Typecheck**

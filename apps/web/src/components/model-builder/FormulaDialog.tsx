@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Bar, Button, Dialog, Form, FormGroup, FormItem, Input } from "@ui5/webcomponents-react";
-import type { Issue, ModelDef } from "@hera/config-engine";
+import type { Issue, ModelDef } from "@confire/config-engine";
 import { ExprInput } from "./ExprInput.tsx";
 import { PAIRS, W, lbl } from "./ParamDialog.tsx";
 import type { TableCols } from "./exprHelpers.ts";
@@ -25,7 +25,7 @@ export function FormulaDialog({ draft, tables, initial, issue, onCancel, onOk }:
     draft.computed.some((x) => x.key === c.key && x.key !== initial.key);
 
   return (
-    <Dialog open onClose={onCancel} className="hera-pd" headerText="Formula"
+    <Dialog open onClose={onCancel} className="confire-pd" headerText="Formula"
       accessibleName={`Edit formula ${initial.key}`} style={{ width: "min(48rem, 96vw)" }}
       footer={
         <Bar design="Footer" endContent={

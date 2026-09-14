@@ -4,7 +4,7 @@ import {
   Bar, Button, Dialog, Form, FormGroup, FormItem, Input, MessageStrip, ObjectStatus, Option, Select,
   StepInput, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text,
 } from "@ui5/webcomponents-react";
-import { checkModel, QTY_COL, type LookupRef, type ModelDef, type TableColumn, type TableDef } from "@hera/config-engine";
+import { checkModel, QTY_COL, type LookupRef, type ModelDef, type TableColumn, type TableDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { PAIRS, W, lbl } from "./ParamDialog.tsx";
@@ -80,7 +80,7 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
   const keyTaken = (draft.tables ?? []).some((x) => x.key === t.key && x.key !== initial.key);
 
   return (
-    <Dialog open onClose={onCancel} className="hera-pd"
+    <Dialog open onClose={onCancel} className="confire-pd"
       accessibleName={`Edit table ${initial.title || initial.key}`}
       style={{ width: "min(76rem, 96vw)" }}
       headerText={isItems ? "Item grid" : "Calculation table"}

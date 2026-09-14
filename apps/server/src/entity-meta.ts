@@ -1,8 +1,8 @@
 import { and, eq } from "drizzle-orm";
-import { db, entityMeta } from "@hera/db";
+import { db, entityMeta } from "@confire/db";
 import {
   parseEntityList, parseEntitySchema, type B1EntityRef, type B1EntitySchema, type B1Transport,
-} from "@hera/b1";
+} from "@confire/b1";
 
 // B1's $metadata, cached. The full EDMX is ~1.7 MB; both reads here use the scoped query the
 // Service Layer already supports, so a schema costs one entity's worth of XML, not the lot.

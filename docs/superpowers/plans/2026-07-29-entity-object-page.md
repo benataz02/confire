@@ -717,7 +717,7 @@ Do not apply it to a non-test database as part of this task.
 Parse:
 
 ```text
-B1_CREATE_CAPABILITIES=Quotations:U_HERA_DedupKey,Orders:U_HERA_DedupKey
+B1_CREATE_CAPABILITIES=Quotations:U_CF_Key,Orders:U_CF_Key
 ```
 
 Validate against parsed EDMX at startup and after metadata refresh. Report only valid pairs.
@@ -1064,7 +1064,7 @@ explicit.
 
 After successful candidate selection, invalidate/refetch the persisted run and navigate to
 `?section=quote`. Keep Quote locked until customer, run, non-empty persisted selection, and current
-`Quotations:U_HERA_DedupKey` capability are present.
+`Quotations:U_CF_Key` capability are present.
 
 After completion, navigate on demand with:
 
@@ -1138,7 +1138,7 @@ Against the configured sandbox:
 
 - [ ] **Step 5: Run a designated test-company write smoke only after DBA provisioning**
 
-With `Quotations:U_HERA_DedupKey` reported current:
+With `Quotations:U_CF_Key` reported current:
 
 1. Enqueue one test quotation.
 2. Confirm one SAP record and one done request.

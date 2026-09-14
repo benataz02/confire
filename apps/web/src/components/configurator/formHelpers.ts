@@ -1,4 +1,4 @@
-import type { DomainOption, Entries, ResolvedLookups, ResolvedTable, Val } from "@hera/config-engine";
+import type { DomainOption, Entries, ResolvedLookups, ResolvedTable, Val } from "@confire/config-engine";
 
 // Pure helpers for ConfiguratorForm, kept UI-free so they're unit-testable without the UI5 runtime.
 

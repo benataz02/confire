@@ -1,5 +1,5 @@
 {
-  "name": "@hera/db",
+  "name": "@confire/db",
   "type": "module",
   "private": true,
   "exports": {
@@ -8,8 +8,8 @@
     "./client": "./src/client.ts"
   },
   "dependencies": {
-    "@hera/b1": "workspace:*",
-    "@hera/config-engine": "workspace:*",
+    "@confire/b1": "workspace:*",
+    "@confire/config-engine": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.22.0",
     "zod": "^4.4.3"

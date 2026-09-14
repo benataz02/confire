@@ -9,7 +9,7 @@ import {
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import type { PanelDomRef } from "@ui5/webcomponents-react";
-import type { ODataQuery, QuerySource, Val } from "@hera/config-engine";
+import type { ODataQuery, QuerySource, Val } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { colMinWidth } from "../configurator/tableWidths.ts";
 import { confirm } from "../confirm.ts";

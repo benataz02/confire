@@ -7,7 +7,7 @@ import { XMLParser } from "fast-xml-parser";
 //    elements, so it cannot express `CardCode -> BusinessPartners` — the entity relations the
 //    document UI is built on, and the only place we add what SAP omitted.
 //
-// The output shape is HERA's, not SAP's: plain JSON (the EDM model in the sample is built out of
+// The output shape is Confire's, not SAP's: plain JSON (the EDM model in the sample is built out of
 // Maps, which neither cache in jsonb nor cross the wire) carrying exactly what a form needs to
 // pick a control and validate a value.
 

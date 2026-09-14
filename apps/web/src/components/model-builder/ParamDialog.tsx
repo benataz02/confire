@@ -4,8 +4,8 @@ import {
   MessageStrip, MultiComboBox, MultiComboBoxItem, ObjectPage, ObjectPageSection, ObjectPageTitle,
   Option, SegmentedButton, SegmentedButtonItem, Select, StepInput, Text, TextArea, Title,
 } from "@ui5/webcomponents-react";
-import { refKeyCols } from "@hera/config-engine";
-import type { LookupRef, ModelDef, Param } from "@hera/config-engine";
+import { refKeyCols } from "@confire/config-engine";
+import type { LookupRef, ModelDef, Param } from "@confire/config-engine";
 import { ExprInput } from "./ExprInput.tsx";
 import { modelWithParam, type TableCols } from "./exprHelpers.ts";
 
@@ -22,9 +22,9 @@ const ICON = { marginInlineStart: "0.375rem", cursor: "help", color: "var(--sapC
 // The ObjectPage brings its own padding and needs a height to scroll in — the dialog's own padding
 // would double up on it.
 if (typeof document !== "undefined") {
-  let el = document.getElementById("hera-pd-style");
-  if (!el) { el = document.createElement("style"); el.id = "hera-pd-style"; document.head.appendChild(el); }
-  el.textContent = `.hera-pd::part(content){padding:0;}`;
+  let el = document.getElementById("confire-pd-style");
+  if (!el) { el = document.createElement("style"); el.id = "confire-pd-style"; document.head.appendChild(el); }
+  el.textContent = `.confire-pd::part(content){padding:0;}`;
 }
 
 /** Label + the ⓘ carrying the field's explanation — the only help a field gets. */
@@ -82,7 +82,7 @@ export function ParamDialog({ draft, tables, initial, isNew, onOk, onCancel }: {
   const scope = modelWithParam(draft, p);
 
   return (
-    <Dialog open onClose={onCancel} className="hera-pd"
+    <Dialog open onClose={onCancel} className="confire-pd"
       accessibleName={isNew ? "Add parameter" : `Edit parameter ${initial.key}`}
       style={{ width: "min(76rem, 96vw)" }}
       footer={
@@ -292,7 +292,7 @@ function SourceRefEditor({ ref_, names, columnsOf, onChange }: {
     <>
       <FormItem labelContent={lbl(isTable ? "Table" : "Query",
         isTable
-          ? "Rows maintained in HERA, on the Masterdata page."
+          ? "Rows maintained in Confire, on the Masterdata page."
           : `A live read from B1/Beas, paged on demand. Key = 1st query column${cols[1] ? `, label = 2nd (${cols[0]} / ${cols[1]})` : ""}.`,
         true)}>
         <Select style={W} value={ref_.table}

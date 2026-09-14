@@ -7,7 +7,7 @@ import { orpc } from "../../orpc.ts";
 // page, the list report's count bar, the portal timeline — renders this and nothing else, so
 // there is exactly one blob-URL lifecycle to get right.
 //
-// apps/web does not depend on @hera/server at runtime (only `import type` for the router), so the
+// apps/web does not depend on @confire/server at runtime (only `import type` for the router), so the
 // PRINTABLE list is restated here rather than imported — the same reason portalUi.ts inlines
 // ProjectStatus. The server's entity-profiles.ts PRINTABLE is the real boundary; this only
 // decides whether to draw a button.

@@ -1,5 +1,5 @@
 import { Bar, BusyIndicator, Button, MessageStrip } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef, Propagation, ResolvedLookups, ResolvedTable, TableRows } from "@hera/config-engine";
+import type { Entries, ModelDef, Propagation, ResolvedLookups, ResolvedTable, TableRows } from "@confire/config-engine";
 import { ConfiguratorForm, ConsistencyStatus } from "./ConfiguratorForm.tsx";
 
 // Wizard step 1: the same form the builder preview uses, over ready lookups + propagate.

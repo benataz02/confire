@@ -1,7 +1,7 @@
-import type { B1Transport, CrossJoinSpec } from "@hera/b1";
+import type { B1Transport, CrossJoinSpec } from "@confire/b1";
 
-// The forward document walk: from the quotation HERA wrote (config_project.b1DocEntry — the only B1
-// link HERA stores) to whatever SAP has since made of it. Written in the same style as
+// The forward document walk: from the quotation Confire wrote (config_project.b1DocEntry — the only B1
+// link Confire stores) to whatever SAP has since made of it. Written in the same style as
 // doc-history.ts and reusing the same machinery, for the same reason: B1's $filter has no lambda
 // operators, so a document cannot be filtered by its lines except through $crossjoin.
 //

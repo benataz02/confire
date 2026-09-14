@@ -4,6 +4,8 @@ dist/
 *.log
 .DS_Store
 apps/web/src/routeTree.gen.ts
+apps/web/tsconfig.tsbuildinfo
 packages/db/drizzle/
 apps/agent/agent.json
+apps/agent/confire-agent.exe
 apps/agent/hera-agent.exe

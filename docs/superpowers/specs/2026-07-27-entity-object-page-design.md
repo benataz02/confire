@@ -49,7 +49,7 @@ The design is based on the connected B1 v2 sandbox and UI5 Web Components React 
 - Use SAP pricing plus local preview arithmetic. SAP is authoritative after save.
 - Keep `POST /$metadata`.
 - Route all creates and updates through one durable `agent_request(kind="write")` path.
-- Require a unique `U_HERA_DedupKey` UDF/index on each document table enabled for create.
+- Require a unique `U_CF_Key` UDF/index on each document table enabled for create.
 - Support common single-key B1 entities first. Composite route keys are outside this version.
 
 ## Non-goals
@@ -512,7 +512,7 @@ notifies `requestChannel(id)`.
 
 ### SAP prerequisite
 
-Every document entity enabled for create requires `U_HERA_DedupKey` on its SAP header table and a
+Every document entity enabled for create requires `U_CF_Key` on its SAP header table and a
 unique company-database index. Examples include OQUT for Quotations and ORDR for Sales Orders.
 
 The agent verifies that metadata exposes the field before accepting create work. Service Layer
@@ -523,7 +523,7 @@ not declared provisioned.
 The declaration comes from on-prem agent configuration, not from the browser:
 
 ```text
-B1_CREATE_CAPABILITIES=Quotations:U_HERA_DedupKey,Orders:U_HERA_DedupKey
+B1_CREATE_CAPABILITIES=Quotations:U_CF_Key,Orders:U_CF_Key
 ```
 
 At startup and after metadata refresh, the agent:

@@ -1,4 +1,4 @@
-// The curated set: the handful of B1 entities HERA lets a user change, and exactly which fields.
+// The curated set: the handful of B1 entities Confire lets a user change, and exactly which fields.
 // Everything else B1 exposes stays read-only, enforced in the router (see orpc/routers/entities.ts).
 //
 // Hand-written on purpose. Inferring "which fields are safe to edit" from $metadata is a rules
@@ -107,7 +107,7 @@ export function missingRequired(profile: EntityProfile, data: Record<string, unk
   });
 }
 
-/** Documents HERA can ask SAP to render as a PDF. Same shape of rule as ENTITY_PROFILES: the
+/** Documents Confire can ask SAP to render as a PDF. Same shape of rule as ENTITY_PROFILES: the
  *  list is the boundary, enforced in the routers, not by which page drew a button. An entry
  *  here also needs a matching layout code in the agent's `apiGateway.layouts`. */
 export const PRINTABLE = new Set(["Quotations", "Orders", "DeliveryNotes", "Invoices"]);

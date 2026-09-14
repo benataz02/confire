@@ -6,11 +6,11 @@
 
 **Architecture:** Four new jsonb-heavy tables in `packages/db` (house style: `tenant_id text`, no FK, uuid PKs). Two new routers in `apps/server`: `models` (adminProcedure — model/table CRUD + `lookupPreview`) and `configs` (userProcedure — project CRUD, `lookups`, `run`, `select`). Lookup resolution is one server helper that turns a `ModelDef`'s `LookupRef`s into the engine's `ResolvedLookups`, fetching `query` sources through the existing `agent_request` + `runRequest` bridge (`kind: "query"`, now with `target: "b1" | "beas"`). `configs.run` snapshots model + lookups + computed candidates into `config_run` (immutable, always-fresh lookups); `configs.select` recomputes totals server-side from stored snapshots so client numbers are never trusted.
 
-**Tech Stack:** Bun workspaces, Drizzle + drizzle-kit (postgres), oRPC, zod ^4.4.3, `@hera/config-engine` (pure, already built), bun test. **No new dependencies.**
+**Tech Stack:** Bun workspaces, Drizzle + drizzle-kit (postgres), oRPC, zod ^4.4.3, `@confire/config-engine` (pure, already built), bun test. **No new dependencies.**
 
 ## Global Constraints
 
-- Repo root: `/home/benataz02/dev/hera`. Run all commands from there. Commit after every task (style: `feat(configurator): …` / `chore(db): …`, matching `git log`).
+- Repo root: `/home/benataz02/dev/confire`. Run all commands from there. Commit after every task (style: `feat(configurator): …` / `chore(db): …`, matching `git log`).
 - The engine as built is the source of truth where it diverges from the spec sketch: `pricing.priceExpr` (not `marginExpr`); `LookupRef` = `{source:"manual", options:[{value,label?}]} | {source:"table", table, valueCol, labelCol?} | {source:"query", target:"b1"|"beas", path, valueField, labelField?}`; `ModelDef.queryTables: {name,target,path,columns}[]`; `ResolvedLookups = { domains: Record<paramKey, Option[]>, tables: Record<name, {columns: string[], rows: Val[][]}> }`; `Entries = Record<string, Val>` where `Val = number|string|boolean|null|string[]`.
 - Schema house style (see `packages/db/src/schema/variant.ts`, `tenant.ts`): `uuid("id").primaryKey().defaultRandom()`, `text("tenant_id").notNull()` (no FK), `timestamp(..., { withTimezone: true })`, leading-tenant indexes, typed jsonb via `.$type<T>()`.
 - Agent request kind for configurator GETs is the **existing** `"query"` kind (`apps/agent/src/sync.ts` already routes it to `queryRaw`); we extend its payload with `target`, we do NOT invent a new `query.fetch` kind name.
@@ -30,13 +30,13 @@ packages/config-engine/src/
 packages/config-engine/test/
   output.test.ts              MODIFY: override tests
 packages/db/
-  package.json                MODIFY: add @hera/config-engine dep
+  package.json                MODIFY: add @confire/config-engine dep
   src/schema/configurator.ts  CREATE: config_model, config_table, config_project, config_run
   src/schema/index.ts         MODIFY: export configurator
   drizzle/0005_*.sql          GENERATED: drop config_masterdata
   drizzle/0006_*.sql          GENERATED: create the four tables
 apps/server/
-  package.json                MODIFY: add @hera/config-engine dep
+  package.json                MODIFY: add @confire/config-engine dep
   src/lookups.ts              CREATE: resolveLookups / optionsFromRef (pure-ish, fetcher injected)
   src/orpc/routers/models.ts  CREATE: admin router (models, tables, lookupPreview)
   src/orpc/routers/configs.ts CREATE: user router (projects, lookups, run, select)
@@ -366,13 +366,13 @@ git commit -m "feat(config-engine): override-aware computeOutputs for review-ste
 ### Task 3: DB schema — config_model, config_table, config_project, config_run
 
 **Files:**
-- Modify: `packages/db/package.json` (add `"@hera/config-engine": "workspace:*"` to `dependencies`)
+- Modify: `packages/db/package.json` (add `"@confire/config-engine": "workspace:*"` to `dependencies`)
 - Create: `packages/db/src/schema/configurator.ts`
 - Modify: `packages/db/src/schema/index.ts`
 - Generated: `packages/db/drizzle/0006_configurator_tables.sql`
 
 **Interfaces:**
-- Consumes: `ModelDef`, `Entries`, `ResolvedLookups`, `Outputs`, `OutputOverrides`, `Val` types from `@hera/config-engine` (Task 2).
+- Consumes: `ModelDef`, `Entries`, `ResolvedLookups`, `Outputs`, `OutputOverrides`, `Val` types from `@confire/config-engine` (Task 2).
 - Produces (used by Tasks 5–7): drizzle tables `configModel`, `configTable`, `configProject`, `configRun`; types `ConfigTableColumn`, `ProjectStatus`, `ProjectCustomer`, `RunCandidate`, `RunSelection`.
 
 - [ ] **Step 1: Add the workspace dep**
@@ -380,7 +380,7 @@ git commit -m "feat(config-engine): override-aware computeOutputs for review-ste
 In `packages/db/package.json` `dependencies`, add:
 
 ```json
-"@hera/config-engine": "workspace:*",
+"@confire/config-engine": "workspace:*",
 ```
 
 Run: `bun install`
@@ -390,7 +390,7 @@ Expected: exits 0.
 
 ```ts
 import { index, jsonb, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-import type { Entries, ModelDef, OutputOverrides, Outputs, ResolvedLookups, Val } from "@hera/config-engine";
+import type { Entries, ModelDef, OutputOverrides, Outputs, ResolvedLookups, Val } from "@confire/config-engine";
 
 // Configurator persistence: mutable model + immutable snapshot-on-run (model + lookups + computed
 // outputs frozen per engine run). Spec: docs/superpowers/specs/2026-07-03-configurator-design.md.
@@ -501,7 +501,7 @@ git commit -m "feat(db): configurator schema (model, table, project, run)"
 One helper turns `LookupRef`s + `queryTables` into the engine's `ResolvedLookups`. The agent hop is injected as a function so tests (and the run integration test) never need an agent.
 
 **Files:**
-- Modify: `apps/server/package.json` (add `"@hera/config-engine": "workspace:*"` to `dependencies`, then `bun install`)
+- Modify: `apps/server/package.json` (add `"@confire/config-engine": "workspace:*"` to `dependencies`, then `bun install`)
 - Create: `apps/server/src/lookups.ts`
 - Test: `apps/server/test/lookups.test.ts`
 
@@ -516,13 +516,13 @@ One helper turns `LookupRef`s + `queryTables` into the engine's `ResolvedLookups
 
 - [ ] **Step 1: Add the dep**
 
-In `apps/server/package.json` `dependencies` add `"@hera/config-engine": "workspace:*"`, then run `bun install`.
+In `apps/server/package.json` `dependencies` add `"@confire/config-engine": "workspace:*"`, then run `bun install`.
 
 - [ ] **Step 2: Write the failing tests — `apps/server/test/lookups.test.ts`**
 
 ```ts
 import { describe, expect, test } from "bun:test";
-import type { ModelDef } from "@hera/config-engine";
+import type { ModelDef } from "@confire/config-engine";
 import { optionsFromRef, resolveLookups, tablesFromTenant, type QueryFetcher } from "../src/lookups.ts";
 
 const noFetch: QueryFetcher = async () => {
@@ -658,7 +658,7 @@ Expected: FAIL — cannot resolve `../src/lookups.ts`.
 - [ ] **Step 4: Implement `apps/server/src/lookups.ts`**
 
 ```ts
-import type { LookupRef, ModelDef, Option, ResolvedLookups, ResolvedTable, Val } from "@hera/config-engine";
+import type { LookupRef, ModelDef, Option, ResolvedLookups, ResolvedTable, Val } from "@confire/config-engine";
 
 // Resolve a model's external references (manual lists, tenant config_tables, agent-backed
 // B1/Beas GETs) into the engine's ResolvedLookups. The agent hop is injected so this stays
@@ -775,8 +775,8 @@ CRUD is deliberately thin (validated by `ModelDefZ`/`checkModel` from the alread
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
-import { db, configModel, configProject, configTable } from "@hera/db";
-import { checkModel, LookupRefZ, ModelDefZ, ValZ } from "@hera/config-engine";
+import { db, configModel, configProject, configTable } from "@confire/db";
+import { checkModel, LookupRefZ, ModelDefZ, ValZ } from "@confire/config-engine";
 import { adminProcedure } from "../base.ts";
 import { assertAgentReady, runRequest } from "./entities.ts";
 import { optionsFromRef, tablesFromTenant, type QueryFetcher, type TenantTable } from "../../lookups.ts";
@@ -969,11 +969,11 @@ git commit -m "feat(server): models router — model/table CRUD, save gate, look
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
-import { db, configModel, configProject, configRun, type RunCandidate, type RunSelection } from "@hera/db";
+import { db, configModel, configProject, configRun, type RunCandidate, type RunSelection } from "@confire/db";
 import {
   computeOutputs, DslError, enumerate, EntriesZ, OutputOverridesZ, propagate,
   type ModelDef, type Outputs, type ResolvedLookups,
-} from "@hera/config-engine";
+} from "@confire/config-engine";
 import { userProcedure } from "../base.ts";
 import { assertAgentReady } from "./entities.ts";
 import { agentFetcher, tenantTables } from "./models.ts";
@@ -1255,8 +1255,8 @@ Exercises the whole persistence path (project → run → snapshot row → statu
 ```ts
 import { afterAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { db, configModel, configProject, configRun, pool } from "@hera/db";
-import type { ModelDef } from "@hera/config-engine";
+import { db, configModel, configProject, configRun, pool } from "@confire/db";
+import type { ModelDef } from "@confire/config-engine";
 import { applySelection, executeRun } from "../src/orpc/routers/configs.ts";
 import type { QueryFetcher } from "../src/lookups.ts";
 
@@ -1575,5 +1575,5 @@ Expected: clean; if not, review and commit with an appropriate message.
 - `models.ts`: list/get/save (checkModel gate, span issues in `data.issues`)/remove, tables CRUD, lookupPreview ✓
 - `configs.ts`: project CRUD, `lookups` (5-min cache), `run` (fresh lookups, enumerate+computeOutputs per candidate × batch, snapshot insert, status flip, cap/widest surfaced), `select` (store + server-side recompute) ✓ — `createQuote` deferred to phase 5 per the spec's phase list.
 - Agent `query.fetch`: implemented as the existing `"query"` kind + `target` payload field + `BeasClient` ✓
-- Cleanup: orphan `config_masterdata` dropped via forward migration, `mdResolveKey` deleted, `@hera/config-engine` link verified by install/typecheck ✓
+- Cleanup: orphan `config_masterdata` dropped via forward migration, `mdResolveKey` deleted, `@confire/config-engine` link verified by install/typecheck ✓
 - Error handling: agent offline → `assertAgentReady` shape; lookup failure names source + path; cap → `{ capped, widest }` for the UI message ✓

@@ -1,13 +1,13 @@
 import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   Bar, Button, BusyIndicator, DynamicSideContent, IllustratedMessage, Input,
-  Menu, MenuItem, MessageStrip, Table, TableCell, TableHeaderCell,
+  Menu, MenuItem, MessageStrip, SplitButton, Table, TableCell, TableHeaderCell,
   TableHeaderRow, TableRow, TableRowAction, Text, Title,
   type TableHeaderRowDomRef,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/AddColumn.js";
-import { itemsTable, propagate, type Entries, type ResolvedLookups, type TableRows } from "@hera/config-engine";
-import type { Issue, ModelDef, Param, TableDef } from "@hera/config-engine";
+import { isTableGroup, itemsTable, propagate, type Entries, type ResolvedLookups, type TableRows } from "@confire/config-engine";
+import type { Issue, ModelDef, Param, TableDef } from "@confire/config-engine";
 import { confirm } from "../confirm.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { ParamDialog } from "./ParamDialog.tsx";
@@ -16,7 +16,7 @@ import type { TableCols } from "./exprHelpers.ts";
 import { ConfiguratorForm, ConsistencyStatus } from "../configurator/ConfiguratorForm.tsx";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "../configurator/formHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
-import { applyMove, canDrop, duplicateParam, parseRowKey, placeParam, removeFromStructure, rowKeyOf, unplacedParams, unplacedTables, type Placement, type RowRef } from "./structureOps.ts";
+import { applyMove, canDrop, duplicateParam, parseRowKey, placeParam, placeTable, removeFromStructure, rowKeyOf, tableKeyAt, unplacedParams, unplacedTables, type Placement, type RowRef } from "./structureOps.ts";
 
 type Tables = TableCols[];
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
@@ -54,10 +54,10 @@ function Gutter({ depth, children, collapse, style }: {
 //
 // Section and group backgrounds have to come from here too: TableRow has no highlight/background
 // prop, and a document-level rule is the one thing that beats the shadow root's own `:host`.
-if (typeof document !== "undefined" && !document.getElementById("hera-params-rows")) {
+if (typeof document !== "undefined" && !document.getElementById("confire-params-rows")) {
   const el = document.createElement("style");
-  el.id = "hera-params-rows";
-  const R = `.hera-params-struct [ui5-table-row]`;
+  el.id = "confire-params-rows";
+  const R = `.confire-params-struct [ui5-table-row]`;
   el.textContent =
     `@media (hover: hover){${R}[row-key^="p:"] [ui5-table-row-action]{opacity:0;pointer-events:none}` +
     `${R}[row-key^="p:"]:hover [ui5-table-row-action],${R}[row-key^="p:"]:focus-within [ui5-table-row-action]{opacity:1;pointer-events:auto}}` +
@@ -70,9 +70,9 @@ if (typeof document !== "undefined" && !document.getElementById("hera-params-row
 // UI5 clips the actions-column header (a11y-only "Row Actions") inside the header-row shadow.
 function revealActionsHeader(el: TableHeaderRowDomRef | null) {
   const sr = el?.shadowRoot;
-  if (!sr || sr.getElementById("hera-actions-hdr")) return;
+  if (!sr || sr.getElementById("confire-actions-hdr")) return;
   const style = document.createElement("style");
-  style.id = "hera-actions-hdr";
+  style.id = "confire-actions-hdr";
   style.textContent = `#actions-cell-content{position:static;clip:auto;font-size:0}#actions-cell-content::after{content:"Actions";font-size:var(--sapFontSize);font-family:var(--sapFontSemiboldDuplexFamily);color:var(--sapList_HeaderTextColor)}`;
   sr.appendChild(style);
 }
@@ -89,6 +89,9 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   const [fEdit, setFEdit] = useState<number | null>(null);
   // Inline title edit: keep the original so Escape can revert (edits apply live per keystroke).
   const [titleEdit, setTitleEdit] = useState<{ key: string; original: string } | null>(null);
+  // Arrow half of the toolbar's Add-group SplitButton. The default half adds a plain group, so
+  // this only tracks whether the "what kind?" menu is showing.
+  const [addOpen, setAddOpen] = useState(false);
   // Loose-param placement menu: which unplaced key is being placed, and the button that opened it.
   const [placing, setPlacing] = useState<{ key: string; opener: string; kind: "param" | "table" } | null>(null);
   // Keyed by stable section/group key (not row index) so collapse survives drag-reordering.
@@ -105,8 +108,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   // ever left dangling: an anchor naming a parameter that is gone or unplaced re-homes onto the
   // last placed one, which is also where the toolbar button puts a new formula.
   const placedParams = draft.structure.sections
-    .flatMap((s) => s.groups.flatMap((g) => g.params))
-    .filter((k) => !defOf(k));
+    .flatMap((s) => s.groups.flatMap((g) => (isTableGroup(g) ? [] : g.params)));
   const lastParam = placedParams.at(-1);
   const anchorFor = (under?: string) => (under && placedParams.includes(under) ? under : lastParam);
   const byAnchor = new Map<string, number[]>();
@@ -120,20 +122,22 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
     rows.push({ kind: "struct", key: `s:${si}`, depth: 0, label: s.title, detail: `section · ${s.key}`, ref: { kind: "section", s: si }, collapseId: sId });
     if (collapsed.has(sId)) return;
     s.groups.forEach((g, gi) => {
+      // A table is a group, so it draws at group depth with no children and no collapse chevron.
+      if (isTableGroup(g)) {
+        const t = defOf(g.table);
+        rows.push({
+          kind: "struct", key: `t:${si}.${gi}`, depth: 1, label: t?.title || g.table,
+          detail: t
+            ? `${t.role === "items" ? "item grid" : "calculation table"} · ${t.columns.length} column${t.columns.length === 1 ? "" : "s"}`
+            : "missing table",
+          ref: { kind: "table", s: si, g: gi },
+        });
+        return;
+      }
       const gId = `G:${s.key}/${g.key}`;
       rows.push({ kind: "struct", key: `g:${si}.${gi}`, depth: 1, label: g.title, detail: `group · ${g.key}`, ref: { kind: "group", s: si, g: gi }, collapseId: gId });
       if (collapsed.has(gId)) return;
-      // One list, both kinds: a key a TableDef claims is a table row, anything else a parameter.
       g.params.forEach((k) => {
-        const t = defOf(k);
-        if (t) {
-          rows.push({
-            kind: "struct", key: `t:${k}`, depth: 2, label: t.title || k,
-            detail: `${t.role === "items" ? "item grid" : "calculation table"} · ${t.columns.length} column${t.columns.length === 1 ? "" : "s"}`,
-            ref: { kind: "table", key: k },
-          });
-          return;
-        }
         const p = draft.parameters.find((x) => x.key === k);
         rows.push({
           kind: "struct", key: `p:${k}`, depth: 2, label: p?.label || k,
@@ -167,9 +171,11 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
 
   const deleteRow = (ref: RowRef) =>
     update((d) => {
+      // Read the table key before the group goes: the ref is positional, so it stops resolving.
+      const tk = ref.kind === "table" ? tableKeyAt(d, ref.s, ref.g) : undefined;
       let out = removeFromStructure(d, ref);
       if (ref.kind === "param") out = { ...out, parameters: out.parameters.filter((p) => p.key !== ref.key) };
-      if (ref.kind === "table") out = { ...out, tables: (out.tables ?? []).filter((t) => t.key !== ref.key) };
+      if (tk) out = { ...out, tables: (out.tables ?? []).filter((t) => t.key !== tk) };
       return out;
     });
 
@@ -180,18 +186,16 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
     if (ref.kind === "section") {
       const sec = draft.structure.sections[ref.s];
       const groups = sec?.groups.length ?? 0;
-      const params = sec?.groups.reduce((n, g) => n + g.params.filter((k) => !defOf(k)).length, 0) ?? 0;
+      const params = sec?.groups.reduce((n, g) => n + (isTableGroup(g) ? 0 : g.params.length), 0) ?? 0;
       if (groups > 0) message = `Delete section "${sec?.title}" with its ${groups} group${groups === 1 ? "" : "s"}${params ? ` and ${params} placed parameter${params === 1 ? "" : "s"}` : ""}?`;
     } else if (ref.kind === "group") {
       const grp = draft.structure.sections[ref.s]?.groups[ref.g];
-      const params = grp?.params.filter((k) => !defOf(k)).length ?? 0;
-      const tabs = grp?.params.filter((k) => defOf(k)).length ?? 0;
-      const what = [params && `${params} parameter${params === 1 ? "" : "s"}`, tabs && `${tabs} table${tabs === 1 ? "" : "s"}`]
-        .filter(Boolean).join(" and ");
-      if (what) message = `Delete group "${grp?.title}" and unplace its ${what}?`;
+      const params = grp && !isTableGroup(grp) ? grp.params.length : 0;
+      if (params) message = `Delete group "${grp && !isTableGroup(grp) ? grp.title : ""}" and unplace its ${params} parameter${params === 1 ? "" : "s"}?`;
     } else if (ref.kind === "table") {
-      const t = defOf(ref.key);
-      message = `Delete table "${t?.title || ref.key}"? Formulas reading ${ref.key}_count or its column sums will stop resolving.`;
+      const key = tableKeyAt(draft, ref.s, ref.g) ?? "";
+      const t = defOf(key);
+      message = `Delete table "${t?.title || key}"? Formulas reading ${key}_count or its column sums will stop resolving.`;
     } else {
       const p = draft.parameters.find((x) => x.key === ref.key);
       message = `Delete parameter "${p?.label || ref.key}"? This removes its definition from the model.`;
@@ -206,7 +210,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       structure: {
         sections: d.structure.sections.map((s, si) => {
           if (ref.kind === "section") return si === ref.s ? { ...s, title } : s;
-          if (ref.kind === "group") return si === ref.s ? { ...s, groups: s.groups.map((g, gi) => (gi === ref.g ? { ...g, title } : g)) } : s;
+          if (ref.kind === "group") return si === ref.s ? { ...s, groups: s.groups.map((g, gi) => (gi === ref.g && !isTableGroup(g) ? { ...g, title } : g)) } : s;
           return s;
         }),
       },
@@ -225,7 +229,11 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
     ...d,
     structure: {
       sections: d.structure.sections.map((sec, i) => i !== s ? sec : {
-        ...sec, groups: [...sec.groups, { key: addKey("group", sec.groups.map((g) => g.key)), title: "New group", params: [] }],
+        ...sec,
+        groups: [...sec.groups, {
+          key: addKey("group", sec.groups.flatMap((g) => (isTableGroup(g) ? [] : [g.key]))),
+          title: "New group", params: [],
+        }],
       }),
     },
   }));
@@ -233,18 +241,24 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
     ...d,
     computed: [...d.computed, { key: addKey("value", [...d.parameters.map((p) => p.key), ...d.computed.map((c) => c.key)]), expr: "0", under }],
   }));
-  const addTable = () => update((d) => {
-    const t = newCalcTable((d.tables ?? []).map((x) => x.key));
-    const g = lastGroup();
+  // A table is a group, so it is added to a section, not into one.
+  const addTable = (role: "calc" | "items") => update((d) => {
+    const t = role === "items" ? itemsTable() : newCalcTable((d.tables ?? []).map((x) => x.key));
     const withTable = { ...d, tables: [...(d.tables ?? []), t] };
-    return g ? placeParam(withTable, t.key, g.s, g.g) : withTable;
+    const s = lastSection();
+    return s === undefined ? withTable : placeTable(withTable, t.key, s);
   });
+  const lastSection = () =>
+    draft.structure.sections.length ? draft.structure.sections.length - 1 : undefined;
+  /** Last group a parameter can go into — a table group holds no parameter list. */
   const lastGroup = () => {
-    for (let s = draft.structure.sections.length - 1; s >= 0; s--) {
-      const g = draft.structure.sections[s]!.groups.length - 1;
-      if (g >= 0) return { s, g };
-    }
+    for (let s = draft.structure.sections.length - 1; s >= 0; s--)
+      for (let g = draft.structure.sections[s]!.groups.length - 1; g >= 0; g--)
+        if (!isTableGroup(draft.structure.sections[s]!.groups[g]!)) return { s, g };
   };
+  // checkModel allows at most one items table, and requires exactly one — so the menu entry that
+  // would create a second is disabled rather than producing a model that cannot be saved.
+  const hasItems = (draft.tables ?? []).some((t) => t.role === "items");
   // "add" row action: section → group, group → parameter (dialog targeted to the group).
   const addUnder = (ref: RowRef) => {
     if (ref.kind === "section") addGroup(ref.s);
@@ -257,7 +271,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   const actionsFor = (ref: RowRef) =>
     ref.kind === "section" ? <><TableRowAction icon="add" text="Add group" data-act="add" />{del}</>
     : ref.kind === "group" ? <><TableRowAction icon="add" text="Add parameter" data-act="add" />{del}</>
-    : ref.kind === "table" ? (defOf(ref.key)?.role === "items" ? undefined : del)
+    : ref.kind === "table" ? (defOf(tableKeyAt(draft, ref.s, ref.g) ?? "")?.role === "items" ? undefined : del)
     : (
       <>
         <TableRowAction icon="add" text="Add formula here" data-act="add" />
@@ -284,15 +298,27 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
         endContent={
           <>
             <Button icon="add" onClick={addSection}>Add section</Button>
-            <Button icon="add" onClick={() => setEditing({ param: emptyParam(), isNew: true, place: lastGroup() })}>Add parameter</Button>
-            <Button icon="add" disabled={!lastGroup()} onClick={addTable}>Add table</Button>
+            {/* A parameter needs a field group to land in. Without one it would be created unplaced,
+                straight into the amber strip below — which is documented as somewhere nothing the
+                builder creates can reach. A fresh model has no field group, so this starts disabled. */}
+            <Button icon="add" disabled={!lastGroup()}
+              tooltip={lastGroup() ? undefined : "Add a group first — a parameter needs one to live in"}
+              onClick={() => setEditing({ param: emptyParam(), isNew: true, place: lastGroup() })}>Add parameter</Button>
+            {/* Both halves add a group — the default one a plain group, the arrow one a group that
+                is a table. Two kinds of group, one button. */}
+            <SplitButton id="add-group-split" icon="add" disabled={lastSection() === undefined}
+              accessibilityAttributes={{ arrowButton: { hasPopup: "menu", expanded: addOpen } }}
+              onClick={() => addGroup(lastSection()!)}
+              onArrowClick={() => setAddOpen(true)}>
+              Add group
+            </SplitButton>
             <Button icon="add" disabled={!lastParam} onClick={() => addFormula(lastParam)}>Add formula</Button>
           </>
         }
       />
 
       <Table
-        className="hera-params-struct"
+        className="confire-params-struct"
         noData={
           <IllustratedMessage name="AddColumn" design="Dot" titleText="No structure yet"
             subtitleText="Add a section to start structuring the form, then add groups and parameters." />
@@ -334,14 +360,14 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
           if (rowKey.startsWith("c:")) return setFEdit(Number(rowKey.slice(2)));
           const ref = parseRowKey(rowKey);
           if (ref.kind === "table") {
-            setTableEdit(ref.key);
+            setTableEdit(tableKeyAt(draft, ref.s, ref.g) ?? null);
           } else if (ref.kind === "param") {
             const p = draft.parameters.find((x) => x.key === ref.key);
             if (p) setEditing({ param: structuredClone(p), isNew: false });
           } else {
-            const title = ref.kind === "section"
-              ? draft.structure.sections[ref.s]?.title ?? ""
-              : draft.structure.sections[ref.s]?.groups[ref.g]?.title ?? "";
+            const grp = ref.kind === "group" ? draft.structure.sections[ref.s]?.groups[ref.g] : undefined;
+            const title = ref.kind === "section" ? draft.structure.sections[ref.s]?.title ?? ""
+              : grp && !isTableGroup(grp) ? grp.title : "";
             setTitleEdit({ key: rowKeyOf(ref), original: title });
           }
         }}
@@ -440,14 +466,29 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
             <span>This model has no item grid, so it cannot be saved — a quote has no lines without one.</span>
             <Button icon="add" design="Transparent"
               onClick={() => update((d) => {
-                const g = lastGroup();
+                const s = lastSection();
                 const withTable = { ...d, tables: [...(d.tables ?? []), itemsTable()] };
-                return g ? placeParam(withTable, "items", g.s, g.g) : withTable;
+                return s === undefined ? withTable : placeTable(withTable, "items", s);
               })}>
               Add item grid
             </Button>
           </div>
         </MessageStrip>
+      ) : null}
+
+      {addOpen ? (
+        <Menu open opener="add-group-split" onClose={() => setAddOpen(false)}
+          onItemClick={(e) => {
+            const what = (e.detail.item as HTMLElement).dataset.add;
+            if (what === "group") addGroup(lastSection()!);
+            else if (what === "calc" || what === "items") addTable(what);
+            setAddOpen(false);
+          }}>
+          <MenuItem text="Normal group" icon="add" data-add="group" />
+          <MenuItem text="Calculation table" icon="table-view" data-add="calc" />
+          <MenuItem text="Item grid" icon="product" data-add="items" disabled={hasItems}
+            tooltip={hasItems ? "This model already has an item grid" : undefined} />
+        </Menu>
       ) : null}
 
       {placing ? (
@@ -456,26 +497,34 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
             const el = e.detail.item as HTMLElement;
             const s = Number(el.dataset.s);
             const g = Number(el.dataset.g);
-            if (!Number.isNaN(s) && !Number.isNaN(g)) {
-              const { key, kind } = placing;
-              update((d) => placeParam(d, key, s, g));
-            }
+            const { key, kind } = placing;
+            // A table is a group, so it is placed into a section; a parameter into a group.
+            if (kind === "table" && !Number.isNaN(s)) update((d) => placeTable(d, key, s));
+            else if (kind === "param" && !Number.isNaN(s) && !Number.isNaN(g)) update((d) => placeParam(d, key, s, g));
             setPlacing(null);
           }}>
           {draft.structure.sections.length === 0 ? (
             <MenuItem text="Add a section first" disabled />
-          ) : (
+          ) : placing.kind === "table" ? (
             draft.structure.sections.map((sec, si) => (
-              <MenuItem key={si} text={sec.title || "(untitled section)"}>
-                {sec.groups.length ? (
-                  sec.groups.map((g, gi) => (
-                    <MenuItem key={gi} text={g.title || "(untitled group)"} data-s={si} data-g={gi} />
-                  ))
-                ) : (
-                  <MenuItem text="No groups — add one first" disabled />
-                )}
-              </MenuItem>
+              <MenuItem key={si} text={sec.title || "(untitled section)"} data-s={si} />
             ))
+          ) : (
+            draft.structure.sections.map((sec, si) => {
+              // A table group has no parameter list, so it is not a place a parameter can go.
+              const groups = sec.groups.flatMap((g, gi) => (isTableGroup(g) ? [] : [{ g, gi }]));
+              return (
+                <MenuItem key={si} text={sec.title || "(untitled section)"}>
+                  {groups.length ? (
+                    groups.map(({ g, gi }) => (
+                      <MenuItem key={gi} text={g.title || "(untitled group)"} data-s={si} data-g={gi} />
+                    ))
+                  ) : (
+                    <MenuItem text="No groups — add one first" disabled />
+                  )}
+                </MenuItem>
+              );
+            })
           )}
         </Menu>
       ) : null}
@@ -489,11 +538,11 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
             update((d) => ({
               ...d,
               tables: (d.tables ?? []).map((x) => (x.key === was ? t : x)),
-              // a rename has to follow into placement, or the table drops out of its group
+              // a rename has to follow into placement, or the group points at a table that is gone
               structure: was === t.key ? d.structure : {
                 sections: d.structure.sections.map((sec) => ({
                   ...sec,
-                  groups: sec.groups.map((g) => ({ ...g, params: g.params.map((k) => (k === was ? t.key : k)) })),
+                  groups: sec.groups.map((g) => (isTableGroup(g) && g.table === was ? { table: t.key } : g)),
                 })),
               },
             }));

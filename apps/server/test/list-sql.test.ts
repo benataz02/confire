@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { sql, type SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import type { ListVariantDef } from "@hera/db";
+import type { ListVariantDef } from "@confire/db";
 import { compileList } from "../src/entity-list.ts";
 import { compileListSql, nextSkipOf, type SqlFields } from "../src/list-sql.ts";
-import type { B1EntitySchema } from "@hera/b1";
-import { configProject } from "@hera/db";
+import type { B1EntitySchema } from "@confire/b1";
+import { configProject } from "@confire/db";
 
 // The SQL executor of a saved view. Same spec, same rules as entity-list.ts's OData compilation —
 // these lock in the two that differ from "just drop what you don't recognise": a filter naming a

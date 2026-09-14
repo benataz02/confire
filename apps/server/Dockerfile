@@ -5,7 +5,7 @@ WORKDIR /app
 COPY . .
 RUN bun install --frozen-lockfile
 # Bake the subdomain base domain into the SPA (apps/web/src/lib/tenant.ts). Defaults to
-# localhost for a bare build; compose passes hera.local for the wildcard prod profile.
+# localhost for a bare build; compose passes confire.local for the wildcard prod profile.
 ARG VITE_APP_BASE_DOMAIN=localhost
 RUN VITE_APP_BASE_DOMAIN="$VITE_APP_BASE_DOMAIN" bun run build:web
 

@@ -66,7 +66,7 @@ function Login() {
   return (
     <AuthLayout>
       <h2 className="auth-h1">Welcome back</h2>
-      <p className="auth-sub">Sign in to your HERA workspace.</p>
+      <p className="auth-sub">Sign in to your Confire workspace.</p>
       {signIn.error ? <MessageStrip design="Negative" hideCloseButton>{signIn.error.message}</MessageStrip> : null}
       <label className="auth-field">
         <span>Email</span>
@@ -87,7 +87,7 @@ function Login() {
       <div className="auth-or">or</div>
       <SocialButtons />
       <p className="auth-alt">
-        New to HERA? <Link to="/signup" search={{ redirect: redirectTo, email: emailFromInvite }}>Create an account</Link>
+        New to Confire? <Link to="/signup" search={{ redirect: redirectTo, email: emailFromInvite }}>Create an account</Link>
       </p>
     </AuthLayout>
   );

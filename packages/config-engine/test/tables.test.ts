@@ -2,8 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { checkModel } from "../src/check";
 import type { ModelDef, TableDef } from "../src/model";
 import { bindings } from "../src/propagate";
+import { placedTables } from "../src/model";
 import { evalTableRows, splitShares, splitWeights, tableAggregates } from "../src/tables";
-import { lookups, model as base } from "./fixture";
+import { fieldGroup, lookups, model as base } from "./fixture";
 
 const known = [{ name: "prices", columns: ["code", "price"] }];
 
@@ -63,7 +64,7 @@ const model: ModelDef = {
   structure: {
     sections: [{
       ...base.structure.sections[0]!,
-      groups: base.structure.sections[0]!.groups.map((g, i) => (i === 0 ? { ...g, params: [...g.params, "holes"] } : g)),
+      groups: [...base.structure.sections[0]!.groups, { table: "holes" }],
     }],
   },
 };
@@ -236,10 +237,44 @@ describe("checkModel", () => {
       structure: {
         sections: [{
           ...base.structure.sections[0]!,
-          groups: [{ ...base.structure.sections[0]!.groups[0]!, params: ["nope"] }],
+          groups: [{ ...fieldGroup(base), params: ["nope"] }],
         }],
       },
     };
     expect(msgs(m)).toContain("structure references unknown parameter 'nope'");
+  });
+
+  test("a table group naming no TableDef", () => {
+    const m: ModelDef = {
+      ...model,
+      structure: { sections: [{ ...base.structure.sections[0]!, groups: [{ table: "ghost" }] }] },
+    };
+    expect(msgs(m)).toContain("structure references unknown table 'ghost'");
+  });
+
+  test("the same table placed as two groups", () => {
+    const m: ModelDef = {
+      ...model,
+      structure: {
+        sections: [{ ...base.structure.sections[0]!, groups: [{ table: "holes" }, { table: "holes" }] }],
+      },
+    };
+    expect(msgs(m)).toContain("table 'holes' is placed more than once");
+  });
+
+  // A model saved before tables became groups. It still parses (the field arm is unchanged), but
+  // placedTables() no longer sees the table, so the form would drop it into the catch-all section.
+  test("a legacy table key still sitting in a group's params", () => {
+    const m: ModelDef = {
+      ...model,
+      structure: {
+        sections: [{
+          ...base.structure.sections[0]!,
+          groups: [{ ...fieldGroup(base), params: [...fieldGroup(base).params, "holes"] }],
+        }],
+      },
+    };
+    expect(msgs(m)).toContain("table 'holes' sits in group 'conductor' — place it as a group of its own");
+    expect(placedTables(m)).not.toContain("holes");
   });
 });

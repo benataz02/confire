@@ -6,13 +6,13 @@
 
 **Goal:** The admin Model Builder — routes `models/` (list) + `models/$id` (builder): TabContainer editor (Parameters hierarchy with drag-reorder, Rules, BOM, Routing, Tables designer, Settings), a shared `ExprInput` with span-accurate errors + suggestions, and a live preview pane running the real engine (`propagate`) against the unsaved draft — spec phase 3 of `docs/superpowers/specs/2026-07-03-configurator-design.md`.
 
-**Architecture:** Everything data goes through the existing oRPC client (`orpc.models.*`, admin-gated server-side by `adminProcedure`); the engine (`@hera/config-engine`) runs **in the browser** for validation (`checkModel`) and live preview (`propagate`) — the dep is already declared in `apps/web/package.json`, currently unused. The builder holds one draft `ModelDef` in React state; `checkModel(draft, tableNames)` runs on every change and drives per-field `valueState`, per-tab error badges, a header MessageView, and the save gate. One new server procedure, `models.previewLookups`, resolves a *draft* definition's lookups (reusing the already-tested `resolveLookups`) so the preview sees query domains and queryTables exactly as a run would.
+**Architecture:** Everything data goes through the existing oRPC client (`orpc.models.*`, admin-gated server-side by `adminProcedure`); the engine (`@confire/config-engine`) runs **in the browser** for validation (`checkModel`) and live preview (`propagate`) — the dep is already declared in `apps/web/package.json`, currently unused. The builder holds one draft `ModelDef` in React state; `checkModel(draft, tableNames)` runs on every change and drives per-field `valueState`, per-tab error badges, a header MessageView, and the save gate. One new server procedure, `models.previewLookups`, resolves a *draft* definition's lookups (reusing the already-tested `resolveLookups`) so the preview sees query domains and queryTables exactly as a run would.
 
-**Tech Stack:** React 19, `@ui5/webcomponents-react` 2.23.1 (all component APIs verified against the ui5-wcr MCP at 2.23.2), TanStack Router (file-based) + TanStack Query via `@orpc/tanstack-query`, `@hera/config-engine` (pure TS), bun test for pure helpers. **No new dependencies.**
+**Tech Stack:** React 19, `@ui5/webcomponents-react` 2.23.1 (all component APIs verified against the ui5-wcr MCP at 2.23.2), TanStack Router (file-based) + TanStack Query via `@orpc/tanstack-query`, `@confire/config-engine` (pure TS), bun test for pure helpers. **No new dependencies.**
 
 ## Global Constraints
 
-- Repo root `/home/benataz02/dev/hera`; run all commands there. Commit after every task (style: `feat(web): …`, matching `git log`).
+- Repo root `/home/benataz02/dev/confire`; run all commands there. Commit after every task (style: `feat(web): …`, matching `git log`).
 - The engine **as built** is the source of truth (not the spec sketch): `pricing.priceExpr`, `LookupRef` variants `manual{options[{value,label?}]} | table{table,valueCol,labelCol?} | query{target,path,valueField,labelField?}`, `ModelDef.queryTables`, `Param.domain = {kind:"options",ref} | {kind:"range",min,max,step?}`, expr fields are plain strings (`BomLine.qty/price/itemCode/desc/condition`, `Operation.setupMin/runMinPerUnit/ratePerHour/condition`).
 - Expression scopes mirror `check.ts`: params/computed/constraints → param+computed keys; bom/routing exprs additionally see `qty`; `pricing.priceExpr` additionally sees `qty` and `unitCost`.
 - Web conventions (from the live code, do not invent new ones): thin route files delegating to components; `orpc.x.y.queryOptions({input})` / `.mutationOptions()`; invalidation via `qc.invalidateQueries({queryKey: orpc.x.y.queryOptions().queryKey})`; errors as inline `<MessageStrip design="Negative">`; loading via `BusyIndicator`/`isPending`; inline `style={{}}` objects, no CSS files; icons by string name (global `AllIcons.js` import exists).
@@ -148,7 +148,7 @@ Expected: PASS (no behavior change).
 
 ```ts
 import { describe, expect, test } from "bun:test";
-import type { ModelDef } from "@hera/config-engine";
+import type { ModelDef } from "@confire/config-engine";
 import { complete, matches, scopeSuggestions, trailingIdent } from "./exprHelpers.ts";
 
 const model = {
@@ -208,7 +208,7 @@ Expected: FAIL — module not found.
 - [ ] **Step 4: Implement `exprHelpers.ts`**
 
 ```ts
-import { FUNCS, type ModelDef } from "@hera/config-engine";
+import { FUNCS, type ModelDef } from "@confire/config-engine";
 
 // Suggestion machinery for ExprInput. Completion targets the TRAILING identifier of the
 // value — the common typing flow. // ponytail: caret-aware mid-expression completion needs
@@ -253,7 +253,7 @@ Expected: PASS (4 tests).
 ```tsx
 import { useId, useMemo, useState, type CSSProperties } from "react";
 import { Input, List, ListItemStandard, Popover } from "@ui5/webcomponents-react";
-import { DslError, parse, type Issue, type ModelDef } from "@hera/config-engine";
+import { DslError, parse, type Issue, type ModelDef } from "@confire/config-engine";
 import { complete, matches, scopeSuggestions, type Suggestion } from "./exprHelpers.ts";
 
 // The one expression editor used everywhere in the builder: monospace, parse-on-change with
@@ -311,7 +311,7 @@ export function ExprInput({
       <Input
         id={id}
         style={{ width: "100%", ...style }}
-        className="hera-expr" // fontFamily via CSS part is unavailable; monospace set inline below
+        className="confire-expr" // fontFamily via CSS part is unavailable; monospace set inline below
         value={text}
         placeholder={placeholder}
         valueState={error ? "Negative" : "None"}
@@ -351,10 +351,10 @@ Monospace: the UI5 `Input` exposes a CSS part named `input`. Add once, in this f
 
 ```tsx
 // Monospace inside the shadow DOM via the exposed `input` CSS part.
-if (typeof document !== "undefined" && !document.getElementById("hera-expr-style")) {
+if (typeof document !== "undefined" && !document.getElementById("confire-expr-style")) {
   const el = document.createElement("style");
-  el.id = "hera-expr-style";
-  el.textContent = `.hera-expr::part(input){font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}`;
+  el.id = "confire-expr-style";
+  el.textContent = `.confire-expr::part(input){font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}`;
   document.head.appendChild(el);
 }
 ```
@@ -444,7 +444,7 @@ import {
   Bar, Button, BusyIndicator, Dialog, DynamicPage, DynamicPageTitle, Input, Label, MessageStrip,
   Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, Title,
 } from "@ui5/webcomponents-react";
-import type { ModelDef } from "@hera/config-engine";
+import type { ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 
 // Minimal valid model a new draft starts from; passes checkModel (unitCost is in pricing scope).
@@ -594,7 +594,7 @@ The full edit→validate→save loop, end to end, with one real tab (Settings). 
 ```ts
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { checkModel, type Issue, type ModelDef } from "@hera/config-engine";
+import { checkModel, type Issue, type ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 
 export type TabKey = "params" | "rules" | "bom" | "routing" | "tables" | "settings";
@@ -671,7 +671,7 @@ export function useDraftModel(id: string) {
 ```tsx
 import { useState } from "react";
 import { Button, Form, FormGroup, FormItem, Input, Label, Option, Select, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text } from "@ui5/webcomponents-react";
-import type { Issue, ModelDef } from "@hera/config-engine";
+import type { Issue, ModelDef } from "@confire/config-engine";
 import { ExprInput } from "./ExprInput.tsx";
 import { issueFor } from "./useDraftModel.ts";
 
@@ -766,7 +766,7 @@ import {
   Bar, Button, BusyIndicator, MessageStrip, MessageItem, MessageView, MessageViewButton,
   ObjectStatus, ResponsivePopover, SplitterElement, SplitterLayout, Tab, TabContainer, Text, Title,
 } from "@ui5/webcomponents-react";
-import type { Issue } from "@hera/config-engine";
+import type { Issue } from "@confire/config-engine";
 import { tabOf, useDraftModel, type TabKey } from "./useDraftModel.ts";
 import { SettingsTab } from "./SettingsTab.tsx";
 
@@ -922,7 +922,7 @@ git commit -m "feat(web): model builder shell — draft state, validation loop, 
 
 ```ts
 import { describe, expect, test } from "bun:test";
-import type { ModelDef } from "@hera/config-engine";
+import type { ModelDef } from "@confire/config-engine";
 import { applyMove, canDrop, parseRowKey, placeParam, removeFromStructure, unplacedParams } from "./structureOps.ts";
 
 const def = {
@@ -998,7 +998,7 @@ Expected: FAIL — module not found.
 - [ ] **Step 3: Implement `structureOps.ts`**
 
 ```ts
-import type { ModelDef } from "@hera/config-engine";
+import type { ModelDef } from "@confire/config-engine";
 
 // Pure structure-tree edits for the Parameters tab. All functions return new ModelDefs.
 
@@ -1143,7 +1143,7 @@ import {
   Option, Select, StepInput, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow,
   TableRowAction, Text, Title,
 } from "@ui5/webcomponents-react";
-import type { Issue, LookupRef, ModelDef, Option as EngineOption, Param } from "@hera/config-engine";
+import type { Issue, LookupRef, ModelDef, Option as EngineOption, Param } from "@confire/config-engine";
 import { client } from "../../orpc.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { issueFor } from "./useDraftModel.ts";
@@ -1624,7 +1624,7 @@ import {
   Bar, Button, Dialog, Input, Label, MultiComboBox, MultiComboBoxItem, Option, Select,
   Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, Title,
 } from "@ui5/webcomponents-react";
-import type { Constraint, Issue, ModelDef, ResolvedLookups, Val } from "@hera/config-engine";
+import type { Constraint, Issue, ModelDef, ResolvedLookups, Val } from "@confire/config-engine";
 import { ExprInput } from "./ExprInput.tsx";
 import { issueFor } from "./useDraftModel.ts";
 
@@ -1854,7 +1854,7 @@ git commit -m "feat(web): rules tab — expression constraints and combination t
 
 ```tsx
 import { Bar, Button, Input, StepInput, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, Title } from "@ui5/webcomponents-react";
-import type { Issue, ModelDef } from "@hera/config-engine";
+import type { Issue, ModelDef } from "@confire/config-engine";
 import { ExprInput } from "./ExprInput.tsx";
 import { issueFor } from "./useDraftModel.ts";
 
@@ -2003,7 +2003,7 @@ import {
   Bar, Button, BusyIndicator, Input, Label, List, ListItemStandard, MessageStrip, Option, Select,
   Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, Title,
 } from "@ui5/webcomponents-react";
-import type { Val } from "@hera/config-engine";
+import type { Val } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 
 type Col = { key: string; label: string; type: "string" | "number" | "boolean" };
@@ -2164,7 +2164,7 @@ git commit -m "feat(web): tables tab — tenant lookup-table designer with TSV p
 
 ```ts
 import { useQuery } from "@tanstack/react-query";
-import type { ModelDef } from "@hera/config-engine";
+import type { ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 
 // Only domain refs and queryTables affect lookup resolution. Sending this skeleton (instead of
@@ -2202,7 +2202,7 @@ import {
   Bar, CheckBox, Form, FormGroup, FormItem, Input, Label, MessageStrip, MultiComboBox,
   MultiComboBoxItem, ObjectStatus, Option, Panel, RadioButton, Select, StepInput, Text,
 } from "@ui5/webcomponents-react";
-import { propagate, type DomainOption, type Entries, type ModelDef, type ResolvedLookups, type Val } from "@hera/config-engine";
+import { propagate, type DomainOption, type Entries, type ModelDef, type ResolvedLookups, type Val } from "@confire/config-engine";
 
 // The one form both the builder preview and the phase-4 wizard render. Fully controlled:
 // entries in, entries out; all engine work happens in propagate().
@@ -2361,7 +2361,7 @@ export function ConfiguratorForm({ model, lookups, entries, onChange }: {
 ```tsx
 import { useRef, useState } from "react";
 import { Bar, Button, BusyIndicator, MessageStrip, Text, Title } from "@ui5/webcomponents-react";
-import { DslError, type Entries, type Issue, type ModelDef } from "@hera/config-engine";
+import { DslError, type Entries, type Issue, type ModelDef } from "@confire/config-engine";
 import { ConfiguratorForm } from "./ConfiguratorForm.tsx";
 import { usePreviewLookups } from "./usePreviewLookups.ts";
 

@@ -14,7 +14,7 @@
 
 Every task implicitly includes these. Values are copied from the spec — do not re-derive them.
 
-- **Naming:** The agent's user-facing name is **Chati** — window header, launcher button, welcome view, and system prompt persona ("You are Chati, the configuration assistant for …"). Technical identifiers keep the spec's names: `packages/assistant`, `@hera/assistant`, `assistant_*` tables, `assist.*` procedures, `AssistantWindow.tsx`.
+- **Naming:** The agent's user-facing name is **Chati** — window header, launcher button, welcome view, and system prompt persona ("You are Chati, the configuration assistant for …"). Technical identifiers keep the spec's names: `packages/assistant`, `@confire/assistant`, `assistant_*` tables, `assist.*` procedures, `AssistantWindow.tsx`.
 - **Serial tools:** `maxToolCallsPerTurn: 1`, `maxIterations(8)`, `maxToolCalls(8)` — at most 8 executed tools per `turnId` across all attempts; a second call in one model turn gets a `TOOL_ORDER` tool error, is never executed, and still consumes the emitted-call budget.
 - **Budgets:** `MAX_PROVIDER_CALLS = 11` (8 loop + 1 wrap-up + 2 extraction attempts); output ≤2048 tokens/provider call, ≤8192/turn cumulative (512 reserved for wrap-up); input ≤32k est. tokens/call, ≤128k/turn cumulative; user message ≤4000 chars; turn watchdog 120s, tool timeout 30s, extraction 60s; lease 30s renewed every 10s; `MAX_TOOL_OPERATION_ATTEMPTS = 2` (retryable, side-effect-free failures only).
 - **Result caps:** `MAX_TOOL_RESULT_BYTES = 32 KiB`; `PREVIEW_TOP_K = 5`; `RUN_TOP_K = 5`; similar rows = 3; doc-history rows = 20; selections/call ≤100; suggestions ≤3 × ≤120 chars; list/get pages ≤50; model context = last 20 whole turns.
@@ -35,7 +35,7 @@ Every task implicitly includes these. Values are copied from the spec — do not
 | `apps/server/src/orpc/routers/extraction.ts` (modify) | split `extractSuggestions` → `callExtraction` (shared Gemini core) + thin wrapper |
 | `packages/db/src/schema/configurator.ts` (modify) | `configRun.selectionVersion` column |
 | `apps/server/src/orpc/routers/configs.ts` (modify) | `executeRunFromSnapshot` (guarded CAS run path), factored `searchSimilarRows` / `fetchDocHistory`, `configs.remove` cascades assistant conversations, `configs.select` bumps `selectionVersion` |
-| `packages/assistant/package.json` (create) | `@hera/assistant` workspace package, pinned TanStack AI deps |
+| `packages/assistant/package.json` (create) | `@confire/assistant` workspace package, pinned TanStack AI deps |
 | `packages/assistant/src/schema.ts` (create) | 4 Drizzle tables: conversation, turn, message, tool execution |
 | `packages/assistant/src/events.ts` (create) | `AssistantEventZ` strict discriminated union + envelope |
 | `packages/assistant/src/provider.ts` (create) | provider registry from env, capability profiles, `listProviders` / `resolveProvider` |
@@ -278,7 +278,7 @@ Expected: PASS — `configurator.test.ts` exercises `executeRun`/`applySelection
 - Modify: `packages/db/drizzle.config.ts`
 
 **Interfaces:**
-- Produces: Drizzle tables `assistantConversation`, `assistantTurn`, `assistantMessage`, `assistantToolExecution` (+ exported types `Provider`, `TurnStatus`, `ToolExecStatus`, `MessageContent`, `UiChange`). Later tasks import them from `@hera/assistant/schema`.
+- Produces: Drizzle tables `assistantConversation`, `assistantTurn`, `assistantMessage`, `assistantToolExecution` (+ exported types `Provider`, `TurnStatus`, `ToolExecStatus`, `MessageContent`, `UiChange`). Later tasks import them from `@confire/assistant/schema`.
 - `packages/db` gains **no** dependency on the assistant package — only the drizzle-kit config references the schema file by path (one migration pipeline, no runtime dep).
 
 - [ ] **Step 1: Scaffold the package**
@@ -287,7 +287,7 @@ Expected: PASS — `configurator.test.ts` exercises `executeRun`/`applySelection
 
 ```json
 {
-  "name": "@hera/assistant",
+  "name": "@confire/assistant",
   "type": "module",
   "private": true,
   "exports": {
@@ -295,7 +295,7 @@ Expected: PASS — `configurator.test.ts` exercises `executeRun`/`applySelection
     "./schema": "./src/schema.ts"
   },
   "dependencies": {
-    "@hera/config-engine": "workspace:*",
+    "@confire/config-engine": "workspace:*",
     "@orpc/server": "^1.14.6",
     "drizzle-orm": "^0.45.2",
     "zod": "^4.4.3"
@@ -309,7 +309,7 @@ Expected: PASS — `configurator.test.ts` exercises `executeRun`/`applySelection
 `packages/assistant/tsconfig.json`: copy `packages/db/tsconfig.json` verbatim. TanStack AI deps are added in Task 6 (pinned exact), not here.
 
 Run: `bun install`
-Expected: workspace links `@hera/assistant`.
+Expected: workspace links `@confire/assistant`.
 
 - [ ] **Step 2: Implement `packages/assistant/src/schema.ts`**
 
@@ -318,11 +318,11 @@ import { sql } from "drizzle-orm";
 import {
   boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid,
 } from "drizzle-orm/pg-core";
-import type { Entries } from "@hera/config-engine";
+import type { Entries } from "@confire/config-engine";
 
 // Chati persistence. Spec: docs/superpowers/specs/2026-07-21-configurator-assistant-design.md.
-// Owned by @hera/assistant; migrations are generated from packages/db (drizzle.config schema array).
-// No runtime dependency on @hera/db — configs.remove deletes conversations explicitly.
+// Owned by @confire/assistant; migrations are generated from packages/db (drizzle.config schema array).
+// No runtime dependency on @confire/db — configs.remove deletes conversations explicitly.
 
 export type Provider = "gemini" | "anthropic" | "openai";
 export type TurnStatus = "running" | "partial" | "complete" | "failed";
@@ -642,13 +642,13 @@ export function resolveProvider(provider: Provider, env: Record<string, string |
 - Create: `packages/assistant/src/prompt.ts`
 
 **Interfaces:**
-- Consumes: `formatParameterBlock` from `@hera/config-engine` (Task 1).
+- Consumes: `formatParameterBlock` from `@confire/config-engine` (Task 1).
 - Produces: `buildAssistPrompt(model: ModelDef, propagated, working, ctx): string` — pure, rebuilt fresh every turn. Section order: role → domain context → parameters → current state → rules.
 
 - [ ] **Step 1: Implement `packages/assistant/src/prompt.ts`** — the spec's prompt verbatim (§System prompt), persona changed to Chati:
 
 ```ts
-import { formatParameterBlock, type Entries, type ModelDef, type Val } from "@hera/config-engine";
+import { formatParameterBlock, type Entries, type ModelDef, type Val } from "@confire/config-engine";
 
 type Propagated = {
   domains: Record<string, { value: Val; eliminatedBy?: string }[]>;
@@ -1002,7 +1002,7 @@ Add `export * from "./turns.ts";` to `src/index.ts`.
 
 **Files:**
 - Create: `apps/server/src/assistant/executors.ts`
-- Modify: `apps/server/package.json` (add `"@hera/assistant": "workspace:*"`)
+- Modify: `apps/server/package.json` (add `"@confire/assistant": "workspace:*"`)
 
 **Interfaces:**
 - Consumes: `validateSuggestionSet` (`../extraction.ts`), `propagate`/`enumerate`/`computeOutputs` (config-engine), `searchSimilarRows`/`fetchDocHistory` (Task 3), `callExtraction` (Task 2), `staleResult` shapes (Task 8), `assistantToolExecution`/`assistantTurn` (provenance lookups).
@@ -1030,9 +1030,9 @@ type ExecutorCtx = {
 ```ts
 import { ORPCError } from "@orpc/server";
 import { and, eq, inArray } from "drizzle-orm";
-import { db } from "@hera/db";
-import { propagate, enumerate, computeOutputs, type Entries, type ResolvedLookups, type Val } from "@hera/config-engine";
-import { assistantToolExecution, assistantTurn, type Evidence } from "@hera/assistant";
+import { db } from "@confire/db";
+import { propagate, enumerate, computeOutputs, type Entries, type ResolvedLookups, type Val } from "@confire/config-engine";
+import { assistantToolExecution, assistantTurn, type Evidence } from "@confire/assistant";
 import { validateSuggestionSet } from "../extraction.ts";
 import { callExtraction as realCallExtraction, type ExtractFile } from "../orpc/routers/extraction.ts";
 import { searchSimilarRows as realSimilar, fetchDocHistory as realDocs, loadModel } from "../orpc/routers/configs.ts";
@@ -1391,7 +1391,7 @@ Expected: PASS (compile + no regressions; live behavior verified in Task 18).
 - `deps.ts`: assembles the full `AssistantDeps` (glue: `loadProject` from `configProject`, `loadModelAndLookups` = `loadModel` + `cachedLookups`-style fresh resolve, `makeExecutors` = Task 10/11 factory).
 - `router.ts` mounts `assist: createAssistantRouter(userProcedure, assistantDeps)`.
 - `index.ts`: `new RPCHandler(router, { plugins: [new BodyLimitPlugin({ maxBodySize: 22 * 1024 * 1024 })] })` — confirm the plugin's import path via the orpc skill; it must reject before JSON parsing.
-- `configs.remove` gains, inside its existing transaction (import from `@hera/assistant/schema`): `await tx.delete(assistantConversation).where(and(eq(assistantConversation.tenantId, context.tenantId), eq(assistantConversation.projectId, input.id)));` — FKs cascade turns/messages/executions.
+- `configs.remove` gains, inside its existing transaction (import from `@confire/assistant/schema`): `await tx.delete(assistantConversation).where(and(eq(assistantConversation.tenantId, context.tenantId), eq(assistantConversation.projectId, input.id)));` — FKs cascade turns/messages/executions.
 
 - [ ] **Step 1: Implement** the five modules + mounting + cascade per the contract.
 - [ ] **Step 2: Boot check** — Run: `bun run dev:server` briefly: server starts with no assistant env set; `assist.providers` reports all unavailable; nothing crashes. Ctrl-C.
@@ -1406,7 +1406,7 @@ Pure client state, no components.
 
 **Files:**
 - Create: `apps/web/src/components/configurator/assistantState.ts`
-- Modify: `apps/web/package.json` (add `"@hera/assistant": "workspace:*"` for the **type-only** `AssistantEvent` import; run `bun install`; verify `bun run build:web` doesn't pull server code into the bundle)
+- Modify: `apps/web/package.json` (add `"@confire/assistant": "workspace:*"` for the **type-only** `AssistantEvent` import; run `bun install`; verify `bun run build:web` doesn't pull server code into the bundle)
 
 **Interfaces:**
 

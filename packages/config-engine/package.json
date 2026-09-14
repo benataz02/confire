@@ -1,5 +1,5 @@
 {
-  "name": "@hera/config-engine",
+  "name": "@confire/config-engine",
   "type": "module",
   "private": true,
   "exports": {

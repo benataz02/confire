@@ -1,4 +1,4 @@
-import { FUNCS, aggregateKey, derivedColumns, derivedKey, type ModelDef, type Param, type TableDef } from "@hera/config-engine";
+import { FUNCS, aggregateKey, derivedColumns, derivedKey, type ModelDef, type Param, type TableDef } from "@confire/config-engine";
 
 // Suggestion machinery for ExprInput. Completion targets the TRAILING identifier of the
 // value — the common typing flow. // ponytail: caret-aware mid-expression completion needs

@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { db, configMasterdata, configModel, configProject, type ConfigCandidate } from "@hera/db";
-import type { Entries, ModelDef, ResolvedLookups } from "@hera/config-engine";
+import { db, configMasterdata, configModel, configProject, type ConfigCandidate } from "@confire/db";
+import type { Entries, ModelDef, ResolvedLookups } from "@confire/config-engine";
 import { applySelection, calculateProject } from "../src/orpc/routers/configs.ts";
 import { buildQuoteLines, configDocumentCommandId } from "../src/config-quote.ts";
 import { router } from "../src/orpc/router.ts";

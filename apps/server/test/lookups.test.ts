@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ModelDef } from "@hera/config-engine";
+import type { ModelDef } from "@confire/config-engine";
 import { needsSap, queryPageSource, resolveLookups, type MasterdataRow, type QueryRunner } from "../src/lookups.ts";
 
 // Masterdata is tenant-wide: these cover the filter that keeps a model from reading tables it

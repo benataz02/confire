@@ -6,13 +6,13 @@
 
 **Architecture:** Pure web-app phase: no server, agent, db, or engine changes. The wizard reuses the phase-3 `ConfiguratorForm` (live client-side `propagate`) for step 1; steps 3–4 render **only** from the immutable run snapshot (`latestRun.modelSnapshot` / `lookupSnapshot` / `candidates`) so what the user reviews is exactly what the server computed. Local state overlays server state (`override ?? server value`); `configs.update` persists entries/batches **before** `configs.run` because `executeRun` reads them from the DB, and `configs.select` recomputes totals server-side — client numbers are never persisted. A small pure-helper module (`runView.ts`) carries all testable logic (candidate labels, best-price-per-column, cell selection toggling, override editing) with bun tests.
 
-**Tech Stack:** React 19, UI5 Web Components React 2.23 (components verified against the 2.23.2 API via the UI5 MCP), TanStack Router (file-based) + TanStack Query + oRPC client, `@hera/config-engine` (browser side), bun test. **No new dependencies.**
+**Tech Stack:** React 19, UI5 Web Components React 2.23 (components verified against the 2.23.2 API via the UI5 MCP), TanStack Router (file-based) + TanStack Query + oRPC client, `@confire/config-engine` (browser side), bun test. **No new dependencies.**
 
 **Design stance (frontend-design):** The visual system is fixed — Fiori themes, user-switchable in the shell — so the design investment goes into interaction and information design. The signature element is the **candidates price matrix**: rows are candidates labeled by their open-parameter values, columns are batch quantities, every cell is a price that is *itself the selection control* (a `ToggleButton`), and the lowest price per column is highlighted. The matrix visually **is** the `RunSelection[]` data shape — one selected cell = one future quotation line. Copy: sentence case, verbs name outcomes and stay consistent through the flow ("Calculate", "Review selection (n)", "Save selection").
 
 ## Global Constraints
 
-- Repo root: `/home/benataz02/dev/hera`. Run all commands from there. Commit after every task (style: `feat(web): …`, matching `git log`).
+- Repo root: `/home/benataz02/dev/confire`. Run all commands from there. Commit after every task (style: `feat(web): …`, matching `git log`).
 - **No new dependencies.** Deliberate divergence from the spec sketch: the price-vs-batch chart is an inline SVG micro-chart (≤ ~6 points), not `@ui5/webcomponents-react-charts` `LineChart` — the charts package's own docs warn "custom-built **without** defined design specifications … especially accessibility may not meet standard app requirements", and it would drag recharts in for one tiny curve. Marked `// ponytail:` with the swap path. Do not "fix" this by adding the package.
 - The engine/server **as built** is the source of truth where the spec sketch differs. Exact shapes tasks rely on:
   - `propagate(model, lookups, entries)` → `{ domains: Record<key, DomainOption[]>, values: Record<key, Val>, visible: Record<key, boolean>, defaulted: Set<string>, conflicts: {message: string}[], open: string[], candidateEstimate: number }`.
@@ -25,7 +25,7 @@
   - `lookups {modelId}` → `ResolvedLookups` (server-cached ~5 min; needs the agent only when the model uses query sources — error message comes from `assertAgentReady`, show it verbatim with a Retry).
   - `run {projectId}` → `{runId, candidateCount, capped, widest?: {key, size}}` — reads entries/batches **from the DB**, so persist local edits via `update` first. Errors are `BAD_REQUEST` with speakable messages ("Configuration has conflicts: …", "Add at least one batch quantity").
   - `select {runId, selection}` (min 1 entry) → recomputes and stores server-side.
-- `apps/web` does **not** depend on `@hera/db`: mirror `RunCandidate`/`RunSelection` structurally in `runView.ts` (`Candidate`, `Sel`).
+- `apps/web` does **not** depend on `@confire/db`: mirror `RunCandidate`/`RunSelection` structurally in `runView.ts` (`Candidate`, `Sel`).
 - Web house style (match phase-3 files): double quotes, 2-space indent, function components, inline `style={{}}`, `orpc.X.queryOptions()/mutationOptions()`, dates over the wire are strings (`new Date(x).toLocaleString()`), UI5 typing gaps patched via `data-*` + `dataset` (see `ModelsPage` Select/row patterns).
 - UI5 components verified against 2.23.2 via MCP: `Wizard` (`contentLayout="MultipleSteps"`, needs a height-constrained parent, steps advance by setting `selected` on `WizardStep`, `onStepChange` detail `{step, previousStep, withScroll}`), `Tokenizer`/`Token` (`onTokenDelete` detail `{tokens: Token[]}`), `ToggleButton` (`pressed`, `design`), `Table`/`TableRow rowKey`/`TableRowAction`. Number formatting: `fmt()` helper (locale, ≤2 decimals) — no currency symbol, models don't carry a currency.
 - Copy rules: sentence case everywhere; actions keep their names through the flow: **Calculate** (step 2), **Review selection (n)** (step 3), **Save selection** (step 4). Errors state what happened and what to do next; empty states invite the action.
@@ -58,7 +58,7 @@ apps/web/src/components/AppShell.tsx   MODIFY  add "Configurations" nav item (al
 - Test: `apps/web/src/components/configurator/runView.test.ts`
 
 **Interfaces:**
-- Consumes: `Entries`, `ModelDef`, `Outputs`, `OutputOverrides` types from `@hera/config-engine`.
+- Consumes: `Entries`, `ModelDef`, `Outputs`, `OutputOverrides` types from `@confire/config-engine`.
 - Produces (used by Tasks 2–6, exact signatures):
   - `type Candidate = { assignment: Entries; perBatch: { batchQty: number; outputs: Outputs }[] }`
   - `type Sel = { candidateIdx: number; batchQty: number; overrides?: OutputOverrides }`
@@ -78,7 +78,7 @@ Create `apps/web/src/components/configurator/runView.test.ts`:
 
 ```ts
 import { describe, expect, test } from "bun:test";
-import type { ModelDef, Outputs } from "@hera/config-engine";
+import type { ModelDef, Outputs } from "@confire/config-engine";
 import {
   bestByBatch, candidateLabel, cleanOverrides, isEdited, isRemoved, isSelected, openKeys,
   patchBom, resetLine, toggleSelection, withoutRemovals, type Candidate, type Sel,
@@ -163,10 +163,10 @@ Expected: FAIL — `Cannot find module './runView.ts'`.
 Create `apps/web/src/components/configurator/runView.ts`:
 
 ```ts
-import type { Entries, ModelDef, OutputOverrides, Outputs } from "@hera/config-engine";
+import type { Entries, ModelDef, OutputOverrides, Outputs } from "@confire/config-engine";
 
 // Pure view logic for the configuration wizard. Client-side mirrors of the server's
-// RunCandidate/RunSelection jsonb shapes (web doesn't depend on @hera/db; structural match).
+// RunCandidate/RunSelection jsonb shapes (web doesn't depend on @confire/db; structural match).
 export type Candidate = { assignment: Entries; perBatch: { batchQty: number; outputs: Outputs }[] };
 export type Sel = { candidateIdx: number; batchQty: number; overrides?: OutputOverrides };
 
@@ -455,7 +455,7 @@ git commit -m "feat(web): configurations list, route, member nav item"
 - Create: `apps/web/src/routes/_authed/configs/$id.tsx`
 
 **Interfaces:**
-- Consumes: `orpc.configs.get / lookups / update / run / select`; `ConfiguratorForm` (phase 3, props `{model, lookups, entries, onChange}`); `propagate` from `@hera/config-engine`; `statusUi`, `Sel`, `toggleSelection`, `cleanOverrides` from Task 1.
+- Consumes: `orpc.configs.get / lookups / update / run / select`; `ConfiguratorForm` (phase 3, props `{model, lookups, entries, onChange}`); `propagate` from `@confire/config-engine`; `statusUi`, `Sel`, `toggleSelection`, `cleanOverrides` from Task 1.
 - Produces (Tasks 4–6 replace the placeholder step contents inside this file):
   - `ConfigProcessPage({ id }: { id: string })` holding: `entries` (`entriesOverride ?? project.entries`), `batches` (`batchesOverride ?? project.batches`), `selection` (`selOverride ?? latestRun?.selection ?? []`), `step` (`stepOverride ?? status-derived default`), `runMeta` (`{capped, widest} | null` from the last run mutation), mutations `update`, `run`, `select`, helpers `goto(i)`, `saveEntries()`, `calculate()`, `saveSelection()`, flags `conflicted`, `runReady`, `entriesDirty`, `batchesDirty`.
   - `StepConfigure` props: `{ model: ModelDef, lookups: UseQueryResult<ResolvedLookups, Error>, entries: Entries, onChange, onNext, saving, conflicted }`.
@@ -467,7 +467,7 @@ Create `apps/web/src/components/configurator/StepConfigure.tsx`:
 ```tsx
 import type { UseQueryResult } from "@tanstack/react-query";
 import { Bar, BusyIndicator, Button, MessageStrip } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef, ResolvedLookups } from "@hera/config-engine";
+import type { Entries, ModelDef, ResolvedLookups } from "@confire/config-engine";
 import { ConfiguratorForm } from "./ConfiguratorForm.tsx";
 
 // Wizard step 1: the same form the builder preview uses, over server-resolved lookups.
@@ -515,7 +515,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar, BusyIndicator, MessageStrip, ObjectStatus, Text, Title, Wizard, WizardStep,
 } from "@ui5/webcomponents-react";
-import { propagate, type Entries } from "@hera/config-engine";
+import { propagate, type Entries } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { cleanOverrides, statusUi, toggleSelection, type Sel } from "./runView.ts";
 import { StepConfigure } from "./StepConfigure.tsx";
@@ -899,7 +899,7 @@ import {
   Bar, Button, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Text,
   Title, ToggleButton,
 } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef } from "@hera/config-engine";
+import type { Entries, ModelDef } from "@confire/config-engine";
 import { bestByBatch, candidateLabel, fmt, isSelected, openKeys, type Candidate, type Sel } from "./runView.ts";
 import { CandidateDetail } from "./CandidateDetail.tsx";
 
@@ -1035,7 +1035,7 @@ import {
   Bar, Button, Input, MessageStrip, ObjectStatus, Panel, StepInput, Table, TableCell,
   TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, Title,
 } from "@ui5/webcomponents-react";
-import { computeOutputs, type Entries, type ModelDef, type OutputOverrides, type Outputs, type ResolvedLookups } from "@hera/config-engine";
+import { computeOutputs, type Entries, type ModelDef, type OutputOverrides, type Outputs, type ResolvedLookups } from "@confire/config-engine";
 import {
   addBomLine, addOpLine, candidateLabel, fmt, isEdited, isRemoved, openKeys, patchAddedBom,
   patchAddedOp, patchBom, patchOp, removeAddedBom, removeAddedOp, resetLine, withoutRemovals,

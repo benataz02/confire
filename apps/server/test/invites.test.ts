@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { db, portalClient } from "@hera/db";
+import { db, portalClient } from "@confire/db";
 import { call, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
 import { startMockAgent, connectTenant, type MockAgent } from "./mock-agent.ts";
 import { router } from "../src/orpc/router.ts";

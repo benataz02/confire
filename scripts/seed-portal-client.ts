@@ -10,8 +10,8 @@
  */
 import { randomBytes } from "node:crypto";
 import { eq, and } from "drizzle-orm";
-import { db, organization, configModel, portalClient, pool } from "@hera/db";
-import type { ModelDef } from "@hera/config-engine";
+import { db, organization, configModel, portalClient, pool } from "@confire/db";
+import type { ModelDef } from "@confire/config-engine";
 import { hashToken } from "../apps/server/src/crypto.ts";
 
 const slug = process.argv[2] ?? process.env.SLUG;

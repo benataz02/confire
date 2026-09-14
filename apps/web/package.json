@@ -1,5 +1,5 @@
 {
-  "name": "@hera/web",
+  "name": "@confire/web",
   "type": "module",
   "private": true,
   "scripts": {
@@ -8,9 +8,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@hera/b1": "workspace:*",
-    "@hera/config-engine": "workspace:*",
-    "@hera/server": "workspace:*",
+    "@confire/b1": "workspace:*",
+    "@confire/config-engine": "workspace:*",
+    "@confire/server": "workspace:*",
     "@orpc/client": "^1.14.6",
     "@orpc/tanstack-query": "^1.14.6",
     "@tanstack/react-query": "^5.101.0",

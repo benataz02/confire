@@ -37,7 +37,7 @@ export function DashboardPage() {
   const d = o.data;
   const cur = d.currency;
   const orderValue = scaled(d.orderValue.total);
-  const heraValue = scaled(d.orderValue.hera);
+  const confireValue = scaled(d.orderValue.confire);
   const bucketDocEntries = new Set(d.pipeline.find((p) => p.bucket === ageFilter)?.docEntries ?? []);
   const attention = ageFilter
     ? d.attention.filter((a) => a.docEntry !== null && bucketDocEntries.has(a.docEntry))
@@ -84,7 +84,7 @@ export function DashboardPage() {
             value={orderValue.value} scale={`${orderValue.scale} ${cur}`}
             trend={trendOf(d.orderValue.total, d.orderValue.prevTotal)} state="Good"
           >
-            <NumericSideIndicator titleText="via HERA" number={heraValue.value} unit={`${heraValue.scale} ${cur}`} />
+            <NumericSideIndicator titleText="via Confire" number={confireValue.value} unit={`${confireValue.scale} ${cur}`} />
           </AnalyticalCardHeader>
         } />
         <Card header={

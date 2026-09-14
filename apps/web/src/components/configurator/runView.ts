@@ -1,8 +1,8 @@
-import type { Entries, ModelDef, OutputOverrides, Outputs } from "@hera/config-engine";
+import type { Entries, ModelDef, OutputOverrides, Outputs } from "@confire/config-engine";
 import { randomUuid } from "../../uuid.ts";
 
 // Pure view logic for the configuration wizard. Client-side mirrors of the server's
-// ConfigCandidate/ConfigSelection jsonb shapes (web doesn't depend on @hera/db; structural match).
+// ConfigCandidate/ConfigSelection jsonb shapes (web doesn't depend on @confire/db; structural match).
 export type Candidate = { assignment: Entries; perBatch: { batchQty: number; outputs: Outputs }[] };
 export type Sel = { candidateIdx: number; batchQty: number; overrides?: OutputOverrides };
 

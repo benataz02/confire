@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { db, entityMeta, type B1EntitySchema } from "@hera/db";
-import type { B1Transport } from "@hera/b1";
+import { db, entityMeta, type B1EntitySchema } from "@confire/db";
+import type { B1Transport } from "@confire/b1";
 import { entitySchema } from "../src/entity-meta.ts";
 import { makeTenant } from "./harness.ts";
 

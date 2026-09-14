@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, gte, ilike, lt, lte, ne, or, sql, type Column, type SQL } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { ListVariantDefZ, type FilterCond, type ListVariantDef } from "@hera/db";
+import { ListVariantDefZ, type FilterCond, type ListVariantDef } from "@confire/db";
 
 // Compile a saved list view (ListVariantDef) into a Postgres WHERE + ORDER BY. This is the third
 // executor of the same spec: apps/web/src/listSpec.ts used to run it over an in-memory array,

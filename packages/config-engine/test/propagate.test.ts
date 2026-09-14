@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ModelDef, ResolvedLookups } from "../src/model";
 import { bindings, domainOf, propagate } from "../src/propagate";
-import { lookups, model } from "./fixture";
+import { fieldGroup, lookups, model } from "./fixture";
 
 describe("bindings", () => {
   test("entries pass through; defaults fill absent params", () => {
@@ -106,7 +106,7 @@ describe("propagate", () => {
   test("undecidable constraint (domainless free-text ref) must NOT over-prune", () => {
     const m2 = structuredClone(model);
     m2.parameters.push({ key: "note", label: "Note", type: "string", ui: "input" });
-    m2.structure.sections[0]!.groups[0]!.params.push("note");
+    fieldGroup(m2).params.push("note");
     m2.constraints.push({ kind: "expr", assert: 'note != "x" || material == "steel"', message: "note rule" });
     const p = propagate(m2, lookups, {});
     // note is unbound and has no domain -> constraint undecidable -> material keeps both values
@@ -134,7 +134,7 @@ describe("propagate", () => {
   test("domainless unbound table param is a wildcard, not a violation", () => {
     const m2 = structuredClone(model);
     m2.parameters.push({ key: "note", label: "Note", type: "string", ui: "input" });
-    m2.structure.sections[0]!.groups[0]!.params.push("note");
+    fieldGroup(m2).params.push("note");
     m2.constraints = [{
       kind: "table", mode: "allow", params: ["material", "note"],
       rows: [["steel", "ok"], ["alu", "ok"]],

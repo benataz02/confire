@@ -1,6 +1,6 @@
 import { os, ORPCError } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
-import { db, member, organization, portalClient } from "@hera/db";
+import { db, member, organization, portalClient } from "@confire/db";
 import { auth } from "../auth.ts";
 import { tenantSlugFromHost } from "../tenant.ts";
 

@@ -2,8 +2,8 @@ import { ORPCError } from "@orpc/server";
 import {
   andFilter, coerceKey, countOf, nextLinkOf, rowsOf,
   type B1EntitySchema, type B1Transport, type Key,
-} from "@hera/b1";
-import type { ListVariantDef } from "@hera/db";
+} from "@confire/b1";
+import type { ListVariantDef } from "@confire/db";
 import { compileList } from "./entity-list.ts";
 import { decryptSecret, encryptSecret } from "./crypto.ts";
 import { viaB1 } from "./b1.ts";

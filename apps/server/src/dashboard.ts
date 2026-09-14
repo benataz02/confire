@@ -1,4 +1,4 @@
-import type { B1Snapshot, Bucket, OpenQuote, ProjectSource, ProjectStatus } from "@hera/db";
+import type { B1Snapshot, Bucket, OpenQuote, ProjectSource, ProjectStatus } from "@confire/db";
 
 export type Window = "month" | "quarter" | "year12";
 
@@ -16,7 +16,7 @@ export type ProjectRow = {
 export type Overview = {
   window: Window; currency: string;
   computedAt: string | null; snapshotError: string | null;
-  orderValue: { total: number; hera: number; prevTotal: number };
+  orderValue: { total: number; confire: number; prevTotal: number };
   conversion: { rate: number; prevRate: number; quotes: number; converted: number };
   turnaround: { medianDays: number | null; sampled: number };
   margin: { pct: number | null; value: number; cost: number; covered: number; of: number };
@@ -95,7 +95,7 @@ const BUCKET_EDGES: Array<[label: string, maxDays: number]> = [
 ];
 
 export function ageBuckets(
-  quotes: OpenQuote[], now: Date, heraDocEntries: Set<number>,
+  quotes: OpenQuote[], now: Date, confireDocEntries: Set<number>,
 ): Overview["pipeline"] {
   const out = BUCKET_EDGES.map(([bucket]) => ({ bucket, value: 0, count: 0, docEntries: [] as number[] }));
   // Compare date-to-date, not instant-to-instant: B1 DocDate has no time, so a quote raised
@@ -107,7 +107,7 @@ export function ageBuckets(
     const slot = out[i === -1 ? out.length - 1 : i]!;
     slot.value += q.docTotal;
     slot.count += 1;
-    if (heraDocEntries.has(q.docEntry)) slot.docEntries.push(q.docEntry);
+    if (confireDocEntries.has(q.docEntry)) slot.docEntries.push(q.docEntry);
   }
   return out;
 }
@@ -123,7 +123,7 @@ export function buildOverview(input: {
   const cur = payload ? sumBuckets(payload.months, keys, null) : structuredClone(EMPTY);
   const prev = payload ? sumBuckets(payload.months, priorKeys(keys, now, window), null) : structuredClone(EMPTY);
 
-  const heraDocEntries = new Set(
+  const confireDocEntries = new Set(
     projects.filter((p) => p.b1DocEntry !== null).map((p) => p.b1DocEntry!),
   );
 
@@ -134,11 +134,11 @@ export function buildOverview(input: {
   const marginValue = withMargin.reduce((s, p) => s + p.quotedValue!, 0);
   const marginCost = withMargin.reduce((s, p) => s + p.quotedCost!, 0);
 
-  // A HERA quotation absent from openQuotes counts as converted.
+  // A Confire quotation absent from openQuotes counts as converted.
   // ponytail: "not open" stands in for "ordered" — exact attribution needs
   //           Orders?$expand=DocumentLines($select=BaseEntry,BaseType). Upgrade on dispute.
   // null, not an empty set: with no snapshot we cannot tell converted from open, and claiming
-  // every HERA quotation converted would be the worst possible default.
+  // every Confire quotation converted would be the worst possible default.
   const open = payload ? new Set(payload.openQuotes.map((q) => q.docEntry)) : null;
   const isOrdered = (p: ProjectRow) => open !== null && p.b1DocEntry !== null && !open.has(p.b1DocEntry);
 
@@ -158,14 +158,14 @@ export function buildOverview(input: {
     }))
     .sort((a, b) => b.ageDays - a.ageDays);
 
-  const heraOrderValue = withMargin.filter(isOrdered).reduce((s, p) => s + p.quotedValue!, 0);
+  const confireOrderValue = withMargin.filter(isOrdered).reduce((s, p) => s + p.quotedValue!, 0);
 
   return {
     window,
     currency: payload?.currency ?? "EUR",
     computedAt: snapshot?.computedAt.toISOString() ?? null,
     snapshotError: snapshot?.lastError ?? null,
-    orderValue: { total: cur.orders.value, hera: heraOrderValue, prevTotal: prev.orders.value },
+    orderValue: { total: cur.orders.value, confire: confireOrderValue, prevTotal: prev.orders.value },
     conversion: {
       rate: cur.quotes.count ? cur.quotes.closed / cur.quotes.count : 0,
       prevRate: prev.quotes.count ? prev.quotes.closed / prev.quotes.count : 0,
@@ -181,7 +181,7 @@ export function buildOverview(input: {
       { stage: "Quoted", count: stage("quoted") },
       { stage: "Ordered", count: ordered.length },
     ],
-    pipeline: ageBuckets(payload?.openQuotes ?? [], now, heraDocEntries),
+    pipeline: ageBuckets(payload?.openQuotes ?? [], now, confireDocEntries),
     pipelineTruncated: payload?.openQuotesTruncated ?? false,
     attention,
   };

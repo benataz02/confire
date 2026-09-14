@@ -10,7 +10,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
     <div className="auth-root">
       <aside className="auth-brand">
         <div className="auth-brand__inner">
-          <h1 className="auth-brand__mark reveal" style={delay(0)}>HERA</h1>
+          <h1 className="auth-brand__mark reveal" style={delay(0)}>Confire</h1>
           <p className="auth-brand__tagline reveal" style={delay(90)}>
             Quotes that reach SAP&nbsp;B1.<br />
             <em>Exactly once.</em>

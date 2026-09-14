@@ -1,5 +1,5 @@
 import { type Ast, DslError, parse } from "./dsl";
-import { aggregateKey, derivedKey, type ModelDef, type TableDef, derivedColumns, refKeyCols, QTY_COL } from "./model";
+import { aggregateKey, derivedKey, type ModelDef, type TableDef, derivedColumns, refKeyCols, isTableGroup, QTY_COL } from "./model";
 
 export type Issue = { path: string; message: string; from?: number; to?: number };
 
@@ -201,15 +201,23 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   };
   for (const k of computedKeys) visit(k, []);
 
-  // structure references. A group's list holds parameter keys and table keys — a key is a table
-  // when a TableDef claims it, and table keys can't collide with parameter keys (checked above).
+  // structure references. A group is either a table (naming one TableDef) or a list of parameter
+  // keys — never both, so the two arms are checked separately.
   const seenPlaced = new Set<string>();
-  for (const k of model.structure.sections.flatMap((s) => s.groups.flatMap((g) => g.params))) {
-    if (seenTable.has(k)) {
-      if (seenPlaced.has(k)) issues.push({ path: "structure", message: `table '${k}' is placed more than once` });
-      seenPlaced.add(k);
-    } else if (!base.has(k) || compSet.has(k) || derivedSet.has(k)) {
-      issues.push({ path: "structure", message: `structure references unknown parameter '${k}'` });
+  for (const g of model.structure.sections.flatMap((s) => s.groups)) {
+    if (isTableGroup(g)) {
+      if (!seenTable.has(g.table)) issues.push({ path: "structure", message: `structure references unknown table '${g.table}'` });
+      else if (seenPlaced.has(g.table)) issues.push({ path: "structure", message: `table '${g.table}' is placed more than once` });
+      seenPlaced.add(g.table);
+      continue;
+    }
+    for (const k of g.params) {
+      // A table key here is a model saved before tables became groups: still not a parameter, and
+      // the form will not render it where the tree says. placedTables() drops it, so the trailing
+      // catch-all section picks the table up and the builder offers to place it.
+      if (seenTable.has(k)) issues.push({ path: "structure", message: `table '${k}' sits in group '${g.key}' — place it as a group of its own` });
+      else if (!base.has(k) || compSet.has(k) || derivedSet.has(k))
+        issues.push({ path: "structure", message: `structure references unknown parameter '${k}'` });
     }
   }
 

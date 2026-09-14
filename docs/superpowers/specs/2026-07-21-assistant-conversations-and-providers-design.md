@@ -174,7 +174,7 @@ client cannot select an unconfigured or unknown model.
 `ANTHROPIC_MODEL` is **removed** — the picker is the model choice for chat now; the registry is the
 only place model ids live. `GEMINI_MODEL` still governs drawing extraction, which is untouched.
 
-The client remembers the last pick in `localStorage["hera.assistant.model"]`, validated against
+The client remembers the last pick in `localStorage["confire.assistant.model"]`, validated against
 `assistant.models` on open, falling back to the first available. No user-preference schema.
 
 ### Adapters

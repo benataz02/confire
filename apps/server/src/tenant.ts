@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 
 const RESERVED = new Set(["app", "www", "api", "auth", "admin", "static", "assets"]);
 
-/** `acme.hera.local` + base `hera.local` -> "acme"; apex/reserved/deeper -> null. */
+/** `acme.confire.local` + base `confire.local` -> "acme"; apex/reserved/deeper -> null. */
 export function tenantSlugFromHost(
   host: string | null | undefined,
   baseDomain: string,
@@ -23,14 +23,14 @@ export function tenantSlugFromHost(
 // ponytail: assert-based self-check — `bun apps/server/src/tenant.ts`.
 if (import.meta.main) {
   const t = (h: string | null, b: string) => tenantSlugFromHost(h, b);
-  assert.equal(t("acme.hera.local", "hera.local"), "acme");
+  assert.equal(t("acme.confire.local", "confire.local"), "acme");
   assert.equal(t("acme.localhost:5173", "localhost"), "acme");
-  assert.equal(t("ACME.Hera.Local", "hera.local"), "acme");
-  assert.equal(t("hera.local", "hera.local"), null); // apex
+  assert.equal(t("ACME.Confire.Local", "confire.local"), "acme");
+  assert.equal(t("confire.local", "confire.local"), null); // apex
   assert.equal(t("localhost:3000", "localhost"), null); // apex
-  assert.equal(t("app.hera.local", "hera.local"), null); // reserved
-  assert.equal(t("a.b.hera.local", "hera.local"), null); // deeper subdomain
-  assert.equal(t("acme.evil.com", "hera.local"), null); // wrong base
-  assert.equal(t(null, "hera.local"), null);
+  assert.equal(t("app.confire.local", "confire.local"), null); // reserved
+  assert.equal(t("a.b.confire.local", "confire.local"), null); // deeper subdomain
+  assert.equal(t("acme.evil.com", "confire.local"), null); // wrong base
+  assert.equal(t(null, "confire.local"), null);
   console.log("tenant.ts ok");
 }

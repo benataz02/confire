@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-HERA is a multi-tenant SaaS quoting platform for SME manufacturers running on-prem SAP Business One.
+Confire is a multi-tenant SaaS quoting platform for SME manufacturers running on-prem SAP Business One.
 `AGENTS.md` describes what the product does in plain language; this file is the technical picture.
 
 ## Commands
@@ -46,10 +46,10 @@ bun run migrate:masterdata [--write]    # one-way model queryTables -> config_ma
 Browser (React + UI5 Web Components)
    │ oRPC over /rpc, same-origin (dev: Vite proxy; prod: server serves the built SPA)
    ▼
-HERA server (Bun + Hono)  ── Postgres
+Confire server (Bun + Hono)  ── Postgres
    │ HTTPS to the tenant's agentUrl, one named operation per endpoint
    ▼
-hera-agent (Bun, on the customer's network) ── SAP B1 Service Layer /b1s/v2
+confire-agent (Bun, on the customer's network) ── SAP B1 Service Layer /b1s/v2
 ```
 
 The agent is a Windows service the customer installs. SAP credentials live in its `agent.json`
@@ -87,7 +87,7 @@ expression language; `check.ts` validates a whole model and is the gate on save,
 saves cannot produce a parse/unknown-ref error at runtime.
 
 `ResolvedLookups` is the seam: the engine never sees where options came from — manual lists and
-tenant `config_masterdata` rows (kind `table` = values maintained in HERA, kind `query` = a live
+tenant `config_masterdata` rows (kind `table` = values maintained in Confire, kind `query` = a live
 B1/Beas read) are all resolved to the same shape by `apps/server/src/lookups.ts` before the engine
 runs. **A model holds no table definitions**: it names masterdata, and `referencedTables` decides
 which query rows a resolve actually fetches — a model naming none never touches the agent.

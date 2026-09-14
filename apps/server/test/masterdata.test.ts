@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { db, configMasterdata, configModel } from "@hera/db";
-import type { ModelDef } from "@hera/config-engine";
+import { db, configMasterdata, configModel } from "@confire/db";
+import type { ModelDef } from "@confire/config-engine";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
 

@@ -1,13 +1,13 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, type ComponentProps } from "react";
 import {
   Button, CheckBox, Form, FormGroup, FormItem, Icon, Input, Label, MultiComboBox, MultiComboBoxItem,
-  ObjectStatus, Option, RadioButton, Select, StepInput, Text, Title, Token, Tokenizer,
+  ObjectStatus, Option, RadioButton, Select, StepInput, Text, Token, Tokenizer,
   type StepInputDomRef,
 } from "@ui5/webcomponents-react";
 import {
-  displayColumns, domainOf, placedTables, refKeyCols,
-  type DomainOption, type Entries, type LookupRef, type ModelDef, type Propagation, type ResolvedLookups, type ResolvedTable, type TableRows, type Val,
-} from "@hera/config-engine";
+  displayColumns, domainOf, isTableGroup, placedTables, refKeyCols,
+  type DomainOption, type Entries, type Group, type LookupRef, type ModelDef, type Propagation, type ResolvedLookups, type ResolvedTable, type TableDef, type TableRows, type Val,
+} from "@confire/config-engine";
 import { QueryValueHelp, type QuerySource } from "../ValueHelp.tsx";
 import { ConfigTable } from "./ConfigTable.tsx";
 import { displayValue, setEntry } from "./formHelpers.ts";
@@ -66,16 +66,30 @@ export function formSections(model: ModelDef): { key: string; title: string; tab
 // labelSpan 12 everywhere = labels on top of their fields (natively left-aligned), field takes the full column.
 const FORM_PROPS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2", headerLevel: "H5" } as const;
 
-// A table is a FormItem like any other field, so it sorts among them — but it must not be one
-// column wide. Form.css lays a group's items with `column-count: <the group's colSpan>`, so a
-// group holding a table spans the whole Form (colSpan mirrors FORM_PROPS.layout) and the table
-// item breaks out of that column flow with the native `column-span: all`. Its label part is
-// hidden: ConfigTable draws its own title and Add-row toolbar.
-if (typeof document !== "undefined" && !document.getElementById("hera-table-item")) {
+// A table group holds exactly one FormItem, and it must not be one column wide. Form.css lays a
+// group's items with `column-count: <the group's colSpan>`, so the group spans the whole Form
+// (colSpan mirrors FORM_PROPS.layout) and the item breaks out of that column flow with the native
+// `column-span: all`. FormItem's own `columnSpan` is deprecated since UI5 2.23 and does nothing,
+// so the CSS is the only lever. The label part is hidden: the FormGroup header names the table,
+// and ConfigTable draws the Add-row toolbar.
+if (typeof document !== "undefined" && !document.getElementById("confire-table-item")) {
   const el = document.createElement("style");
-  el.id = "hera-table-item";
-  el.textContent = `.hera-table-item{column-span:all}.hera-table-item::part(label){display:none}`;
+  el.id = "confire-table-item";
+  el.textContent = `.confire-table-item{column-span:all}.confire-table-item::part(label){display:none}`;
   document.head.appendChild(el);
+}
+
+/** One table, one FormGroup — keyed and titled from its own TableDef, so a rename in TableDialog
+ *  cannot leave a stale heading behind. Shared by placed tables and by the orphans the catch-all
+ *  section collects, so a table is named the same way wherever it ends up. */
+function TableGroup(props: ComponentProps<typeof ConfigTable>) {
+  return (
+    <FormGroup headerText={props.def.title || props.def.key} colSpan={FORM_PROPS.layout}>
+      <FormItem className="confire-table-item">
+        <ConfigTable {...props} />
+      </FormItem>
+    </FormGroup>
+  );
 }
 
 export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, section, disabled, readOnly, querySource, tables, onTablesChange, batches, onBatchesChange }: {
@@ -290,8 +304,8 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   // section already gets its own ObjectPageSubSection (which supplies the title and the anchor), so
   // headerText is only needed when we stack the whole model ourselves (builder preview, portal wizard).
   //
-  // A group's content is one ordered list of parameter keys and table keys, so a table renders
-  // where the author put it, between the fields. See the style block above for the width.
+  // A section's groups are of two kinds: a table group renders as one full-width FormGroup titled
+  // from its TableDef, a field group as the ordinary label-and-field group.
   const byKey = new Map(model.structure.sections.map((s) => [s.key, s]));
   const defOf = (k: string) => (model.tables ?? []).find((t) => t.key === k);
   const shown = formSections(model).filter((s) => !section || s.key === section);
@@ -302,26 +316,26 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
       {shown.map((sec, si) => {
-      const s = byKey.get(sec.key);
+      // The catch-all section owns no structure: its orphans become table groups here, so they go
+      // through the very same Form/FormGroup path a placed table does.
+      const groups: Group[] = byKey.get(sec.key)?.groups ?? sec.tables.map((table) => ({ table }));
       return (
-        <div key={`${sec.key}:${si}`} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-        {s ? (
-        <Form headerText={section ? undefined : sec.title} {...FORM_PROPS} {...formMode}>
-          {s.groups.map((g, gi) => {
-          const content = g.params.filter((k) => defOf(k) || prop.visible[k]);
+        <Form key={`${sec.key}:${si}`} headerText={section ? undefined : sec.title} {...FORM_PROPS} {...formMode}>
+          {groups.map((g, gi) => {
+          if (isTableGroup(g)) {
+            const def = defOf(g.table);
+            // A group left behind by a deleted table: placedTables() already drops it, so drawing
+            // an empty titleless FormGroup here would be the only trace of it.
+            if (!def) return null;
+            return <TableGroup key={`${g.table}:${gi}`} def={def} rows={tableRows[g.table] ?? []}
+              scopeVars={prop.values} lookups={lk} querySource={querySource}
+              disabled={disabled || !onTablesChange} readOnly={readOnly}
+              onChange={(rows) => setRows(g.table, rows)} />;
+          }
+          const content = g.params.filter((k) => prop.visible[k]);
           return (
-            <FormGroup key={`${g.key}:${gi}`} headerText={g.title}
-              colSpan={content.some((k) => defOf(k)) ? FORM_PROPS.layout : undefined}>
+            <FormGroup key={`${g.key}:${gi}`} headerText={g.title}>
               {content.map((k) => {
-                const def = defOf(k);
-                if (def)
-                  return (
-                    <FormItem key={k} className="hera-table-item">
-                      <ConfigTable def={def} rows={tableRows[k] ?? []} scopeVars={prop.values}
-                        lookups={lk} querySource={querySource} disabled={disabled || !onTablesChange} readOnly={readOnly}
-                        onChange={(rows) => setRows(k, rows)} />
-                    </FormItem>
-                  );
                 const p = model.parameters.find((x) => x.key === k);
                 if (!p) return null;
                 const dom: DomainOption[] = prop.domains[k] ?? domainOf(model, lookups, k);
@@ -364,17 +378,6 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
           );
           })}
         </Form>
-        ) : section ? null : <Title level="H5">{sec.title}</Title>}
-        {sec.tables.map((tk) => {
-          const def = defOf(tk);
-          if (!def) return null;
-          return (
-            <ConfigTable key={tk} def={def} rows={tableRows[tk] ?? []} scopeVars={prop.values}
-              lookups={lk} querySource={querySource} disabled={disabled || !onTablesChange} readOnly={readOnly}
-              onChange={(rows) => setRows(tk, rows)} />
-          );
-        })}
-        </div>
       );
       })}
     </div>

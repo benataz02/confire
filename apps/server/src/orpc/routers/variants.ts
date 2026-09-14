@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, eq, ne, or } from "drizzle-orm";
-import { db, uiVariant, user, ListVariantDefZ, ObjectVariantDefZ } from "@hera/db";
+import { db, uiVariant, user, ListVariantDefZ, ObjectVariantDefZ } from "@confire/db";
 import { userProcedure } from "../base.ts";
 
 // Saved list/object "views". Per-user, plus admin-published `shared` (public) views.

@@ -11,7 +11,7 @@
  * local dev). It is stored encrypted.
  */
 import { eq } from "drizzle-orm";
-import { db, pool, organization, sapConnection } from "@hera/db";
+import { db, pool, organization, sapConnection } from "@confire/db";
 import { encryptSecret } from "../apps/server/src/crypto.ts";
 
 const [slug, agentUrl = "http://localhost:4000", secret = "dev-secret-change-me-min-32-chars-long"] = process.argv.slice(2).filter((a) => !a.startsWith("--"));

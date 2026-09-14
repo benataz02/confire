@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Panel, Text, Title } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef, Propagation, ResolvedLookups, Val } from "@hera/config-engine";
+import type { Entries, ModelDef, Propagation, ResolvedLookups, Val } from "@confire/config-engine";
 import { money, paramPrices } from "./costElements.ts";
 import { DocHistory, Similar } from "./HistoryPane.tsx";
 

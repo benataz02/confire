@@ -1,4 +1,4 @@
-import { db, configModel, configProject, organization, user } from "@hera/db";
+import { db, configModel, configProject, organization, user } from "@confire/db";
 import { eq } from "drizzle-orm";
 
 const [org] = await db.select().from(organization).where(eq(organization.slug, "alumigraf")).limit(1);

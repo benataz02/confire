@@ -6,7 +6,7 @@ import {
   MessageStrip, ObjectPage, ObjectPageSection, ObjectPageSubSection, ObjectPageTitle, ObjectStatus,
   Option, Select, Tag, Text, TextArea, Title, Toolbar,
 } from "@ui5/webcomponents-react";
-import { propagate, type Entries, type TableRows, type Val } from "@hera/config-engine";
+import { propagate, type Entries, type TableRows, type Val } from "@confire/config-engine";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts";
 import { client, orpc } from "../../orpc.ts";
 import { confirm } from "../confirm.ts";
@@ -241,7 +241,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
   // The rail sits OUTSIDE the ObjectPage: ObjectPage collects sub-tabs from direct children only,
   // so wrapping the subsections would silently drop Configure's sub-anchor tabs.
   // DynamicSideContent handles the responsive drop-below itself — no media queries. Its own
-  // show/hide is a hard display:none though, so the slide lives on the rail (.hera-rail).
+  // show/hide is a hard display:none though, so the slide lives on the rail (.confire-rail).
   return (
     <>
     <DynamicSideContent
@@ -250,7 +250,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
       sideContent={
         <InsightsRail projectId={id} model={model.definition} lk={lk} prop={prop} entries={entries}
           onCopy={copyValues} open={openPanels} onToggle={togglePanel}
-          className={railShown ? "hera-rail" : "hera-rail hera-rail-out"} />
+          className={railShown ? "confire-rail" : "confire-rail confire-rail-out"} />
       }>
 
     <ObjectPage

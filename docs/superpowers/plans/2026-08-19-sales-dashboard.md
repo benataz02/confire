@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the placeholder home page with a single-scroll sales dashboard combining SAP B1 order/quotation figures with HERA configuration data.
+**Goal:** Replace the placeholder home page with a single-scroll sales dashboard combining SAP B1 order/quotation figures with Confire configuration data.
 
 **Architecture:** App-side metrics are live SQL over `config_project` / `config_run` / `agent_request`. B1-side metrics come from one `dashboard_snapshot` row per tenant, refreshed hourly by an in-process interval that pulls rows through the existing on-prem agent and aggregates them in JS. No separate analytics service; no `$apply`.
 
@@ -219,7 +219,7 @@ export * from "./dashboard.ts";
 In `packages/db/src/schema/tenant.ts`, inside the `tenantIntegration` table definition, after `writeCapabilitiesCheckedAt`:
 
 ```ts
-  // Maps a HERA user id to a B1 SalesEmployeeCode so the dashboard can scope to "my numbers".
+  // Maps a Confire user id to a B1 SalesEmployeeCode so the dashboard can scope to "my numbers".
   // ponytail: jsonb map like enabledEntities — tens of entries, read once per request.
   //           A real table only if this ever needs to be queried BY rep code.
   salesReps: jsonb("sales_reps").$type<Record<string, number>>().notNull().default({}),
@@ -278,7 +278,7 @@ they are not already there:
 
 ```ts
 import { quotedTotals, type ConfigRunRow } from "../src/config-quote.ts";
-import { computeOutputs } from "@hera/config-engine";
+import { computeOutputs } from "@confire/config-engine";
 import { TEST_MODEL } from "./harness.ts";
 ```
 
@@ -416,7 +416,7 @@ The whole dashboard computation: rows in, overview shape out. No database, no tr
 - Test: `apps/server/test/dashboard.test.ts`
 
 **Interfaces:**
-- Consumes: `B1Snapshot`, `Bucket`, `OpenQuote` from `@hera/db` (Task 2).
+- Consumes: `B1Snapshot`, `Bucket`, `OpenQuote` from `@confire/db` (Task 2).
 - Produces:
 
 ```ts
@@ -437,7 +437,7 @@ export type ExceptionRow = {
 export type Overview = {
   window: Window; scope: Scope; currency: string;
   computedAt: string | null; snapshotError: string | null;
-  orderValue: { total: number; hera: number; prevTotal: number };
+  orderValue: { total: number; confire: number; prevTotal: number };
   conversion: { rate: number; prevRate: number; quotes: number; converted: number };
   turnaround: { medianDays: number | null; sampled: number };
   margin: { pct: number | null; value: number; cost: number; covered: number; of: number };
@@ -450,7 +450,7 @@ export type Overview = {
 
 export function monthKeys(window: Window, now: Date): string[];
 export function medianDays(durationsMs: number[]): number | null;
-export function ageBuckets(quotes: OpenQuote[], now: Date, heraDocEntries: Set<number>):
+export function ageBuckets(quotes: OpenQuote[], now: Date, confireDocEntries: Set<number>):
   Overview["pipeline"];
 export function buildOverview(input: {
   window: Window; scope: Scope; now: Date;
@@ -469,7 +469,7 @@ export function buildOverview(input: {
 ```ts
 import { describe, expect, test } from "bun:test";
 import { ageBuckets, buildOverview, medianDays, monthKeys, type ProjectRow } from "../src/dashboard.ts";
-import type { B1Snapshot, OpenQuote } from "@hera/db";
+import type { B1Snapshot, OpenQuote } from "@confire/db";
 
 const NOW = new Date("2026-08-19T12:00:00Z");
 const day = 24 * 60 * 60 * 1000;
@@ -519,7 +519,7 @@ describe("ageBuckets", () => {
     ]);
   });
 
-  test("records the HERA-originated doc entries per bucket", () => {
+  test("records the Confire-originated doc entries per bucket", () => {
     const out = ageBuckets([q(1, 0, 10), q(2, 40, 20)], NOW, new Set([2]));
     expect(out[0]!.docEntries).toEqual([]);
     expect(out[3]!.docEntries).toEqual([2]);
@@ -648,7 +648,7 @@ Expected: FAIL — cannot resolve `../src/dashboard.ts`.
 `apps/server/src/dashboard.ts`:
 
 ```ts
-import type { B1Snapshot, Bucket, OpenQuote, ProjectSource, ProjectStatus } from "@hera/db";
+import type { B1Snapshot, Bucket, OpenQuote, ProjectSource, ProjectStatus } from "@confire/db";
 
 export type Window = "month" | "quarter" | "year12";
 export type Scope = "mine" | "tenant";
@@ -671,7 +671,7 @@ export type ExceptionRow = { id: string; kind: string; lastError: string | null;
 export type Overview = {
   window: Window; scope: Scope; currency: string;
   computedAt: string | null; snapshotError: string | null;
-  orderValue: { total: number; hera: number; prevTotal: number };
+  orderValue: { total: number; confire: number; prevTotal: number };
   conversion: { rate: number; prevRate: number; quotes: number; converted: number };
   turnaround: { medianDays: number | null; sampled: number };
   margin: { pct: number | null; value: number; cost: number; covered: number; of: number };
@@ -751,7 +751,7 @@ const BUCKET_EDGES: Array<[label: string, maxDays: number]> = [
 ];
 
 export function ageBuckets(
-  quotes: OpenQuote[], now: Date, heraDocEntries: Set<number>,
+  quotes: OpenQuote[], now: Date, confireDocEntries: Set<number>,
 ): Overview["pipeline"] {
   const out = BUCKET_EDGES.map(([bucket]) => ({ bucket, value: 0, count: 0, docEntries: [] as number[] }));
   // Compare date-to-date, not instant-to-instant: B1 DocDate has no time, so a quote raised
@@ -763,7 +763,7 @@ export function ageBuckets(
     const slot = out[i === -1 ? out.length - 1 : i]!;
     slot.value += q.docTotal;
     slot.count += 1;
-    if (heraDocEntries.has(q.docEntry)) slot.docEntries.push(q.docEntry);
+    if (confireDocEntries.has(q.docEntry)) slot.docEntries.push(q.docEntry);
   }
   return out;
 }
@@ -783,7 +783,7 @@ export function buildOverview(input: {
   const cur = payload ? sumBuckets(payload.months, keys, rep) : structuredClone(EMPTY);
   const prev = payload ? sumBuckets(payload.months, priorKeys(keys, now, window), rep) : structuredClone(EMPTY);
 
-  const heraDocEntries = new Set(
+  const confireDocEntries = new Set(
     projects.filter((p) => p.b1DocEntry !== null).map((p) => p.b1DocEntry!),
   );
 
@@ -794,11 +794,11 @@ export function buildOverview(input: {
   const marginValue = withMargin.reduce((s, p) => s + p.quotedValue!, 0);
   const marginCost = withMargin.reduce((s, p) => s + p.quotedCost!, 0);
 
-  // A HERA quotation absent from openQuotes counts as converted.
+  // A Confire quotation absent from openQuotes counts as converted.
   // ponytail: "not open" stands in for "ordered" — exact attribution needs
   //           Orders?$expand=DocumentLines($select=BaseEntry,BaseType). Upgrade on dispute.
   // null, not an empty set: with no snapshot we cannot tell converted from open, and claiming
-  // every HERA quotation converted would be the worst possible default.
+  // every Confire quotation converted would be the worst possible default.
   const open = payload ? new Set(payload.openQuotes.map((q) => q.docEntry)) : null;
   const isOrdered = (p: ProjectRow) => open !== null && p.b1DocEntry !== null && !open.has(p.b1DocEntry);
 
@@ -818,14 +818,14 @@ export function buildOverview(input: {
     }))
     .sort((a, b) => b.ageDays - a.ageDays);
 
-  const heraOrderValue = withMargin.filter(isOrdered).reduce((s, p) => s + p.quotedValue!, 0);
+  const confireOrderValue = withMargin.filter(isOrdered).reduce((s, p) => s + p.quotedValue!, 0);
 
   return {
     window, scope,
     currency: payload?.currency ?? "EUR",
     computedAt: snapshot?.computedAt.toISOString() ?? null,
     snapshotError: snapshot?.lastError ?? null,
-    orderValue: { total: cur.orders.value, hera: heraOrderValue, prevTotal: prev.orders.value },
+    orderValue: { total: cur.orders.value, confire: confireOrderValue, prevTotal: prev.orders.value },
     conversion: {
       rate: cur.quotes.count ? cur.quotes.closed / cur.quotes.count : 0,
       prevRate: prev.quotes.count ? prev.quotes.closed / prev.quotes.count : 0,
@@ -842,7 +842,7 @@ export function buildOverview(input: {
       { stage: "Quoted", count: stage("quoted") },
       { stage: "Ordered", count: ordered.length },
     ],
-    pipeline: ageBuckets(payload?.openQuotes ?? [], now, heraDocEntries),
+    pipeline: ageBuckets(payload?.openQuotes ?? [], now, confireDocEntries),
     pipelineTruncated: payload?.openQuotesTruncated ?? false,
     attention,
     exceptions: {
@@ -982,7 +982,7 @@ Expected: FAIL — cannot resolve `../src/dashboard-snapshot.ts`.
 
 ```ts
 import { eq, sql } from "drizzle-orm";
-import { db, dashboardSnapshot, tenantIntegration, type B1Snapshot, type Bucket, type OpenQuote } from "@hera/db";
+import { db, dashboardSnapshot, tenantIntegration, type B1Snapshot, type Bucket, type OpenQuote } from "@confire/db";
 import { assertAgentReady, runRequest } from "./orpc/routers/entities.ts";
 
 const OPEN_QUOTE_CAP = 1000;
@@ -1166,7 +1166,7 @@ git commit -m "feat: hourly B1 snapshot job for the dashboard"
 
 ```ts
 import { describe, expect, test } from "bun:test";
-import { db, tenantIntegration } from "@hera/db";
+import { db, tenantIntegration } from "@confire/db";
 import { call, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
 import { router } from "../src/orpc/router.ts";
 
@@ -1243,7 +1243,7 @@ Expected: FAIL — `router.dashboard` is undefined.
 import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
-import { db, agentRequest, configProject, configRun, dashboardSnapshot, tenantIntegration } from "@hera/db";
+import { db, agentRequest, configProject, configRun, dashboardSnapshot, tenantIntegration } from "@confire/db";
 import { adminProcedure, userProcedure } from "../base.ts";
 import { buildOverview, type ExceptionRow, type ProjectRow } from "../../dashboard.ts";
 import { refreshB1Snapshot } from "../../dashboard-snapshot.ts";
@@ -1711,7 +1711,7 @@ export function DashboardPage() {
   const d = o.data;
   const cur = d.currency;
   const orderValue = scaled(d.orderValue.total);
-  const heraValue = scaled(d.orderValue.hera);
+  const confireValue = scaled(d.orderValue.confire);
   const bucketDocEntries = new Set(d.pipeline.find((p) => p.bucket === ageFilter)?.docEntries ?? []);
   const attention = ageFilter
     ? d.attention.filter((a) => a.docEntry !== null && bucketDocEntries.has(a.docEntry))
@@ -1762,7 +1762,7 @@ export function DashboardPage() {
             value={orderValue.value} scale={`${orderValue.scale} ${cur}`}
             trend={trendOf(d.orderValue.total, d.orderValue.prevTotal)} state="Good"
           >
-            <NumericSideIndicator titleText="via HERA" number={heraValue.value} unit={`${heraValue.scale} ${cur}`} />
+            <NumericSideIndicator titleText="via Confire" number={confireValue.value} unit={`${confireValue.scale} ${cur}`} />
           </AnalyticalCardHeader>
         </Card>
         <Card>

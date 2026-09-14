@@ -1,5 +1,5 @@
-import { db, member, organization, portalClient } from "@hera/db";
-import type { ModelDef } from "@hera/config-engine";
+import { db, member, organization, portalClient } from "@confire/db";
+import type { ModelDef } from "@confire/config-engine";
 import { auth } from "../src/auth.ts";
 
 export { call } from "@orpc/server";

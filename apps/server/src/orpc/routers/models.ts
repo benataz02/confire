@@ -1,8 +1,8 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, count, eq, inArray, max } from "drizzle-orm";
-import { db, configHistory, configModel, configProject } from "@hera/db";
-import { checkModel, ModelDefZ, RESERVED_LINE_FIELDS } from "@hera/config-engine";
+import { db, configHistory, configModel, configProject } from "@confire/db";
+import { checkModel, ModelDefZ, RESERVED_LINE_FIELDS } from "@confire/config-engine";
 import { adminProcedure } from "../base.ts";
 import { queryRowsFor, resolveLookups } from "../../lookups.ts";
 import { knownTables, masterdataRows } from "./masterdata.ts";

@@ -32,7 +32,7 @@
 
 | File | Responsibility |
 |---|---|
-| `apps/agent/src/api-gateway.ts` | The API Gateway client: session login (one in-flight promise), `exportPdf(entity, docEntry)` → base64. Knows nothing about HERA. |
+| `apps/agent/src/api-gateway.ts` | The API Gateway client: session login (one in-flight promise), `exportPdf(entity, docEntry)` → base64. Knows nothing about Confire. |
 | `apps/agent/test/api-gateway.test.ts` | Mock gateway over `Bun.serve`: one login for N calls, re-login on 401, unknown layout refuses. |
 | `scripts/print-smoke.ts` | Live one-shot against the real gateway. Confirms the login route, the `DocKey@` parameter name and the four layout codes, writes `out.pdf`. |
 | `apps/server/src/entity-read.ts` | `readRows` / `readOne` / `bad` — the B1 read bodies both routers share. Pure of procedure builders. |
@@ -195,7 +195,7 @@ Expected: FAIL — `Cannot find module '../src/api-gateway.ts'`
 Create `apps/agent/src/api-gateway.ts`:
 
 ```ts
-import { B1Error, silentLogger, type Logger } from "@hera/b1";
+import { B1Error, silentLogger, type Logger } from "@confire/b1";
 
 // The SAP B1 API Gateway's Reporting Service. A *different service* from the Service Layer:
 // its own port, its own `POST /login`, and an export that answers with a base64 string rather
@@ -324,7 +324,7 @@ Expected: PASS — 4 tests.
 
 In `apps/agent/src/index.ts`:
 
-Add the import next to the existing `@hera/b1` one:
+Add the import next to the existing `@confire/b1` one:
 
 ```ts
 import { ApiGateway, type ApiGatewayConfig } from "./api-gateway.ts";
@@ -378,7 +378,7 @@ Then replace the request-dispatch block inside `Bun.serve`'s `fetch` — everyth
 Finally, mention printing in the boot log — replace the `console.log` after `Bun.serve`:
 
 ```ts
-console.log(`hera-agent on :${server.port} — services: ${Object.keys(services).join(", ")}${gateway ? " + print" : ""}`);
+console.log(`confire-agent on :${server.port} — services: ${Object.keys(services).join(", ")}${gateway ? " + print" : ""}`);
 ```
 
 - [ ] **Step 8: Document the block in the example config**
@@ -529,7 +529,7 @@ git commit -m "feat(agent): SAP B1 API Gateway client and POST /print"
 **Interfaces:**
 - Consumes: the agent's `POST /print` from Task 1 (body `{ entity, docEntry }` → `{ pdf, fileName }`).
 - Produces:
-  - `@hera/b1` → `export type AgentTarget = { agentUrl: string; secret: string; accessClientId?: string | null; accessClientSecret?: string | null; timeoutMs?: number }` and `export async function agentPost(o: AgentTarget, route: string, body: unknown): Promise<unknown>` (route is the **full** agent path, e.g. `/print` or `/b1/entity-set`).
+  - `@confire/b1` → `export type AgentTarget = { agentUrl: string; secret: string; accessClientId?: string | null; accessClientSecret?: string | null; timeoutMs?: number }` and `export async function agentPost(o: AgentTarget, route: string, body: unknown): Promise<unknown>` (route is the **full** agent path, e.g. `/print` or `/b1/entity-set`).
   - `apps/server/src/b1.ts` → `export type TenantAgent = AgentTarget & { beasEnabled: boolean }` and `export async function agentTarget(tenantId: string): Promise<TenantAgent>`.
   - `apps/server/src/print.ts` → `export async function printDocument(tenantId: string, entity: string, docEntry: number): Promise<{ pdf: string; fileName: string }>`.
   - `apps/server/src/entity-profiles.ts` → `export const PRINTABLE: Set<string>`.
@@ -700,10 +700,10 @@ Expected: PASS, no type errors. `packages/b1/test/remote.test.ts` exercises the 
 
 - [ ] **Step 5: Extract `agentTarget` in the server**
 
-In `apps/server/src/b1.ts`, add `agentPost`'s type to the existing `@hera/b1` import:
+In `apps/server/src/b1.ts`, add `agentPost`'s type to the existing `@confire/b1` import:
 
 ```ts
-import { B1Error, RemoteTransport, readPages, rowsOrThrow, type AgentTarget, type B1Transport, type Connector } from "@hera/b1";
+import { B1Error, RemoteTransport, readPages, rowsOrThrow, type AgentTarget, type B1Transport, type Connector } from "@confire/b1";
 ```
 
 Then replace the whole `tenantConnector` function with:
@@ -741,7 +741,7 @@ export async function tenantConnector(tenantId: string): Promise<Connector> {
 At the bottom of `apps/server/src/entity-profiles.ts`, after `missingRequired`:
 
 ```ts
-/** Documents HERA can ask SAP to render as a PDF. Same shape of rule as ENTITY_PROFILES: the
+/** Documents Confire can ask SAP to render as a PDF. Same shape of rule as ENTITY_PROFILES: the
  *  list is the boundary, enforced in the routers, not by which page drew a button. An entry
  *  here also needs a matching layout code in the agent's `apiGateway.layouts`. */
 export const PRINTABLE = new Set(["Quotations", "Orders", "DeliveryNotes", "Invoices"]);
@@ -753,7 +753,7 @@ Create `apps/server/src/print.ts`:
 
 ```ts
 import { ORPCError } from "@orpc/server";
-import { agentPost } from "@hera/b1";
+import { agentPost } from "@confire/b1";
 import { agentTarget, viaB1 } from "./b1.ts";
 import { PRINTABLE } from "./entity-profiles.ts";
 
@@ -853,7 +853,7 @@ import { orpc } from "../../orpc.ts";
 // page, the list report's count bar, the portal timeline — renders this and nothing else, so
 // there is exactly one blob-URL lifecycle to get right.
 //
-// apps/web does not depend on @hera/server at runtime (only `import type` for the router), so the
+// apps/web does not depend on @confire/server at runtime (only `import type` for the router), so the
 // PRINTABLE list is restated here rather than imported — the same reason portalUi.ts inlines
 // ProjectStatus. The server's entity-profiles.ts PRINTABLE is the real boundary; this only
 // decides whether to draw a button.
@@ -1065,8 +1065,8 @@ import { ORPCError } from "@orpc/server";
 import {
   andFilter, coerceKey, countOf, rowsOf,
   type B1EntitySchema, type B1Transport, type Key,
-} from "@hera/b1";
-import type { ListVariantDef } from "@hera/db";
+} from "@confire/b1";
+import type { ListVariantDef } from "@confire/db";
 import { compileList } from "./entity-list.ts";
 import { viaB1 } from "./b1.ts";
 
@@ -1148,10 +1148,10 @@ import { bad, readOne, readRows } from "../../entity-read.ts";
 Delete the local `bad` const (the 5-line arrow function) and the local `keyed` helper — `readOne`
 now does the coercion.
 
-Trim the `@hera/b1` import to what is still used in this file:
+Trim the `@confire/b1` import to what is still used in this file:
 
 ```ts
-import { categoriesOf, categoryNames, coerceKey, type Key } from "@hera/b1";
+import { categoriesOf, categoryNames, coerceKey, type Key } from "@confire/b1";
 ```
 
 (`coerceKey` is still needed by `update`; `rowsOf`/`countOf` are not. If `coerceKey` turns out
@@ -1386,15 +1386,15 @@ Expected: FAIL — `router.portal.docs` is undefined.
 In `apps/server/src/orpc/routers/portal.ts`, extend the imports:
 
 ```ts
-import { escapeLiteral, type B1EntitySchema } from "@hera/b1";
-import { ListVariantDefZ } from "@hera/db";
+import { escapeLiteral, type B1EntitySchema } from "@confire/b1";
+import { ListVariantDefZ } from "@confire/db";
 import { tenantConnector, viaB1 } from "../../b1.ts";
 import { entitySchema } from "../../entity-meta.ts";
 import { bad, readOne, readRows } from "../../entity-read.ts";
 import { printDocument } from "../../print.ts";
 ```
 
-(`ListVariantDefZ` joins the existing `@hera/db` import; keep one import statement per module.)
+(`ListVariantDefZ` joins the existing `@confire/db` import; keep one import statement per module.)
 
 Then add this block just above `// --- Client side ---`:
 
@@ -1694,7 +1694,7 @@ Expected: PASS, including the new case.
 `variants.list` is `userProcedure`, which fences clients out — without this, `useListSpec` would
 fall back to `EMPTY_SPEC` and show every column.
 
-In `apps/server/src/orpc/routers/portal.ts`, extend the `@hera/db` import with `uiVariant`, then add
+In `apps/server/src/orpc/routers/portal.ts`, extend the `@confire/db` import with `uiVariant`, then add
 this procedure to `portalRouter` immediately after the `docs: { … }` block:
 
 ```ts
@@ -2008,7 +2008,7 @@ contents with:
 nothing — no extra condition needed. The copy mutation's `onSuccess` navigate stays `/b1/...`
 because it can only fire from an internal mount.
 
-The "read-only in HERA" MessageStrip would be noise on the portal. Change its condition to:
+The "read-only in Confire" MessageStrip would be noise on the portal. Change its condition to:
 
 ```tsx
             {!profile && !editing && !portal ? (
@@ -2107,7 +2107,7 @@ git commit -m "feat(web): portal document list and object pages under a scope pr
 
 ### Task 8: `doc-chain.ts` and `portal.docs.chain`
 
-The forward walk from the quotation HERA wrote to whatever SAP has done with it since. Same
+The forward walk from the quotation Confire wrote to whatever SAP has done with it since. Same
 machinery as `doc-history.ts` — `CrossJoinSpec` + `b1.crossJoin`, no new `B1Transport` method —
 because B1's `$filter` has no lambda operators and a document therefore cannot be filtered by its
 lines any other way.
@@ -2197,10 +2197,10 @@ Expected: FAIL — `Cannot find module '../src/doc-chain.ts'`
 Create `apps/server/src/doc-chain.ts`:
 
 ```ts
-import type { B1Transport, CrossJoinSpec } from "@hera/b1";
+import type { B1Transport, CrossJoinSpec } from "@confire/b1";
 
-// The forward document walk: from the quotation HERA wrote (config_run.b1DocEntry — the only B1
-// link HERA stores) to whatever SAP has since made of it. Written in the same style as
+// The forward document walk: from the quotation Confire wrote (config_run.b1DocEntry — the only B1
+// link Confire stores) to whatever SAP has since made of it. Written in the same style as
 // doc-history.ts and reusing the same machinery, for the same reason: B1's $filter has no lambda
 // operators, so a document cannot be filtered by its lines except through $crossjoin.
 //
@@ -2331,7 +2331,7 @@ import { documentChain } from "../../doc-chain.ts";
 and add this procedure inside the `docs: { … }` block, after `print`:
 
 ```ts
-    /** The live SAP document chain for one of this client's projects: the quotation HERA wrote,
+    /** The live SAP document chain for one of this client's projects: the quotation Confire wrote,
      *  then whatever SAP has since made of it. Empty until the project is quoted — before that
      *  there is no b1DocEntry to walk from. */
     chain: clientProcedure
@@ -2395,7 +2395,7 @@ Append to `apps/server/test/portal-docs.test.ts`, inside the existing `describe`
 Add the imports this needs to the top of the file:
 
 ```ts
-import { db, configModel } from "@hera/db";
+import { db, configModel } from "@confire/db";
 import { call, makeTenant, makeUser, bindClient, tenantHeaders, TEST_MODEL } from "./harness.ts";
 ```
 
@@ -2473,7 +2473,7 @@ Inside the component, after the existing `quoted` query, add:
 ```tsx
   const navigate = useNavigate();
 
-  // The SAP chain only exists once HERA has written the quotation, which is exactly `quoted`.
+  // The SAP chain only exists once Confire has written the quotation, which is exactly `quoted`.
   // Before that the timeline is what it has always been.
   const chain = useQuery({
     ...orpc.portal.docs.chain.queryOptions({ input: { projectId: project.id } }),
@@ -2492,7 +2492,7 @@ Inside the component, after the existing `quoted` query, add:
           doc: { entity: d.entity, docEntry: d.docEntry, docNum: d.docNum },
         })),
       ]
-        // ISO strings compare correctly as strings; B1 dates are date-only, HERA events are full
+        // ISO strings compare correctly as strings; B1 dates are date-only, Confire events are full
         // timestamps, so a same-day document sorts below the event that produced it. Good enough.
         .sort((a, b) => b.at.localeCompare(a.at)),
     [project.events, chain.data],
@@ -2697,7 +2697,7 @@ In `apps/server/test/invites.test.ts`, replace the imports and the `invite` help
 import { afterEach, describe, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { db, portalClient } from "@hera/db";
+import { db, portalClient } from "@confire/db";
 import { call, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
 import { startMockAgent, connectTenant, type MockAgent } from "./mock-agent.ts";
 import { router } from "../src/orpc/router.ts";

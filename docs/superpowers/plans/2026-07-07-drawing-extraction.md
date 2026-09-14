@@ -258,7 +258,7 @@ git commit -m "feat(engine): buildExtractionRequest — prompt + Gemini schema f
 - Test: `apps/server/test/extraction.test.ts`
 
 **Interfaces:**
-- Consumes: `ModelDef`, `Option`, `Val` from `@hera/config-engine`.
+- Consumes: `ModelDef`, `Option`, `Val` from `@confire/config-engine`.
 - Produces: `validateSuggestions(model: ModelDef, domains: Record<string, Option[]>, raw: unknown): Suggestion[]` and `type Suggestion = { paramKey: string; value: Val; evidence: string; valid: boolean; reason?: string }`. Task 4 calls it on the parsed Gemini JSON; Task 5's UI consumes the `Suggestion` shape via oRPC inference.
 
 - [ ] **Step 1: Write the failing test**
@@ -267,7 +267,7 @@ Create `apps/server/test/extraction.test.ts` (mirrors the pure-module style of `
 
 ```ts
 import { describe, expect, test } from "bun:test";
-import type { ModelDef, Option } from "@hera/config-engine";
+import type { ModelDef, Option } from "@confire/config-engine";
 import { validateSuggestions } from "../src/extraction.ts";
 
 const model: ModelDef = {
@@ -347,7 +347,7 @@ Expected: FAIL — `Cannot find module '../src/extraction.ts'`.
 Create `apps/server/src/extraction.ts`:
 
 ```ts
-import type { ModelDef, Option, Val } from "@hera/config-engine";
+import type { ModelDef, Option, Val } from "@confire/config-engine";
 
 // Server-side gate on whatever the LLM returned: type + domain/range check per parameter.
 // Invalid values are flagged (never dropped) so the UI can show them with a reason but no
@@ -444,7 +444,7 @@ Create `apps/server/src/orpc/routers/extraction.ts`:
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { GoogleGenAI, type Schema } from "@google/genai";
-import { buildExtractionRequest } from "@hera/config-engine";
+import { buildExtractionRequest } from "@confire/config-engine";
 import { userProcedure } from "../base.ts";
 import { assertAgentReady } from "./entities.ts";
 import { agentFetcher } from "./models.ts";
@@ -569,7 +569,7 @@ git commit -m "feat(server): extraction.extract — Gemini drawing extraction be
 - Modify: `apps/web/src/components/configurator/ConfigProcessPage.tsx`
 
 **Interfaces:**
-- Consumes: `orpc.extraction.extract` (Task 4) via TanStack Query mutation; `ModelDef`, `Entries`, `Val` from `@hera/config-engine`; suggestion shape `{ paramKey, value, evidence, valid, reason? }` inferred end-to-end from `AppRouter`.
+- Consumes: `orpc.extraction.extract` (Task 4) via TanStack Query mutation; `ModelDef`, `Entries`, `Val` from `@confire/config-engine`; suggestion shape `{ paramKey, value, evidence, valid, reason? }` inferred end-to-end from `AppRouter`.
 - Produces: `ExtractPanel({ modelId, model, entries, onChange })` — accepted suggestions merge into `entries` through the same `onChange` the form uses, so live propagation and conflict display react exactly as manual entry would.
 
 - [ ] **Step 1: Create the panel component**
@@ -582,7 +582,7 @@ import { useMutation } from "@tanstack/react-query";
 import {
   BusyIndicator, Button, FileUploader, List, ListItemCustom, MessageStrip, ObjectStatus, Panel, Text,
 } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef, Val } from "@hera/config-engine";
+import type { Entries, ModelDef, Val } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 
 // Upload a customer drawing → server-side Gemini extraction → per-parameter suggestions.
@@ -693,7 +693,7 @@ In `apps/web/src/components/configurator/StepConfigure.tsx`, add the prop and re
 ```tsx
 import type { UseQueryResult } from "@tanstack/react-query";
 import { Bar, BusyIndicator, Button, MessageStrip } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef, ResolvedLookups } from "@hera/config-engine";
+import type { Entries, ModelDef, ResolvedLookups } from "@confire/config-engine";
 import { ConfiguratorForm } from "./ConfiguratorForm.tsx";
 import { ExtractPanel } from "./ExtractPanel.tsx";
 

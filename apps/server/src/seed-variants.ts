@@ -1,8 +1,8 @@
 import { and, eq } from "drizzle-orm";
-import { db, uiVariant, type ListVariantDef, type ObjectVariantDef, type VariantDef } from "@hera/db";
+import { db, uiVariant, type ListVariantDef, type ObjectVariantDef, type VariantDef } from "@confire/db";
 import { ENTITY_PROFILES } from "./entity-profiles.ts";
 
-// Variant seeding lives here, not in routers/variants.ts, so it imports @hera/db and nothing else.
+// Variant seeding lives here, not in routers/variants.ts, so it imports @confire/db and nothing else.
 // auth.ts calls it from the afterCreateOrganization hook, and routers/variants.ts pulls in base.ts
 // which pulls in auth.ts — putting these in the router would close that cycle.
 
@@ -139,7 +139,7 @@ export function entityVariantDefs(entity: string): { list: ListVariantDef; objec
 }
 
 /** The `entity` key a B1 page saves its views under — `b1:` namespaced so a B1 entity set can
- *  never collide with a HERA list key like "models". Must match the list route's `b1:${entity}`. */
+ *  never collide with a Confire list key like "models". Must match the list route's `b1:${entity}`. */
 export const b1VariantKey = (entity: string) => `b1:${entity}`;
 
 /** Standard list + object views for every curated B1 entity. Idempotent. */

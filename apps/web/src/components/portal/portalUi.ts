@@ -1,4 +1,4 @@
-// apps/web doesn't depend on @hera/db (bun isolated installs need direct deps — see project memory),
+// apps/web doesn't depend on @confire/db (bun isolated installs need direct deps — see project memory),
 // so the status union is inlined here rather than imported as `ProjectStatus`.
 export type PortalStatus = "draft" | "quoted" | "requested" | "rejected";
 

@@ -1,5 +1,5 @@
 import { boolean, index, jsonb, integer, numeric, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-import type { Entries, ModelDef, OutputOverrides, Outputs, QuerySource, TableRows, Val } from "@hera/config-engine";
+import type { Entries, ModelDef, OutputOverrides, Outputs, QuerySource, TableRows, Val } from "@confire/config-engine";
 
 // Configurator persistence: a mutable model, and one configuration document that carries its own
 // latest calculation. Spec: docs/superpowers/specs/2026-07-03-configurator-design.md.

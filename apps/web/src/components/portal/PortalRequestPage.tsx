@@ -5,7 +5,7 @@ import {
   TableHeaderCell, TableHeaderRow, TableRow, Text, Title, Wizard, WizardStep,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-icons/dist/paper-plane.js";
-import { propagate, type Entries, type TableRows } from "@hera/config-engine";
+import { propagate, type Entries, type TableRows } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { StepConfigure } from "../configurator/StepConfigure.tsx";
 import { BATCHES_SECTION, ConfiguratorForm } from "../configurator/ConfiguratorForm.tsx";

@@ -1,4 +1,4 @@
-# Cloudflare Workers VPC as a replacement for `hera-agent` — Design Analysis (2026-09-09)
+# Cloudflare Workers VPC as a replacement for `confire-agent` — Design Analysis (2026-09-09)
 
 Status: **analysis, not a decision**. Nothing in this document is implemented.
 
@@ -9,7 +9,7 @@ Short answer: it can replace the *transport*, and only the transport. It cannot 
 things the agent actually exists for — on-prem credentials, one B1 session per tenant, and an
 allowlisted operation surface — without those moving into the cloud or being rebuilt on Durable
 Objects. There is also a multi-tenancy problem that is not obvious from the docs: **VPC bindings
-are static Wrangler config, resolved at deploy time**, and HERA adds a private network per
+are static Wrangler config, resolved at deploy time**, and Confire adds a private network per
 customer.
 
 ## What Workers VPC is (verified against the docs, 2026-09-09)
@@ -50,14 +50,14 @@ Load-bearing details for us:
 
 ## The structural blocker: bindings only exist inside a Worker
 
-`RemoteTransport` runs inside the HERA server, which is Bun + Hono in a container behind Caddy
+`RemoteTransport` runs inside the Confire server, which is Bun + Hono in a container behind Caddy
 (`docker-compose.yml`, `Caddyfile`). There is no way to call a VPC binding from there. Adopting
 Workers VPC therefore means putting a Worker somewhere in the path. Three shapes:
 
 | | Shape | Verdict |
 |---|---|---|
 | **A** | Port `apps/server` to Workers | Disproportionate. Postgres pool → Hyperdrive, `node:crypto` in `crypto.ts`, better-auth, SPA serving, and the assistant's durable turn engine (leases, `lastEventId` resume) would want Durable Objects. Months, for no product gain. |
-| **B** | A thin Worker **replaces** the agent: it holds the VPC binding and runs `ServiceLayer` itself | Smallest diff in HERA, biggest change in the security story — SAP credentials move to the cloud. |
+| **B** | A thin Worker **replaces** the agent: it holds the VPC binding and runs `ServiceLayer` itself | Smallest diff in Confire, biggest change in the security story — SAP credentials move to the cloud. |
 | **C** | A thin Worker **relays to** the agent over the VPC Service; agent stays | Keeps every property the agent has. Gain is limited to deleting the public tunnel hostname and the Access token pair. |
 
 Under **B** and **C** alike, `packages/b1`'s seam pays off: `RemoteTransport`, `toOrpcError`,
@@ -66,7 +66,7 @@ tunnel hostname and becomes the Worker's URL — still a database row, still not
 
 ## The multi-tenancy problem
 
-`vpc_services` and `vpc_networks` are static Wrangler config. HERA onboards one private network per
+`vpc_services` and `vpc_networks` are static Wrangler config. Confire onboards one private network per
 customer. So:
 
 1. **One binding per tenant, one Worker.** Every customer onboarding is a Worker redeploy. Rejected.
@@ -92,7 +92,7 @@ per tenant against a 1000/account cap ≈ **330–500 tenants** before asking Cl
 Reading `apps/agent/src/index.ts`, `packages/b1/src/service-layer.ts` and `client.ts`:
 
 1. **Credentials never leave the customer's network.** `agent.json` holds the B1 user, password and
-   company DB. Under shape B these move into HERA's database (encrypted with `crypto.ts`, like the
+   company DB. Under shape B these move into Confire's database (encrypted with `crypto.ts`, like the
    agent secret already is) or into Worker secrets. That is the single biggest thing being traded,
    and it is stated as a product property in `CLAUDE.md` and `AGENTS.md`. Under shape C it is
    preserved.
@@ -115,7 +115,7 @@ Reading `apps/agent/src/index.ts`, `packages/b1/src/service-layer.ts` and `clien
 
 ## What is actually gained
 
-- No HERA-authored binary on the customer's network — but `cloudflared` still installs as a Windows
+- No Confire-authored binary on the customer's network — but `cloudflared` still installs as a Windows
   service. It is a swap of one service for another, and the honest gain is that Cloudflare maintains
   and updates theirs while we maintain ours.
 - No public hostname for the agent; `sapConnection.accessClientId` / `accessClientSecret` become
@@ -139,7 +139,7 @@ Two proportionate options, in order:
    they are; the public hostname and the Access token pair go away. Cost: one Worker per tenant,
    deployed at onboarding.
 
-Shape B (agent deleted, `ServiceLayer` in a Worker) is only worth it if "no HERA software on-prem"
+Shape B (agent deleted, `ServiceLayer` in a Worker) is only worth it if "no Confire software on-prem"
 becomes a hard product requirement. Then the work is: `apps/vpc-worker` mounting the existing route
 table against a `VpcTransport`, a Durable Object per tenant for the B1 session, SAP credentials
 moved into `sap_connection` under `crypto.ts`, 2–3 VPC Services per tenant, and per-tenant Worker

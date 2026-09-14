@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Bar, Button, Text, Title } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef } from "@hera/config-engine";
+import type { Entries, ModelDef } from "@confire/config-engine";
 import { candidateLabel, openKeys, type PricedCandidate, type Sel } from "./runView.ts";
 import { CandidatesMatrix } from "./CandidatesMatrix.tsx";
 

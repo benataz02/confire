@@ -1,11 +1,11 @@
 import type { AnalyticalTableColumnDefinition } from "@ui5/webcomponents-react";
-import type { ListVariantDef, FilterCond } from "@hera/db";
+import type { ListVariantDef, FilterCond } from "@confire/db";
 
 // The pure half of a list view: column descriptors, the local executor, cell formatting. No hooks,
 // no orpc — variants.ts re-exports all of it, and the test imports this module directly (orpc.ts
 // touches `window` at module scope, so anything importing it can't be unit-tested under bun).
 
-export type { ListVariantDef, FilterCond, FilterOp } from "@hera/db";
+export type { ListVariantDef, FilterCond, FilterOp } from "@confire/db";
 
 // VariantManagement's dialog flags come back as boolean | "true" | "false" (string-bool). Coerce.
 export const truthy = (v: unknown): boolean => v === true || v === "true";

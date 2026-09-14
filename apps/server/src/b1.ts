@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { eq } from "drizzle-orm";
-import { db, sapConnection } from "@hera/db";
-import { B1Error, RemoteTransport, nextLinkOf, readPages, rowsOrThrow, type AgentTarget, type B1Transport, type Connector } from "@hera/b1";
+import { db, sapConnection } from "@confire/db";
+import { B1Error, RemoteTransport, nextLinkOf, readPages, rowsOrThrow, type AgentTarget, type B1Transport, type Connector } from "@confire/b1";
 import { decryptSecret } from "./crypto.ts";
 import { DEFAULT_PAGE, type QueryRunner } from "./lookups.ts";
 

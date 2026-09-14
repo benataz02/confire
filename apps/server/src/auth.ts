@@ -1,8 +1,8 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins";
-import { db } from "@hera/db/client";
-import * as schema from "@hera/db/schema";
+import { db } from "@confire/db/client";
+import * as schema from "@confire/db/schema";
 import { ensureConfiguratorVariants, ensureEntityVariants, ensurePortalVariants } from "./seed-variants.ts";
 
 const baseDomain = process.env.APP_BASE_DOMAIN ?? "lvh.me";
@@ -46,7 +46,7 @@ export const auth = betterAuth({
   // Auth lives on the apex, but the app POSTs (sign-out) from every tenant subdomain, so those
   // origins need trusting; baseURL's own origin is trusted automatically. A pattern without
   // `://` is matched against URL.host — which includes the port — hence both forms: prod
-  // (`acme.hera.app`) and dev (`acme.lvh.me:5173`).
+  // (`acme.confire.app`) and dev (`acme.lvh.me:5173`).
   trustedOrigins: [`*.${baseDomain}`, `*.${baseDomain}:*`, `http://192.168.1.134:5173`],
   advanced: {
     crossSubDomainCookies: { enabled: true, domain: `.${baseDomain}` },

@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
-import { db, configHistory } from "@hera/db";
-import type { ModelDef, Val } from "@hera/config-engine";
+import { db, configHistory } from "@confire/db";
+import type { ModelDef, Val } from "@confire/config-engine";
 import { fetchQueryTable, type QueryRunner } from "./lookups.ts";
 
 // Pull a model's history query rows into config_history, wholesale (delete + insert, one tx).

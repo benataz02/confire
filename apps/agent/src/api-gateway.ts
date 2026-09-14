@@ -1,4 +1,4 @@
-import { B1Error, silentLogger, type Logger } from "@hera/b1";
+import { B1Error, silentLogger, type Logger } from "@confire/b1";
 
 // The SAP B1 API Gateway's Reporting Service. A *different service* from the Service Layer:
 // its own port, its own `POST /login`, and an export that answers with a base64 string rather

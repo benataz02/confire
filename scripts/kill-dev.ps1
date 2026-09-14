@@ -1,4 +1,4 @@
-# Free hera dev procs. server :3000, web :5173 by port.
+# Free confire dev procs. server :3000, web :5173 by port.
 $owners = (Get-NetTCPConnection -LocalPort 3000, 5173 -State Listen -ErrorAction SilentlyContinue).OwningProcess
 $pids = @($owners) | Where-Object { $_ } | Sort-Object -Unique
 if ($pids) {

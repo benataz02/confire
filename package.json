@@ -1,5 +1,5 @@
 {
-  "name": "hera",
+  "name": "confire",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -7,10 +7,10 @@
     "packages/*"
   ],
   "devDependencies": {
-    "@hera/b1": "workspace:*",
-    "@hera/config-engine": "workspace:*",
-    "@hera/db": "workspace:*",
-    "@hera/server": "workspace:*",
+    "@confire/b1": "workspace:*",
+    "@confire/config-engine": "workspace:*",
+    "@confire/db": "workspace:*",
+    "@confire/server": "workspace:*",
     "@orpc/client": "^1.14.6",
     "@orpc/server": "^1.14.6",
     "@types/bun": "^1.4.0",

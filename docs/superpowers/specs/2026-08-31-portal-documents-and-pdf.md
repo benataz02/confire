@@ -10,7 +10,7 @@ to the customer who is waiting for it.
 
 This change turns the portal from a request inbox into a **follow-up workspace**:
 
-- a project page whose timeline merges HERA milestones with the live SAP document chain,
+- a project page whose timeline merges Confire milestones with the live SAP document chain,
 - four read-only document lists in the nav (quotations, orders, deliveries, invoices), scoped to the
   client's business partner,
 - PDF preview/download on every document, via the SAP Business One **API Gateway** Reporting Service,
@@ -27,7 +27,7 @@ and a `layouts` map.
 | Axis | Decision |
 |---|---|
 | Configure wizard | **Unchanged.** `/portal/new` catalog + the 4-step Wizard stay exactly as they are. |
-| Timeline (HERA half) | **Milestones only** — `config_project.events` as it stands. No new event kinds, no schema change. |
+| Timeline (Confire half) | **Milestones only** — `config_project.events` as it stands. No new event kinds, no schema change. |
 | Print layouts | **Explicit per-customer map** in `agent.json` → `apiGateway.layouts`. No `LoadAuthorizedCRList` discovery. |
 | Internal buttons | Count bar in `ListReport`, enabled on exactly one selected row. |
 | Nav | 5 client items. "New request" leaves the nav and becomes a button on the Projects page. |
@@ -132,7 +132,7 @@ second source, merged and sorted by date descending.
 reusing its machinery — `CrossJoinSpec` + `b1.crossJoin`, no new `B1Transport` method:
 
 ```
-start: config_run.b1DocEntry   (the Quotations DocEntry; the only B1 link HERA stores)
+start: config_run.b1DocEntry   (the Quotations DocEntry; the only B1 link Confire stores)
 
 hop 1  $crossjoin(Orders,Orders/DocumentLines)
          Orders/DocEntry eq Orders/DocumentLines/DocEntry

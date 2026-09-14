@@ -6,8 +6,8 @@ import {
   ObjectPageSection, ObjectPageSubSection, ObjectPageTitle, Tag, Title, Toolbar,
   ToolbarButton,
 } from "@ui5/webcomponents-react";
-import { coerceKey, parseKeyParam, type B1Field } from "@hera/b1";
-import type { Val } from "@hera/config-engine";
+import { coerceKey, parseKeyParam, type B1Field } from "@confire/b1";
+import type { Val } from "@confire/config-engine";
 import { formatCell } from "../../listSpec.ts";
 import { orpc } from "../../orpc.ts";
 import { toast } from "../toast.ts";
@@ -163,7 +163,7 @@ export function EntityObjectPage({
             {copy.error ? <MessageStrip design="Negative" hideCloseButton>{copy.error.message}</MessageStrip> : null}
             {!profile && !editing && !portal ? (
               <MessageStrip design="Information" hideCloseButton>
-                {`${schema.data!.label} is read-only in HERA.`}
+                {`${schema.data!.label} is read-only in Confire.`}
               </MessageStrip>
             ) : null}
             <Form layout="S1 M2 L3 XL3" labelSpan="S12 M4 L4 XL4"

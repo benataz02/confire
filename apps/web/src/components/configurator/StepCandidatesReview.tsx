@@ -2,7 +2,7 @@ import {
   Bar, Button, Input, MessageStrip, ObjectStatus, Panel, StepInput, Table, TableCell,
   TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, Title,
 } from "@ui5/webcomponents-react";
-import { computeOutputs, type Entries, type ModelDef, type OutputOverrides, type Outputs, type ResolvedLookups } from "@hera/config-engine";
+import { computeOutputs, type Entries, type ModelDef, type OutputOverrides, type Outputs, type ResolvedLookups } from "@confire/config-engine";
 import {
   addBomLine, addOpLine, candidateLabel, fmt, isEdited, isRemoved, openKeys, patchAddedBom,
   patchAddedOp, patchBom, patchOp, removeAddedBom, removeAddedOp, resetLine, toPriced, withoutRemovals,

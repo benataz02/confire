@@ -1,5 +1,5 @@
-import { db, dashboardSnapshot, type B1Snapshot, type Bucket, type OpenQuote } from "@hera/db";
-import { readPages, type B1Transport, type QueryOptions } from "@hera/b1";
+import { db, dashboardSnapshot, type B1Snapshot, type Bucket, type OpenQuote } from "@confire/db";
+import { readPages, type B1Transport, type QueryOptions } from "@confire/b1";
 
 const OPEN_QUOTE_CAP = 1000;
 /** Rows per Service Layer page while walking the snapshot's history. */

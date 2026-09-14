@@ -5,7 +5,7 @@ import {
   ObjectStatus, Option, Select, StepInput, Table, TableCell, TableHeaderCell,
   TableHeaderRow, TableRow, TableRowAction, Text, TextArea,
 } from "@ui5/webcomponents-react";
-import type { Issue, ModelDef, QuerySource, Val } from "@hera/config-engine";
+import type { Issue, ModelDef, QuerySource, Val } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { issueFor } from "./useDraftModel.ts";
 

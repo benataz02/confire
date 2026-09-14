@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { B1Snapshot } from "@hera/db";
+import type { B1Snapshot } from "@confire/db";
 import { buildOverview, type ProjectRow } from "../src/dashboard.ts";
 
 const NOW = new Date("2026-08-19T12:00:00Z");

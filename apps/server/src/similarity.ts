@@ -1,4 +1,4 @@
-import type { Entries, ModelDef, Val } from "@hera/config-engine";
+import type { Entries, ModelDef, Val } from "@confire/config-engine";
 
 // Weighted per-param similarity over cached historic rows. Pure — no DB, no agent — so it has
 // a network-free test. Score = Σ(weight × match) / Σ(weight of params the user filled).

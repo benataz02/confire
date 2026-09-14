@@ -4,15 +4,15 @@ export const hashToken = (token: string): string =>
   createHash("sha256").update(token).digest("hex");
 
 // Symmetric encryption for credentials the server must be able to *use*, not just compare:
-// today only sap_connection.secret. AES-256-GCM, key derived from HERA_SECRET_KEY (any length —
+// today only sap_connection.secret. AES-256-GCM, key derived from CONFIRE_SECRET_KEY (any length —
 // it is hashed to 32 bytes). Format: iv.tag.ciphertext, base64url, so it round-trips in a text
 // column and a re-encrypt is visible as a changed prefix.
 // ponytail: one process-wide key, no rotation. Rotation earns its place when there is a second
 // tenant-visible secret to rotate; today re-running the seed replaces the row.
 const key = () => {
   // `||`, not `??`: an env var declared-but-empty is unset, not a zero-length key.
-  const raw = process.env.HERA_SECRET_KEY || process.env.BETTER_AUTH_SECRET;
-  if (!raw) throw new Error("HERA_SECRET_KEY (or BETTER_AUTH_SECRET) is required to store SAP credentials");
+  const raw = process.env.CONFIRE_SECRET_KEY || process.env.BETTER_AUTH_SECRET;
+  if (!raw) throw new Error("CONFIRE_SECRET_KEY (or BETTER_AUTH_SECRET) is required to store SAP credentials");
   return createHash("sha256").update(raw).digest();
 };
 

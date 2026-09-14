@@ -1,4 +1,4 @@
-# HERA - B2B SAP CPQ and Integration Platform
+# Confire - B2B SAP CPQ and Integration Platform
 
 ## Objective
 I want to create a cpq that is able to solve the most common problems of SME manufacturing companies which use SAP B1 by exploiting their historical production and sales data to provide more accurate and faster product configurations and automated sales-to-production process.

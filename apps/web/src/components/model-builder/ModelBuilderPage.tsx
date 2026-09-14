@@ -5,7 +5,7 @@ import {
   ObjectPage, ObjectPageSection, ObjectPageTitle, ObjectStatus,
   Title, Toolbar,
 } from "@ui5/webcomponents-react";
-import type { Issue, ModelDef } from "@hera/config-engine";
+import type { Issue, ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { tabOf, useDraftModel, type TabKey } from "./useDraftModel.ts";
 import { confirm } from "../confirm.ts";

@@ -1,33 +1,35 @@
-import { placedTables, type ModelDef } from "@hera/config-engine";
+import { isTableGroup, placedTables, type FieldGroup, type ModelDef } from "@confire/config-engine";
 
 // Pure structure-tree edits for the Parameters tab. All functions return new ModelDefs.
 
+// A table is a group, so it is addressed by position like a group is — `t:` rather than `g:` only
+// so the tree can tell the two apart when drawing a row and picking its actions. That leaves the
+// parameter as the tree's only leaf.
 export type RowRef =
   | { kind: "section"; s: number }
   | { kind: "group"; s: number; g: number }
-  | { kind: "param"; key: string }
-  | { kind: "table"; key: string };
+  | { kind: "table"; s: number; g: number }
+  | { kind: "param"; key: string };
 
 export const rowKeyOf = (r: RowRef): string =>
   r.kind === "section" ? `s:${r.s}`
   : r.kind === "group" ? `g:${r.s}.${r.g}`
-  : r.kind === "table" ? `t:${r.key}`
+  : r.kind === "table" ? `t:${r.s}.${r.g}`
   : `p:${r.key}`;
 
 export function parseRowKey(k: string): RowRef {
   if (k.startsWith("s:")) return { kind: "section", s: Number(k.slice(2)) };
-  if (k.startsWith("g:")) {
+  if (k.startsWith("g:") || k.startsWith("t:")) {
     const [s, g] = k.slice(2).split(".").map(Number);
-    return { kind: "group", s: s!, g: g! };
+    return { kind: k[0] === "g" ? "group" : "table", s: s!, g: g! };
   }
-  if (k.startsWith("t:")) return { kind: "table", key: k.slice(2) };
   return { kind: "param", key: k.slice(2) };
 }
 
 export type Placement = "Before" | "After" | "On";
 
-/** Parameters and tables are both leaves of a group's content list — same drag rules, same ops. */
-const leaf = (r: RowRef) => r.kind === "param" || r.kind === "table";
+/** Groups and tables are the same level of the tree, so they drag by the same rules. */
+const atGroupLevel = (r: RowRef) => r.kind === "group" || r.kind === "table";
 
 export function uniqueKey(base: string, taken: string[]): string {
   let k = base, n = 2;
@@ -35,24 +37,43 @@ export function uniqueKey(base: string, taken: string[]): string {
   return k;
 }
 
-export function canDrop(_def: ModelDef, srcKey: string, dstKey: string, placement: Placement): boolean {
+/** The group at a position, only if it is one a parameter can go into. */
+const fieldGroupAt = (def: ModelDef, s: number, g: number): FieldGroup | undefined => {
+  const grp = def.structure.sections[s]?.groups[g];
+  return grp && !isTableGroup(grp) ? grp : undefined;
+};
+
+export function canDrop(def: ModelDef, srcKey: string, dstKey: string, placement: Placement): boolean {
   const src = parseRowKey(srcKey);
   const dst = parseRowKey(dstKey);
   if (srcKey === dstKey) return false;
-  // A table sits in the group's content list like a parameter does, so the two drag the same way:
-  // into a group, or beside any other leaf — a table can land between two fields.
-  if (leaf(src)) return (dst.kind === "group" && placement === "On") || (leaf(dst) && placement !== "On");
-  if (src.kind === "group") return (dst.kind === "section" && placement === "On") || (dst.kind === "group" && placement !== "On");
+  // A parameter goes into a field group or beside another parameter. Dropping one onto a table
+  // group is the one move that has to be refused here: a table group holds no parameter list, so
+  // the drop would silently vanish.
+  if (src.kind === "param")
+    return (dst.kind === "group" && placement === "On" && !!fieldGroupAt(def, dst.s, dst.g)) || (dst.kind === "param" && placement !== "On");
+  if (atGroupLevel(src)) return (dst.kind === "section" && placement === "On") || (atGroupLevel(dst) && placement !== "On");
   return dst.kind === "section" && placement !== "On";
 }
 
-/** Unplace a parameter or table from every group. Never deletes its definition. */
+/** Unplace a parameter from every group. Never deletes its definition. */
 const stripParam = (def: ModelDef, key: string): ModelDef => ({
   ...def,
   structure: {
     sections: def.structure.sections.map((s) => ({
       ...s,
-      groups: s.groups.map((g) => ({ ...g, params: g.params.filter((p) => p !== key) })),
+      groups: s.groups.map((g) => (isTableGroup(g) ? g : { ...g, params: g.params.filter((p) => p !== key) })),
+    })),
+  },
+});
+
+/** Drop every group that renders a table, so re-placing one can never leave a duplicate behind. */
+const stripTable = (def: ModelDef, key: string): ModelDef => ({
+  ...def,
+  structure: {
+    sections: def.structure.sections.map((s) => ({
+      ...s,
+      groups: s.groups.filter((g) => !(isTableGroup(g) && g.table === key)),
     })),
   },
 });
@@ -61,7 +82,7 @@ const stripParam = (def: ModelDef, key: string): ModelDef => ({
 function findParam(def: ModelDef, key: string): { s: number; g: number; i: number } | null {
   for (let s = 0; s < def.structure.sections.length; s++)
     for (let g = 0; g < def.structure.sections[s]!.groups.length; g++) {
-      const i = def.structure.sections[s]!.groups[g]!.params.indexOf(key);
+      const i = fieldGroupAt(def, s, g)?.params.indexOf(key) ?? -1;
       if (i >= 0) return { s, g, i };
     }
   return null;
@@ -71,7 +92,10 @@ const editGroup = (def: ModelDef, s: number, g: number, fn: (params: string[]) =
   ...def,
   structure: {
     sections: def.structure.sections.map((sec, si) =>
-      si !== s ? sec : { ...sec, groups: sec.groups.map((gr, gi) => (gi !== g ? gr : { ...gr, params: fn(gr.params) })) },
+      si !== s ? sec : {
+        ...sec,
+        groups: sec.groups.map((gr, gi) => (gi !== g || isTableGroup(gr) ? gr : { ...gr, params: fn(gr.params) })),
+      },
     ),
   },
 });
@@ -81,26 +105,29 @@ export function applyMove(def: ModelDef, srcKey: string, dstKey: string, placeme
   const src = parseRowKey(srcKey);
   const dst = parseRowKey(dstKey);
 
-  if (leaf(src)) {
-    const key = (src as { key: string }).key;
-    const without = stripParam(def, key);
-    if (dst.kind === "group") return editGroup(without, dst.s, dst.g, (ps) => [...ps, key]);
-    const at = findParam(without, (dst as { key: string }).key);
+  if (src.kind === "param") {
+    const without = stripParam(def, src.key);
+    if (dst.kind === "group") return editGroup(without, dst.s, dst.g, (ps) => [...ps, src.key]);
+    const dstParam = (dst as { key: string }).key;
+    const at = findParam(without, dstParam);
     if (!at) return def;
     return editGroup(without, at.s, at.g, (ps) => {
-      const i = ps.indexOf((dst as { key: string }).key) + (placement === "After" ? 1 : 0);
-      return [...ps.slice(0, i), key, ...ps.slice(i)];
+      const i = ps.indexOf(dstParam) + (placement === "After" ? 1 : 0);
+      return [...ps.slice(0, i), src.key, ...ps.slice(i)];
     });
   }
 
-  if (src.kind === "group") {
+  if (atGroupLevel(src)) {
     const grp = def.structure.sections[src.s]!.groups[src.g]!;
     const sections = def.structure.sections.map((s, si) =>
       si === src.s ? { ...s, groups: s.groups.filter((_, gi) => gi !== src.g) } : s,
     );
+    // A table group is identified by the table it names, so it is never re-keyed — uniquifying it
+    // would point the group at a table that does not exist.
     const into = (si: number) => {
-      const taken = sections[si]!.groups.map((g) => g.key);
-      return src.s === si ? grp : { ...grp, key: uniqueKey(grp.key, taken) };
+      if (isTableGroup(grp) || src.s === si) return grp;
+      const taken = sections[si]!.groups.flatMap((g) => (isTableGroup(g) ? [] : [g.key]));
+      return { ...grp, key: uniqueKey(grp.key, taken) };
     };
     if (dst.kind === "section")
       return { ...def, structure: { sections: sections.map((s, si) => (si === dst.s ? { ...s, groups: [...s.groups, into(dst.s)] } : s)) } };
@@ -128,8 +155,8 @@ export function applyMove(def: ModelDef, srcKey: string, dstKey: string, placeme
 }
 
 export function removeFromStructure(def: ModelDef, ref: RowRef): ModelDef {
-  if (leaf(ref)) return stripParam(def, (ref as { key: string }).key);
-  if (ref.kind === "group")
+  if (ref.kind === "param") return stripParam(def, ref.key);
+  if (atGroupLevel(ref))
     return {
       ...def,
       structure: {
@@ -141,10 +168,29 @@ export function removeFromStructure(def: ModelDef, ref: RowRef): ModelDef {
   return { ...def, structure: { sections: def.structure.sections.filter((_, si) => si !== ref.s) } };
 }
 
-/** Append a parameter or table to a group, removing it from wherever it was. */
+/** Append a parameter to a field group, removing it from wherever it was. */
 export function placeParam(def: ModelDef, key: string, s: number, g: number): ModelDef {
   return editGroup(stripParam(def, key), s, g, (ps) => [...ps, key]);
 }
+
+/** Append a table to a section as a group of its own, removing any group it already had. */
+export function placeTable(def: ModelDef, key: string, s: number): ModelDef {
+  const without = stripTable(def, key);
+  return {
+    ...without,
+    structure: {
+      sections: without.structure.sections.map((sec, si) =>
+        si === s ? { ...sec, groups: [...sec.groups, { table: key }] } : sec,
+      ),
+    },
+  };
+}
+
+/** The key of the table a row refers to, or undefined if the row is not a table group. */
+export const tableKeyAt = (def: ModelDef, s: number, g: number): string | undefined => {
+  const grp = def.structure.sections[s]?.groups[g];
+  return grp && isTableGroup(grp) ? grp.table : undefined;
+};
 
 /** Table keys the form would push into its trailing catch-all section. */
 export function unplacedTables(def: ModelDef): string[] {
@@ -153,7 +199,9 @@ export function unplacedTables(def: ModelDef): string[] {
 }
 
 export function unplacedParams(def: ModelDef): string[] {
-  const placed = new Set(def.structure.sections.flatMap((s) => s.groups.flatMap((g) => g.params)));
+  const placed = new Set(
+    def.structure.sections.flatMap((s) => s.groups.flatMap((g) => (isTableGroup(g) ? [] : g.params))),
+  );
   return def.parameters.map((p) => p.key).filter((k) => !placed.has(k));
 }
 
@@ -173,6 +221,7 @@ export function duplicateParam(def: ModelDef, key: string): ModelDef {
       sections: def.structure.sections.map((s) => ({
         ...s,
         groups: s.groups.map((g) => {
+          if (isTableGroup(g)) return g;
           const i = g.params.indexOf(key);
           if (i < 0) return g;
           return { ...g, params: [...g.params.slice(0, i + 1), copyKey, ...g.params.slice(i + 1)] };

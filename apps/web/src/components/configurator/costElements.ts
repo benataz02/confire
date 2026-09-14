@@ -1,4 +1,4 @@
-import { evaluate, type ModelDef, type Propagation, type ResolvedLookups } from "@hera/config-engine";
+import { evaluate, type ModelDef, type Propagation, type ResolvedLookups } from "@confire/config-engine";
 
 // The single source both the per-field price badges and the rail's Costs card read, so they
 // cannot disagree. These figures are informational only — see the spec's non-goals: the

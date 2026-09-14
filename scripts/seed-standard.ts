@@ -11,7 +11,7 @@
  * Standard view an admin has already shaped is left alone unless --force.
  */
 import { eq } from "drizzle-orm";
-import { db, pool, organization, member } from "@hera/db";
+import { db, pool, organization, member } from "@confire/db";
 import { ensureConfiguratorVariants, ensureEntityVariants, ensurePortalVariants } from "../apps/server/src/seed-variants.ts";
 
 const args = process.argv.slice(2);
