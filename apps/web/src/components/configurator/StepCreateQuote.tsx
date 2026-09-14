@@ -1,10 +1,11 @@
 import { useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button, BusyIndicator, DatePicker, Form, FormGroup, FormItem, Label, MessageStrip,
   Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Text, TextArea, Title,
 } from "@ui5/webcomponents-react";
-import { orpc } from "../../orpc.ts";
+import { meQuery, orpc } from "../../orpc.ts";
 
 const STANDARD: Record<string, string> = {
   ItemCode: "Item", ItemDescription: "Description", Quantity: "Qty", UnitPrice: "Unit price",
@@ -21,14 +22,30 @@ const money = (n: unknown, currency?: string) =>
 // never create a second quotation.
 export function StepCreateQuote({ projectId }: { projectId: string }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  // The B1 pages are admin/owner only — _authed bounces everyone else off /b1 — so a plain member
+  // stays here and reads the confirmation rather than being thrown back to the dashboard.
+  const me = useQuery(meQuery);
+  const canOpenInB1 = me.data?.role === "admin" || me.data?.role === "owner";
   const draft = useQuery({ ...orpc.configs.quoteDraft.queryOptions({ input: { projectId } }), retry: false });
   const [comments, setComments] = useState("");
   const [docDueDate, setDocDueDate] = useState("");
 
   const create = useMutation(orpc.configs.createQuote.mutationOptions({
-    onSuccess: () => {
+    onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: orpc.configs.get.queryOptions({ input: { id: projectId } }).queryKey });
-      void draft.refetch();
+      if (!canOpenInB1) { void draft.refetch(); return; } // staying: the strip needs `quoted`
+      // SAP answers the POST with the whole document, which is exactly what entities.one reads —
+      // so seed it and the quotation opens without a second Service Layer round trip. Absent when
+      // the dedup UDF found the document instead of creating it; then the page reads it itself.
+      // The key is the number DocEntry because that is what EntityObjectPage coerces it to.
+      if (r.row) {
+        qc.setQueryData(
+          orpc.entities.one.queryOptions({ input: { entity: "Quotations", key: r.docEntry } }).queryKey,
+          { row: r.row, etag: r.etag },
+        );
+      }
+      void navigate({ to: "/b1/$entity/$key", params: { entity: "Quotations", key: String(r.docEntry) } });
     },
   }));
 

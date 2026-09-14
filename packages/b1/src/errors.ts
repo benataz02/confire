@@ -17,9 +17,14 @@ export class B1Error extends Error {
     const text =
       typeof msg === "string" ? msg
       : typeof (msg as { value?: unknown })?.value === "string" ? String((msg as { value: string }).value)
-      : typeof payload === "string" && payload ? payload
-      : JSON.stringify(payload ?? null);
+      : typeof payload === "string" ? payload
+      // An unreadable payload is a status, not a sentence — a JSON blob in a MessageStrip is
+      // exactly the noise this message must not carry.
+      : "";
     const code = typeof err?.code === "string" || typeof err?.code === "number" ? err.code : null;
-    return new B1Error(status, code, `B1 ${status}${code === null ? "" : ` (${code})`}: ${text}`);
+    // The message is B1's own sentence and nothing else: it is what the UI puts in a MessageStrip,
+    // and status/code already live as fields for logs and toOrpcError. Prefixing them here would
+    // duplicate them into every end-user string.
+    return new B1Error(status, code, text.trim() || `SAP returned ${status} with no message.`);
   }
 }

@@ -68,6 +68,10 @@ export function EntityObjectPage({
       : orpc.entities.one.queryOptions({ input: { entity, key } })),
     enabled: !!schema.data,
     retry: false,
+    // A row this fresh is not worth a second read: StepCreateQuote seeds this cache with SAP's
+    // own return-representation and navigates straight here, and without a window the seed would
+    // be stale on arrival and refetched on mount. Saves and copies refetch explicitly.
+    staleTime: 30_000,
   });
 
   const [draft, setDraft] = useState<Record<string, Val | undefined> | null>(null);

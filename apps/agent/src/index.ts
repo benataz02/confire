@@ -93,7 +93,7 @@ const server = Bun.serve({
       return Response.json(await handler(transport, JSON.parse(raw)));
     } catch (e) {
       if (e instanceof B1Error) {
-        logger.warn(`${pathname}: ${e.message}`);
+        logger.warn(`${pathname}: B1 ${e.status}${e.code === null ? "" : ` (${e.code})`}: ${e.message}`);
         return fail(e.status, e.code, e.message);
       }
       logger.warn(`${pathname}:`, e instanceof Error ? e.message : String(e));

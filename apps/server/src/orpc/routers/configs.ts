@@ -315,7 +315,8 @@ export async function createQuote(
 ) {
   const project = await loadProject(tenantId, input.projectId);
   // Already posted: the row IS the idempotency record for a retry that got its response.
-  if (project.b1DocEntry !== null) return { docEntry: project.b1DocEntry, docNum: null, reused: true };
+  if (project.b1DocEntry !== null)
+    return { docEntry: project.b1DocEntry, docNum: null, reused: true, row: null, etag: null };
 
   const commandId = configDocumentCommandId({
     tenantId, projectId: input.projectId, candidates: project.candidates, selection: project.selection ?? [],
@@ -346,12 +347,13 @@ export async function createQuote(
 
     // createEntity answers with the document itself (Prefer: return-representation), not a
     // collection — so this is `.data`, not `rowsOf(.data)[0]`.
-    const doc = (prior ?? (await b1.createEntity("Quotations", {
+    const created = prior ? null : await b1.createEntity("Quotations", {
       ...seed,
       [DEDUP_UDF]: commandId,
       ...(input.comments ? { Comments: input.comments } : {}),
       ...(input.docDueDate ? { DocDueDate: input.docDueDate } : {}),
-    }, { prefer: "representation" })).data ?? {}) as Record<string, unknown>;
+    }, { prefer: "representation" });
+    const doc = (prior ?? created?.data ?? {}) as Record<string, unknown>;
     const docEntry = Number(doc.DocEntry);
     if (!Number.isFinite(docEntry))
       throw new ORPCError("BAD_GATEWAY", { message: "SAP created the quotation but returned no DocEntry" });
@@ -365,7 +367,16 @@ export async function createQuote(
         quotedValue: totals.value.toFixed(4), quotedCost: totals.cost.toFixed(4),
       })
       .where(and(eq(configProject.id, input.projectId), eq(configProject.tenantId, tenantId)));
-    return { docEntry, docNum: doc.DocNum === undefined ? null : Number(doc.DocNum), reused: !!prior };
+    return {
+      docEntry,
+      docNum: doc.DocNum === undefined ? null : Number(doc.DocNum),
+      reused: !!prior,
+      // The representation is the same document entities.one would read back, ETag and all, so
+      // the browser seeds that query from here and opens the quotation without a second Service
+      // Layer round trip. Null on the dedup path — that read selected two fields, not a document.
+      row: created ? doc : null,
+      etag: created?.etag ?? null,
+    };
   });
 }
 
