@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import {
   Bar, BusyIndicator, Button, Dialog, Icon, Input, SuggestionItem, Table, TableCell, TableGrowing,
@@ -166,15 +166,16 @@ function ValueHelpDialog({
 }
 
 // The value-help input: type to search remotely, pick from the suggestions, or open the F4 dialog
-// for the full table. The field shows the option's **label** — the key only ever travels in
-// `value`/`onChange`. Free text that matches no option is rejected on blur/Enter and the field
-// snaps back to the committed option.
+// for the full table. The field shows the option's **label** unless `showValue` — the key always
+// travels in `value`/`onChange`. Free text that matches no option is rejected on blur/Enter and
+// the field snaps back to the committed option.
 //
 // INVARIANT: `options` is index-aligned with `table.rows` (both wrappers below build it that way,
 // through optionsOf) — that alignment is how a picked row recovers its label.
-function ValueHelp({
+export function ValueHelp({
   options, value, onChange, headerText, table, valueCol, columns, onSearch, disabled, readonly,
-  valueState, loading, hasMore, onLoadMore, onOpen, columnLabels, hidden,
+  valueState, valueStateMessage, loading, hasMore, onLoadMore, onOpen, columnLabels, hidden,
+  showValue,
 }: {
   options: DomainOption[];
   value: Val | undefined;
@@ -182,6 +183,8 @@ function ValueHelp({
   /** dialog title */
   headerText: string;
   valueState?: "None" | "Positive" | "Critical" | "Negative" | "Information";
+  /** shown under the field while `valueState` is Information/Critical/Negative */
+  valueStateMessage?: ReactNode;
   table: ResolvedTable;
   valueCol: string;
   columns: string[];
@@ -198,6 +201,8 @@ function ValueHelp({
   onOpen: () => void;
   columnLabels?: Record<string, string>;
   hidden?: string[];
+  /** field + suggestion `text` show the option key; the label moves to additionalText */
+  showValue?: boolean;
 }) {
   const [typed, setTyped] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -206,10 +211,12 @@ function ValueHelp({
   const [picked, setPicked] = useState<{ value: Val; label: string } | null>(null);
   const remote = useRemoteSearch(onSearch);
 
-  const label =
+  const raw = value === undefined || value === null ? "" : String(value);
+  const label = showValue ? raw : (
     options.find((o) => o.value === value)?.label ??
     (picked && picked.value === value ? picked.label : undefined) ??
-    (value === undefined || value === null ? "" : String(value));
+    raw
+  );
   const shown = typed ?? label;
 
   // filter="None" on the Input, and no local filter here: the server already searched for the same
@@ -221,7 +228,7 @@ function ValueHelp({
       value: v,
       label: matchedLabel ?? options.find((o) => o.value === v)?.label ?? String(v ?? ""),
     });
-    setTyped(null); // snap the field back to the committed label
+    setTyped(null); // snap the field back to the committed display
     onChange(v, row);
   };
   const commit = (raw: string) => {
@@ -237,7 +244,8 @@ function ValueHelp({
   return (
     <>
       <Input showSuggestions filter="None" value={shown} placeholder="Type or pick…"
-        showClearIcon={!readonly} style={{ width: "100%" }} disabled={disabled} readonly={readonly} valueState={valueState}
+        showClearIcon={!readonly} style={{ width: "100%" }} disabled={disabled} readonly={readonly}
+        valueState={valueState} valueStateMessage={valueStateMessage ? <div>{valueStateMessage}</div> : undefined}
         icon={
           readonly ? undefined
             : loading ? <BusyIndicator active delay={0} size="S" />
@@ -249,9 +257,12 @@ function ValueHelp({
         }
         onInput={(e) => { const t = e.target.value ?? ""; setTyped(t); remote.search(t); }}
         onChange={(e) => commit(e.target.value ?? "")}>
-        {items.map((o, i) => (
-          <SuggestionItem key={i} text={o.label} additionalText={String(o.value ?? "")} />
-        ))}
+        {items.map((o, i) => {
+          const key = String(o.value ?? "");
+          return showValue
+            ? <SuggestionItem key={i} text={key} additionalText={o.label} />
+            : <SuggestionItem key={i} text={o.label} additionalText={key} />;
+        })}
       </Input>
       {open && !pending ? (
         <ValueHelpDialog open headerText={headerText} table={table} valueCol={valueCol} columns={columns}
@@ -293,6 +304,7 @@ export type QuerySource = { kind: "project" | "portal"; modelId: string };
  *  is still findable. */
 export function QueryValueHelp({
   source, canonicalTable, lookupRef, value, onChange, onPick, headerText, disabled, readonly,
+  showValue,
 }: {
   source: QuerySource;
   /** first page already resolved with the form's other lookups; carries the masterdata row's own
@@ -306,6 +318,7 @@ export function QueryValueHelp({
   headerText: string;
   disabled?: boolean;
   readonly?: boolean;
+  showValue?: boolean;
 }) {
   const [search, setSearch] = useState<string | null>(null); // null = untouched; show canonical data without fetching
   const table = lookupRef.source === "manual" ? "" : lookupRef.table;
@@ -357,7 +370,8 @@ export function QueryValueHelp({
         if (row) onPick?.({ columns: resolved.columns, rows: [row] });
         onChange(nv);
       }}
-      disabled={disabled} readonly={readonly} valueState={page.error ? "Negative" : undefined}
+      disabled={disabled} readonly={readonly} showValue={showValue}
+      valueState={page.error ? "Negative" : undefined}
       table={resolved} valueCol={valueCol} columns={displayColumns(lookupRef, resolved.columns)}
       columnLabels={canonicalTable?.labels} hidden={canonicalTable?.hidden}
       onSearch={setSearch} onOpen={() => setSearch("")}

@@ -270,6 +270,9 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
           if (!valueCol) issues.push({ path, message: `table '${ref.table}' declares no columns` });
           for (const col of [...(valueCol ? [valueCol] : []), ...(labelCol ? [labelCol] : [])])
             if (!srcCols.includes(col)) issues.push({ path, message: `table '${ref.table}' has no column '${col}'` });
+          // the picked row's other columns, in row scope as <column>_<source column> — the same
+          // rule a parameter's options domain gets, and bound by the same declaration order.
+          for (const col of derivedColumns(ref, srcCols)) inRow.add(derivedKey(c.key, col));
         }
       }
       inRow.add(c.key);

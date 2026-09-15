@@ -1,4 +1,4 @@
-import { FUNCS, aggregateKey, derivedColumns, derivedKey, type ModelDef, type Param, type TableDef } from "@confire/config-engine";
+import { FUNCS, aggregateKey, derivedColumns, derivedKey, type ModelDef, type Param, type TableColumn, type TableDef } from "@confire/config-engine";
 
 // Suggestion machinery for ExprInput. Completion targets the TRAILING identifier of the
 // value — the common typing flow. // ponytail: caret-aware mid-expression completion needs
@@ -25,6 +25,19 @@ export function modelWithParam(model: ModelDef, p: Param): ModelDef {
 export function modelWithTable(model: ModelDef, t: TableDef): ModelDef {
   if (!t.key) return model;
   return { ...model, tables: [...(model.tables ?? []).filter((x) => x.key !== t.key), t] };
+}
+
+/** What a table's columns put in *row* scope: the column key, plus — for an options cell over
+ *  masterdata — the picked row's other columns as `<column>_<source column>`. Mirror of check.ts's
+ *  `inRow`, and the same standing hazard as the aggregates below: drift and the builder flags an
+ *  identifier the engine resolves. */
+export function rowVars(cols: TableColumn[], tables: TableCols[] = []): string[] {
+  return cols.flatMap((c) => {
+    if (c.cell.kind !== "options") return [c.key];
+    const ref = c.cell.ref;
+    const src = ref.source === "manual" ? undefined : tables.find((t) => t.name === ref.table)?.columns;
+    return [c.key, ...derivedColumns(ref, src).map((col) => derivedKey(c.key, col))];
+  });
 }
 
 export function scopeSuggestions(model: ModelDef, extraVars: string[] = [], tables: TableCols[] = []): Suggestion[] {

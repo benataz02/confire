@@ -58,6 +58,24 @@ const parts: TableDef = {
   ],
 };
 
+/** An options column over masterdata: the picked row's other columns come along as
+ *  `<column>_<source column>`, exactly as a parameter's options domain does. */
+const bought: TableDef = {
+  role: "calc",
+  key: "bought",
+  title: "Bought-in parts",
+  columns: [
+    {
+      key: "item",
+      label: "Item",
+      type: "string",
+      cell: { kind: "options", ref: { source: "table", table: "prices", valueCol: "code" } },
+    },
+    { key: "pieces", label: "Pieces", type: "number", cell: { kind: "input" } },
+    { key: "cost", label: "Cost", type: "number", cell: { kind: "formula", expr: "item_price * pieces" } },
+  ],
+};
+
 const model: ModelDef = {
   ...base,
   tables: [holes, parts],
@@ -103,6 +121,31 @@ describe("evalTableRows", () => {
     expect(evalTableRows(shadowing, [{ section: 3 }], { section: 10 }, lookups.tables)[0]!.twice).toBe(6);
     // a declared column shadows even while empty — the cell reads as zero, not as the model's 10
     expect(evalTableRows(shadowing, [{}], { section: 10 }, lookups.tables)[0]!.twice).toBe(0);
+  });
+
+  test("an options cell derives its source row's other columns into the row scope", () => {
+    const out = evalTableRows(bought, [{ item: "COND-alu", pieces: 2 }], {}, lookups.tables);
+    expect(out[0]!.item_price).toBe(2.5);
+    expect(out[0]!.cost).toBe(5);
+    // the derived key is the row's, not the model's: nothing leaks out of the table
+    expect(bindings(base, lookups, entries).values).not.toHaveProperty("item_price");
+  });
+
+  test("a value with no source row leaves the derived key absent, like an unbound parameter", () => {
+    // an off-page query pick before enrichLookups re-appends it, or a stale code
+    const out = evalTableRows(bought, [{ item: "COND-gone", pieces: 2 }], {}, lookups.tables);
+    expect(out[0]!).not.toHaveProperty("item_price");
+    expect(out[0]!.cost).toBeNull();
+  });
+
+  test("a stored cell on a computed column overrides the formula, and null hands it back", () => {
+    // the salesperson typed 40 over a perimeter of 31.4159 — and the columns downstream follow it
+    const out = evalTableRows(holes, [{ shape: "circular", size: 10, perimeter: 40 }], {}, lookups.tables);
+    expect(out[0]!.perimeter).toBe(40);
+    expect(out[0]!.minutes).toBe(0.8);
+    // cleared: back to the formula, so an override cannot be sticky-by-accident
+    const back = evalTableRows(holes, [{ shape: "circular", size: 10, perimeter: null }], {}, lookups.tables);
+    expect(back[0]!.perimeter).toBeCloseTo(31.4159, 6);
   });
 
   test("a missing cell reads as the type's zero rather than blanking the row", () => {
@@ -182,6 +225,21 @@ describe("checkModel", () => {
 
   test("the fixture with tables is clean", () => {
     expect(checkModel(model, known)).toEqual([]);
+  });
+
+  test("a cell formula and a cost basis may read a derived source column", () => {
+    const m: ModelDef = { ...model, tables: [...model.tables!, bought] };
+    expect(checkModel(m, known)).toEqual([]);
+
+    const typo: ModelDef = {
+      ...model,
+      tables: [...model.tables!, {
+        ...bought,
+        columns: [bought.columns[0]!, bought.columns[1]!,
+          { ...bought.columns[2]!, cell: { kind: "formula", expr: "item_prive * pieces" } }],
+      }],
+    };
+    expect(msgs(typo)).toContain("unknown identifier 'item_prive'");
   });
 
   test("a table key colliding with a parameter", () => {

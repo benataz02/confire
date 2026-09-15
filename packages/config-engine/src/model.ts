@@ -165,8 +165,8 @@ export const TableDefZ = z.discriminatedUnion("role", [
 export type TableDef = z.infer<typeof TableDefZ>;
 export type ItemsTable = Extract<TableDef, { role: "items" }>;
 
-/** Per-project row data, by table key. Only input/option cells are stored: formula cells are
- *  re-evaluated on every read, like every other number in this engine. */
+/** Per-project row data, by table key. Formula cells are re-evaluated on every read, like every
+ *  other number in this engine — unless the row stores one, which is a manual override (tables.ts). */
 export type TableRows = Record<string, Record<string, Val>[]>;
 // same union as EntriesZ, for the same reason: Val's list arm is real (a multicombo cell), and a
 // zod schema narrower than the TS type would fail to typecheck at every call site that stores one.

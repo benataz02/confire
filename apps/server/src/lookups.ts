@@ -1,6 +1,7 @@
 import { refKeyCols, referencedTables } from "@confire/config-engine";
 import type {
-  Entries, LookupRef, ModelDef, ODataQuery, Option, QuerySource, ResolvedLookups, ResolvedTable, Val,
+  Entries, LookupRef, ModelDef, ODataQuery, Option, QuerySource, ResolvedLookups, ResolvedTable,
+  TableRows, Val,
 } from "@confire/config-engine";
 import { andFilter, escapeLiteral } from "@confire/b1";
 import { ORPCError } from "@orpc/server";
@@ -112,8 +113,15 @@ export function withSearch(query: ODataQuery, cols: string[], q: string): ODataQ
 
 /** AND an exact `col eq <literal>` onto a query's $filter. */
 export function withExact(query: ODataQuery, col: string, value: Val): ODataQuery {
-  const literal = typeof value === "string" ? `'${escapeLiteral(value)}'` : String(value);
-  return { ...query, filter: andFilter(query.filter, `${col} eq ${literal}`) };
+  return withAnyOf(query, col, [value]);
+}
+
+/** AND an OR-group of `col eq <literal>` onto a query's $filter: n picked rows, one read.
+ *  andFilter parenthesises both sides, so the group cannot be split by `and` precedence. */
+export function withAnyOf(query: ODataQuery, col: string, values: Val[]): ODataQuery {
+  if (!values.length) return query;
+  const eq = (v: Val) => `${col} eq ${typeof v === "string" ? `'${escapeLiteral(v)}'` : String(v)}`;
+  return { ...query, filter: andFilter(query.filter, values.map(eq).join(" or ")) };
 }
 
 /** Resolve a value-help page request. The query always comes from the tenant's masterdata, never
@@ -156,16 +164,36 @@ export async function fetchQueryTable(
   };
 }
 
+/** Values one enrich read asks for at a time.
+ *  ponytail: a 50-term `or` is a long but ordinary URL; a grid deeper than that leaves the rest
+ *  underived (null in a formula, like an unbound parameter). Page the read if one ever appears. */
+const ENRICH_VALUES_MAX = 50;
+
 /** Add only server-verified rows needed to bind persisted query selections. Domains stay the
- *  canonical first page, and cached lookup objects are never mutated. */
+ *  canonical first page, and cached lookup objects are never mutated. `tableRows` carries the
+ *  project's own grid rows: their option cells derive columns exactly as a parameter does. */
 export async function enrichLookups(
   model: ModelDef,
   rows: MasterdataRow[],
   entries: Entries,
   canonical: ResolvedLookups,
   run: QueryRunner,
+  tableRows: TableRows = {},
 ): Promise<ResolvedLookups> {
   let tables = canonical.tables;
+  /** Append one fetched row under the canonical table's own column order, copy-on-write. */
+  const append = (name: string, cols: string[], row: Val[]) => {
+    const current = tables[name];
+    const base = current?.columns.length ? current : { ...current, columns: cols, rows: current?.rows ?? [] };
+    const aligned = base.columns.map((col) => {
+      const i = cols.indexOf(col);
+      return i < 0 ? null : (row[i] ?? null);
+    });
+    if (base.rows.some((r) => r.length === aligned.length && r.every((v, i) => v === aligned[i]))) return;
+    if (tables === canonical.tables) tables = { ...tables };
+    tables[name] = { ...base, rows: [...base.rows, aligned] };
+  };
+
   for (const p of model.parameters) {
     const ref = p.domain?.kind === "options" ? p.domain.ref : undefined;
     const value = entries[p.key];
@@ -191,14 +219,39 @@ export async function enrichLookups(
     const row = fetched.rows[0];
     if (!row || fetchedKey < 0 || row[fetchedKey] !== value) throw invalid();
 
-    const base = current?.columns.length ? current : { ...current, columns: fetched.columns, rows: current?.rows ?? [] };
-    const appended = base.columns.map((col) => {
-      const i = fetched.columns.indexOf(col);
-      return i < 0 ? null : (row[i] ?? null);
-    });
-    if (!base.rows.some((r) => r.length === appended.length && r.every((v, i) => v === appended[i]))) {
-      if (tables === canonical.tables) tables = { ...tables };
-      tables[ref.table] = { ...base, rows: [...base.rows, appended] };
+    append(ref.table, fetched.columns, row);
+  }
+
+  // A table's option cells have the same off-page problem an entry does — and a grid is n rows
+  // deep, so the values are OR'd into one read per column rather than one read per row. A value
+  // that comes back with nothing is left alone: unlike a parameter's, a stale cell does not
+  // invalidate the configuration, and failing here would make the project unopenable.
+  for (const def of model.tables ?? []) {
+    const defRows = tableRows[def.key] ?? [];
+    if (!defRows.length) continue;
+    for (const c of def.columns) {
+      if (c.cell.kind !== "options" || c.cell.ref.source !== "query") continue;
+      const ref = c.cell.ref;
+      const source = queryRowOf(rows, ref.table)?.query;
+      const valueCol = source && refKeyCols(ref, source.columns).valueCol;
+      if (!source || !valueCol || !IDENT.test(valueCol)) continue; // checkModel's business, not the read path's
+
+      const current = tables[ref.table];
+      const ci = current?.columns.indexOf(valueCol) ?? -1;
+      const have = new Set(ci < 0 ? [] : current!.rows.map((r) => r[ci]));
+      const missing = [...new Set(
+        defRows
+          .map((r) => r[c.key])
+          .filter((v): v is Val =>
+            v !== undefined && v !== null && !Array.isArray(v) && !have.has(v)
+            && (typeof v !== "number" || Number.isFinite(v))),
+      )].slice(0, ENRICH_VALUES_MAX);
+      if (!missing.length) continue;
+
+      const fetched = await fetchQueryTable(
+        run, source.target, withAnyOf(source.query, valueCol, missing), source.columns,
+      );
+      for (const row of fetched.rows) append(ref.table, fetched.columns, row);
     }
   }
   return tables === canonical.tables ? canonical : { domains: canonical.domains, tables };

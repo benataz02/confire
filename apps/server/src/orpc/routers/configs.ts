@@ -95,14 +95,17 @@ export function cachedLookups(
 }
 
 /** Cached lookups plus the off-page query rows a persisted entry depends on — the one call every
- *  read path makes. `enrichLookups` is not optional: a stored entry can name a row that is not on
- *  the canonical first page. */
+ *  read path makes. `enrichLookups` is not optional: a stored entry, or a stored grid cell, can
+ *  name a row that is not on the canonical first page. */
 export async function enrichedLookups(
-  tenantId: string, model: Awaited<ReturnType<typeof loadModel>>, entries: Entries, run?: QueryRunner,
+  tenantId: string, model: Awaited<ReturnType<typeof loadModel>>, entries: Entries,
+  run?: QueryRunner, tableRows?: TableRows,
 ): Promise<ResolvedLookups> {
   const rows = await masterdataRows(tenantId);
   const runner = run ?? (await modelRunner(tenantId, model.definition, rows));
-  return enrichLookups(model.definition, rows, entries, await cachedLookups(tenantId, model, runner, rows), runner);
+  return enrichLookups(
+    model.definition, rows, entries, await cachedLookups(tenantId, model, runner, rows), runner, tableRows,
+  );
 }
 
 /** One page of a model's query table, for the value help. The caller names a table; the query is
@@ -138,9 +141,11 @@ export async function queryTablePage(
 /** Live model + lookups for a stored calculation. There is no snapshot: stored candidates are
  *  always re-priced against what the model and SAP say now. `enrichLookups` is not optional — it
  *  re-appends the off-page query rows a persisted entry may depend on. */
-export async function liveEngine(tenantId: string, project: { modelId: string; entries: Entries }) {
+export async function liveEngine(
+  tenantId: string, project: { modelId: string; entries: Entries; tables?: TableRows },
+) {
   const model = await loadModel(tenantId, project.modelId);
-  return { model, lookups: await enrichedLookups(tenantId, model, project.entries) };
+  return { model, lookups: await enrichedLookups(tenantId, model, project.entries, undefined, project.tables) };
 }
 
 /** The calculate path, shared by configs.calculate and portal.run.
@@ -180,7 +185,7 @@ export async function calculateProject(
     };
   }
 
-  const lookups = await enrichedLookups(tenantId, model, entries, run);
+  const lookups = await enrichedLookups(tenantId, model, entries, run, tableRows);
 
   try {
     const pre = propagate(model.definition, lookups, entries, tableRows);
@@ -709,7 +714,7 @@ export const configsRouter = {
       // Lookups resolve outside the transaction: they can involve a round trip to the customer's
       // agent, and holding a row lock across that is how you get a pile of stuck writers.
       const [pre] = await db
-        .select({ modelId: configProject.modelId, entries: configProject.entries })
+        .select({ modelId: configProject.modelId, entries: configProject.entries, tables: configProject.tables })
         .from(configProject)
         .where(and(eq(configProject.id, input.projectId), eq(configProject.tenantId, context.tenantId)))
         .limit(1);

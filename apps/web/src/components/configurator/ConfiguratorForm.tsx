@@ -330,7 +330,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
             return <TableGroup key={`${g.table}:${gi}`} def={def} rows={tableRows[g.table] ?? []}
               scopeVars={prop.values} lookups={lk} querySource={querySource}
               disabled={disabled || !onTablesChange} readOnly={readOnly}
-              onChange={(rows) => setRows(g.table, rows)} />;
+              onQueryPick={onQueryPick} onChange={(rows) => setRows(g.table, rows)} />;
           }
           const content = g.params.filter((k) => prop.visible[k]);
           return (

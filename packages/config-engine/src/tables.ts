@@ -1,9 +1,12 @@
 import { evaluate } from "./dsl";
 import {
   aggregateKey,
+  derivedColumns,
+  derivedKey,
   refKeyCols,
   QTY_COL,
   type ItemsTable,
+  type LookupRef,
   type ModelDef,
   type Option,
   type ResolvedLookups,
@@ -37,8 +40,33 @@ export function columnOptions(col: TableColumn, lookups: ResolvedLookups): Optio
   return t.rows.map((r) => ({ value: r[vi] ?? null, label: String((li >= 0 ? r[li] : r[vi]) ?? "") }));
 }
 
+/** The picked row's other columns, bound as `<column>_<source column>` — the same rule a
+ *  parameter's options domain gets (propagate.ts), scoped to the row it was picked in. A `table`
+ *  source is resolved whole, so this always binds; a `query` source resolves one page, and a value
+ *  off it leaves the keys absent — undecidable, exactly like an unbound parameter. That is what
+ *  enrichLookups (server) and the value help's onPick (browser) re-append the picked row for. */
+function derivedCells(
+  key: string,
+  ref: LookupRef,
+  value: Val,
+  tables?: Record<string, ResolvedTable>,
+): Record<string, Val> {
+  const t = ref.source === "manual" ? undefined : tables?.[ref.table];
+  if (!t) return {};
+  const vi = t.columns.indexOf(refKeyCols(ref, t.columns).valueCol);
+  const src = vi < 0 ? undefined : t.rows.find((r) => r[vi] === value);
+  if (!src) return {};
+  const out: Record<string, Val> = {};
+  for (const col of derivedColumns(ref, t.columns)) {
+    const ci = t.columns.indexOf(col);
+    out[derivedKey(key, col)] = ci < 0 ? null : (src[ci] ?? null);
+  }
+  return out;
+}
+
 /**
- * Stored cells as-is, formula cells evaluated against the model scope plus the row's own cells.
+ * Stored cells as-is, formula cells evaluated against the model scope plus the row's own cells —
+ * unless the row stores one, which wins (see the override note below).
  * Row cells shadow model identifiers, which is what lets a column be named `width` next to a
  * parameter called `width`.
  *
@@ -60,15 +88,27 @@ export function evalTableRows(
       const v = row[c.key] ?? zeroOf(c.type);
       out[c.key] = v;
       vars[c.key] = v;
+      // derived cells go into `out` as well as `vars`: basisExpr reads the returned row.
+      if (c.cell.kind === "options") {
+        const d = derivedCells(c.key, c.cell.ref, v, tables);
+        Object.assign(vars, d);
+        Object.assign(out, d);
+      }
     }
     for (const c of def.columns) {
       if (c.cell.kind !== "formula") continue;
+      // A stored cell on a computed column is a manual override: the salesperson typed over the
+      // formula, and the server prices what they saw. Clearing the cell (null) hands the row back
+      // to the formula, which is why absence — not a sentinel — is what "no override" looks like.
+      const override = row[c.key];
       let v: Val;
-      try {
-        v = evaluate(c.cell.expr, { vars, tables });
-      } catch {
-        v = null; // undecidable while the row is incomplete, exactly like an unbound parameter
-      }
+      if (override !== undefined && override !== null) v = override;
+      else
+        try {
+          v = evaluate(c.cell.expr, { vars, tables });
+        } catch {
+          v = null; // undecidable while the row is incomplete, exactly like an unbound parameter
+        }
       out[c.key] = v;
       vars[c.key] = v;
     }

@@ -4,11 +4,13 @@ import {
   Bar, Button, Dialog, Form, FormGroup, FormItem, Input, MessageStrip, ObjectStatus, Option, Select,
   StepInput, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text,
 } from "@ui5/webcomponents-react";
-import { checkModel, QTY_COL, type LookupRef, type ModelDef, type TableColumn, type TableDef } from "@confire/config-engine";
+import { checkModel, QTY_COL, RESERVED_LINE_FIELDS, type LookupRef, type ModelDef, type TableColumn, type TableDef, type Val } from "@confire/config-engine";
+import type { B1EntitySchema, B1Field } from "@confire/b1";
 import { orpc } from "../../orpc.ts";
+import { ValueHelp } from "../ValueHelp.tsx";
 import { ExprInput } from "./ExprInput.tsx";
 import { PAIRS, W, lbl } from "./ParamDialog.tsx";
-import { modelWithTable, type TableCols } from "./exprHelpers.ts";
+import { modelWithTable, rowVars, type TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 
 const optValue = (e: { detail: { selectedOption: unknown } }) => (e.detail.selectedOption as HTMLElement).dataset.v!;
@@ -57,15 +59,26 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
   onOk: (t: TableDef) => void;
 }) {
   const [t, setT] = useState<TableDef>(initial);
+  // Nothing is wrong until the author says they are done: a half-typed key or an empty option
+  // list is a work in progress, not a mistake. Save is the moment that judgement is asked for.
+  const [tried, setTried] = useState(false);
   const edit = (fn: (x: TableDef) => TableDef) => setT((x) => fn(x));
   const editCols = (fn: (c: TableColumn[]) => TableColumn[]) =>
     edit((x) => ({ ...x, columns: fn(x.columns) }) as TableDef);
   const setCol = (j: number, patch: Partial<TableColumn>) =>
     editCols((cs) => cs.map((c, k) => (k === j ? ({ ...c, ...patch } as TableColumn) : c)));
 
-  // Only the mapping dropdown depends on SAP. It failing must not block model authoring, so the
-  // map cell falls back to a free-text field rather than this dialog refusing to render.
-  const lineFields = useQuery({ ...orpc.models.lineFields.queryOptions(), retry: false, staleTime: 60 * 60_000 });
+  // Only the column mapping depends on SAP. It failing must not block model authoring, so the map
+  // cell falls back to a free-text field rather than this dialog refusing to render.
+  // The same cached Quotations schema the B1 pages read: it is served from entity_meta in Postgres
+  // and only re-read from $metadata on an explicit Refresh, so a day in the browser costs nothing
+  // and a UDF added in B1 shows up as soon as that row is refreshed.
+  const schema = useQuery({
+    ...orpc.entities.schema.queryOptions({ input: { entity: "Quotations" } }),
+    retry: false,
+    staleTime: 24 * 60 * 60_000,
+  });
+  const lineFields = useMemo(() => (schema.data ? lineFieldsOf(schema.data) : null), [schema.data]);
 
   // Validate against the draft with this buffered table spliced in, so a cell formula reading
   // another of its own aggregates resolves before the table is committed.
@@ -78,6 +91,10 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
   const locked = lockedColumns(t);
   const keyOk = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(t.key);
   const keyTaken = (draft.tables ?? []).some((x) => x.key === t.key && x.key !== initial.key);
+  const blocked = !keyOk || keyTaken || !t.columns.length;
+  const errors = tried
+    ? [...(t.columns.length ? [] : ["Add at least one column."]), ...mine.map((x) => x.message)]
+    : [];
 
   return (
     <Dialog open onClose={onCancel} className="confire-pd"
@@ -87,16 +104,16 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
       footer={
         <Bar design="Footer" endContent={
           <>
-            <Button design="Emphasized" disabled={!keyOk || keyTaken || !t.columns.length}
-              onClick={() => onOk(t)}>Save</Button>
+            <Button design="Emphasized"
+              onClick={() => (blocked ? setTried(true) : onOk(t))}>Save</Button>
             <Button onClick={onCancel}>Cancel</Button>
           </>
         } />
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1rem" }}>
-        {mine.length ? (
-          <MessageStrip design="Negative" hideCloseButton>{mine.map((x) => x.message).join(" · ")}</MessageStrip>
+        {errors.length ? (
+          <MessageStrip design="Negative" hideCloseButton>{errors.join(" · ")}</MessageStrip>
         ) : null}
         {isItems ? (
           <ObjectStatus state="Information">Required — these rows become the quotation lines</ObjectStatus>
@@ -105,7 +122,7 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
         <Form {...PAIRS}>
           <FormGroup accessibleName="Table">
             <FormItem labelContent={lbl("Key", "The name formulas use. This table contributes <key>_count and one sum per numeric column to every expression scope.", true)}>
-              <Input value={t.key} style={W} valueState={keyOk && !keyTaken ? "None" : "Negative"}
+              <Input value={t.key} style={W} valueState={!tried || (keyOk && !keyTaken) ? "None" : "Negative"}
                 valueStateMessage={<div>{keyTaken ? "Another table already uses this key." : "Must be a valid identifier."}</div>}
                 onInput={(e) => edit((x) => ({ ...x, key: e.target.value }) as TableDef)} />
             </FormItem>
@@ -133,9 +150,9 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
             <FormGroup accessibleName="Cost basis" columnSpan={2} colSpan="S1 M1 L1 XL1">
               <FormItem labelContent={lbl("Cost basis", "How the configuration's price is divided between rows: evaluated once per row, with that row's own columns in scope, then weighted by the row's quantity. Leave it at 1 to split by quantity alone.", true)}>
                 <ExprInput value={t.basisExpr} model={scope} tables={tables} rows={2} style={W}
-                  extraVars={t.columns.map((c) => c.key)}
+                  extraVars={rowVars(t.columns, tables)}
                   fieldId={`expr-tables[${at}].basisExpr`}
-                  issue={issueFor(issues, `tables[${at}].basisExpr`)}
+                  issue={tried ? issueFor(issues, `tables[${at}].basisExpr`) : undefined}
                   onChange={(v) => edit((x) => ({ ...x, basisExpr: v ?? "" }) as TableDef)} />
               </FormItem>
             </FormGroup>
@@ -202,9 +219,9 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
                   // Same scope check.ts applies: the model's identifiers plus this row's
                   // earlier columns. A reference to a later column is an error, not a cycle.
                   <ExprInput value={c.cell.expr} model={scope} tables={tables}
-                    extraVars={t.columns.slice(0, j).map((x) => x.key)}
+                    extraVars={rowVars(t.columns.slice(0, j), tables)}
                     fieldId={`expr-tables[${at}].columns[${j}]`}
-                    issue={issueFor(issues, `tables[${at}].columns[${j}].cell`)}
+                    issue={tried ? issueFor(issues, `tables[${at}].columns[${j}].cell`) : undefined}
                     onChange={(v) => setCol(j, { cell: { kind: "formula", expr: v ?? "" } })} />
                 ) : c.cell.kind === "options" ? (
                   <OptionsCell col={c} tables={tables}
@@ -215,15 +232,22 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
               </TableCell>
               {isItems ? (
                 <TableCell>
-                  <LineFieldSelect value={t.map?.[c.key] ?? ""}
-                    fields={lineFields.data ?? null} loading={lineFields.isPending}
-                    onChange={(field) =>
-                      edit((x) => {
-                        const map = { ...((x as Extract<TableDef, { role: "items" }>).map ?? {}) };
-                        if (field) map[c.key] = field;
-                        else delete map[c.key];
-                        return { ...x, map: Object.keys(map).length ? map : undefined } as TableDef;
-                      })} />
+                  {/* Quantity is not the author's to map: config-quote.ts writes
+                      DocumentLine.Quantity itself (row quantity x batch), and RESERVED_LINE_FIELDS
+                      rejects a mapping to it — so show where it lands and leave it alone. */}
+                  {c.key === QTY_COL ? (
+                    <Input style={W} value="Quantity" readonly />
+                  ) : (
+                    <LineFieldHelp value={t.map?.[c.key] ?? ""}
+                      fields={lineFields} loading={schema.isPending}
+                      onChange={(field) =>
+                        edit((x) => {
+                          const map = { ...((x as Extract<TableDef, { role: "items" }>).map ?? {}) };
+                          if (field) map[c.key] = field;
+                          else delete map[c.key];
+                          return { ...x, map: Object.keys(map).length ? map : undefined } as TableDef;
+                        })} />
+                  )}
                 </TableCell>
               ) : null}
             </TableRow>
@@ -281,13 +305,46 @@ function OptionsCell({ col, tables, onChange }: {
   );
 }
 
-/** The tenant's own DocumentLine UDFs when SAP answers, a free-text field when it does not. */
-function LineFieldSelect({ value, fields, loading, onChange }: {
+/** Every DocumentLine field the tenant's own B1 exposes and a user may set, from the cached
+ *  Quotations schema. Not a curated list: the only ones held back are the collections (a cell is
+ *  one value) and the four the price split owns — everything else on that customer's line, UDF or
+ *  standard, is theirs to map. */
+const lineFieldsOf = (schema: B1EntitySchema): B1Field[] =>
+  (schema.fields.find((f) => f.name === "DocumentLines")?.fields ?? [])
+    .filter((f) => f.kind !== "collection" && !RESERVED_LINE_FIELDS.has(f.name))
+    .sort((a, b) => Number(!!b.isUDF) - Number(!!a.isUDF) || a.name.localeCompare(b.name));
+
+const FIELD_LABELS = { name: "Field", label: "Description", type: "Type" };
+
+/** The tenant's own DocumentLine fields as a value help, a free-text field when SAP is unreachable.
+ *  A value help rather than a Select because there are hundreds of them: typing filters, and the
+ *  F4 dialog shows the description and type next to the name. Search is local — the whole list is
+ *  already in memory, so "the server already searched" does not apply here. */
+function LineFieldHelp({ value, fields, loading, onChange }: {
   value: string;
-  fields: { name: string; label: string; isUDF: boolean }[] | null;
+  fields: B1Field[] | null;
   loading: boolean;
   onChange: (field: string) => void;
 }) {
+  const [search, setSearch] = useState<string | null>(null);
+
+  const shown = useMemo(() => {
+    const q = (search ?? "").trim().toLowerCase();
+    const all = fields ?? [];
+    return q ? all.filter((f) => `${f.name} ${f.label ?? ""}`.toLowerCase().includes(q)) : all;
+  }, [fields, search]);
+  const table = useMemo(
+    () => ({
+      columns: ["name", "label", "type"],
+      rows: shown.map((f) => [f.name, f.label ?? f.name, f.isUDF ? `${f.kind} · UDF` : f.kind] as Val[]),
+    }),
+    [shown],
+  );
+  const options = useMemo(
+    () => shown.map((f) => ({ value: f.name as Val, label: f.label && f.label !== f.name ? `${f.label} (${f.name})` : f.name })),
+    [shown],
+  );
+
   if (!fields)
     return (
       <Input style={W} value={value} disabled={loading}
@@ -295,21 +352,18 @@ function LineFieldSelect({ value, fields, loading, onChange }: {
         onInput={(e) => onChange(e.target.value)} />
     );
   // A seeded mapping (U_CF_ItemCode) only resolves if the tenant actually created the UDF. Keep
-  // the value and say so, rather than letting the Select fall blank and drop the mapping silently:
-  // the alternative surfaces as a 400 from B1 at the moment the quote is posted.
+  // the value and say so, rather than dropping the mapping silently: the alternative surfaces as
+  // a 400 from B1 at the moment the quote is posted.
   const missing = !!value && !fields.some((f) => f.name === value);
   return (
-    <Select style={W} value={value} valueState={missing ? "Critical" : "None"}
-      valueStateMessage={<div>{`${value} does not exist on this tenant's DocumentLines — create the UDF in B1, or map the column to another field.`}</div>}
-      onChange={(e) => onChange(optValue(e))}>
-      <Option value="" data-v="" selected={!value}>— not written —</Option>
-      {missing ? <Option value={value} data-v={value} selected additionalText="missing">{value}</Option> : null}
-      {fields.map((f) => (
-        <Option key={f.name} value={f.name} data-v={f.name} selected={value === f.name}
-          additionalText={f.isUDF ? "UDF" : undefined}>
-          {f.label === f.name ? f.name : `${f.label} (${f.name})`}
-        </Option>
-      ))}
-    </Select>
+    <ValueHelp
+      options={options} value={value || undefined} headerText="DocumentLine field"
+      table={table} valueCol="name" columns={["label", "type"]} columnLabels={FIELD_LABELS}
+      valueState={missing ? "Critical" : undefined}
+      valueStateMessage={missing
+        ? `${value} does not exist on this tenant's DocumentLines — create the UDF in B1, or map the column to another field.`
+        : undefined}
+      onChange={(v) => onChange(v === undefined || v === null ? "" : String(v))}
+      onSearch={setSearch} onOpen={() => setSearch("")} />
   );
 }

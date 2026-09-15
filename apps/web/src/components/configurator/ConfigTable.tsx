@@ -4,8 +4,8 @@ import {
   TableHeaderRow, TableRow, TableRowAction, Text, Toolbar, ToolbarButton,
 } from "@ui5/webcomponents-react";
 import {
-  aggregateKey, columnOptions, evalTableRows,
-  type ResolvedLookups, type TableColumn, type TableDef, type Val,
+  columnOptions, evalTableRows,
+  type ResolvedLookups, type ResolvedTable, type TableColumn, type TableDef, type Val,
 } from "@confire/config-engine";
 import { QueryValueHelp, type QuerySource } from "../ValueHelp.tsx";
 import { displayValue } from "./formHelpers.ts";
@@ -29,33 +29,28 @@ const header = (c: TableColumn) => c.label + (c.unit ? ` (${c.unit})` : "");
  * than stored. The cell controls follow ConfiguratorForm.control()'s branch order so a column and a
  * parameter of the same type look and behave the same.
  */
-export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled, readOnly, querySource }: {
+export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPick, disabled, readOnly, querySource }: {
   def: TableDef;
   rows: Row[];
   /** the model's current values — row formulas read these, and row cells shadow them */
   scopeVars: Record<string, Val>;
   lookups: ResolvedLookups;
   onChange: (rows: Row[]) => void;
+  /** an off-page query pick, so its `<column>_<source column>` values bind before the next
+   *  recalculate. Keyed per cell — two rows of the same column pick independently. */
+  onQueryPick?: (key: string, table: string, selected: ResolvedTable | undefined) => void;
   disabled?: boolean;
   /** quoted/locked: cells are Text, add/delete are gone. See ConfiguratorForm. */
   readOnly?: boolean;
   querySource: QuerySource;
 }) {
-  // Same function the server runs, so the footer cannot disagree with the price.
+  // Same function the server runs, so a computed cell cannot disagree with the quote.
   const evaluated = useMemo(
     () => evalTableRows(def, rows, scopeVars, lookups.tables),
     [def, rows, scopeVars, lookups],
   );
   // colMinWidth measures positionally, so hand it the grid rather than the keyed rows.
   const grid = useMemo(() => evaluated.map((r) => def.columns.map((c) => r[c.key])), [evaluated, def]);
-  const totals = useMemo(() => {
-    const out = new Map<string, number>();
-    for (const c of def.columns) {
-      if (c.type !== "number") continue;
-      out.set(c.key, evaluated.reduce((a, r) => a + (typeof r[c.key] === "number" ? (r[c.key] as number) : 0), 0));
-    }
-    return out;
-  }, [evaluated, def]);
 
   // An items grid is never capped and never empty: its rows are the quotation's lines.
   const maxRows = def.role === "calc" ? def.maxRows : undefined;
@@ -65,27 +60,46 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
   const cell = (ri: number, c: TableColumn) => {
     const stored = rows[ri]?.[c.key];
     const set = (v: Val) => onChange(setCell(rows, ri, c.key, v));
+    // A computed column is an override, not a lock: the cell shows what the formula says until
+    // someone types over it, and clearing it hands the row back to the formula. Both states live
+    // in the same cell, so `stored != null` is the whole "is this one overridden" question —
+    // evalTableRows applies the same rule server-side, which is what makes the quote agree.
+    const computed = c.cell.kind === "formula";
+    const overridden = computed && stored !== undefined && stored !== null;
+    const value = computed ? (evaluated[ri]?.[c.key] ?? null) : stored;
 
-    if (c.cell.kind === "formula") return <Text>{show(evaluated[ri]?.[c.key] ?? null)}</Text>;
     if (readOnly) {
+      if (computed) return <Text>{show(value ?? null)}</Text>;
       if (c.type === "boolean")
         return <Text>{displayValue(stored, [{ value: true, label: "Yes" }, { value: false, label: "No" }])}</Text>;
-      if (c.cell.kind === "options") return <Text>{displayValue(stored, columnOptions(c, lookups))}</Text>;
+      if (c.cell.kind === "options") {
+        // Items grid: the stored code is what rides to SAP; don't swap it for the lookup label.
+        const opts = def.role === "items" ? [] : columnOptions(c, lookups);
+        return <Text>{displayValue(stored, opts)}</Text>;
+      }
       return <Text>{displayValue(stored, [])}</Text>;
     }
 
     if (c.type === "boolean")
       return (
-        <CheckBox checked={stored === true} disabled={disabled} accessibleName={header(c)}
+        // ponytail: a computed boolean has no "clear" — a checkbox cannot hold three states. Ticking
+        // one overrides it for good; give it a Select if a model ever needs to un-override.
+        <CheckBox checked={value === true} disabled={disabled} accessibleName={header(c)}
           onChange={(e) => set(e.target.checked)} />
       );
 
     if (c.cell.kind === "options" && c.cell.ref.source === "query") {
       const ref = c.cell.ref;
+      const pickKey = `${def.key}.${c.key}.${ri}`;
       return (
         <QueryValueHelp source={querySource} canonicalTable={lookups.tables[ref.table]} lookupRef={ref}
           value={stored ?? undefined} headerText={header(c)} disabled={disabled}
-          onChange={(nv) => set(nv ?? null)} />
+          showValue={def.role === "items"}
+          onPick={(t) => onQueryPick?.(pickKey, ref.table, t)}
+          onChange={(nv) => {
+            if (nv === undefined || nv === null) onQueryPick?.(pickKey, ref.table, undefined);
+            set(nv ?? null);
+          }} />
       );
     }
 
@@ -108,7 +122,12 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
 
     return (
       <Input style={{ width: "100%" }} type={c.type === "number" ? "Number" : "Text"}
-        accessibleName={header(c)} value={stored === undefined || stored === null ? "" : String(stored)}
+        accessibleName={header(c)}
+        value={value === undefined || value === null ? "" : computed ? show(value) : String(value)}
+        // The clear icon IS the revert, and the value state is how a hand-typed number is told
+        // apart from a calculated one at a glance.
+        showClearIcon={overridden} valueState={overridden ? "Information" : "None"}
+        valueStateMessage={<div>Overridden by hand. Clear the field to go back to the formula.</div>}
         disabled={disabled}
         onInput={(e) => {
           const raw = e.target.value ?? "";
@@ -156,22 +175,6 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, disabled,
               ))}
             </TableRow>
           ))}
-          {/* The totals the model's formulas actually see: <table>_<col>. Shown so a salesperson
-              watches the number their routing depends on move as they type, rather than guessing.
-              No `actions`, so the delete column stays blank for it. */}
-          {rows.length ? (
-            <TableRow key="totals" rowKey="totals-0">
-              {def.columns.map((c, i) => (
-                <TableCell key={c.key}>
-                  <Text style={{ fontWeight: "bold" }}>
-                    {i === 0 ? `Σ (${aggregateKey(def.key, "count")} = ${rows.length})`
-                      : totals.has(c.key) ? `${aggregateKey(def.key, c.key)} = ${show(totals.get(c.key)!)}`
-                      : ""}
-                  </Text>
-                </TableCell>
-              ))}
-            </TableRow>
-          ) : null}
         </Table>
       </div>
     </div>

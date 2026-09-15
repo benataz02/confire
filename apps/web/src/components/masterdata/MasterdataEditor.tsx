@@ -95,9 +95,14 @@ export function MasterdataEditor({ id }: { id?: string }) {
   // Panel only animates from its own toggle handler — assigning `collapsed` from outside just
   // re-renders it open. Clicking its toggle button is the interaction path; a frame later, so the
   // result is in the DOM when slideDown measures the height it animates to.
+  // A dispatched MouseEvent rather than `.click()`: `.click()` arrives at x=0/y=0, which Panel
+  // reads as the keyboard path and answers with stopImmediatePropagation, so the click never
+  // reaches the header handler that toggles and the panel stays shut (2.26.0, verified headless).
+  // Coordinates make it the mouse path, which is the one that animates.
   const expandPreview = () => requestAnimationFrame(() => {
-    if (panelRef.current?.collapsed)
-      panelRef.current.shadowRoot?.querySelector<HTMLElement>(".ui5-panel-header-button")?.click();
+    if (!panelRef.current?.collapsed) return;
+    panelRef.current.shadowRoot?.querySelector(".ui5-panel-header-button")
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 1, clientY: 1 }));
   });
   const testFetch = useMutation(orpc.masterdata.queryPage.mutationOptions({
     onSuccess: (r) => {
@@ -137,11 +142,20 @@ export function MasterdataEditor({ id }: { id?: string }) {
     ...saveOpts,
     // The client rules run *as part of* the mutation rather than gating it, so a local problem and
     // a server one land in the same place: `save.error`. That is also what makes the mutation's own
-    // state enough to say whether Save has been pressed — no second flag beside it.
-    mutationFn: (...args: Parameters<NonNullable<typeof saveOpts.mutationFn>>) => {
+    // state enough to say whether Save has been pressed — no second flag beside it. The test fetch
+    // a query kind runs first is a link in that same chain for the same reason: it opens the
+    // preview on its way through, and a query B1 refuses fails the save in that one place.
+    mutationFn: async (...args: Parameters<NonNullable<typeof saveOpts.mutationFn>>) => {
       const i = issueOf(draft!);
       if (i) throw new Error(i);
-      return saveOpts.mutationFn!(...args);
+      const [input, ...rest] = args;
+      if (input.kind !== "query") return saveOpts.mutationFn!(...args);
+      // What gets stored is what the response returned, never what was typed — the rule Test fetch
+      // already followed, now on the only path that writes: a saved $select answered by B1 once.
+      const r = await testFetch.mutateAsync({
+        target: input.query.target, query: input.query.query, columns: input.query.columns, top: PREVIEW_TOP,
+      });
+      return saveOpts.mutationFn!({ ...input, query: pruneColUi({ ...input.query, columns: r.columns }) }, ...rest);
     },
   });
   // `isError`, not `submittedAt`: a submit stamp outlives the save that succeeded, so clearing a
@@ -176,7 +190,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
     return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
   }
   const d = draft;
-  const error = save.error ?? remove.error ?? duplicate.error;
+  const error = save.error ?? testFetch.error ?? remove.error ?? duplicate.error;
   // Both title states: a delete the server refuses has to be readable without scrolling the
   // header shut first.
   const errorStrip = error
@@ -208,7 +222,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
               <Title level="H4">{"Master data " + (d.name || (id ? "Untitled" : "New table"))}</Title>
           }
           snappedContent={errorStrip}
-          //expandedContent={errorStrip}
+          expandedContent={errorStrip}
           actionsBar={
             <Toolbar design="Transparent" accessibleName="Table actions">
               {id ? (
@@ -234,13 +248,13 @@ export function MasterdataEditor({ id }: { id?: string }) {
       }
       footerArea={
         <Bar design="FloatingFooter" endContent={
-          <Button design="Emphasized" disabled={save.isPending}
+          <Button design="Emphasized" disabled={save.isPending || testFetch.isPending}
             onClick={() => save.mutate(
               d.kind === "table"
                 ? { id, name: d.name.trim(), kind: "table", columns: d.columns, rows: d.rows }
                 : { id, name: d.name.trim(), kind: "query", query: d.query },
             )}>
-            {save.isPending ? "Saving…" : "Save"}
+            {testFetch.isPending ? "Testing…" : save.isPending ? "Saving…" : "Save"}
           </Button>
         } />
       }
@@ -434,7 +448,6 @@ export function MasterdataEditor({ id }: { id?: string }) {
                     </Button>
                   </div>
                 }>
-              {testFetch.error ? <MessageStrip design="Negative" hideCloseButton>{testFetch.error.message}</MessageStrip> : null}
               {preview ? (
                 // Scroll, not Popin: popped-in columns stack *inside* the row, which is the row
                 // growing taller. Long values truncate (maxLines) and the table scrolls instead.

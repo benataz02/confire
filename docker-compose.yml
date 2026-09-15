@@ -4,15 +4,15 @@ services:
   db:
     image: postgres:17
     environment:
-      POSTGRES_USER: hera
-      POSTGRES_PASSWORD: hera
-      POSTGRES_DB: hera
+      POSTGRES_USER: confire
+      POSTGRES_PASSWORD: confire
+      POSTGRES_DB: confire
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hera"]
+      test: ["CMD-SHELL", "pg_isready -U confire"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -25,7 +25,7 @@ services:
       args:
         VITE_APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-confire.local}
     environment:
-      DATABASE_URL: postgres://hera:hera@db:5432/hera
+      DATABASE_URL: postgres://confire:confire@db:5432/confire
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev-secret-change-me-min-32-chars-long}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
       APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-confire.local}

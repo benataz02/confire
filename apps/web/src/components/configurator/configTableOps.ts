@@ -1,13 +1,16 @@
 import type { TableColumn, TableDef, Val } from "@confire/config-engine";
 
-/** One stored row: only the author-declared input/option cells. Formula cells are re-evaluated. */
+/** One stored row: the author-declared input/option cells, plus any computed cell the user typed
+ *  over — an absent formula cell is the normal case and means "follow the formula". */
 export type Row = Record<string, Val>;
 
 /** Coerce raw text to the column's type — same rule as the masterdata editor's `typed`. */
 export const typedCell = (type: TableColumn["type"], raw: string): Val =>
   type === "number" ? (raw === "" ? null : Number(raw)) : type === "boolean" ? raw === "true" : raw;
 
-/** The columns a user can actually fill, in declaration order. */
+/** The columns a pasted block fills, in declaration order.
+ *  ponytail: a computed column is overridable by hand but stays out of a paste — pasting the
+ *  page's own numbers back in would freeze every formula at once. Include them if authors ask. */
 export const inputColumns = (def: TableDef): TableColumn[] => def.columns.filter((c) => c.cell.kind !== "formula");
 
 export const addRow = (rows: Row[]): Row[] => [...rows, {}];
