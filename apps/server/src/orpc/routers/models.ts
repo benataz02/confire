@@ -4,7 +4,7 @@ import { and, count, eq, inArray, max } from "drizzle-orm";
 import { db, configHistory, configModel, configProject } from "@confire/db";
 import { checkModel, ModelDefZ } from "@confire/config-engine";
 import { adminProcedure } from "../base.ts";
-import { queryRowsFor, resolveLookups } from "../../lookups.ts";
+import { queryRowOf, queryRowsFor, resolveLookups } from "../../lookups.ts";
 import { knownTables, masterdataRows } from "./masterdata.ts";
 import { runnerFor, tenantConnector } from "../../b1.ts";
 import { syncModelHistory } from "../../history-sync.ts";
@@ -91,7 +91,7 @@ export const modelsRouter = {
   // client-side copy would silently drop portalDescription (a column, not part of the jsonb).
   // No checkModel: a byte-identical copy of a stored definition either already passed on save, or
   // now fails only because masterdata was deleted since — an unhelpful error on an unedited copy.
-  // config_history is not copied; the definition keeps history.query, so "Sync now" repopulates it.
+  // config_history is not copied; the definition keeps history.table, so "Sync now" repopulates it.
   duplicate: adminProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
     const [row] = await db
       .select()
@@ -142,9 +142,13 @@ export const modelsRouter = {
       .where(and(eq(configModel.id, input.id), eq(configModel.tenantId, context.tenantId)))
       .limit(1);
     if (!m) throw new ORPCError("NOT_FOUND");
-    if (!m.definition.history?.query)
-      throw new ORPCError("BAD_REQUEST", { message: "Save a history query first" });
-    return syncModelHistory(context.tenantId, m.id, m.definition, runnerFor(await tenantConnector(context.tenantId)));
+    const name = m.definition.history?.table;
+    if (!name)
+      throw new ORPCError("BAD_REQUEST", { message: "Pick a masterdata query on the History tab, then save." });
+    const q = queryRowOf(await masterdataRows(context.tenantId), name);
+    if (!q)
+      throw new ORPCError("BAD_REQUEST", { message: `Unknown query '${name}'` });
+    return syncModelHistory(context.tenantId, m.id, q.query, runnerFor(await tenantConnector(context.tenantId)));
   }),
 
   historyInfo: adminProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {

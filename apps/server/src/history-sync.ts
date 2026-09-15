@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db, configHistory } from "@confire/db";
-import type { ModelDef, Val } from "@confire/config-engine";
+import type { QuerySource, Val } from "@confire/config-engine";
 import { fetchQueryTable, type QueryRunner } from "./lookups.ts";
 
 // Pull a model's history query rows into config_history, wholesale (delete + insert, one tx).
@@ -31,11 +31,9 @@ export async function loadHistoryRows(tenantId: string, modelId: string): Promis
 export async function syncModelHistory(
   tenantId: string,
   modelId: string,
-  def: ModelDef,
+  q: QuerySource,
   run: QueryRunner,
 ): Promise<{ count: number }> {
-  const q = def.history?.query;
-  if (!q) throw new Error("Model has no history query");
   // ponytail: capped synchronous walk. The cap is stated here, at the call site, precisely
   // because packages/b1 has no readAll to hide it in.
   const t = await fetchQueryTable(run, q.target, q.query, q.columns, { maxPages: HISTORY_MAX_PAGES });

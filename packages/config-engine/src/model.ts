@@ -232,10 +232,11 @@ export const ModelDefZ = z.object({
   bom: z.array(BomLineZ),
   routing: z.array(OperationZ),
   // No item-code pointer here: exact help reads the items grid's ITEM_COL column, which every
-  // items table already declares. This object is only the similarity cache's configuration.
+  // items table already declares. This object is only the similarity cache's configuration —
+  // `table` names a tenant masterdata query; the query itself is not stored on the model.
   history: z
     .object({
-      query: QuerySourceZ.optional(),
+      table: z.string().min(1).optional(),
       mappings: z.array(HistoryMappingZ),
       display: z.array(z.string()),
     })

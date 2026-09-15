@@ -65,4 +65,15 @@ describe("LookupRef columns", () => {
     m.queryTables = [{ name: "items", target: "b1", query: { entitySet: "Items" }, columns: ["ItemCode"] }];
     expect("queryTables" in ModelDefZ.parse(m)).toBe(false);
   });
+
+  test("history names a masterdata query rather than carrying one", () => {
+    const m = structuredClone(model) as Record<string, unknown>;
+    m.history = {
+      query: { target: "b1", query: { entitySet: "X" }, columns: ["mat"] },
+      table: "past",
+      mappings: [],
+      display: [],
+    };
+    expect(ModelDefZ.parse(m).history).toEqual({ table: "past", mappings: [], display: [] });
+  });
 });

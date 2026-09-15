@@ -96,20 +96,20 @@ describe("checkModel", () => {
   test("history: valid config is clean", () => {
     const m = structuredClone(model);
     m.history = {
-      query: { target: "b1", query: { entitySet: "X" }, columns: ["mat", "sec", "price"] },
+      table: "past",
       mappings: [
         { param: "material", column: "mat", match: "exact", weight: 2 },
         { param: "section", column: "sec", match: "closeness", weight: 1 },
       ],
       display: ["price"],
     };
-    expect(checkModel(m, PRICES)).toEqual([]);
+    expect(checkModel(m, [...PRICES, { name: "past", columns: ["mat", "sec", "price"] }])).toEqual([]);
   });
 
   test("history: unknown param, closeness on non-number, unknown columns", () => {
     const m = structuredClone(model);
     m.history = {
-      query: { target: "b1", query: { entitySet: "X" }, columns: ["mat"] },
+      table: "past",
       mappings: [
         { param: "ghost", column: "mat", match: "exact", weight: 1 },
         { param: "material", column: "mat", match: "closeness", weight: 1 },
@@ -117,7 +117,7 @@ describe("checkModel", () => {
       ],
       display: ["also_missing"],
     };
-    const issues = checkModel(m, PRICES);
+    const issues = checkModel(m, [...PRICES, { name: "past", columns: ["mat"] }]);
     expect(issues.some((i) => i.path === "history.mappings[0]" && i.message.includes("ghost"))).toBe(true);
     expect(issues.some((i) => i.path === "history.mappings[1]" && i.message.includes("closeness"))).toBe(true);
     expect(issues.some((i) => i.path === "history.mappings[2]" && i.message.includes("missing"))).toBe(true);
@@ -127,7 +127,13 @@ describe("checkModel", () => {
   test("history: mappings without a query flagged", () => {
     const m = structuredClone(model);
     m.history = { mappings: [{ param: "material", column: "mat", match: "exact", weight: 1 }], display: [] };
-    expect(checkModel(m, PRICES).some((i) => i.path === "history.query")).toBe(true);
+    expect(checkModel(m, PRICES).some((i) => i.path === "history.table")).toBe(true);
+  });
+
+  test("history: unknown masterdata name flagged", () => {
+    const m = structuredClone(model);
+    m.history = { table: "ghost", mappings: [], display: [] };
+    expect(checkModel(m, PRICES).some((i) => i.path === "history.table" && i.message.includes("ghost"))).toBe(true);
   });
 });
 
@@ -228,5 +234,11 @@ describe("referencedTables", () => {
     m.computed[0]!.expr = "1 + "; // checkModel's problem, not this one's
     m.parameters[0]!.domain = { kind: "options", ref: { source: "manual", options: [{ value: "a" }] } };
     expect([...referencedTables(m)]).toEqual(["prices"]); // still found, in the fixture's bom price
+  });
+
+  it("does not treat the history cache source as a live lookup", () => {
+    const m = structuredClone(model);
+    m.history = { table: "past", mappings: [], display: [] };
+    expect([...referencedTables(m)]).toEqual(["prices"]);
   });
 });

@@ -291,13 +291,16 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
     }
   });
 
-  // history: mapped params exist, closeness only on numbers, columns ⊆ query.columns
+  // history: named masterdata exists, mapped params exist, closeness only on numbers,
+  // columns ⊆ that table. The query itself lives in masterdata, not on the model.
   if (model.history) {
     const h = model.history;
     const paramOf = (k: string) => model.parameters.find((p) => p.key === k);
-    if (h.mappings.length && !h.query)
-      issues.push({ path: "history.query", message: "similarity mappings need a history query" });
-    const qCols = h.query?.columns ?? [];
+    if (h.mappings.length && !h.table)
+      issues.push({ path: "history.table", message: "similarity mappings need a history query" });
+    if (h.table && !tableCols.has(h.table))
+      issues.push({ path: "history.table", message: `unknown table '${h.table}'` });
+    const qCols = (h.table && tableCols.get(h.table)) ?? [];
     h.mappings.forEach((m, i) => {
       const p = paramOf(m.param);
       if (!p) issues.push({ path: `history.mappings[${i}]`, message: `unknown parameter '${m.param}'` });
@@ -316,10 +319,12 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
 }
 
 
-/** Every masterdata table this model names: domain refs plus statically-known LOOKUP() first
- *  arguments. The server fetches only these, so a tenant's other live queries cost nothing —
- *  a LOOKUP whose table name is computed at runtime cannot be seen here, which is why
- *  `checkModel` only accepts string literals there in the first place. */
+/** Every masterdata table this model names as a *live lookup*: domain refs plus statically-known
+   *  LOOKUP() first arguments. History's cache source is not included — sync fetches that query
+   *  wholesale, and putting it here would pull it onto every calculate. The server fetches only
+   *  these, so a tenant's other live queries cost nothing — a LOOKUP whose table name is computed
+   *  at runtime cannot be seen here, which is why `checkModel` only accepts string literals there
+   *  in the first place. */
 export function referencedTables(model: ModelDef): Set<string> {
   const out = new Set<string>();
   for (const p of model.parameters) {

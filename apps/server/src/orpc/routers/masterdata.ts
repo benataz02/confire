@@ -182,7 +182,10 @@ export const masterdataRouter = {
     // the batch size (see the ponytail note above).
     const used = new Map<string, string[]>();
     for (const m of models) {
+      // history.table is a cache source, not a live lookup, so referencedTables omits it — still
+      // a name this model holds, and deleting it would leave Sync now pointing at nothing.
       const refs = referencedTables(m.definition);
+      if (m.definition.history?.table) refs.add(m.definition.history.table);
       for (const r of rows) if (refs.has(r.name)) used.set(r.name, [...(used.get(r.name) ?? []), m.name]);
     }
     if (used.size)
