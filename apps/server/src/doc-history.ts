@@ -1,6 +1,6 @@
 import { escapeLiteral, type CrossJoinSpec } from "@confire/b1";
 
-// Exact help: latest Orders/Quotations for the configured item and/or the project customer,
+// Exact help: latest Orders/Quotations for the configuration's item codes and/or its customer,
 // fetched live through the B1 transport. Pure helpers here (testable); the oRPC handler in
 // configs.ts calls crossJoin with what docHistoryQuery returns.
 // B1's $filter parser has no lambda operators, so a document can't be filtered by its lines
@@ -26,12 +26,15 @@ export type DocRow = {
 
 export function docHistoryQuery(
   entity: "Orders" | "Quotations",
-  opts: { itemCode?: string; cardCode?: string; top?: number },
+  opts: { itemCodes?: string[]; cardCode?: string; top?: number },
 ): CrossJoinSpec {
   const clauses: string[] = [];
   if (opts.cardCode) clauses.push(`${entity}/CardCode eq '${escapeLiteral(opts.cardCode)}'`);
-  if (opts.itemCode) clauses.push(`${entity}/DocumentLines/ItemCode eq '${escapeLiteral(opts.itemCode)}'`);
-  if (!clauses.length) throw new Error("docHistoryQuery needs an itemCode or a cardCode");
+  // n item codes, because the items grid is a list: one clause each, OR-ed into the same group the
+  // customer clause sits in. The caller bounds n (the oRPC input caps it) — this only escapes.
+  for (const code of opts.itemCodes ?? [])
+    clauses.push(`${entity}/DocumentLines/ItemCode eq '${escapeLiteral(code)}'`);
+  if (!clauses.length) throw new Error("docHistoryQuery needs an item code or a cardCode");
   // The DocEntry equality IS the join — without it the crossjoin pairs every document with every
   // line in the company. A customer-matched doc still pairs with all its lines (the header clause
   // holds for each), so the "keep all lines of my customer's docs" behaviour survives the rewrite.
@@ -51,17 +54,18 @@ export function docHistoryQuery(
 export function flattenDocs(
   docType: "order" | "quotation",
   json: unknown,
-  opts: { itemCode?: string; cardCode?: string },
+  opts: { itemCodes?: string[]; cardCode?: string },
 ): DocRow[] {
   const entity = docType === "order" ? "Orders" : "Quotations";
   const pairs = Array.isArray(json) ? json : ((json as { value?: unknown } | null)?.value ?? []);
   if (!Array.isArray(pairs)) return [];
   const out: DocRow[] = [];
+  const wanted = new Set(opts.itemCodes ?? []);
   for (const p of pairs as Record<string, unknown>[]) {
     const d = (p[entity] ?? {}) as Record<string, unknown>;
     const l = (p[`${entity}/DocumentLines`] ?? {}) as Record<string, unknown>;
     const custMatch = !!opts.cardCode && d.CardCode === opts.cardCode;
-    const itemMatch = !!opts.itemCode && l.ItemCode === opts.itemCode;
+    const itemMatch = typeof l.ItemCode === "string" && wanted.has(l.ItemCode);
     if (!itemMatch && !custMatch) continue; // B1 already filtered; this just guards `matched`
     out.push({
       docType,

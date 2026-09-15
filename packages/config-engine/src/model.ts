@@ -142,6 +142,11 @@ const TableBaseZ = {
  *  and a configurable name only ever bought a way for it to dangle. */
 export const QTY_COL = "quantity";
 
+/** The items grid's SAP item code column, fixed for the same reason as QTY_COL: every item row
+ *  carries a code, so the document history matches on this column instead of a model setting
+ *  naming some parameter — one less pointer that can go stale. */
+export const ITEM_COL = "itemcode";
+
 /** `calc` feeds sums into the model's formulas. `items` does that too, and additionally becomes
  *  n quotation lines: merge production is 1 config, 1 BOM, 1 routing, n items. */
 export const TableDefZ = z.discriminatedUnion("role", [
@@ -226,9 +231,10 @@ export const ModelDefZ = z.object({
   constraints: z.array(ConstraintZ),
   bom: z.array(BomLineZ),
   routing: z.array(OperationZ),
+  // No item-code pointer here: exact help reads the items grid's ITEM_COL column, which every
+  // items table already declares. This object is only the similarity cache's configuration.
   history: z
     .object({
-      itemCodeParam: KeyZ.optional(),
       query: QuerySourceZ.optional(),
       mappings: z.array(HistoryMappingZ),
       display: z.array(z.string()),
@@ -295,9 +301,9 @@ export const itemsTable = (): ItemsTable => ({
   title: "Items",
   role: "items",
   basisExpr: "1",
-  map: { itemcode: "U_CF_ItemCode", itemname: "ItemDescription" },
+  map: { [ITEM_COL]: "U_CF_ItemCode", itemname: "ItemDescription" },
   columns: [
-    { key: "itemcode", label: "Item code", type: "string", cell: { kind: "input" } },
+    { key: ITEM_COL, label: "Item code", type: "string", cell: { kind: "input" } },
     { key: "itemname", label: "Item name", type: "string", cell: { kind: "input" } },
     { key: QTY_COL, label: "Quantity", type: "number", cell: { kind: "input" } },
   ],

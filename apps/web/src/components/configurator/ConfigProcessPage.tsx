@@ -249,7 +249,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
       hideSideContent={!railShown && !railMounted}
       sideContent={
         <InsightsRail projectId={id} model={model.definition} lk={lk} prop={prop} entries={entries}
-          onCopy={copyValues} open={openPanels} onToggle={togglePanel}
+          tables={tables} onCopy={copyValues} open={openPanels} onToggle={togglePanel}
           className={railShown ? "confire-rail" : "confire-rail confire-rail-out"} />
       }>
 

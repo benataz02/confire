@@ -99,12 +99,12 @@ function Masterdata() {
       onRowClick={(row) => navigate({ to: "/masterdata/$id", params: { id: String(row.id) } })}
       actions={({ rows: sel, clear }) => (
         <>
-          <Button design="Emphasized" onClick={() => navigate({ to: "/masterdata/new" })}>Create</Button>
-          <Button icon="copy" design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}
+          <Button design="Transparent" onClick={() => navigate({ to: "/masterdata/new" })}>Create</Button>
+          <Button design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}
             onClick={() => duplicate.mutate({ id: String(sel[0]!.id) })}>
             Duplicate
           </Button>
-          <Button icon="delete" design="Transparent" disabled={!sel.length || remove.isPending}
+          <Button design="Transparent" disabled={!sel.length || remove.isPending}
             onClick={() => void del(sel, clear)}>
             Delete
           </Button>

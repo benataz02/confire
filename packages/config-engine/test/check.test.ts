@@ -96,7 +96,6 @@ describe("checkModel", () => {
   test("history: valid config is clean", () => {
     const m = structuredClone(model);
     m.history = {
-      itemCodeParam: "material",
       query: { target: "b1", query: { entitySet: "X" }, columns: ["mat", "sec", "price"] },
       mappings: [
         { param: "material", column: "mat", match: "exact", weight: 2 },
@@ -110,7 +109,6 @@ describe("checkModel", () => {
   test("history: unknown param, closeness on non-number, unknown columns", () => {
     const m = structuredClone(model);
     m.history = {
-      itemCodeParam: "nope",
       query: { target: "b1", query: { entitySet: "X" }, columns: ["mat"] },
       mappings: [
         { param: "ghost", column: "mat", match: "exact", weight: 1 },
@@ -120,7 +118,6 @@ describe("checkModel", () => {
       display: ["also_missing"],
     };
     const issues = checkModel(m, PRICES);
-    expect(issues.some((i) => i.path === "history.itemCodeParam")).toBe(true);
     expect(issues.some((i) => i.path === "history.mappings[0]" && i.message.includes("ghost"))).toBe(true);
     expect(issues.some((i) => i.path === "history.mappings[1]" && i.message.includes("closeness"))).toBe(true);
     expect(issues.some((i) => i.path === "history.mappings[2]" && i.message.includes("missing"))).toBe(true);

@@ -39,21 +39,22 @@ const matchTag = {
 
 const setOf = (docType: "order" | "quotation") => (docType === "order" ? "Orders" : "Quotations");
 
-export function DocHistory({ projectId, model, entries, open }: {
+export function DocHistory({ projectId, itemCodes, open }: {
   projectId: string;
-  model: ModelDef;
-  entries: Entries;
+  /** the item codes in the configuration's items grid — see InsightsRail */
+  itemCodes: string[];
   /** the Documents panel is expanded */
   open: boolean;
 }) {
   const navigate = useNavigate();
-  const h = model.history;
-  const rawItem = h?.itemCodeParam ? entries[h.itemCodeParam] : undefined;
   // Debounced: this key drives two live B1 GETs (Orders + Quotations), and every distinct value
-  // is a cache miss — undebounced, typing the item code is one agent round trip per keystroke.
-  const itemCode = useDebounced(typeof rawItem === "string" && rawItem ? rawItem : undefined, 500);
+  // is a cache miss — undebounced, typing an item code is one agent round trip per keystroke.
+  // A string, not the array: the caller rebuilds the array every render, and an array identity
+  // that changes every render would restart the timer forever.
+  const key = useDebounced(itemCodes.join("\n"), 500);
+  const codes = key ? key.split("\n") : [];
   const q = useQuery({
-    ...orpc.configs.docHistory.queryOptions({ input: { id: projectId, itemCode } }),
+    ...orpc.configs.docHistory.queryOptions({ input: { id: projectId, itemCodes: codes } }),
     enabled: open, // the panel stays mounted when collapsed —
     // don't fire live B1 agent traffic for a panel nobody is looking at.
     staleTime: 5 * 60_000,
@@ -66,13 +67,16 @@ export function DocHistory({ projectId, model, entries, open }: {
         <Button style={{ alignSelf: "start" }} onClick={() => void q.refetch()}>Retry</Button>
       </div>
     );
-  if (q.data && !q.data.cardCode && !q.data.itemCode)
-    return <Text>Assign a customer to this configuration or fill the item parameter to see past documents.</Text>;
+  if (q.data && !q.data.cardCode && !q.data.itemCodes.length)
+    return <Text>Assign a customer to this configuration or fill in an item code to see past documents.</Text>;
   // No isPending early-return: List's own `loading` overlays the rows, so a refetch dims in place
   // instead of swapping the whole panel for a spinner and back.
   const rows = q.data?.rows ?? [];
-  const context = [q.data?.cardCode && `customer ${q.data.cardCode}`, q.data?.itemCode && `item ${q.data.itemCode}`]
-    .filter(Boolean).join(" · ");
+  const found = q.data?.itemCodes ?? [];
+  const context = [
+    q.data?.cardCode && `customer ${q.data.cardCode}`,
+    found.length > 0 && `item${found.length > 1 ? "s" : ""} ${found.join(", ")}`,
+  ].filter(Boolean).join(" · ");
 
   return (
     // ponytail: one row per (doc, line) pair. A *customer*-matched document contributes all of its

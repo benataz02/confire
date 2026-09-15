@@ -420,18 +420,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
                   onInput={(e) => setOData({ orderby: e.target.value || undefined })} />
               </FormItem>
             </FormGroup>
-
-            {/* The panel goes in the group directly, not through a FormItem: a FormItem always
-                reserves its label track, and a table has no business being indented into 8/12
-                of half a section. */}
             <FormGroup accessibleName="Preview" {...WIDE}>
-              {/* Panel draws the header row itself (and makes the preview collapsible), so the
-                  slot only carries the title and the action beside it. A custom header is not
-                  clickable — only the arrow toggles — so the button needs no stopPropagation.
-                  `headerText` is ignored whenever the `header` slot is filled. */}
-              {/* Collapsed until Test fetch has something to show — a result, or the error
-                  that explains why there is none. Uncontrolled from then on: the value never
-                  changes, so React never overwrites what the user toggled. */}
               <Panel ref={panelRef} accessibleRole="Region" accessibleName="Preview" collapsed
                 header={
                   <div style={{ ...CELL, flex: 1, justifyContent: "space-between", minWidth: 0 }}>
@@ -449,8 +438,6 @@ export function MasterdataEditor({ id }: { id?: string }) {
                   </div>
                 }>
               {preview ? (
-                // Scroll, not Popin: popped-in columns stack *inside* the row, which is the row
-                // growing taller. Long values truncate (maxLines) and the table scrolls instead.
                 <Table noDataText="No rows returned."
                   headerRow={
                     <TableHeaderRow>

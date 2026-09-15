@@ -1,18 +1,21 @@
 import type { ReactNode } from "react";
 import { Panel, Text, Title } from "@ui5/webcomponents-react";
-import type { Entries, ModelDef, Propagation, ResolvedLookups, Val } from "@confire/config-engine";
+import { evalTableRows, ITEM_COL } from "@confire/config-engine";
+import type { Entries, ModelDef, Propagation, ResolvedLookups, TableRows, Val } from "@confire/config-engine";
 import { money, paramPrices } from "./costElements.ts";
 import { DocHistory, Similar } from "./HistoryPane.tsx";
 
 // The process page's persistent right-hand rail: cost elements, B1 document history, similar past
 // configurations. Three Panels rather than cards — `collapsed`/`onToggle` are native, and `fixed`
 // on the only open one keeps at least one expanded without an accordion state machine.
-export function InsightsRail({ projectId, model, lk, prop, entries, onCopy, open, onToggle, slot, className }: {
+export function InsightsRail({ projectId, model, lk, prop, entries, tables, onCopy, open, onToggle, slot, className }: {
   projectId: string;
   model: ModelDef;
   lk?: ResolvedLookups;
   prop?: Propagation | null;
   entries: Entries;
+  /** the configuration's table rows — the items grid in here is what doc history matches on */
+  tables: TableRows;
   onCopy: (values: Record<string, Val>) => void;
   open: Set<string>;
   onToggle: (key: string) => void;
@@ -22,6 +25,19 @@ export function InsightsRail({ projectId, model, lk, prop, entries, onCopy, open
   /** the caller's slide animation — same element as `slot`, so no extra DOM node */
   className?: string;
 }) {
+  // The items grid IS the item list: no model setting names an item-code parameter any more.
+  // Evaluated, not the raw cells, so a computed item code counts — the same evalTableRows the grid
+  // and the quotation's lines are drawn from. ponytail: 20, because each code is another OR clause
+  // in the crossjoin filter and the oRPC input caps it there; page the rest if a grid ever needs it.
+  const items = (model.tables ?? []).find((t) => t.role === "items");
+  const itemCodes = items
+    ? [...new Set(
+        evalTableRows(items, tables[items.key] ?? [], prop?.values ?? {}, lk?.tables)
+          .map((r) => String(r[ITEM_COL] ?? "").trim())
+          .filter(Boolean),
+      )].slice(0, 20)
+    : [];
+
   const panel = (key: string, title: string, body: ReactNode) => (
     <Panel headerText={title} collapsed={!open.has(key)} fixed={open.has(key) && open.size === 1}
       onToggle={() => onToggle(key)}>
@@ -37,7 +53,7 @@ export function InsightsRail({ projectId, model, lk, prop, entries, onCopy, open
         ? <Costs model={model} lookups={lk} prop={prop} />
         : <Text>No priced parameters yet — fill the form, or add price formulas in the model builder.</Text>)}
       {panel("documents", "Documents",
-        <DocHistory projectId={projectId} model={model} entries={entries} open={open.has("documents")} />)}
+        <DocHistory projectId={projectId} itemCodes={itemCodes} open={open.has("documents")} />)}
       {panel("similars", "Similar configurations",
         <Similar projectId={projectId} model={model} entries={entries} onCopy={onCopy} />)}
     </div>

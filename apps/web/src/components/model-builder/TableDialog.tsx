@@ -4,7 +4,7 @@ import {
   Bar, Button, Dialog, Form, FormGroup, FormItem, Input, MessageStrip, ObjectStatus, Option, Select,
   StepInput, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text,
 } from "@ui5/webcomponents-react";
-import { checkModel, QTY_COL, RESERVED_LINE_FIELDS, type LookupRef, type ModelDef, type TableColumn, type TableDef, type Val } from "@confire/config-engine";
+import { checkModel, ITEM_COL, QTY_COL, RESERVED_LINE_FIELDS, type LookupRef, type ModelDef, type TableColumn, type TableDef, type Val } from "@confire/config-engine";
 import type { B1EntitySchema, B1Field } from "@confire/b1";
 import { orpc } from "../../orpc.ts";
 import { ValueHelp } from "../ValueHelp.tsx";
@@ -13,7 +13,14 @@ import { PAIRS, W, lbl } from "./ParamDialog.tsx";
 import { modelWithTable, rowVars, type TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 
-const optValue = (e: { detail: { selectedOption: unknown } }) => (e.detail.selectedOption as HTMLElement).dataset.v!;
+/** Select hands back the option element; `value` is the string we put on it. Option's own
+ *  `selected` prop is deprecated since 2.20 — the parent's `value` is the whole selection API. */
+const optValue = (e: { detail: { selectedOption: { value?: string } } }) => e.detail.selectedOption.value ?? "";
+
+/** "Nothing picked". Not `""`: Select matches an option by `value || textContent`, so an empty
+ *  value falls through to the label, nothing matches, and the box renders blank instead of the
+ *  placeholder line. A sentinel no table or column can be called is the whole fix. */
+const NONE = "(none)";
 
 const newKey = (prefix: string, taken: string[]) => {
   let n = taken.length + 1;
@@ -23,8 +30,8 @@ const newKey = (prefix: string, taken: string[]) => {
 
 /** A manual option list, as one comma-separated field. Enough for "circular, rectangular"; a list
  *  worth maintaining belongs in masterdata, where it is shared across models. */
-const manualText = (ref: LookupRef) =>
-  ref.source === "manual" ? ref.options.map((o) => String(o.value)).join(", ") : "";
+const manualText = (ref: Extract<LookupRef, { source: "manual" }>) =>
+  ref.options.map((o) => String(o.value)).join(", ");
 const parseManual = (type: TableColumn["type"], text: string): LookupRef => ({
   source: "manual",
   options: text
@@ -34,11 +41,11 @@ const parseManual = (type: TableColumn["type"], text: string): LookupRef => ({
     .map((v) => ({ value: type === "number" ? Number(v) : type === "boolean" ? v === "true" : v })),
 });
 
-/** Columns the table's own definition leans on: renaming or deleting one would either break the
- *  price split or silently stop writing a mapped SAP field, so both are withheld. Derived rather
- *  than a hardcoded list, so it follows the author if they remap. */
+/** Columns the table's own definition leans on: renaming or deleting one would break the price
+ *  split, silently stop writing a mapped SAP field, or leave the document history with nothing to
+ *  match on. Mapped columns are derived, not hardcoded, so the set follows the author if they remap. */
 const lockedColumns = (t: TableDef): Set<string> =>
-  t.role === "items" ? new Set([QTY_COL, ...Object.keys(t.map ?? {})]) : new Set<string>();
+  t.role === "items" ? new Set([QTY_COL, ITEM_COL, ...Object.keys(t.map ?? {})]) : new Set<string>();
 
 /** A new calculation table. The role is not a choice: a model has exactly one items table, seeded
  *  by starterModel and undeletable, and every table added in the builder is a calc table. */
@@ -62,9 +69,11 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
   // Nothing is wrong until the author says they are done: a half-typed key or an empty option
   // list is a work in progress, not a mistake. Save is the moment that judgement is asked for.
   const [tried, setTried] = useState(false);
-  const edit = (fn: (x: TableDef) => TableDef) => setT((x) => fn(x));
+  // One cast, here, rather than one at every call site: spreading a discriminated union loses the
+  // tag, and every patch below keeps the role it already had.
+  const edit = (patch: Partial<TableDef>) => setT((x) => ({ ...x, ...patch }) as TableDef);
   const editCols = (fn: (c: TableColumn[]) => TableColumn[]) =>
-    edit((x) => ({ ...x, columns: fn(x.columns) }) as TableDef);
+    setT((x) => ({ ...x, columns: fn(x.columns) }) as TableDef);
   const setCol = (j: number, patch: Partial<TableColumn>) =>
     editCols((cs) => cs.map((c, k) => (k === j ? ({ ...c, ...patch } as TableColumn) : c)));
 
@@ -124,21 +133,21 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
             <FormItem labelContent={lbl("Key", "The name formulas use. This table contributes <key>_count and one sum per numeric column to every expression scope.", true)}>
               <Input value={t.key} style={W} valueState={!tried || (keyOk && !keyTaken) ? "None" : "Negative"}
                 valueStateMessage={<div>{keyTaken ? "Another table already uses this key." : "Must be a valid identifier."}</div>}
-                onInput={(e) => edit((x) => ({ ...x, key: e.target.value }) as TableDef)} />
+                onInput={(e) => edit({ key: e.target.value })} />
             </FormItem>
             <FormItem labelContent={lbl("Title", "The heading the salesperson sees above the grid on the configuration form.")}>
               <Input value={t.title} style={W}
-                onInput={(e) => edit((x) => ({ ...x, title: e.target.value }) as TableDef)} />
+                onInput={(e) => edit({ title: e.target.value })} />
             </FormItem>
             {t.role === "calc" ? (
               <>
                 <FormItem labelContent={lbl("Minimum rows", "Rows the grid starts with and refuses to drop below. Zero lets the salesperson leave it empty.")}>
                   <StepInput style={W} min={0} value={t.minRows ?? 0}
-                    onChange={(e) => edit((x) => ({ ...x, minRows: e.target.value || undefined }) as TableDef)} />
+                    onChange={(e) => edit({ minRows: e.target.value || undefined })} />
                 </FormItem>
                 <FormItem labelContent={lbl("Maximum rows", "Caps how many rows can be added. Zero means no cap.")}>
                   <StepInput style={W} min={0} value={t.maxRows ?? 0}
-                    onChange={(e) => edit((x) => ({ ...x, maxRows: e.target.value || undefined }) as TableDef)} />
+                    onChange={(e) => edit({ maxRows: e.target.value || undefined })} />
                 </FormItem>
               </>
             ) : null}
@@ -153,7 +162,7 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
                   extraVars={rowVars(t.columns, tables)}
                   fieldId={`expr-tables[${at}].basisExpr`}
                   issue={tried ? issueFor(issues, `tables[${at}].basisExpr`) : undefined}
-                  onChange={(v) => edit((x) => ({ ...x, basisExpr: v ?? "" }) as TableDef)} />
+                  onChange={(v) => edit({ basisExpr: v ?? "" })} />
               </FormItem>
             </FormGroup>
           ) : null}
@@ -191,7 +200,7 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
                 <Select style={W} value={c.type}
                   onChange={(e) => setCol(j, { type: optValue(e) as TableColumn["type"] })}>
                   {(["string", "number", "boolean"] as const).map((ty) => (
-                    <Option key={ty} value={ty} data-v={ty} selected={c.type === ty}>{ty}</Option>
+                    <Option key={ty} value={ty}>{ty}</Option>
                   ))}
                 </Select>
               </TableCell>
@@ -209,9 +218,9 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
                         : { kind: "input" },
                     });
                   }}>
-                  <Option value="input" data-v="input" selected={c.cell.kind === "input"}>Typed in</Option>
-                  <Option value="options" data-v="options" selected={c.cell.kind === "options"}>Options</Option>
-                  <Option value="formula" data-v="formula" selected={c.cell.kind === "formula"}>Computed</Option>
+                  <Option value="input">Typed in</Option>
+                  <Option value="options">Options</Option>
+                  <Option value="formula">Computed</Option>
                 </Select>
               </TableCell>
               <TableCell>
@@ -224,13 +233,13 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
                     issue={tried ? issueFor(issues, `tables[${at}].columns[${j}].cell`) : undefined}
                     onChange={(v) => setCol(j, { cell: { kind: "formula", expr: v ?? "" } })} />
                 ) : c.cell.kind === "options" ? (
-                  <OptionsCell col={c} tables={tables}
+                  <OptionsCell lookup={c.cell.ref} type={c.type} tables={tables}
                     onChange={(ref) => setCol(j, { cell: { kind: "options", ref } })} />
                 ) : (
                   <Text>Typed in by the salesperson</Text>
                 )}
               </TableCell>
-              {isItems ? (
+              {t.role === "items" ? (
                 <TableCell>
                   {/* Quantity is not the author's to map: config-quote.ts writes
                       DocumentLine.Quantity itself (row quantity x batch), and RESERVED_LINE_FIELDS
@@ -240,13 +249,12 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
                   ) : (
                     <LineFieldHelp value={t.map?.[c.key] ?? ""}
                       fields={lineFields} loading={schema.isPending}
-                      onChange={(field) =>
-                        edit((x) => {
-                          const map = { ...((x as Extract<TableDef, { role: "items" }>).map ?? {}) };
-                          if (field) map[c.key] = field;
-                          else delete map[c.key];
-                          return { ...x, map: Object.keys(map).length ? map : undefined } as TableDef;
-                        })} />
+                      onChange={(field) => {
+                        const map = { ...(t.map ?? {}) };
+                        if (field) map[c.key] = field;
+                        else delete map[c.key];
+                        edit({ map: Object.keys(map).length ? map : undefined });
+                      }} />
                   )}
                 </TableCell>
               ) : null}
@@ -266,39 +274,36 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
 }
 
 /** Inline source picker: a comma-separated list, or a masterdata table/query column. */
-function OptionsCell({ col, tables, onChange }: {
-  col: TableColumn;
+function OptionsCell({ lookup, type, tables, onChange }: {
+  lookup: LookupRef;
+  /** the column's type — a manual list is parsed into it */
+  type: TableColumn["type"];
   tables: TableCols[];
   onChange: (ref: LookupRef) => void;
 }) {
-  if (col.cell.kind !== "options") return null;
-  const ref = col.cell.ref;
-  const src = ref.source === "manual" ? "" : ref.table;
-  const cols = ref.source === "manual" ? [] : (tables.find((t) => t.name === ref.table)?.columns ?? []);
-
   return (
     <div style={{ display: "flex", gap: "0.25rem", width: "100%" }}>
-      <Select style={{ flex: 1 }} value={src}
+      <Select style={{ flex: 1 }} value={lookup.source === "manual" ? NONE : lookup.table}
         onChange={(e) => {
           const name = optValue(e);
-          if (!name) return onChange({ source: "manual", options: [] });
+          if (name === NONE) return onChange({ source: "manual", options: [] });
           const kind = tables.find((t) => t.name === name)?.kind;
           // a query ref takes its key/label columns by convention (refKeyCols); a table names one
           onChange(kind === "query" ? { source: "query", table: name } : { source: "table", table: name, valueCol: "" });
         }}>
-        <Option value="" data-v="" selected={ref.source === "manual"}>List...</Option>
-        {tables.map((t) => (
-          <Option key={t.name} value={t.name} data-v={t.name} selected={src === t.name}>{t.name}</Option>
-        ))}
+        <Option value={NONE}>List...</Option>
+        {tables.map((t) => <Option key={t.name} value={t.name}>{t.name}</Option>)}
       </Select>
-      {ref.source === "manual" ? (
-        <Input style={{ flex: 2 }} placeholder="circular, rectangular" value={manualText(ref)}
-          onInput={(e) => onChange(parseManual(col.type, e.target.value))} />
-      ) : ref.source === "table" ? (
-        <Select style={{ flex: 1 }} value={ref.valueCol}
-          onChange={(e) => onChange({ ...ref, valueCol: optValue(e) })}>
-          <Option value="" data-v="" selected={!ref.valueCol}>value column...</Option>
-          {cols.map((c) => <Option key={c} value={c} data-v={c} selected={ref.valueCol === c}>{c}</Option>)}
+      {lookup.source === "manual" ? (
+        <Input style={{ flex: 2 }} placeholder="circular, rectangular" value={manualText(lookup)}
+          onInput={(e) => onChange(parseManual(type, e.target.value))} />
+      ) : lookup.source === "table" ? (
+        <Select style={{ flex: 1 }} value={lookup.valueCol || NONE}
+          onChange={(e) => onChange({ ...lookup, valueCol: optValue(e) === NONE ? "" : optValue(e) })}>
+          <Option value={NONE}>value column...</Option>
+          {(tables.find((t) => t.name === lookup.table)?.columns ?? []).map((c) => (
+            <Option key={c} value={c}>{c}</Option>
+          ))}
         </Select>
       ) : null}
     </div>

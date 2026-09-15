@@ -221,24 +221,24 @@ export async function calculateProject(
   }
 }
 
-// Exact help: live B1 Orders + Quotations for the project customer and/or the item-code param.
-// itemCode is only ever a quoted filter value.
+// Exact help: live B1 Orders + Quotations for the project customer and/or the item codes in the
+// configuration's items grid. The codes are only ever quoted filter values.
 export async function fetchDocHistory(
   tenantId: string,
   projectId: string,
-  itemCode?: string,
-): Promise<{ itemCode: string | null; cardCode: string | null; rows: DocRow[] }> {
+  itemCodes: string[] = [],
+): Promise<{ itemCodes: string[]; cardCode: string | null; rows: DocRow[] }> {
   const [project] = await db
     .select({ customer: configProject.customer })
     .from(configProject)
     .where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId)))
     .limit(1);
   if (!project) throw new ORPCError("NOT_FOUND");
-  const trimmedItemCode = itemCode?.trim() || undefined;
+  const codes = [...new Set(itemCodes.map((c) => c.trim()).filter(Boolean))];
   const cardCode = project.customer?.cardCode;
-  if (!trimmedItemCode && !cardCode) return { itemCode: null, cardCode: null, rows: [] };
+  if (!codes.length && !cardCode) return { itemCodes: [], cardCode: null, rows: [] };
 
-  const opts = { itemCode: trimmedItemCode, cardCode };
+  const opts = { itemCodes: codes, cardCode };
   const { b1 } = await tenantConnector(tenantId);
   // Two crossjoins in parallel — one per document type; B1 has no union.
   const [orders, quotes] = await viaB1(() =>
@@ -248,7 +248,7 @@ export async function fetchDocHistory(
     ]),
   );
   return {
-    itemCode: trimmedItemCode ?? null,
+    itemCodes: codes,
     cardCode: cardCode ?? null,
     rows: sortDocRows([
       ...flattenDocs("order", orders.data, opts),
@@ -660,11 +660,12 @@ export const configsRouter = {
     return queryTablePage(context.tenantId, input);
   }),
 
-  // Exact help: live B1 Orders + Quotations for the project customer and/or the item-code param.
-  // itemCode comes from the client (current unsaved entry); it is only ever a quoted filter value.
+  // Exact help: live B1 Orders + Quotations for the project customer and/or its item codes. The
+  // codes come from the client (the items grid as it stands, unsaved); capped here, because each
+  // one is another OR clause in the crossjoin's $filter.
   docHistory: userProcedure
-    .input(z.object({ id: z.uuid(), itemCode: z.string().optional() }))
-    .handler(({ input, context }) => fetchDocHistory(context.tenantId, input.id, input.itemCode)),
+    .input(z.object({ id: z.uuid(), itemCodes: z.array(z.string()).max(20).optional() }))
+    .handler(({ input, context }) => fetchDocHistory(context.tenantId, input.id, input.itemCodes)),
 
   // Similarity help: rank cached historic rows against the live (unsaved) entries. `values` are
   // the row's mapped param values, coerced to each param's type — what the Copy button applies.

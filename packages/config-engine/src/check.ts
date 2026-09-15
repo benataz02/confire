@@ -295,8 +295,6 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   if (model.history) {
     const h = model.history;
     const paramOf = (k: string) => model.parameters.find((p) => p.key === k);
-    if (h.itemCodeParam && !paramOf(h.itemCodeParam))
-      issues.push({ path: "history.itemCodeParam", message: `unknown parameter '${h.itemCodeParam}'` });
     if (h.mappings.length && !h.query)
       issues.push({ path: "history.query", message: "similarity mappings need a history query" });
     const qCols = h.query?.columns ?? [];
