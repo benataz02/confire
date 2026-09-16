@@ -175,7 +175,7 @@ function ValueHelpDialog({
 export function ValueHelp({
   options, value, onChange, headerText, table, valueCol, columns, onSearch, disabled, readonly,
   valueState, valueStateMessage, loading, hasMore, onLoadMore, onOpen, columnLabels, hidden,
-  showValue,
+  showValue, required,
 }: {
   options: DomainOption[];
   value: Val | undefined;
@@ -185,6 +185,9 @@ export function ValueHelp({
   valueState?: "None" | "Positive" | "Critical" | "Negative" | "Information";
   /** shown under the field while `valueState` is Information/Critical/Negative */
   valueStateMessage?: ReactNode;
+  /** mandatory field: Fiori wants the negative state, not just the label asterisk, while it is
+   *  empty. Derived here off the committed value, so typing a search does not clear the error. */
+  required?: boolean;
   table: ResolvedTable;
   valueCol: string;
   columns: string[];
@@ -245,7 +248,9 @@ export function ValueHelp({
     <>
       <Input showSuggestions filter="None" value={shown} placeholder="Type or pick…"
         showClearIcon={!readonly} style={{ width: "100%" }} disabled={disabled} readonly={readonly}
-        valueState={valueState} valueStateMessage={valueStateMessage ? <div>{valueStateMessage}</div> : undefined}
+        required={required}
+        valueState={valueState ?? (required && !raw ? "Negative" : undefined)}
+        valueStateMessage={valueStateMessage ? <div>{valueStateMessage}</div> : undefined}
         icon={
           readonly ? undefined
             : loading ? <BusyIndicator active delay={0} size="S" />
@@ -304,7 +309,7 @@ export type QuerySource = { kind: "project" | "portal"; modelId: string };
  *  is still findable. */
 export function QueryValueHelp({
   source, canonicalTable, lookupRef, value, onChange, onPick, headerText, disabled, readonly,
-  showValue,
+  showValue, required,
 }: {
   source: QuerySource;
   /** first page already resolved with the form's other lookups; carries the masterdata row's own
@@ -319,6 +324,8 @@ export function QueryValueHelp({
   disabled?: boolean;
   readonly?: boolean;
   showValue?: boolean;
+  /** mandatory field — see ValueHelp */
+  required?: boolean;
 }) {
   const [search, setSearch] = useState<string | null>(null); // null = untouched; show canonical data without fetching
   const table = lookupRef.source === "manual" ? "" : lookupRef.table;
@@ -370,7 +377,7 @@ export function QueryValueHelp({
         if (row) onPick?.({ columns: resolved.columns, rows: [row] });
         onChange(nv);
       }}
-      disabled={disabled} readonly={readonly} showValue={showValue}
+      disabled={disabled} readonly={readonly} showValue={showValue} required={required}
       valueState={page.error ? "Negative" : undefined}
       table={resolved} valueCol={valueCol} columns={displayColumns(lookupRef, resolved.columns)}
       columnLabels={canonicalTable?.labels} hidden={canonicalTable?.hidden}

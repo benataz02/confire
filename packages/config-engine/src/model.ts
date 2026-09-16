@@ -66,6 +66,9 @@ export const ParamZ = z.object({
   requiredWhen: z.string().optional(),
   /** informational per-unit price shown at the field's top-right; never enters the calculated price */
   priceExpr: z.string().optional(),
+  /** the form asks for it: asterisk on the label, negative state while empty. A default that
+   *  fills the field counts as an answer. ponytail: display only — nothing gates the quote on it. */
+  mandatory: z.boolean().optional(),
   readonly: z.boolean().optional(),
   excludeFromDomains: z.boolean().optional(),
   unit: z.string().optional(),
@@ -221,9 +224,9 @@ export const ModelDefZ = z.object({
       }),
     ),
   }),
-  // `under` is a display anchor only — which parameter row the builder tree draws this formula
-  // beneath. Scope is unaffected: a computed value is global and usable in any expression.
-  computed: z.array(z.object({ key: KeyZ, expr: z.string(), under: KeyZ.optional() })),
+  // A computed value is global: it shares one namespace with the parameters and is usable in any
+  // expression. The builder lists them flat, so there is nothing positional to store.
+  computed: z.array(z.object({ key: KeyZ, expr: z.string() })),
   // optional, not .default([]): same reason as pricing.currency below — a zod default is required
   // in the inferred type and would force `tables: []` into every existing ModelDef literal.
   tables: z.array(TableDefZ).optional(),

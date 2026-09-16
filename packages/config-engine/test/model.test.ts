@@ -13,11 +13,13 @@ describe("ModelDefZ", () => {
     expect(() => ModelDefZ.parse(bad)).toThrow();
   });
 
-  test("keeps excludeFromDomains on a parameter", () => {
+  test("keeps excludeFromDomains and mandatory on a parameter", () => {
     const m = structuredClone(model) as any;
     m.parameters[0].excludeFromDomains = true;
+    m.parameters[0].mandatory = true;
     const parsed = ModelDefZ.parse(m);
     expect(parsed.parameters[0]!.excludeFromDomains).toBe(true);
+    expect(parsed.parameters[0]!.mandatory).toBe(true);
   });
 
   test("rejects unknown constraint kind", () => {

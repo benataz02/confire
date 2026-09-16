@@ -208,6 +208,17 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     const v = prop.values[key];
     if (readOnly || p.readonly) return <Text>{displayValue(v, dom)}</Text>;
 
+    // Fiori: a mandatory field carries the asterisk on its label *and* a negative state while it is
+    // empty — the asterisk alone says it will be asked for, not that it still is. `v` is the
+    // propagated value, so a field an auto-default filled already counts as answered.
+    // Radio and checkbox get the asterisk only: a checkbox is never empty (false is an answer), and
+    // painting every radio in a group negative would read as "these options are wrong".
+    const req = !!p.mandatory;
+    const reqProps = {
+      required: req,
+      valueState: req && (v === undefined || v === null || v === "") ? "Negative" : "None",
+    } as const;
+
     if (p.ui === "radio")
       return (
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem 1rem" }}>
@@ -235,7 +246,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     if (p.ui === "multicombo")
       return (
         // MultiComboBoxItem has no disabled prop -> eliminated options are filtered out.
-        <MultiComboBox style={{ width: "100%" }} disabled={disabled}
+        <MultiComboBox style={{ width: "100%" }} disabled={disabled} {...reqProps}
           onSelectionChange={(e) => {
             const texts = e.detail.items.map((i) => (i as HTMLElement).getAttribute("text")!);
             set(key, texts.length ? texts : undefined);
@@ -250,7 +261,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       const r = p.domain?.kind === "range" ? p.domain : undefined;
       return (
         <StepInput value={typeof v === "number" ? v : undefined} min={r?.min} max={r?.max} step={r?.step ?? 1}
-          style={{ width: "100%" }} disabled={disabled}
+          style={{ width: "100%" }} disabled={disabled} required={req}
           onChange={(e) => set(key, e.target.value ?? undefined)} />
       );
     }
@@ -260,7 +271,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       return (
         <QueryValueHelp source={querySource} canonicalTable={lookups.tables[ref.table]} lookupRef={ref}
           value={v} onChange={(nv) => set(key, nv)} headerText={p.label}
-          disabled={disabled}
+          disabled={disabled} required={req}
           onPick={(t) => onQueryPick(key, ref.table, t)} />
       );
     }
@@ -270,6 +281,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       const tbl = tref ? lk.tables[tref.table] : undefined;
       return (
         <Select value={v === undefined ? "" : JSON.stringify(v)} style={{ width: "100%" }} disabled={disabled}
+          {...reqProps}
           onChange={(e) => {
             const j = (e.detail.selectedOption as HTMLElement).dataset.j;
             set(key, j === undefined || j === "" ? undefined : (JSON.parse(j) as Val));
@@ -290,7 +302,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
 
     return (
       <Input type={p.type === "number" ? "Number" : "Text"} value={v === undefined || v === null ? "" : String(v)}
-        style={{ width: "100%" }} disabled={disabled}
+        style={{ width: "100%" }} disabled={disabled} {...reqProps}
         onChange={(e) => {
           const raw = e.target.value ?? "";
           set(key, raw === "" ? undefined : p.type === "number" ? Number(raw) : raw);
@@ -348,7 +360,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
                     // labelSpan is 12, so the label owns a full-width row above its control — its
                     // right end IS the input's top-right corner, which is where the price belongs.
                     <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", width: "100%" }}>
-                      <Label>
+                      <Label required={!!p.mandatory && !readOnly && !p.readonly}>
                         {p.label + (p.unit ? ` (${p.unit})` : "")}
                         {p.help ? <Icon name="message-information" accessibleName={p.help} title={p.help}
                           style={{ marginInlineStart: "0.375rem", cursor: "help", color: "var(--sapContent_IconColor)" }} /> : null}

@@ -21,7 +21,8 @@ type Tables = TableCols[];
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
 type Section = ModelDef["structure"]["sections"][number];
 
-const emptyParam = (): Param => ({ key: "", label: "", type: "string", ui: "select" });
+// mandatory by default: an unanswered field is the usual mistake, and unticking it is one click.
+const emptyParam = (): Param => ({ key: "", label: "", type: "string", ui: "select", mandatory: true });
 
 // Every item carries its own key as data-key: `rowKeyOf` for a structure node, `c:<i>` for a
 // formula. Tree hands the item element back on move/click/toggle, so one attribute addresses them

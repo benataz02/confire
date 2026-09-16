@@ -262,6 +262,13 @@ export function ParamDialog({ draft, tables, initial, isNew, onOk, onCancel }: {
                 onChange={(v) => set({ visibleWhen: v })} />
             </FormItem>
 
+            {/* Second column: the always-on flag sits directly above the conditional version of
+                the same question, so an author reads one then the other. */}
+            <FormItem labelContent={lbl("Mandatory", "The salesperson has to answer this one: the label gets an asterisk and the field stays in the error state until it has a value. A default formula filling it counts as an answer.")}>
+              <CheckBox text="Must have a value" checked={!!p.mandatory}
+                onChange={(e) => set({ mandatory: e.target.checked || undefined })} />
+            </FormItem>
+
             <FormItem labelContent={lbl("Required when", "Blocks the quote until the field has a value. Never fires while the field is hidden; empty means never required.")}>
               <ExprInput optional rows={3} placeholder="never required" value={p.requiredWhen} model={scope}
                 tables={tables} fieldId={`expr-parameters[${at}].requiredWhen`} issue={exprIssue("requiredWhen")}
