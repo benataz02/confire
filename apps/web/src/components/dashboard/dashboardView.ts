@@ -12,11 +12,23 @@ export function percent(value: number | null): string {
   return value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 }
 
+/** Numeric string for AnalyticalCardHeader.value when unitOfMeasurement is "%". */
+export function percentPoints(value: number | null): string {
+  return value === null ? "—" : (value * 100).toFixed(1);
+}
+
 export function trendOf(current: number, previous: number): "Up" | "Down" | "None" {
   if (previous === 0) return "None";
   if (current > previous) return "Up";
   if (current < previous) return "Down";
   return "None";
+}
+
+export function deviationPct(current: number, previous: number): { number: string; unit: string } | null {
+  if (previous === 0) return null;
+  const pct = ((current - previous) / previous) * 100;
+  const sign = pct > 0 ? "+" : "";
+  return { number: `${sign}${pct.toFixed(1)}`, unit: "%" };
 }
 
 /** AnalyticalCardHeader wants the number and its scaling prefix separately. */
@@ -33,9 +45,16 @@ export function greeting(now: Date, name: string): string {
   return `Good ${part}, ${name}`;
 }
 
-export function nextActions(o: Overview): Array<{ text: string; to: string }> {
-  const out: Array<{ text: string; to: string }> = [];
-  const n = o.attention.length;
-  if (n) out.push({ text: `${n} configuration${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} you`, to: "/configs" });
-  return out;
+export function monthLabel(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(Date.UTC(y!, (m ?? 1) - 1, 1)).toLocaleDateString(undefined, {
+    month: "short", timeZone: "UTC",
+  });
+}
+
+export function conversionSlices(converted: number, quotes: number) {
+  return [
+    { status: "Converted", count: converted },
+    { status: "Open", count: Math.max(quotes - converted, 0) },
+  ];
 }

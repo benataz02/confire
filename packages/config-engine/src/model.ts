@@ -6,28 +6,27 @@ export const ValZ = z.union([z.number(), z.string(), z.boolean(), z.null()]);
 /** User-entry value: scalar Val, or string[] for multicombo params. */
 export const EntriesZ = z.record(z.string(), z.union([ValZ, z.array(z.string())]));
 
+/** Both named sources carry the same fields: the ref names a tenant masterdata table and takes its
+ *  key and label columns by convention (refKeyCols). `source` only mirrors that row's kind — rows
+ *  maintained here resolve whole, a query pages a live read — so the builder reads it off the
+ *  picked table rather than asking. The explicit columns stay accepted: a ref written before the
+ *  convention keeps the columns it named. */
+const namedSource = {
+  table: z.string(),
+  /** convention: absent = 1st declared column, label = 2nd (see refKeyCols) */
+  valueCol: z.string().optional(),
+  labelCol: z.string().optional(),
+  /** extra columns shown in pickers; absent = all extra. Derived keys always use every extra column. */
+  columns: z.array(z.string()).optional(),
+};
+
 export const LookupRefZ = z.discriminatedUnion("source", [
   z.object({
     source: z.literal("manual"),
     options: z.array(z.object({ value: ValZ, label: z.string().optional() })),
   }),
-  z.object({
-    source: z.literal("table"),
-    table: z.string(),
-    valueCol: z.string(),
-    labelCol: z.string().optional(),
-    /** extra columns shown in pickers; absent = all extra. Derived keys always use every extra column. */
-    columns: z.array(z.string()).optional(),
-  }),
-  z.object({
-    source: z.literal("query"),
-    /** names a tenant masterdata table of kind "query" — the query itself is defined there */
-    table: z.string(),
-    /** convention: absent = 1st declared column (see refKeyCols) */
-    valueCol: z.string().optional(),
-    labelCol: z.string().optional(),
-    columns: z.array(z.string()).optional(),
-  }),
+  z.object({ source: z.literal("table"), ...namedSource }),
+  z.object({ source: z.literal("query"), ...namedSource }),
 ]);
 export type LookupRef = z.infer<typeof LookupRefZ>;
 
@@ -267,12 +266,11 @@ export type ResolvedLookups = {
 /** User-entered values only; absent key = open parameter. */
 export type Entries = Record<string, Val>;
 
-/** Effective key/label columns; query refs default by convention: 1st column = key, 2nd = label. */
+/** Effective key/label columns, by convention for both named sources: 1st column = key, 2nd =
+ *  label. A ref that names them explicitly still wins — the builder stopped writing them. */
 export function refKeyCols(ref: LookupRef, all: string[] | undefined): { valueCol: string; labelCol?: string } {
   if (ref.source === "manual") return { valueCol: "" };
-  if (ref.source === "query")
-    return { valueCol: ref.valueCol || (all?.[0] ?? ""), labelCol: ref.labelCol ?? all?.[1] };
-  return { valueCol: ref.valueCol, labelCol: ref.labelCol };
+  return { valueCol: ref.valueCol || (all?.[0] ?? ""), labelCol: ref.labelCol ?? all?.[1] };
 }
 
 /** Extra source columns bound as `<param>_<col>`; ignores `ref.columns`. */

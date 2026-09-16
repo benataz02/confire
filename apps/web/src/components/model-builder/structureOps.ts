@@ -1,4 +1,4 @@
-import { isTableGroup, placedTables, type FieldGroup, type ModelDef } from "@confire/config-engine";
+import { isTableGroup, type FieldGroup, type ModelDef } from "@confire/config-engine";
 
 // Pure structure-tree edits for the Parameters tab. All functions return new ModelDefs.
 
@@ -168,6 +168,22 @@ export function removeFromStructure(def: ModelDef, ref: RowRef): ModelDef {
   return { ...def, structure: { sections: def.structure.sections.filter((_, si) => si !== ref.s) } };
 }
 
+/** Strip a node and drop the parameter/table defs it held. Unplaced leftovers have no repair UI. */
+export function deleteNode(def: ModelDef, ref: RowRef): ModelDef {
+  const groups = ref.kind === "section" ? (def.structure.sections[ref.s]?.groups ?? [])
+    : ref.kind === "group" || ref.kind === "table" ? [def.structure.sections[ref.s]?.groups[ref.g]]
+    : [];
+  const paramKeys = new Set(ref.kind === "param" ? [ref.key]
+    : groups.flatMap((g) => (g && !isTableGroup(g) ? g.params : [])));
+  const tableKeys = new Set(groups.flatMap((g) => (g && isTableGroup(g) ? [g.table] : [])));
+  const out = removeFromStructure(def, ref);
+  return {
+    ...out,
+    parameters: out.parameters.filter((p) => !paramKeys.has(p.key)),
+    tables: (out.tables ?? []).filter((t) => !tableKeys.has(t.key)),
+  };
+}
+
 /** Append a parameter to a field group, removing it from wherever it was. */
 export function placeParam(def: ModelDef, key: string, s: number, g: number): ModelDef {
   return editGroup(stripParam(def, key), s, g, (ps) => [...ps, key]);
@@ -191,19 +207,6 @@ export const tableKeyAt = (def: ModelDef, s: number, g: number): string | undefi
   const grp = def.structure.sections[s]?.groups[g];
   return grp && isTableGroup(grp) ? grp.table : undefined;
 };
-
-/** Table keys the form would push into its trailing catch-all section. */
-export function unplacedTables(def: ModelDef): string[] {
-  const placed = new Set(placedTables(def));
-  return (def.tables ?? []).map((t) => t.key).filter((k) => !placed.has(k));
-}
-
-export function unplacedParams(def: ModelDef): string[] {
-  const placed = new Set(
-    def.structure.sections.flatMap((s) => s.groups.flatMap((g) => (isTableGroup(g) ? [] : g.params))),
-  );
-  return def.parameters.map((p) => p.key).filter((k) => !placed.has(k));
-}
 
 /** Clone a param, uniquify its key, and insert it after the source (same group if placed). */
 export function duplicateParam(def: ModelDef, key: string): ModelDef {

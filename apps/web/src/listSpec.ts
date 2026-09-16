@@ -73,9 +73,14 @@ export const boolFilterState = (c?: FilterCond): boolean | undefined =>
 export const nextBoolFilter = (v: boolean | undefined): boolean | "" =>
   v === undefined ? true : v ? false : "";
 
-/** Option-filter values: a saved `eq` is one value; MultiComboBox writes `in` as an array. */
+/** Option-filter values: a saved `eq` is one value; MultiComboBox writes `in` as an array.
+ *  The unfiltered case returns one shared array rather than a fresh `[]`: MultiComboBox's
+ *  `selectedValues` is a *property*, not an attribute, so withWebComponent assigns it from a
+ *  useEffect keyed on value identity — a new array each render is a DOM write and a web-component
+ *  invalidation per render, on every option column that has no filter. */
+const NO_OPTION_VALUES: string[] = [];
 export const optionFilterValues = (c?: FilterCond): string[] =>
-  !c ? [] : (Array.isArray(c.value) ? c.value : [c.value]).map(String);
+  !c ? NO_OPTION_VALUES : (Array.isArray(c.value) ? c.value : [c.value]).map(String);
 
 // Rendered columns only — the server unions in the schema's identity keys for the OData $select.
 export const visibleColumns = (spec: ListVariantDef, columns: ListColumn[]): string[] =>

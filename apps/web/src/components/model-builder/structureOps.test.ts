@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { checkModel, isTableGroup, placedTables, type ModelDef } from "@confire/config-engine";
 import { starterModel } from "./starterModel.ts";
 import {
-  applyMove, canDrop, parseRowKey, placeParam, placeTable, removeFromStructure, rowKeyOf,
-  tableKeyAt, unplacedParams, unplacedTables,
+  applyMove, canDrop, deleteNode, parseRowKey, placeParam, placeTable, removeFromStructure, rowKeyOf,
+  tableKeyAt,
 } from "./structureOps.ts";
 
 /** Two sections: [fields "g", table "items"] and [fields "g2"]. */
@@ -82,28 +82,22 @@ test("placeTable never leaves the same table in two groups", () => {
   expect(groupKinds(twice, 1)).toEqual(["group:g2"]);
 });
 
-test("deleting a table group unplaces the table without touching parameters", () => {
+test("deleting a table group removes it from the section without touching parameters", () => {
   const gone = removeFromStructure(model(), { kind: "table", s: 0, g: 1 });
   expect(groupKinds(gone, 0)).toEqual(["group:g"]);
-  expect(unplacedTables(gone)).toEqual(["items"]);
-  expect(unplacedParams(gone)).toEqual([]);
+  expect(placedTables(gone)).toEqual([]);
+  expect(gone.parameters.map((p) => p.key)).toEqual(["width"]);
 });
 
-test("placing a parameter skips table groups when counting what is placed", () => {
+test("deleteNode drops the defs a section held", () => {
+  const gone = deleteNode(model(), { kind: "section", s: 0 });
+  expect(gone.structure.sections.map((s) => s.key)).toEqual(["other"]);
+  expect(gone.parameters).toEqual([]);
+  expect(gone.tables).toEqual([]);
+});
+
+test("placeParam lands in a field group, not a table group", () => {
   const m = placeParam(model(), "width", 1, 0);
-  expect(unplacedParams(m)).toEqual([]);
+  expect(m.structure.sections[1]!.groups[0]).toEqual({ key: "g2", title: "G2", params: ["width"] });
   expect(groupKinds(m, 0)).toEqual(["group:g", "table:items"]);
-});
-
-// The migration path the team chose: a legacy model keeps its table inside a group's params, so
-// the table simply stops counting as placed and the form's catch-all section picks it up.
-test("a legacy table inside a group's params reads as unplaced", () => {
-  const legacy: ModelDef = {
-    ...model(),
-    structure: {
-      sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["width", "items"] }] }],
-    },
-  };
-  expect(placedTables(legacy)).toEqual([]);
-  expect(unplacedTables(legacy)).toEqual(["items"]);
 });

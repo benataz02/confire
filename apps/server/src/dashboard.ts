@@ -16,12 +16,15 @@ export type ProjectRow = {
 export type Overview = {
   window: Window; currency: string;
   computedAt: string | null; snapshotError: string | null;
-  orderValue: { total: number; confire: number; prevTotal: number };
+  orderValue: {
+    total: number; confire: number; prevTotal: number;
+    series: Array<{ month: string; value: number }>;
+  };
   conversion: { rate: number; prevRate: number; quotes: number; converted: number };
   turnaround: { medianDays: number | null; sampled: number };
   margin: { pct: number | null; value: number; cost: number; covered: number; of: number };
   funnel: Array<{ stage: string; count: number }>;
-  pipeline: Array<{ bucket: string; value: number; count: number; docEntries: number[] }>;
+  pipeline: Array<{ bucket: string; value: number; confire: number; other: number; count: number; docEntries: number[] }>;
   pipelineTruncated: boolean;
   attention: Array<{ id: string; name: string; customer: string | null; docEntry: number | null; reason: string; ageDays: number }>;
 };
@@ -97,7 +100,9 @@ const BUCKET_EDGES: Array<[label: string, maxDays: number]> = [
 export function ageBuckets(
   quotes: OpenQuote[], now: Date, confireDocEntries: Set<number>,
 ): Overview["pipeline"] {
-  const out = BUCKET_EDGES.map(([bucket]) => ({ bucket, value: 0, count: 0, docEntries: [] as number[] }));
+  const out = BUCKET_EDGES.map(([bucket]) => ({
+    bucket, value: 0, confire: 0, other: 0, count: 0, docEntries: [] as number[],
+  }));
   // Compare date-to-date, not instant-to-instant: B1 DocDate has no time, so a quote raised
   // today must read as 0 days old regardless of what time the dashboard is loaded.
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
@@ -107,7 +112,12 @@ export function ageBuckets(
     const slot = out[i === -1 ? out.length - 1 : i]!;
     slot.value += q.docTotal;
     slot.count += 1;
-    if (confireDocEntries.has(q.docEntry)) slot.docEntries.push(q.docEntry);
+    if (confireDocEntries.has(q.docEntry)) {
+      slot.confire += q.docTotal;
+      slot.docEntries.push(q.docEntry);
+    } else {
+      slot.other += q.docTotal;
+    }
   }
   return out;
 }
@@ -165,7 +175,13 @@ export function buildOverview(input: {
     currency: payload?.currency ?? "EUR",
     computedAt: snapshot?.computedAt.toISOString() ?? null,
     snapshotError: snapshot?.lastError ?? null,
-    orderValue: { total: cur.orders.value, confire: confireOrderValue, prevTotal: prev.orders.value },
+    orderValue: {
+      total: cur.orders.value, confire: confireOrderValue, prevTotal: prev.orders.value,
+      series: monthKeys("year12", now).map((month) => ({
+        month,
+        value: payload ? sumBuckets(payload.months, [month], null).orders.value : 0,
+      })),
+    },
     conversion: {
       rate: cur.quotes.count ? cur.quotes.closed / cur.quotes.count : 0,
       prevRate: prev.quotes.count ? prev.quotes.closed / prev.quotes.count : 0,

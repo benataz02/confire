@@ -314,7 +314,11 @@ export function MasterdataEditor({ id }: { id?: string }) {
                     actions={<TableRowAction icon="delete" text="Delete" />}>
                     <TableCell>
                       <div style={{ ...CELL, width: "100%" }}>
-                        {i === 0 ? <Icon name="key" design="Neutral" accessibleName="Lookup key" /> : iconSlot}
+                        {/* 1st column = key, 2nd = label (refKeyCols) — the same convention the
+                            query panel below states, and what a model's lookup reads. */}
+                        {i < 2
+                          ? <Icon name={i === 0 ? "key" : "text"} design="Neutral" accessibleName={i === 0 ? "Lookup key" : "Label column"} />
+                          : iconSlot}
                         <Input placeholder="key" value={c.key} style={{ width: "100%" }}
                           valueState={submitted && !c.key.trim() ? "Negative" : "None"}
                           onInput={(e) => edit((x) => ({ ...x, columns: x.columns.map((y, j) => (j === i ? { ...y, key: e.target.value } : y)) }))} />

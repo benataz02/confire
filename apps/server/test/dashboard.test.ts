@@ -41,3 +41,48 @@ describe("buildOverview funnel", () => {
     ]);
   });
 });
+
+describe("buildOverview series and pipeline split", () => {
+  test("orderValue.series is always twelve months ending at now", () => {
+    const out = buildOverview({
+      ...base,
+      snapshot: {
+        payload: {
+          ...emptySnapshot,
+          months: {
+            "2026-07": { "": { orders: { count: 1, value: 100, grossProfit: null }, quotes: { count: 0, closed: 0, value: 0 } } },
+            "2026-08": { "": { orders: { count: 1, value: 250, grossProfit: null }, quotes: { count: 0, closed: 0, value: 0 } } },
+          },
+        },
+        computedAt: NOW, lastError: null,
+      },
+    });
+    expect(out.orderValue.series).toHaveLength(12);
+    expect(out.orderValue.series[0]!.month).toBe("2025-09");
+    expect(out.orderValue.series.at(-1)).toEqual({ month: "2026-08", value: 250 });
+    expect(out.orderValue.series.find((s) => s.month === "2026-07")).toEqual({ month: "2026-07", value: 100 });
+    expect(out.orderValue.total).toBe(250);
+  });
+
+  test("pipeline splits Confire vs other by b1DocEntry", () => {
+    const out = buildOverview({
+      ...base,
+      snapshot: {
+        payload: {
+          ...emptySnapshot,
+          openQuotes: [
+            { docEntry: 10, docNum: 1, cardCode: "C1", cardName: "Acme", docDate: "2026-08-18", docTotal: 400, salesPersonCode: 0 },
+            { docEntry: 99, docNum: 2, cardCode: "C2", cardName: "Beta", docDate: "2026-08-18", docTotal: 100, salesPersonCode: 0 },
+          ],
+        },
+        computedAt: NOW, lastError: null,
+      },
+      projects: [project({ id: "d", status: "quoted", quotedAt: NOW, b1DocEntry: 10 })],
+    });
+    const young = out.pipeline.find((p) => p.bucket === "0-7d")!;
+    expect(young.value).toBe(500);
+    expect(young.confire).toBe(400);
+    expect(young.other).toBe(100);
+    expect(young.docEntries).toEqual([10]);
+  });
+});

@@ -12,9 +12,9 @@ import { confirm } from "../confirm.ts";
 import { toast } from "../toast.ts";
 import { SettingsTab } from "./SettingsTab.tsx";
 import { ParamsTab } from "./ParamsTab.tsx";
-import { RulesTab } from "./RulesTab.tsx";
-import { BomTab, RoutingTab } from "./LinesTabs.tsx";
-import { HistoryTab } from "./HistoryTab.tsx";
+import { useRulesTab } from "./RulesTab.tsx";
+import { useLinesTab } from "./LinesTabs.tsx";
+import { useHistoryTab } from "./HistoryTab.tsx";
 import { usePreviewLookups } from "./usePreviewLookups.ts";
 
 // Stable placeholder so usePreviewLookups runs unconditionally (rules of hooks) before the
@@ -62,6 +62,20 @@ export function ModelBuilderPage({ id }: { id?: string }) {
   // tenant masterdata, so nothing about the unsaved draft affects them.
   const lookups = usePreviewLookups(m.draft ?? EMPTY_MODEL, { enabled: !!m.draft });
   const allIssues: Issue[] = [...m.issues, ...m.serverIssues];
+  // Rules, History and BOM/Routing hand back ObjectPageSubSection elements so the anchor bar can
+  // find them (a component in between hides them from ObjectPage). They own state, so like
+  // usePreviewLookups they have to be called unconditionally, above the loading return.
+  const rulesSubSections = useRulesTab({
+    draft: m.draft ?? EMPTY_MODEL, update: m.update, issues: allIssues,
+    lookups: lookups.data, tables: m.tableCols,
+  });
+  const historySubSections = useHistoryTab({
+    draft: m.draft ?? EMPTY_MODEL, update: m.update, issues: allIssues,
+    modelId: id ?? "", dirty: m.dirty,
+  });
+  const linesSubSections = useLinesTab({
+    draft: m.draft ?? EMPTY_MODEL, update: m.update, issues: allIssues, tables: m.tableCols,
+  });
   const count = (t: TabKey) => allIssues.filter((i) => tabOf(i.path) === t).length;
 
   if (m.loading || !m.draft || !m.portalMeta) {
@@ -74,6 +88,8 @@ export function ModelBuilderPage({ id }: { id?: string }) {
 
   // Section title carries the section's open issue count, e.g. "Rules (2)".
   const secTitle = (label: string, key: TabKey) => (count(key) ? `${label} (${count(key)})` : label);
+  const linesIssues = count("bom") + count("routing");
+  const linesTitle = linesIssues ? `Item Structure (${linesIssues})` : "Item Structure";
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -135,16 +151,13 @@ export function ModelBuilderPage({ id }: { id?: string }) {
             lookups={lookups.data} lookupsError={lookups.error} onRetryLookups={() => void lookups.refetch()} />
         </ObjectPageSection>
         <ObjectPageSection id="rules" titleText={secTitle("Rules", "rules")}>
-          <RulesTab draft={draft} update={m.update} issues={allIssues} lookups={lookups.data} tables={m.tableCols} />
+          {rulesSubSections}
         </ObjectPageSection>
-        <ObjectPageSection id="bom" titleText={secTitle("BOM", "bom")}>
-          <BomTab draft={draft} update={m.update} issues={allIssues} tables={m.tableCols} />
-        </ObjectPageSection>
-        <ObjectPageSection id="routing" titleText={secTitle("Routing", "routing")}>
-          <RoutingTab draft={draft} update={m.update} issues={allIssues} tables={m.tableCols} />
+        <ObjectPageSection id="outputs" titleText={linesTitle}>
+          {linesSubSections}
         </ObjectPageSection>
         <ObjectPageSection id="history" titleText={secTitle("History", "history")}>
-          <HistoryTab draft={draft} update={m.update} issues={allIssues} modelId={id ?? ""} dirty={m.dirty} />
+          {historySubSections}
         </ObjectPageSection>
       </ObjectPage>
     </div>

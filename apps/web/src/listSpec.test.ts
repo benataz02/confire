@@ -7,6 +7,13 @@ test("optionFilterValues reads a saved eq and a multi in the same way", () => {
   expect(optionFilterValues({ field: "status", op: "in", value: ["quoted", "requested"] })).toEqual(["quoted", "requested"]);
 });
 
+test("the unfiltered case is one shared array, not a fresh one per call", () => {
+  // MultiComboBox's `selectedValues` is a property, not an attribute: withWebComponent assigns it
+  // from a useEffect keyed on value identity, so a new [] per render is a DOM write and a
+  // web-component invalidation per render on every option column that has no filter.
+  expect(optionFilterValues()).toBe(optionFilterValues());
+});
+
 // Verbatim from `select '…'::jsonb` on the dev database — Postgres sorts object keys by length then
 // bytewise, so the seeded "Requested" view comes back with its condition as {op, field, value}.
 // Parsed from a string because an object literal here would be in *source* order, not jsonb order.

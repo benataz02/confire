@@ -9,18 +9,9 @@ import type { B1EntitySchema, B1Field } from "@confire/b1";
 import { orpc } from "../../orpc.ts";
 import { ValueHelp } from "../ValueHelp.tsx";
 import { ExprInput } from "./ExprInput.tsx";
-import { PAIRS, W, lbl } from "./ParamDialog.tsx";
-import { modelWithTable, rowVars, type TableCols } from "./exprHelpers.ts";
+import { NONE, PAIRS, W, lbl, optValue } from "./ParamDialog.tsx";
+import { masterdataRef, modelWithTable, rowVars, sourceBadge, type TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
-
-/** Select hands back the option element; `value` is the string we put on it. Option's own
- *  `selected` prop is deprecated since 2.20 — the parent's `value` is the whole selection API. */
-const optValue = (e: { detail: { selectedOption: { value?: string } } }) => e.detail.selectedOption.value ?? "";
-
-/** "Nothing picked". Not `""`: Select matches an option by `value || textContent`, so an empty
- *  value falls through to the label, nothing matches, and the box renders blank instead of the
- *  placeholder line. A sentinel no table or column can be called is the whole fix. */
-const NONE = "(none)";
 
 const newKey = (prefix: string, taken: string[]) => {
   let n = taken.length + 1;
@@ -273,7 +264,8 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
   );
 }
 
-/** Inline source picker: a comma-separated list, or a masterdata table/query column. */
+/** Inline source picker: a comma-separated list, or a masterdata source — which takes its key and
+ *  label columns by convention (refKeyCols), same as a parameter's domain. */
 function OptionsCell({ lookup, type, tables, onChange }: {
   lookup: LookupRef;
   /** the column's type — a manual list is parsed into it */
@@ -286,25 +278,18 @@ function OptionsCell({ lookup, type, tables, onChange }: {
       <Select style={{ flex: 1 }} value={lookup.source === "manual" ? NONE : lookup.table}
         onChange={(e) => {
           const name = optValue(e);
-          if (name === NONE) return onChange({ source: "manual", options: [] });
-          const kind = tables.find((t) => t.name === name)?.kind;
-          // a query ref takes its key/label columns by convention (refKeyCols); a table names one
-          onChange(kind === "query" ? { source: "query", table: name } : { source: "table", table: name, valueCol: "" });
+          onChange(name === NONE
+            ? { source: "manual", options: [] }
+            : masterdataRef(tables.find((t) => t.name === name)));
         }}>
         <Option value={NONE}>List...</Option>
-        {tables.map((t) => <Option key={t.name} value={t.name}>{t.name}</Option>)}
+        {tables.map((t) => (
+          <Option key={t.name} value={t.name} additionalText={sourceBadge(t)}>{t.name}</Option>
+        ))}
       </Select>
       {lookup.source === "manual" ? (
         <Input style={{ flex: 2 }} placeholder="circular, rectangular" value={manualText(lookup)}
           onInput={(e) => onChange(parseManual(type, e.target.value))} />
-      ) : lookup.source === "table" ? (
-        <Select style={{ flex: 1 }} value={lookup.valueCol || NONE}
-          onChange={(e) => onChange({ ...lookup, valueCol: optValue(e) === NONE ? "" : optValue(e) })}>
-          <Option value={NONE}>value column...</Option>
-          {(tables.find((t) => t.name === lookup.table)?.columns ?? []).map((c) => (
-            <Option key={c} value={c}>{c}</Option>
-          ))}
-        </Select>
       ) : null}
     </div>
   );

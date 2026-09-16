@@ -1,4 +1,4 @@
-import { FUNCS, aggregateKey, derivedColumns, derivedKey, type ModelDef, type Param, type TableColumn, type TableDef } from "@confire/config-engine";
+import { FUNCS, aggregateKey, derivedColumns, derivedKey, type LookupRef, type ModelDef, type Param, type TableColumn, type TableDef } from "@confire/config-engine";
 
 // Suggestion machinery for ExprInput. Completion targets the TRAILING identifier of the
 // value — the common typing flow. // ponytail: caret-aware mid-expression completion needs
@@ -12,8 +12,19 @@ export type Suggestion = {
 };
 
 /** One tenant masterdata table, as the builder needs it: a name, its column keys, and which
- *  kind it is. Both kinds share one namespace — a model references either the same way. */
-export type TableCols = { name: string; kind: "table" | "query"; columns: string[] };
+ *  kind it is. Both kinds share one namespace — a model references either the same way.
+ *  `target` is the query's system, for the badge a picker shows; absent on maintained rows. */
+export type TableCols = { name: string; kind: "table" | "query"; columns: string[]; target?: "b1" | "beas" };
+
+/** Where a source's rows live, as one word next to its name in a picker. */
+export const sourceBadge = (t: TableCols) =>
+  t.kind !== "query" ? "table" : t.target === "beas" ? "Beas" : "SAP";
+
+/** A ref to one masterdata table. `source` is the picked row's kind, never a question the builder
+ *  asks: the two could only ever disagree. Key and label columns are convention (refKeyCols), so
+ *  a ref is a name and — optionally — which extra columns a picker shows. */
+export const masterdataRef = (t?: TableCols): LookupRef =>
+  ({ source: t?.kind === "query" ? "query" : "table", table: t?.name ?? "" });
 
 /** Overlay a param being edited (including unsaved new ones) so its derived keys are in scope. */
 export function modelWithParam(model: ModelDef, p: Param): ModelDef {

@@ -1,26 +1,45 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Bar, Button, CheckBox, Dialog, FlexBox, Form, FormGroup, FormItem, Icon, Input, Label,
-  MessageStrip, MultiComboBox, MultiComboBoxItem, ObjectPage, ObjectPageSection, ObjectPageTitle,
-  Option, SegmentedButton, SegmentedButtonItem, Select, StepInput, Text, TextArea, Title,
+  MessageStrip, MultiComboBox, MultiComboBoxItem, Option, Select, StepInput, Table, TableCell,
+  TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, TextArea,
 } from "@ui5/webcomponents-react";
-import { refKeyCols } from "@confire/config-engine";
+import { checkModel, derivedColumns, displayColumns } from "@confire/config-engine";
 import type { LookupRef, ModelDef, Param } from "@confire/config-engine";
 import { ExprInput } from "./ExprInput.tsx";
-import { modelWithParam, type TableCols } from "./exprHelpers.ts";
+import { masterdataRef, modelWithParam, sourceBadge, type TableCols } from "./exprHelpers.ts";
+import { issueFor } from "./useDraftModel.ts";
 
 type Tables = TableCols[];
 
 // labelSpan 12 = labels on top, the shape ConfiguratorForm uses, so a field looks identical here
-// and on the real form. A group flows its items across the columns it spans, so PAIRS puts two
-// fields per row and FULL one — that is the only way to give a field the whole width.
+// and on the real form. A group flows its items across the columns its form spans, so PAIRS puts
+// two fields per row, FULL one and TRIPLE three — one Form per group is what makes that hold,
+// because a Form with more groups than columns gives every group a single column instead.
+// FormItem's own `columnSpan` is not the way out: a documented no-op since UI5 2.23.
+//
+// The fill is column-major — items 1,2,3 go down the first column, then 4,5,6 down the second —
+// so neighbours in the source are stacked, not side by side. Order items by column, not by row.
 export const PAIRS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2", headerLevel: "H5" } as const;
 export const FULL = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M1 L1 XL1", headerLevel: "H5" } as const;
+const TRIPLE = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M3 L3 XL3", headerLevel: "H5" } as const;
 export const W = { width: "100%" } as const;
 const ICON = { marginInlineStart: "0.375rem", cursor: "help", color: "var(--sapContent_NonInteractiveIconColor)" } as const;
+const HINT = { color: "var(--sapContent_LabelColor)" } as const;
+const PAD = { display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1rem" } as const;
 
-// The ObjectPage brings its own padding and needs a height to scroll in — the dialog's own padding
-// would double up on it.
+/** Select hands back the option element; `value` is the string we put on it. Option's own
+ *  `selected` prop is deprecated since 2.20 — the parent's `value` is the whole selection API. */
+export const optValue = (e: { detail: { selectedOption: { value?: string } } }) =>
+  e.detail.selectedOption.value ?? "";
+
+/** "Nothing picked". Not `""`: Select matches an option by `value || textContent`, so an empty
+ *  value falls through to the label, nothing matches, and the box renders blank instead of the
+ *  placeholder line. A sentinel no table or column can be called is the whole fix. */
+export const NONE = "(none)";
+
+// Every dialog pads its own content column, so the part's default padding is off for all of them.
+// Shared with TableDialog and FormulaDialog — both wear `confire-pd` too.
 if (typeof document !== "undefined") {
   let el = document.getElementById("confire-pd-style");
   if (!el) { el = document.createElement("style"); el.id = "confire-pd-style"; document.head.appendChild(el); }
@@ -37,7 +56,7 @@ export const lbl = (text: string, help: string, required?: boolean) => (
 
 // Friendly name, glyph, and the one-line rule that decides when each control is the right one.
 const UI_META: Record<Param["ui"], { text: string; icon: string; hint: string }> = {
-  input: { text: "Text field", icon: "edit", hint: "A plain field. Anything typed is accepted unless a rule rejects it." },
+  input: { text: "Input field", icon: "edit", hint: "A plain field the salesperson types into — text or a number, whichever the type says. Anything typed is accepted unless a rule rejects it." },
   select: { text: "Dropdown", icon: "slim-arrow-down", hint: "One value from the list — the safest default whenever a domain exists." },
   radio: { text: "Radio", icon: "circle-task-2", hint: "One value with every option on screen; best for three or four choices." },
   checkbox: { text: "Checkbox", icon: "accept", hint: "A single true/false. Needs a boolean type." },
@@ -45,18 +64,19 @@ const UI_META: Record<Param["ui"], { text: string; icon: string; hint: string }>
   step: { text: "Stepper", icon: "number-sign", hint: "A number with plus and minus. Needs a number type, and honours a range." },
 };
 
+// One masterdata namespace, one entry: whether a source is maintained here or read live from
+// B1/Beas is a property of the masterdata row, not a choice the model author re-states.
 const DOMAIN_KINDS = [
-  ["none", "Free entry"], ["manual", "Manual list"], ["table", "Table"],
-  ["query", "Query · B1/Beas"], ["range", "Number range"],
+  ["none", "Free entry"], ["manual", "Manual list"], ["masterdata", "Master data"],
+  ["range", "Number range"],
 ] as const;
 
-/** Blocks Save: the domain is half-built and would resolve to no options at all. */
-export function domainIssue(p: Param): string | undefined {
+/** Blocks Save: the domain is half-built and would resolve to no options at all. A source with no
+ *  columns is checkModel's to report — the key column is convention now, not a field here. */
+function domainIssue(p: Param): string | undefined {
   if (p.domain?.kind !== "options") return undefined;
   const ref = p.domain.ref;
-  if (ref.source === "manual") return undefined;
-  if (!ref.table) return ref.source === "table" ? "Choose a table." : "Choose a query.";
-  if (ref.source === "table" && !ref.valueCol) return "Choose the value column.";
+  if (ref.source !== "manual" && !ref.table) return "Choose a master data source.";
   return undefined;
 }
 
@@ -65,7 +85,7 @@ function controlIssue(p: Param): string | undefined {
   if (p.ui === "checkbox" && p.type !== "boolean") return "A checkbox stores true or false — set the type to boolean.";
   if (p.ui === "step" && p.type !== "number") return "A stepper counts — set the type to number.";
   if ((p.ui === "select" || p.ui === "radio" || p.ui === "multicombo") && !p.domain && p.type !== "boolean")
-    return "This control needs something to list — give it a manual list, a table or a query under Value domain.";
+    return "This control needs something to list — give it a manual list or a master data source under Value domain.";
   return undefined;
 }
 
@@ -74,260 +94,252 @@ export function ParamDialog({ draft, tables, initial, isNew, onOk, onCancel }: {
   onOk: (p: Param) => void; onCancel: () => void;
 }) {
   const [p, setP] = useState<Param>(initial);
+  // Like TableDialog: Save stays enabled and the first click on an invalid parameter reveals the
+  // errors instead of saving, so the button never greys out without saying why.
+  const [tried, setTried] = useState(false);
   const set = (patch: Partial<Param>) => setP((x) => ({ ...x, ...patch }));
+
   const keyOk = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(p.key);
   const keyTaken = isNew && draft.parameters.some((x) => x.key === p.key);
   const dIssue = domainIssue(p);
   const cIssue = controlIssue(p);
+  const blocked = !keyOk || keyTaken || !p.label || !!dIssue;
+
+  // The draft with this parameter's own derived keys in scope — both the expression suggestions
+  // and checkModel are read against it, so an unsaved rename resolves the way it will once saved.
   const scope = modelWithParam(draft, p);
+  const at = scope.parameters.findIndex((x) => x.key === p.key);
+  const issues = useMemo(() => checkModel(scope, tables), [scope, tables]);
+  const mine = at < 0 ? [] : issues.filter((x) => x.path.startsWith(`parameters[${at}]`));
+  const exprIssue = (field: string) =>
+    tried && at >= 0 ? issueFor(issues, `parameters[${at}].${field}`) : undefined;
+
+  const errors = tried
+    ? [...new Set([
+        ...(keyOk ? [] : ["The key must be a valid identifier."]),
+        ...(keyTaken ? ["A parameter with this key already exists."] : []),
+        ...(p.label ? [] : ["Give the parameter a label."]),
+        ...(dIssue ? [dIssue] : []),
+        ...mine.map((x) => x.message),
+      ])]
+    : [];
+
+  const ref = p.domain?.kind === "options" ? p.domain.ref : null;
+  const manualRef = ref?.source === "manual" ? ref : null;
+  const sourceRef = ref && ref.source !== "manual" ? ref : null;
 
   return (
     <Dialog open onClose={onCancel} className="confire-pd"
+      headerText={isNew ? "New parameter" : `Parameter · ${initial.label || initial.key}`}
       accessibleName={isNew ? "Add parameter" : `Edit parameter ${initial.key}`}
       style={{ width: "min(76rem, 96vw)" }}
       footer={
         <Bar design="Footer" endContent={
           <>
-            <Button design="Emphasized" disabled={!keyOk || keyTaken || !p.label || !!dIssue}
-              onClick={() => onOk(p)}>Save</Button>
+            <Button design="Emphasized"
+              onClick={() => (blocked ? setTried(true) : onOk(p))}>Save</Button>
             <Button onClick={onCancel}>Cancel</Button>
           </>
         } />
-      }>
-      {/* Sections MUST be flat children — ObjectPage walks them with React.Children, which skips
-          fragments. Default mode: one scroll, the anchor bar jumps between the three. */}
-      <ObjectPage hidePinButton style={{ height: "min(42rem, 74vh)" }}
-        titleArea={
-          <ObjectPageTitle header={<Title level="H4">{p.label || (isNew ? "New parameter" : initial.key)}</Title>}
-            subHeader={<Text>{[p.key, p.type, UI_META[p.ui].text.toLowerCase()].filter(Boolean).join(" · ")}</Text>} />
-        }>
+      }
+    >
+      <div style={PAD}>
+        {errors.length ? (
+          <MessageStrip design="Negative" hideCloseButton>{errors.join(" · ")}</MessageStrip>
+        ) : null}
+        {cIssue ? <MessageStrip design="Critical" hideCloseButton>{cIssue}</MessageStrip> : null}
 
-        <ObjectPageSection id="definition" titleText="Definition">
-          {cIssue ? <MessageStrip design="Critical" hideCloseButton>{cIssue}</MessageStrip> : null}
+        <Form {...PAIRS} accessibleMode="Edit" headerText="Definition">
+          <FormGroup accessibleName="Definition">
+            <FormItem labelContent={lbl("Key", "The name formulas use to refer to this parameter. Fixed once the parameter exists: renaming it would break every formula that mentions it.", true)}>
+              {/* An untouched new dialog isn't an error yet — only complain once Save is pressed. */}
+              <Input value={p.key} disabled={!isNew} style={W}
+                valueState={!tried || (keyOk && !keyTaken) ? "None" : "Negative"}
+                valueStateMessage={<div>{keyTaken ? "A parameter with this key already exists." : "Letters, digits and underscore only, and it cannot start with a digit."}</div>}
+                onInput={(e) => set({ key: e.target.value })} />
+            </FormItem>
 
-          <Form {...PAIRS}>
-            <FormGroup accessibleName="Definition">
-              <FormItem labelContent={lbl("Key", "The name formulas use to refer to this parameter. Fixed once the parameter exists: renaming it would break every formula that mentions it.", true)}>
-                {/* An untouched new dialog isn't an error yet — only complain once something is typed. */}
-                <Input value={p.key} disabled={!isNew} style={W}
-                  valueState={!p.key || (keyOk && !keyTaken) ? "None" : "Negative"}
-                  valueStateMessage={<div>{keyTaken ? "A parameter with this key already exists." : "Letters, digits and underscore only, and it cannot start with a digit."}</div>}
-                  onInput={(e) => set({ key: e.target.value })} />
-              </FormItem>
+            <FormItem labelContent={lbl("Label", "What the salesperson sees above the field on the configuration form. The unit, if set, is appended in brackets.", true)}>
+              <Input value={p.label} style={W} valueState={!tried || p.label ? "None" : "Negative"}
+                valueStateMessage={<div>The salesperson needs something to read above the field.</div>}
+                onInput={(e) => set({ label: e.target.value })} />
+            </FormItem>
 
-              <FormItem labelContent={lbl("Label", "What the salesperson sees above the field on the configuration form. The unit, if set, is appended in brackets.", true)}>
-                <Input value={p.label} style={W} onInput={(e) => set({ label: e.target.value })} />
-              </FormItem>
+            <FormItem labelContent={lbl("Type", "How the value is stored and compared. Numbers compare and add up in formulas; text does not.")}>
+              <Select value={p.type} style={W}
+                onChange={(e) => set({ type: optValue(e) as Param["type"] })}>
+                {(["string", "number", "boolean"] as const).map((t) => <Option key={t} value={t}>{t}</Option>)}
+              </Select>
+            </FormItem>
 
-              <FormItem labelContent={lbl("Type", "How the value is stored and compared. Numbers compare and add up in formulas; text does not.")}>
-                <Select value={p.type} style={W}
-                  onChange={(e) => set({ type: (e.detail.selectedOption as HTMLElement).dataset.v as Param["type"] })}>
-                  {(["string", "number", "boolean"] as const).map((t) => <Option key={t} value={t} data-v={t}>{t}</Option>)}
-                </Select>
-              </FormItem>
+            <FormItem labelContent={lbl("Unit", "Appended to the label in brackets. Display only — it never converts anything.")}>
+              <Input value={p.unit ?? ""} placeholder="mm, kg, pcs…" style={W}
+                onInput={(e) => set({ unit: e.target.value || undefined })} />
+            </FormItem>
 
-              <FormItem labelContent={lbl("Unit", "Appended to the label in brackets. Display only — it never converts anything.")}>
-                <Input value={p.unit ?? ""} placeholder="mm, kg, pcs…" style={W}
-                  onInput={(e) => set({ unit: e.target.value || undefined })} />
-              </FormItem>
-            </FormGroup>
-          </Form>
-
-          <Form {...FULL}>
-            <FormGroup accessibleName="Control">
-              <FormItem labelContent={lbl("Control", `Which input the salesperson gets on the configuration form. ${UI_META[p.ui].hint}`)}>
-                <SegmentedButton accessibleName="Control" style={W}
-                  onSelectionChange={(e) => {
-                    const v = (e.detail.selectedItems[0] as HTMLElement | undefined)?.dataset.v;
-                    if (v) set({ ui: v as Param["ui"] });
-                  }}>
+            {/* Second column starts here: what the field does, next to what the field is. */}
+            <FormItem labelContent={lbl("Control", "Which input the salesperson gets on the configuration form.")}>
+              {/* Six controls is past what a segmented button should carry, and the hint belongs
+                  under the field rather than in six tooltips nobody hovers. */}
+              <FlexBox direction="Column" gap="0.25rem" style={W}>
+                <Select accessibleName="Control" value={p.ui} style={W}
+                  onChange={(e) => set({ ui: optValue(e) as Param["ui"] })}>
                   {(Object.keys(UI_META) as Param["ui"][]).map((u) => (
-                    <SegmentedButtonItem key={u} data-v={u} icon={UI_META[u].icon} selected={p.ui === u}
-                      tooltip={UI_META[u].hint}>
-                      {UI_META[u].text}
-                    </SegmentedButtonItem>
+                    <Option key={u} value={u} icon={UI_META[u].icon}>{UI_META[u].text}</Option>
                   ))}
-                </SegmentedButton>
-              </FormItem>
+                </Select>
+                <Text style={HINT}>{UI_META[p.ui].hint}</Text>
+              </FlexBox>
+            </FormItem>
+
+            <FormItem labelContent={lbl("Default value", "Filled in automatically and marked “auto”, recalculating whenever its inputs change, until the salesperson edits it by hand.")}>
+              <ExprInput optional rows={3} value={p.defaultExpr} model={scope} tables={tables}
+                fieldId={`expr-parameters[${at}].defaultExpr`} issue={exprIssue("defaultExpr")}
+                onChange={(v) => set({ defaultExpr: v })} />
+            </FormItem>
+
+            <FormItem labelContent={lbl("Help text", "Becomes the information icon next to this field’s label on the form. One sentence is plenty.")}>
+              <TextArea rows={3} value={p.help ?? ""} style={W}
+                onInput={(e) => set({ help: e.target.value || undefined })} />
+            </FormItem>
+
+            <FormItem labelContent={lbl("Restrictions", "Read-only: the salesperson sees the value but cannot change it — right for anything a default formula owns. Exclude from domains: this parameter stops narrowing other parameters’ options, for when it is an outcome rather than a choice.")}>
+              <FlexBox direction="Column" gap="0.5rem">
+                <CheckBox text="Read-only" checked={!!p.readonly}
+                  onChange={(e) => set({ readonly: e.target.checked || undefined })} />
+                <CheckBox text="Exclude from domains" checked={!!p.excludeFromDomains}
+                  onChange={(e) => set({ excludeFromDomains: e.target.checked || undefined })} />
+              </FlexBox>
+            </FormItem>
+          </FormGroup>
+        </Form>
+
+        <Form {...FULL} accessibleMode="Edit" headerText="Value domain">
+          <FormGroup accessibleName="Value domain">
+            <FormItem labelContent={lbl("Where the values come from", "The set of values this parameter may take before any rule narrows it. Free entry constrains nothing — combination rules on the Rules tab still apply.")}>
+              <Select accessibleName="Value domain" value={domainKind(p.domain)} style={W}
+                onChange={(e) => set({ domain: newDomain(optValue(e), tables) })}>
+                {DOMAIN_KINDS.map(([v, l]) => <Option key={v} value={v}>{l}</Option>)}
+              </Select>
+            </FormItem>
+          </FormGroup>
+        </Form>
+
+        {/* Min/max/step is one row of three: reading a range down a column hides the pairing. */}
+        {p.domain?.kind === "range" ? (
+          <Form {...TRIPLE} accessibleMode="Edit">
+            <FormGroup accessibleName="Number range">
+              <RangeEditor value={p.domain} onChange={(domain) => set({ domain })} />
             </FormGroup>
           </Form>
+        ) : null}
 
-          <Form {...PAIRS}>
-            <FormGroup accessibleName="On the form">
-              <FormItem labelContent={lbl("Default value", "Filled in automatically and marked “auto”, recalculating whenever its inputs change, until the salesperson edits it by hand.")}>
-                <ExprInput optional rows={3} value={p.defaultExpr} model={scope} tables={tables}
-                  onChange={(v) => set({ defaultExpr: v })} />
-              </FormItem>
-
-              <FormItem labelContent={lbl("Help text", "Becomes the information icon next to this field’s label on the form. One sentence is plenty.")}>
-                <TextArea rows={3} value={p.help ?? ""} style={W}
-                  onInput={(e) => set({ help: e.target.value || undefined })} />
-              </FormItem>
-
-              <FormItem labelContent={lbl("Options", "Read-only: the salesperson sees the value but cannot change it — right for anything a default formula owns. Exclude from domains: this parameter stops narrowing other parameters’ options, for when it is an outcome rather than a choice.")}>
-                <FlexBox direction="Column" gap="0.5rem">
-                  <CheckBox text="Read-only" checked={!!p.readonly}
-                    onChange={(e) => set({ readonly: e.target.checked || undefined })} />
-                  <CheckBox text="Exclude from domains" checked={!!p.excludeFromDomains}
-                    onChange={(e) => set({ excludeFromDomains: e.target.checked || undefined })} />
-                </FlexBox>
-              </FormItem>
+        {sourceRef ? (
+          <Form {...PAIRS} accessibleMode="Edit">
+            <FormGroup accessibleName="Source">
+              <SourceRefEditor ref_={sourceRef} tried={tried} tables={tables}
+                onChange={(ref) => set({ domain: { kind: "options", ref } })} />
             </FormGroup>
           </Form>
-        </ObjectPageSection>
+        ) : null}
 
-        <ObjectPageSection id="domain" titleText="Value domain">
-          <Form {...PAIRS}>
-            <FormGroup accessibleName="Value domain">
-              <DomainEditor tables={tables} value={p.domain} onChange={(domain) => set({ domain })} />
-            </FormGroup>
-          </Form>
-        </ObjectPageSection>
+        {/* Outside the Form: a list of records is a table, and a table is not a form field. */}
+        {manualRef ? (
+          <ManualOptions ref_={manualRef} onChange={(ref) => set({ domain: { kind: "options", ref } })} />
+        ) : null}
 
-        <ObjectPageSection id="behavior" titleText="Behavior">
-          <Form {...PAIRS}>
-            <FormGroup accessibleName="Behavior">
-              <FormItem labelContent={lbl("Price formula", "This parameter’s contribution to the quote line. The result appears at the top right of the field, in the model currency.")}>
-                <ExprInput optional rows={3} value={p.priceExpr} model={scope} tables={tables}
-                  onChange={(v) => set({ priceExpr: v })} />
-              </FormItem>
+        <Form {...PAIRS} accessibleMode="Edit" headerText="Behavior">
+          <FormGroup accessibleName="Behavior">
+            <FormItem labelContent={lbl("Price formula", "This parameter’s contribution to the quote line. The result appears at the top right of the field, in the model currency.")}>
+              <ExprInput optional rows={3} value={p.priceExpr} model={scope} tables={tables}
+                fieldId={`expr-parameters[${at}].priceExpr`} issue={exprIssue("priceExpr")}
+                onChange={(v) => set({ priceExpr: v })} />
+            </FormItem>
 
-              <FormItem labelContent={lbl("Visible when", "Hides the field when this is false; a hidden field keeps the value it already had. Empty means always visible.")}>
-                <ExprInput optional rows={3} placeholder="always visible" value={p.visibleWhen} model={scope}
-                  tables={tables} onChange={(v) => set({ visibleWhen: v })} />
-              </FormItem>
+            <FormItem labelContent={lbl("Visible when", "Hides the field when this is false; a hidden field keeps the value it already had. Empty means always visible.")}>
+              <ExprInput optional rows={3} placeholder="always visible" value={p.visibleWhen} model={scope}
+                tables={tables} fieldId={`expr-parameters[${at}].visibleWhen`} issue={exprIssue("visibleWhen")}
+                onChange={(v) => set({ visibleWhen: v })} />
+            </FormItem>
 
-              <FormItem labelContent={lbl("Required when", "Blocks the quote until the field has a value. Never fires while the field is hidden; empty means never required.")}>
-                <ExprInput optional rows={3} placeholder="never required" value={p.requiredWhen} model={scope}
-                  tables={tables} onChange={(v) => set({ requiredWhen: v })} />
-              </FormItem>
-            </FormGroup>
-          </Form>
-        </ObjectPageSection>
-
-      </ObjectPage>
+            <FormItem labelContent={lbl("Required when", "Blocks the quote until the field has a value. Never fires while the field is hidden; empty means never required.")}>
+              <ExprInput optional rows={3} placeholder="never required" value={p.requiredWhen} model={scope}
+                tables={tables} fieldId={`expr-parameters[${at}].requiredWhen`} issue={exprIssue("requiredWhen")}
+                onChange={(v) => set({ requiredWhen: v })} />
+            </FormItem>
+          </FormGroup>
+        </Form>
+      </div>
     </Dialog>
   );
 }
 
-// Bare FormItems: the caller owns the Form and its group, so the domain fields flow in the same
-// two columns as every other field.
-function DomainEditor({ tables, value, onChange }: {
-  tables: Tables; value: Param["domain"]; onChange: (d: Param["domain"]) => void;
+/** Which DOMAIN_KINDS entry the current domain is. */
+const domainKind = (d: Param["domain"]) =>
+  d === undefined ? "none" : d.kind === "range" ? "range" : d.ref.source === "manual" ? "manual" : "masterdata";
+
+/** A fresh domain of the chosen kind, seeded so it is usable straight away. */
+function newDomain(kind: string, tables: Tables): Param["domain"] {
+  if (kind === "range") return { kind: "range", min: 0, max: 100, step: 1 };
+  if (kind === "manual") return { kind: "options", ref: { source: "manual", options: [] } };
+  if (kind === "masterdata") return { kind: "options", ref: masterdataRef(tables[0]) };
+  return undefined;
+}
+
+// Bare FormItems: the caller owns the Form and its group.
+function RangeEditor({ value, onChange }: {
+  value: Extract<NonNullable<Param["domain"]>, { kind: "range" }>;
+  onChange: (d: Param["domain"]) => void;
 }) {
-  const kind = value === undefined ? "none" : value.kind === "range" ? "range" : value.ref.source;
-  // One masterdata namespace, split by kind: a "table" ref reads maintained rows, a "query" ref
-  // pages a live read.
-  const tenantNames = tables.filter((t) => t.kind === "table").map((t) => t.name);
-  const queryNames = tables.filter((t) => t.kind === "query").map((t) => t.name);
-  const columnsOf = (name: string) => tables.find((t) => t.name === name)?.columns ?? [];
-
-  const setKind = (k: string) => {
-    if (k === "none") onChange(undefined);
-    else if (k === "range") onChange({ kind: "range", min: 0, max: 100, step: 1 });
-    else if (k === "manual") onChange({ kind: "options", ref: { source: "manual", options: [] } });
-    else if (k === "table") onChange({ kind: "options", ref: { source: "table", table: tenantNames[0] ?? "", valueCol: "" } });
-    else onChange({ kind: "options", ref: { source: "query", table: queryNames[0] ?? "" } });
-  };
-
   return (
     <>
-      <FormItem labelContent={lbl("Where the values come from", "The set of values this parameter may take before any rule narrows it. Free entry constrains nothing — combination rules on the Rules tab still apply.")}>
-        <SegmentedButton accessibleName="Value domain" style={W}
-          onSelectionChange={(e) => {
-            const v = (e.detail.selectedItems[0] as HTMLElement | undefined)?.dataset.v;
-            if (v && v !== kind) setKind(v);
-          }}>
-          {DOMAIN_KINDS.map(([v, l]) => (
-            <SegmentedButtonItem key={v} data-v={v} selected={kind === v}>{l}</SegmentedButtonItem>
-          ))}
-        </SegmentedButton>
+      <FormItem labelContent={lbl("Minimum", "A range only makes sense on a number type. The stepper enforces the bounds; a “required when” formula can still narrow them.")}>
+        <StepInput style={W} value={value.min} onChange={(e) => onChange({ ...value, min: e.target.value ?? 0 })} />
       </FormItem>
-
-      {value?.kind === "range" ? (
-        <>
-          <FormItem labelContent={lbl("Minimum", "A range only makes sense on a number type. The stepper enforces the bounds; a “required when” formula can still narrow them.")}>
-            <StepInput style={W} value={value.min} onChange={(e) => onChange({ ...value, min: e.target.value ?? 0 })} />
-          </FormItem>
-          <FormItem labelContent={<Label>Maximum</Label>}>
-            <StepInput style={W} value={value.max} onChange={(e) => onChange({ ...value, max: e.target.value ?? 0 })} />
-          </FormItem>
-          <FormItem labelContent={<Label>Step</Label>}>
-            <StepInput style={W} value={value.step ?? 1} min={0} onChange={(e) => onChange({ ...value, step: e.target.value || undefined })} />
-          </FormItem>
-        </>
-      ) : null}
-
-      {value?.kind === "options" && value.ref.source === "manual" ? (
-        <ManualOptions ref_={value.ref} onChange={(ref) => onChange({ kind: "options", ref })} />
-      ) : null}
-
-      {value?.kind === "options" && (value.ref.source === "table" || value.ref.source === "query") ? (
-        <SourceRefEditor ref_={value.ref}
-          names={value.ref.source === "table" ? tenantNames : queryNames}
-          columnsOf={columnsOf}
-          onChange={(ref) => onChange({ kind: "options", ref })} />
-      ) : null}
+      <FormItem labelContent={lbl("Maximum", "The top of the range, inclusive. It has to sit above the minimum.")}>
+        <StepInput style={W} value={value.max} valueState={value.max > value.min ? "None" : "Negative"}
+          valueStateMessage={<div>The maximum has to be above the minimum.</div>}
+          onChange={(e) => onChange({ ...value, max: e.target.value ?? 0 })} />
+      </FormItem>
+      <FormItem labelContent={lbl("Step", "How far one press of plus or minus moves. Leave it at 1 for whole units.")}>
+        <StepInput style={W} value={value.step ?? 1} min={0} onChange={(e) => onChange({ ...value, step: e.target.value || undefined })} />
+      </FormItem>
     </>
   );
 }
 
-// One editor for both named sources: pick the source and which extra columns to expose
-// (default: all). Query refs take their key/label columns by convention (refKeyCols).
-function SourceRefEditor({ ref_, names, columnsOf, onChange }: {
+// One editor for every masterdata source: pick the table and which extra columns to expose
+// (default: all). Key and label columns are convention (refKeyCols), not two more questions —
+// the Masterdata page is where a source says which column is its key.
+function SourceRefEditor({ ref_, tables, tried, onChange }: {
   ref_: Extract<LookupRef, { source: "table" | "query" }>;
-  names: string[];
-  columnsOf: (name: string) => string[];
+  tables: Tables;
+  tried: boolean;
   onChange: (r: LookupRef) => void;
 }) {
-  const cols = columnsOf(ref_.table);
-  const { valueCol } = refKeyCols(ref_, cols);
-  const extra = cols.filter((c) => c !== valueCol);
-  const displayed = ref_.columns ?? extra;
-  const isTable = ref_.source === "table";
-  const setTable = (name: string) =>
-    onChange(ref_.source === "query" ? { source: "query", table: name } : { source: "table", table: name, valueCol: "" });
+  const cols = tables.find((t) => t.name === ref_.table)?.columns ?? [];
+  const extra = derivedColumns(ref_, cols);
+  const displayed = displayColumns(ref_, cols);
 
   return (
     <>
-      <FormItem labelContent={lbl(isTable ? "Table" : "Query",
-        isTable
-          ? "Rows maintained in Confire, on the Masterdata page."
-          : `A live read from B1/Beas, paged on demand. Key = 1st query column${cols[1] ? `, label = 2nd (${cols[0]} / ${cols[1]})` : ""}.`,
+      <FormItem labelContent={lbl("Master data",
+        `Rows maintained in Confire, or a live B1/Beas read paged on demand — whichever the Masterdata page defines. Key = 1st column${cols[1] ? `, label = 2nd (${cols[0]} / ${cols[1]})` : ""}.`,
         true)}>
-        <Select style={W} value={ref_.table}
-          valueState={!ref_.table ? "Negative" : "None"}
-          valueStateMessage={<div>{names.length === 0
-            ? `No ${isTable ? "tables" : "queries"} are defined yet — add one on the Masterdata page.`
-            : `Choose a ${isTable ? "table" : "query"}.`}</div>}
-          onChange={(e) => setTable((e.detail.selectedOption as HTMLElement).dataset.v!)}>
-          {names.length === 0 ? <Option value="" data-v="">— none defined —</Option> : null}
-          {names.map((n) => <Option key={n} value={n} data-v={n}>{n}</Option>)}
+        <Select style={W} value={ref_.table || NONE}
+          valueState={!tried || ref_.table ? "None" : "Negative"}
+          valueStateMessage={<div>{tables.length === 0
+            ? "No master data is defined yet — add a table or a query on the Masterdata page."
+            : "Choose a master data source."}</div>}
+          onChange={(e) => onChange(masterdataRef(tables.find((t) => t.name === optValue(e))))}>
+          <Option value={NONE}>{tables.length === 0 ? "(none defined)" : "(not selected)"}</Option>
+          {/* Where the rows live rides along as secondary text: a query source reads SAP or Beas
+              on demand and opens the paged value help, so it is worth seeing before picking. */}
+          {tables.map((t) => (
+            <Option key={t.name} value={t.name} additionalText={sourceBadge(t)}>{t.name}</Option>
+          ))}
         </Select>
       </FormItem>
-
-      {ref_.source === "table" ? (
-        <>
-          <FormItem labelContent={lbl("Value column", "The column holding the value this parameter takes.", true)}>
-            <Select style={W} value={ref_.valueCol}
-              valueState={ref_.table && !ref_.valueCol ? "Negative" : "None"}
-              valueStateMessage={<div>Pick the column holding the value this parameter takes.</div>}
-              onChange={(e) => onChange({ ...ref_, valueCol: (e.detail.selectedOption as HTMLElement).dataset.v! })}>
-              <Option value="" data-v="">value column…</Option>
-              {cols.map((c) => <Option key={c} value={c} data-v={c}>{c}</Option>)}
-            </Select>
-          </FormItem>
-          <FormItem labelContent={lbl("Label column", "Shown instead of the value where there is room for it.")}>
-            <Select style={W} value={ref_.labelCol ?? ""} onChange={(e) => {
-              const v = (e.detail.selectedOption as HTMLElement).dataset.v!;
-              onChange({ ...ref_, labelCol: v || undefined });
-            }}>
-              <Option value="" data-v="">label column (optional)…</Option>
-              {cols.map((c) => <Option key={c} value={c} data-v={c}>{c}</Option>)}
-            </Select>
-          </FormItem>
-        </>
-      ) : null}
 
       <FormItem labelContent={lbl("Columns shown in the picker",
         `Only changes what the salesperson sees: every column of ${ref_.table || "this source"} stays usable in formulas as <param>_<column>.`)}>
@@ -360,22 +372,38 @@ function ManualOptions({ ref_, onChange }: {
         return { value, label: patch.label !== undefined ? patch.label || undefined : o.label };
       }),
     });
+
   return (
-    <FormItem labelContent={lbl("Options", "The list this parameter offers. Numeric-looking values stay numbers, so table constraints still compare them correctly.")}>
-      <FlexBox direction="Column" gap="0.5rem" style={W}>
+    <>
+      <Table accessibleName="Options" noDataText="No options yet." rowActionCount={1} overflowMode="Popin"
+        onRowActionClick={(e) => {
+          const i = Number((e.detail.row as unknown as HTMLElement).dataset.idx);
+          onChange({ ...ref_, options: ref_.options.filter((_, j) => j !== i) });
+        }}
+        headerRow={
+          <TableHeaderRow>
+            <TableHeaderCell minWidth="10rem"><span>Value</span></TableHeaderCell>
+            <TableHeaderCell minWidth="10rem"><span>Label</span></TableHeaderCell>
+          </TableHeaderRow>
+        }>
         {ref_.options.map((o, i) => (
-          <FlexBox key={i} gap="0.5rem" alignItems="Center">
-            <Input placeholder="value" style={{ flex: 1 }} value={String(o.value ?? "")}
-              onInput={(e) => setOpt(i, { value: e.target.value })} />
-            <Input placeholder="label (optional)" style={{ flex: 1 }} value={o.label ?? ""}
-              onInput={(e) => setOpt(i, { label: e.target.value })} />
-            <Button icon="delete" design="Transparent" tooltip="Remove option" accessibleName="Remove option"
-              onClick={() => onChange({ ...ref_, options: ref_.options.filter((_, j) => j !== i) })} />
-          </FlexBox>
+          <TableRow key={i} rowKey={`opt-${i}`} data-idx={String(i)}
+            actions={<TableRowAction icon="delete" text="Remove option" />}>
+            <TableCell>
+              <Input value={String(o.value ?? "")} accessibleName="Value"
+                onInput={(e) => setOpt(i, { value: e.target.value })} />
+            </TableCell>
+            <TableCell>
+              <Input value={o.label ?? ""} placeholder="optional" accessibleName="Label"
+                onInput={(e) => setOpt(i, { label: e.target.value })} />
+            </TableCell>
+          </TableRow>
         ))}
-        <Button icon="add" style={{ alignSelf: "start" }}
+      </Table>
+      <div>
+        <Button icon="add"
           onClick={() => onChange({ ...ref_, options: [...ref_.options, { value: "" }] })}>Add option</Button>
-      </FlexBox>
-    </FormItem>
+      </div>
+    </>
   );
 }

@@ -64,6 +64,7 @@ export function useDraftModel(id?: string) {
       name: t.name,
       kind: t.kind,
       columns: t.kind === "query" ? (t.query?.columns ?? []) : colKeys(t.columns),
+      target: t.query?.target,
     })),
     [tables],
   );

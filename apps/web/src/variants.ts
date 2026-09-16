@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { orpc } from "./orpc.ts";
 import { EMPTY_SPEC, sameDef, type ListVariantDef } from "./listSpec.ts";
@@ -6,6 +6,11 @@ import { EMPTY_SPEC, sameDef, type ListVariantDef } from "./listSpec.ts";
 // The pure list-view logic lives in listSpec.ts (no orpc import, so it's unit-testable); re-exported
 // here so pages have a single import path.
 export * from "./listSpec.ts";
+
+// Shared, so an unloaded query doesn't mint a fresh array every render. Everything ListReport
+// memoises hangs off this identity: nothing in UI5's React layer is memo()'d, so a new `variants`
+// array re-renders the whole VariantManagement/FilterBar tree for nothing.
+const NO_VARIANTS: never[] = [];
 
 // The applied view: it drives the query, the dirty marker and what a Save persists. Owned here so
 // the page can run its own query off `spec` while ListReport renders the chrome from the same state.
@@ -26,7 +31,7 @@ export function useListSpec(entity: string) {
   });
   const data = readOnly ? portal.data : internal.data;
   const isLoading = readOnly ? portal.isPending : internal.isPending;
-  const variants = data?.variants ?? [];
+  const variants = data?.variants ?? NO_VARIANTS;
 
   const invalidate = () => qc.invalidateQueries({ queryKey: opts.queryKey });
   const save = useMutation(orpc.variants.save.mutationOptions({ onSuccess: invalidate }));
@@ -38,20 +43,29 @@ export function useListSpec(entity: string) {
   // render's worth of requests carrying the previous entity's field names.
   const [initedFor, setInitedFor] = useState("");
 
-  const applyVariant = (name: string) => {
-    setSelectedName(name);
-    setSpec((variants.find((v) => v.name === name)?.definition as ListVariantDef) ?? EMPTY_SPEC);
-  };
+  // The callbacks below are stable for as long as `variants` is (i.e. between refetches), because
+  // ListReport's memoised subtrees take them as props — a fresh closure per render defeats every
+  // memo() downstream.
+  const applyVariant = useCallback(
+    (name: string) => {
+      setSelectedName(name);
+      setSpec((variants.find((v) => v.name === name)?.definition as ListVariantDef) ?? EMPTY_SPEC);
+    },
+    [variants],
+  );
 
   /** Apply the default view: a personal default wins over the shared Standard. `exclude` covers the
    *  Manage Views case where the applied view was just deleted and its row is still in the cache.
    *  No variant at all (seed never ran) falls back to an unnamed empty view rather than blocking the
    *  page forever — the user can still filter and Save As. */
-  const applyDefault = (exclude: string[] = []) => {
-    const rows = variants.filter((v) => !exclude.includes(v.name));
-    const def = rows.find((v) => v.isDefault && !v.shared) ?? rows.find((v) => v.isDefault) ?? rows[0];
-    applyVariant(def?.name ?? "");
-  };
+  const applyDefault = useCallback(
+    (exclude: string[] = []) => {
+      const rows = variants.filter((v) => !exclude.includes(v.name));
+      const def = rows.find((v) => v.isDefault && !v.shared) ?? rows.find((v) => v.isDefault) ?? rows[0];
+      applyVariant(def?.name ?? "");
+    },
+    [variants, applyVariant],
+  );
 
   useEffect(() => {
     if (isLoading || initedFor === entity) return;
@@ -59,7 +73,13 @@ export function useListSpec(entity: string) {
     setInitedFor(entity);
   }, [isLoading, entity, initedFor, variants]);
 
-  const selectedDef = (variants.find((v) => v.name === selectedName)?.definition as ListVariantDef) ?? null;
+  const selectedDef = useMemo(
+    () => (variants.find((v) => v.name === selectedName)?.definition as ListVariantDef) ?? null,
+    [variants, selectedName],
+  );
+  // sameDef is two JSON.stringify passes with a key-sorting replacer. Cheap once, not cheap on
+  // every keystroke of every list page — and this ran on every render before it was memoised.
+  const dirty = useMemo(() => !!selectedDef && !sameDef(spec, selectedDef), [spec, selectedDef]);
 
   return {
     entity,
@@ -75,7 +95,7 @@ export function useListSpec(entity: string) {
     // No selected row (no seed, Save As before the refetch, a rename that outran setSelectedName)
     // is "nothing to compare against", not "everything changed" — an asterisk there offers a Save
     // that has no row to write to.
-    dirty: !!selectedDef && !sameDef(spec, selectedDef),
+    dirty,
     isAdmin: data?.isAdmin ?? false,
     readOnly,
     save,
