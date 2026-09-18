@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+.env.development
 *.log
 .DS_Store
 apps/web/src/routeTree.gen.ts
