@@ -206,9 +206,12 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
       {error ? <MessageStrip design="Negative" hideCloseButton>{error}</MessageStrip> : null}
       {saved ? <MessageStrip design="Positive" hideCloseButton>Selection saved — totals recomputed on the server.</MessageStrip> : null}
       {panels}
+      {/* "Engineered", not "Total": this is what the BOM and routing price the run at. A price typed
+          by hand in the items grid overrides the split and moves the quoted value away from it, so
+          the grid and the quotation — not this line — are what the customer is charged. */}
       {selection.length > 0 ? (
         <Text style={{ alignSelf: "flex-end", fontWeight: 700 }}>
-          Total across {selection.length} line{selection.length === 1 ? "" : "s"}: {fmt(grand)}
+          Engineered total across {selection.length} line{selection.length === 1 ? "" : "s"}: {fmt(grand)}
         </Text>
       ) : null}
     </div>

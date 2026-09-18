@@ -10,6 +10,7 @@ import {
 } from "@confire/config-engine";
 import { QueryValueHelp, type QuerySource } from "../ValueHelp.tsx";
 import { ConfigTable } from "./ConfigTable.tsx";
+import type { ItemMoney } from "./itemMoney.ts";
 import { displayValue, setEntry } from "./formHelpers.ts";
 import { addBatch } from "./configProcessState.ts";
 import { money, paramPrices } from "./costElements.ts";
@@ -92,7 +93,7 @@ function TableGroup(props: ComponentProps<typeof ConfigTable>) {
   );
 }
 
-export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, section, disabled, readOnly, querySource, tables, onTablesChange, batches, onBatchesChange }: {
+export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, section, disabled, readOnly, querySource, tables, onTablesChange, batches, onBatchesChange, itemMoney }: {
   model: ModelDef;
   /** Canonical first-page snapshot — seeds query value help. */
   lookups: ResolvedLookups;
@@ -118,6 +119,9 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   batches?: number[];
   /** omit to leave batch quantities out entirely (builder preview, portal Configure step) */
   onBatchesChange?: (next: number[]) => void;
+  /** derived cost/price per items row; omit and the grid shows no money columns at all — which is
+   *  how the builder preview and the client portal stay free of cost data */
+  itemMoney?: ItemMoney | null;
 }) {
   // Same source the rail's Costs card reads, so a badge and the card can never disagree.
   const priceOf = useMemo(
@@ -342,6 +346,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
             return <TableGroup key={`${g.table}:${gi}`} def={def} rows={tableRows[g.table] ?? []}
               scopeVars={prop.values} lookups={lk} querySource={querySource}
               disabled={disabled || !onTablesChange} readOnly={readOnly}
+              money={def.role === "items" ? itemMoney : undefined} currency={model.pricing.currency}
               onQueryPick={onQueryPick} onChange={(rows) => setRows(g.table, rows)} />;
           }
           const content = g.params.filter((k) => prop.visible[k]);

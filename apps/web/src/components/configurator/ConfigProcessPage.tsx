@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -6,17 +6,17 @@ import {
   MessageStrip, ObjectPage, ObjectPageSection, ObjectPageSubSection, ObjectPageTitle, ObjectStatus,
   Option, Select, Tag, Text, TextArea, Title, Toolbar,
 } from "@ui5/webcomponents-react";
-import { propagate, type Entries, type TableRows, type Val } from "@confire/config-engine";
+import { propagate, type Entries, type ItemsTable, type TableRows, type Val } from "@confire/config-engine";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts";
-import { client, orpc } from "../../orpc.ts";
+import { client, meQuery, orpc } from "../../orpc.ts";
 import { confirm } from "../confirm.ts";
 import { toast } from "../toast.ts";
 import { cleanOverrides, statusUi, toggleSelection, type Sel } from "./runView.ts";
 import { BATCHES_SECTION, ConfiguratorForm, ConsistencyStatus, formSections } from "./ConfiguratorForm.tsx";
 import { EntityValueHelp } from "../ValueHelp.tsx";
 import { StepCandidatesReview } from "./StepCandidatesReview.tsx";
-import { StepCreateQuote } from "./StepCreateQuote.tsx";
 import { InsightsRail } from "./InsightsRail.tsx";
+import { itemMoney } from "./itemMoney.ts";
 import { needsCalculation } from "./configProcessState.ts";
 
 // Pinned so the picked row's CardName can be read back off it by name — EntityValueHelp aligns the
@@ -27,6 +27,10 @@ type Draft = { entries: Entries; batches: number[]; tables: TableRows };
  *  cannot change while a configuration has inputs — so the cache is patched, never replaced. */
 type Payload = Awaited<ReturnType<typeof client.configs.get>>;
 
+// One shared empty array, so `?? []` does not mint a new reference every render and bust the
+// memos below.
+const NONE: never[] = [];
+
 const CUSTOMER_SELECT = ["CardCode", "CardName"];
 const CUSTOMER_FILTER = [{ field: "CardType", op: "eq" as const, value: "cCustomer" }];
 
@@ -36,6 +40,8 @@ export function ConfigProcessPage({ id }: { id: string }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const q = useQuery(orpc.configs.get.queryOptions({ input: { id } }));
+  // Cached by _authed's beforeLoad, so this costs nothing. /b1 is admin/owner only.
+  const me = useQuery(meQuery);
   const modelId = q.data?.project.modelId;
   const lookups = useQuery({
     ...orpc.configs.lookups.queryOptions({ input: { modelId: modelId!, entries: q.data?.project.entries ?? {} } }),
@@ -119,8 +125,8 @@ export function ConfigProcessPage({ id }: { id: string }) {
   // refuses quoted with the same CONFLICT). The page goes read-only rather than letting every
   // edit walk into that error.
   const locked = project?.status === "quoted";
-  const candidates = project?.candidates ?? [];
-  const selection = selOverride ?? project?.selection ?? [];
+  const candidates = project?.candidates ?? NONE;
+  const selection = selOverride ?? project?.selection ?? NONE;
   // Candidates are emptied by the same write that changes their inputs, so holding any is proof
   // they match — there is no `calculated` status to consult.
   const runReady = candidates.length > 0;
@@ -131,6 +137,19 @@ export function ConfigProcessPage({ id }: { id: string }) {
   const lk = lookups.data ? mergeQueryPicks(lookups.data, picks) : undefined;
   const prop = model && lk ? propagate(model.definition, lk, entries, tables) : null;
   const conflicted = !!prop && prop.conflicts.length > 0;
+  // The items grid's cost and price, derived on every render and stored nowhere — see itemMoney.ts.
+  // Same itemSplit the server posts with, so the grid cannot show a price the quotation will not
+  // carry. Before anything is selected it previews the first candidate at the first batch quantity.
+  const itemsDef = (model?.definition.tables ?? NONE).find((t): t is ItemsTable => t.role === "items");
+  const money = useMemo(
+    () => (model && lk && itemsDef
+      ? itemMoney({
+          model: model.definition, lookups: lk, items: itemsDef,
+          tables, candidates, selection, batches,
+        })
+      : null),
+    [model, lk, itemsDef, tables, candidates, selection, batches],
+  );
   // calc.reset() reopens the effect's isError gate — the same reason select.reset() runs on a
   // candidate edit below. Without it one failing calculation retries every second forever.
   const edit = (patch: Partial<Draft>) => {
@@ -212,10 +231,21 @@ export function ConfigProcessPage({ id }: { id: string }) {
         </div>
       }
       endContent={
-        <Button design="Emphasized" disabled={locked || select.isPending || selection.length === 0}
-          onClick={saveSelection}>
-          {select.isPending ? "Saving…" : "Save selection"}
-        </Button>
+        <>
+          <Button disabled={locked || select.isPending || selection.length === 0} onClick={saveSelection}>
+            {select.isPending ? "Saving…" : "Save selection"}
+          </Button>
+          {/* The finalizing action, and the only Emphasized one on the page — the Fiori rule.
+              configs.quoteDraft builds from the *saved* selection, so an unsaved pick or a pending
+              edit has nothing to quote yet. */}
+          <Button design="Emphasized"
+            disabled={locked || draft !== null || !project.selection?.length}
+            tooltip={draft !== null ? "Calculate first"
+              : !project.selection?.length ? "Save a candidate selection first" : "Create the quotation in SAP"}
+            onClick={() => navigate({ to: "/configs/$id/quote", params: { id } })}>
+            Create quote
+          </Button>
+        </>
       } />
   );
 
@@ -249,7 +279,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
       hideSideContent={!railShown && !railMounted}
       sideContent={
         <InsightsRail projectId={id} model={model.definition} lk={lk} prop={prop} entries={entries}
-          tables={tables} onCopy={copyValues} open={openPanels} onToggle={togglePanel}
+          tables={tables} itemMoney={money} onCopy={copyValues} open={openPanels} onToggle={togglePanel}
           className={railShown ? "confire-rail" : "confire-rail confire-rail-out"} />
       }>
 
@@ -295,6 +325,17 @@ export function ConfigProcessPage({ id }: { id: string }) {
               </Button>
               {project.status === "requested" ? (
                 <Button design="Negative" onClick={() => setRejectOpen(true)}>Reject</Button>
+              ) : null}
+              {/* The quoted state's only remaining surface, now that the Create quote section is
+                  gone. Admin/owner only, because /b1 is. */}
+              {project.b1DocEntry !== null && (me.data?.role === "admin" || me.data?.role === "owner") ? (
+                <Button icon="document-text" design="Transparent"
+                  onClick={() => navigate({
+                    to: "/b1/$entity/$key",
+                    params: { entity: "Quotations", key: String(project.b1DocEntry) },
+                  })}>
+                  Open quotation
+                </Button>
               ) : null}
             </Toolbar>
           }
@@ -394,7 +435,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
                 onChange={(next) => edit({ entries: next })}
                 onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
                 querySource={{ kind: "project", modelId: project.modelId }} readOnly={locked}
-                tables={tables} onTablesChange={(next) => edit({ tables: next })} />
+                tables={tables} onTablesChange={(next) => edit({ tables: next })} itemMoney={money} />
             ) : lookups.error ? null : <BusyIndicator active delay={0} />}
           </ObjectPageSubSection>
         ))}
@@ -411,13 +452,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
             error={select.error?.message ?? null} saved={select.isSuccess} readOnly={locked} />
         ) : (
           <Text>No candidates yet.</Text>
-        )}
-      </ObjectPageSection>
-      <ObjectPageSection id="quote" titleText="Create quote">
-        {project?.selection?.length || select.isSuccess ? (
-          <StepCreateQuote projectId={id} />
-        ) : (
-          <Text>Save a candidate selection to continue.</Text>
         )}
       </ObjectPageSection>
     </ObjectPage>

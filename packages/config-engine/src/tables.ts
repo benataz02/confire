@@ -183,3 +183,49 @@ export function splitShares(weights: number[], total: number): number[] {
   }
   return share.map((c) => c / 100);
 }
+
+/** One item row's share of a configuration. `raw` is the stored row, which is where a hand-typed
+ *  `PRICE_COL` lives — `row` (the evaluated one) cannot carry it, because the price is not a
+ *  declared column. `index` points back into the unfiltered rows so a caller can line the figures
+ *  up with the grid it drew. */
+export type ItemLine = {
+  index: number;
+  raw: Record<string, Val>;
+  row: Record<string, Val>;
+  /** row quantity x batch — what rides to SAP as DocumentLine.Quantity */
+  quantity: number;
+  cost: number;
+  price: number;
+};
+
+/**
+ * Split one (assignment, batchQty) pair across the item rows that actually ship.
+ *
+ * The joint cost of a merge run cannot be computed per item, only divided — so both totals are
+ * divided, on the *same* weights, which is what lets a salesperson read margin straight off the
+ * grid. A row shipping nothing gets no share, or the shares would not sum to the total.
+ *
+ * The one function `buildQuoteLines` and the items grid both call: the number the browser shows
+ * and the number the server posts come out of here, so they cannot disagree.
+ */
+export function itemSplit(
+  def: ItemsTable,
+  rows: Record<string, Val>[],
+  scopeVars: Record<string, Val>,
+  tables: Record<string, ResolvedTable> | undefined,
+  batchQty: number,
+  totals: { cost: number; price: number },
+): ItemLine[] {
+  const shipping = evalTableRows(def, rows, scopeVars, tables)
+    .map((row, index) => ({ index, raw: rows[index] ?? {}, row }))
+    .filter((p) => typeof p.row[QTY_COL] === "number" && (p.row[QTY_COL] as number) > 0);
+  const weights = splitWeights(def, shipping.map((p) => p.row), scopeVars, tables);
+  const cost = splitShares(weights, totals.cost);
+  const price = splitShares(weights, totals.price);
+  return shipping.map((p, i) => ({
+    ...p,
+    quantity: (p.row[QTY_COL] as number) * batchQty,
+    cost: cost[i] ?? 0,
+    price: price[i] ?? 0,
+  }));
+}

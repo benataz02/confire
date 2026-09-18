@@ -149,6 +149,15 @@ export const QTY_COL = "quantity";
  *  naming some parameter — one less pointer that can go stale. */
 export const ITEM_COL = "itemcode";
 
+/** The two money columns the items grid renders at runtime. Deliberately NOT `TableColumn`s: a
+ *  model never declares them, so they take no room in the author's namespace and produce no
+ *  `items_*` aggregate — and `evalTableRows` therefore ignores a stored one, which is what stops a
+ *  hand-typed price feeding back into `basisExpr`. `COST_COL` is display only and never written;
+ *  `PRICE_COL` is the one cell a salesperson may store, and storing it means "I typed over the
+ *  split", exactly like an override on a formula column. */
+export const COST_COL = "unitcost";
+export const PRICE_COL = "unitprice";
+
 /** `calc` feeds sums into the model's formulas. `items` does that too, and additionally becomes
  *  n quotation lines: merge production is 1 config, 1 BOM, 1 routing, n items. */
 export const TableDefZ = z.discriminatedUnion("role", [

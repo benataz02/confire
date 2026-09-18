@@ -3,7 +3,7 @@ import { checkModel } from "../src/check";
 import type { ModelDef, TableDef } from "../src/model";
 import { bindings } from "../src/propagate";
 import { placedTables } from "../src/model";
-import { evalTableRows, splitShares, splitWeights, tableAggregates } from "../src/tables";
+import { evalTableRows, itemSplit, splitShares, splitWeights, tableAggregates } from "../src/tables";
 import { fieldGroup, lookups, model as base } from "./fixture";
 
 const known = [{ name: "prices", columns: ["code", "price"] }];
@@ -217,6 +217,44 @@ describe("splitWeights", () => {
 
   test("an undecidable basis weighs nothing rather than throwing", () => {
     expect(splitWeights({ ...parts, basisExpr: "nope" }, [{ area: 2, quantity: 3 }], {})).toEqual([0]);
+  });
+});
+
+describe("itemSplit", () => {
+  // width * section, with section = 2 from the fixture scope -> areas 20 and 50, weights 60 and 50.
+  const rows = [
+    { code: "A", name: "Bracket", width: 10, quantity: 3 },
+    { code: "B", name: "Plate", width: 25, quantity: 1 },
+  ];
+  const scope = { section: 2 };
+
+  test("cost and price divide on the same weights, and the shares add up exactly", () => {
+    const out = itemSplit(parts, rows, scope, undefined, 10, { cost: 600, price: 1100 });
+    expect(out.map((l) => l.cost)).toEqual([327.27, 272.73]);
+    expect(out.reduce((n, l) => n + l.cost, 0)).toBeCloseTo(600, 10);
+    expect(out.reduce((n, l) => n + l.price, 0)).toBeCloseTo(1100, 10);
+    // one basis, so the two splits hold the same proportions — to the cent splitShares rounds to
+    expect(out[0]!.cost / 600).toBeCloseTo(out[0]!.price / 1100, 4);
+  });
+
+  test("quantity is the row's pieces times the batch", () => {
+    const out = itemSplit(parts, rows, scope, undefined, 10, { cost: 600, price: 1100 });
+    expect(out.map((l) => l.quantity)).toEqual([30, 10]);
+  });
+
+  test("a row that ships nothing gets no share, and index still points at the grid", () => {
+    const withBlank = [rows[0]!, { code: "C", name: "Offcut", width: 5, quantity: 0 }, rows[1]!];
+    const out = itemSplit(parts, withBlank, scope, undefined, 1, { cost: 600, price: 1100 });
+    expect(out.map((l) => l.index)).toEqual([0, 2]);
+    expect(out.reduce((n, l) => n + l.cost, 0)).toBeCloseTo(600, 10);
+  });
+
+  test("raw keeps the stored row, so a hand-typed price survives evaluation", () => {
+    const priced = [{ ...rows[0]!, unitprice: 42 }, rows[1]!];
+    const out = itemSplit(parts, priced, scope, undefined, 1, { cost: 600, price: 1100 });
+    expect(out[0]!.raw.unitprice).toBe(42);
+    // ...and never reaches the evaluated row, so it cannot feed basisExpr or the aggregates
+    expect(out[0]!.row.unitprice).toBeUndefined();
   });
 });
 

@@ -17,8 +17,9 @@ import { DEFAULT_PAGE } from "../../lookups.ts";
 // entity-profiles.ts, and only on the fields those profiles name. That rule lives in `curated()`
 // below, not in whether a page happened to draw a button.
 //
-// adminProcedure: entity discovery (catalog, pins, schema, writes) is admin/owner only. `rows` is
-// the one exception — see the note on it.
+// adminProcedure: the catalog, pins, row reads and every write are admin/owner only. `rows`,
+// `schema` and `profile` are the exceptions — see the notes on them. What they have in common is
+// that none of them reaches SAP for business data on its own behalf.
 
 const EntityZ = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "must be an entity set name");
 const KeyZ = z.union([z.string(), z.number(), z.record(z.string(), z.union([z.string(), z.number()]))]);
@@ -59,8 +60,12 @@ export const entitiesRouter = {
       return { entities, categories: categoryNames() };
     }),
 
-  /** One entity's fields, keys and lookups. Cached with a TTL; `refresh` re-reads $metadata. */
-  schema: adminProcedure
+  /** One entity's fields, keys and lookups. Cached with a TTL; `refresh` re-reads $metadata.
+   *
+   *  userProcedure, not adminProcedure: this is field *shape*, read from entity_meta in Postgres,
+   *  and the configurator's quote page needs it to render a Quotations draft. No row ever comes
+   *  back through here — `one` is still admin. */
+  schema: userProcedure
     .input(z.object({ entity: EntityZ, refresh: z.boolean().optional() }))
     .handler(async ({ input, context }) => {
       const b1 = await b1Of(context.tenantId);
@@ -102,8 +107,11 @@ export const entitiesRouter = {
       return readOne(b1, schema, input.entity, input.key);
     }),
 
-  /** What a user may change here, if anything. Absent = a read-only generic entity. */
-  profile: adminProcedure
+  /** What a user may change here, if anything. Absent = a read-only generic entity.
+   *
+   *  userProcedure for the same reason as `schema`: it returns a hand-written allowlist, not data,
+   *  and the quote page reads it to decide which header fields become inputs. */
+  profile: userProcedure
     .input(z.object({ entity: EntityZ }))
     .handler(({ input }) => ({
       profile: profileOf(input.entity) ?? null,

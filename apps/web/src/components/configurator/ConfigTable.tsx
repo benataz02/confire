@@ -4,12 +4,14 @@ import {
   TableHeaderRow, TableRow, TableRowAction, Text, Toolbar, ToolbarButton,
 } from "@ui5/webcomponents-react";
 import {
-  columnOptions, evalTableRows,
+  columnOptions, evalTableRows, PRICE_COL,
   type ResolvedLookups, type ResolvedTable, type TableColumn, type TableDef, type Val,
 } from "@confire/config-engine";
 import { QueryValueHelp, type QuerySource } from "../ValueHelp.tsx";
 import { displayValue } from "./formHelpers.ts";
 import { addRow, pasteRows, removeRow, setCell, type Row } from "./configTableOps.ts";
+import { money as fmtMoney } from "./costElements.ts";
+import type { ItemMoney } from "./itemMoney.ts";
 import { colMinWidth } from "./tableWidths.ts";
 
 const rowIndex = (row: unknown) => Number((row as { rowKey: string }).rowKey.split("-")[1]);
@@ -29,7 +31,7 @@ const header = (c: TableColumn) => c.label + (c.unit ? ` (${c.unit})` : "");
  * than stored. The cell controls follow ConfiguratorForm.control()'s branch order so a column and a
  * parameter of the same type look and behave the same.
  */
-export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPick, disabled, readOnly, querySource }: {
+export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPick, disabled, readOnly, querySource, money, currency }: {
   def: TableDef;
   rows: Row[];
   /** the model's current values — row formulas read these, and row cells shadow them */
@@ -43,6 +45,10 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
   /** quoted/locked: cells are Text, add/delete are gone. See ConfiguratorForm. */
   readOnly?: boolean;
   querySource: QuerySource;
+  /** Derived cost/price per row for an `items` grid. Absent = no money columns at all, which is how
+   *  the portal stays free of cost data: PortalRequestPage simply does not pass it. */
+  money?: ItemMoney | null;
+  currency?: string;
 }) {
   // Same function the server runs, so a computed cell cannot disagree with the quote.
   const evaluated = useMemo(
@@ -56,6 +62,44 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
   const maxRows = def.role === "calc" ? def.maxRows : undefined;
   const atMax = maxRows !== undefined && rows.length >= maxRows;
   const atMin = rows.length <= (def.role === "calc" ? (def.minRows ?? 0) : 1);
+
+  // Two runtime columns on an items grid: what the row costs and what it sells for, per unit, so
+  // margin is readable without arithmetic. Neither is a declared column — the cost is never stored
+  // and the price is stored only once someone types over it.
+  const showMoney = def.role === "items" && !!money;
+  // Setup cost is spread across the run, so a unit price means nothing without the quantity it was
+  // priced at. Dropped when several batches are selected at once and there is no single answer.
+  const at = money?.batchQty ? ` (batch ${money.batchQty})` : "";
+  const costHeader = `Unit cost${at}`;
+  const priceHeader = `Unit price${at}`;
+  const moneyHeaders = [costHeader, priceHeader];
+  const moneyText = (n: number | undefined) => (n === undefined ? "—" : fmtMoney(n, currency));
+  // Same positional sizing every other column gets, over the text these two actually render.
+  const moneyGrid = useMemo(
+    () => (money?.rows ?? []).map((m) => [moneyText(m?.unitCost), moneyText(m?.unitPrice)]),
+    [money, currency],
+  );
+
+  const priceCell = (ri: number) => {
+    const stored = rows[ri]?.[PRICE_COL];
+    // Same contract a formula cell's override follows: the split until someone types, absence (not
+    // a sentinel) is what "left alone" looks like, and the clear icon hands it back. The test is
+    // the one buildQuoteLines applies, so the cell cannot show a number the quotation will reject.
+    const overridden = typeof stored === "number" && Number.isFinite(stored) && stored >= 0;
+    const value = overridden ? stored : money?.rows[ri]?.unitPrice;
+    if (readOnly) return <Text>{moneyText(value)}</Text>;
+    return (
+      <Input style={{ width: "100%" }} type="Number" accessibleName={priceHeader}
+        value={value === undefined ? "" : show(value)}
+        showClearIcon={overridden} valueState={overridden ? "Information" : "None"}
+        valueStateMessage={<div>Typed by hand. Clear the field to go back to the calculated price.</div>}
+        disabled={disabled}
+        onInput={(e) => {
+          const raw = e.target.value ?? "";
+          onChange(setCell(rows, ri, PRICE_COL, raw === "" ? null : Number(raw)));
+        }} />
+    );
+  };
 
   const cell = (ri: number, c: TableColumn) => {
     const stored = rows[ri]?.[c.key];
@@ -165,6 +209,13 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
                   <span>{header(c)}</span>
                 </TableHeaderCell>
               ))}
+              {showMoney
+                ? moneyHeaders.map((h, i) => (
+                    <TableHeaderCell key={h} minWidth={colMinWidth(h, moneyGrid, i)}>
+                      <span>{h}</span>
+                    </TableHeaderCell>
+                  ))
+                : null}
             </TableHeaderRow>
           }>
           {rows.map((_, ri) => (
@@ -173,6 +224,12 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
               {def.columns.map((c) => (
                 <TableCell key={c.key}>{cell(ri, c)}</TableCell>
               ))}
+              {/* an array, not a fragment: every other cell list here is one, and nothing has to
+                  wonder whether the row component walks its children */}
+              {showMoney ? [
+                <TableCell key="cost"><Text>{moneyText(money?.rows[ri]?.unitCost)}</Text></TableCell>,
+                <TableCell key="price">{priceCell(ri)}</TableCell>,
+              ] : null}
             </TableRow>
           ))}
         </Table>

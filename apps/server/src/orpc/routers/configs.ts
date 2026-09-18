@@ -29,6 +29,7 @@ import {
   quotedTotals,
   validateSelectionPairs,
   DEDUP_UDF,
+  QUOTE_HEADER,
 } from "../../config-quote.ts";
 // The configuration process API: any member drives a project (draft -> quoted).
 // Trust model: browser propagates for preview; THESE handlers compute the numbers that get
@@ -316,8 +317,14 @@ export async function quoteDraft(tenantId: string, projectId: string) {
 
 export async function createQuote(
   tenantId: string,
-  input: { projectId: string; commandId: string; comments?: string; docDueDate?: string },
+  input: { projectId: string; commandId: string; header?: Record<string, unknown> },
 ) {
+  // Refuse rather than silently write less than the page asked for — the same contract
+  // entities.create honours. Checked before anything reaches SAP.
+  const rejected = Object.keys(input.header ?? {}).filter((k) => !QUOTE_HEADER.has(k));
+  if (rejected.length)
+    throw new ORPCError("BAD_REQUEST", { message: `Not settable on a quotation: ${rejected.join(", ")}` });
+
   const project = await loadProject(tenantId, input.projectId);
   // Already posted: the row IS the idempotency record for a retry that got its response.
   if (project.b1DocEntry !== null)
@@ -354,9 +361,11 @@ export async function createQuote(
     // collection — so this is `.data`, not `rowsOf(.data)[0]`.
     const created = prior ? null : await b1.createEntity("Quotations", {
       ...seed,
+      // The page's patch lands over the seed — CardCode, currency and the dates are correctable
+      // there — but QUOTE_HEADER keeps DocumentLines and the dedup key out of it, so the lines
+      // still come from the item matrix and the key is still ours.
+      ...(input.header ?? {}),
       [DEDUP_UDF]: commandId,
-      ...(input.comments ? { Comments: input.comments } : {}),
-      ...(input.docDueDate ? { DocDueDate: input.docDueDate } : {}),
     }, { prefer: "representation" });
     const doc = (prior ?? created?.data ?? {}) as Record<string, unknown>;
     const docEntry = Number(doc.DocEntry);
@@ -754,9 +763,9 @@ export const configsRouter = {
     .input(z.object({
       projectId: z.uuid(),
       commandId: z.string().length(64),
-      // Only these two are the salesperson's to set; every number is recomputed server-side.
-      comments: z.string().max(2000).optional(),
-      docDueDate: z.iso.date().optional(),
+      // Header fields only, and only the ones QUOTE_HEADER names — filtered in the handler so a
+      // rejection can name them. Every number on the document is recomputed server-side.
+      header: z.record(z.string(), z.unknown()).optional(),
     }))
     .handler(({ input, context }) => createQuote(context.tenantId, input)),
 

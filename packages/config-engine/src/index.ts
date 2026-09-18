@@ -1,6 +1,7 @@
-export { ModelDefZ, LookupRefZ, ParamZ, ConstraintZ, BomLineZ, OperationZ, ValZ, EntriesZ, ODataQueryZ, QuerySourceZ, KeyZ, TableColumnZ, TableDefZ, TableRowsZ, GroupZ, TableGroupZ, FieldGroupZ, isTableGroup, aggregateKey, derivedColumns, displayColumns, refKeyCols, derivedKey, itemsTable, placedTables, QTY_COL, ITEM_COL } from "./model";
+export { ModelDefZ, LookupRefZ, ParamZ, ConstraintZ, BomLineZ, OperationZ, ValZ, EntriesZ, ODataQueryZ, QuerySourceZ, KeyZ, TableColumnZ, TableDefZ, TableRowsZ, GroupZ, TableGroupZ, FieldGroupZ, isTableGroup, aggregateKey, derivedColumns, displayColumns, refKeyCols, derivedKey, itemsTable, placedTables, QTY_COL, ITEM_COL, COST_COL, PRICE_COL } from "./model";
 export type { Constraint, Entries, Group, TableGroup, FieldGroup, LookupRef, ModelDef, ODataQuery, Option, Param, QuerySource, ResolvedLookups, ResolvedTable, ItemsTable, TableColumn, TableDef, TableRows, Val } from "./model";
-export { columnOptions, evalTableRows, splitShares, splitWeights, tableAggregates } from "./tables";
+export { columnOptions, evalTableRows, itemSplit, splitShares, splitWeights, tableAggregates } from "./tables";
+export type { ItemLine } from "./tables";
 export { DslError, evaluate, parse } from "./dsl";
 export type { Ast, Scope } from "./dsl";
 export { checkModel, FUNCS, RESERVED_LINE_FIELDS, aggregateKeysOf, referencedTables } from "./check";

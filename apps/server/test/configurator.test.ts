@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, configMasterdata, configModel, configProject, type ConfigCandidate } from "@confire/db";
 import type { Entries, ModelDef, ResolvedLookups } from "@confire/config-engine";
-import { applySelection, calculateProject } from "../src/orpc/routers/configs.ts";
+import { applySelection, calculateProject, createQuote } from "../src/orpc/routers/configs.ts";
 import { buildQuoteLines, configDocumentCommandId } from "../src/config-quote.ts";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
@@ -323,6 +323,47 @@ describe("config tables (integration)", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]!.ItemCode).toBe("SHEET-CFG");
     expect(lines[0]!.Quantity).toBe(3);
+  });
+
+  test("a hand-typed unit price wins over the split and moves the quoted value", async () => {
+    const projectId = await seed("priced", tableModel, { thickness: 3 }, [3]);
+    const priced = { ...rows, parts: [{ ...rows.parts[0]!, unitprice: 99 }, rows.parts[1]!] };
+    await db.update(configProject).set({ tables: priced }).where(eq(configProject.id, projectId));
+    await calculateProject(tenantId, projectId, noFetch);
+
+    const [project] = await db.select().from(configProject).where(eq(configProject.id, projectId));
+    const { lines, value } = buildQuoteLines(
+      { ...project!, customer: { cardCode: "C1", cardName: "Acme" }, selection: [{ candidateIdx: 0, batchQty: 3 }] },
+      tableModel, { domains: {}, tables: {} },
+    );
+
+    expect(lines[0]!.UnitPrice).toBe(99);
+    // the untouched row still carries its share of the split, so one override does not reprice the other
+    expect(lines[1]!.UnitPrice).not.toBe(99);
+    // value follows the lines, the way B1 will total them
+    const cents = (l: Record<string, unknown>) => Math.round(Number(l.Quantity) * Number(l.UnitPrice) * 100);
+    expect(Math.round(value * 100)).toBe(lines.reduce((a, l) => a + cents(l), 0));
+    expect(cents(lines[0]!)).toBe(99 * 3 * 100);
+  });
+
+  test("editing a unit price yields a new dedup key, so the retry check cannot find the old document", () => {
+    const candidates = [{ assignment: { thickness: 3 }, perBatch: [] }] as unknown as ConfigCandidate[];
+    const args = { tenantId, projectId: "p1", candidates, selection: [{ candidateIdx: 0, batchQty: 3 }] };
+    const before = configDocumentCommandId({ ...args, tables: rows });
+    const after = configDocumentCommandId({
+      ...args,
+      tables: { ...rows, parts: [{ ...rows.parts[0]!, unitprice: 99 }, rows.parts[1]!] },
+    });
+    expect(after).not.toBe(before);
+  });
+
+  test("createQuote refuses a header field the Quotations profile does not name", async () => {
+    // Rejected before anything reaches the database or SAP, so the ids need not exist.
+    await expect(createQuote(tenantId, {
+      projectId: crypto.randomUUID(),
+      commandId: "0".repeat(64),
+      header: { Comments: "fine", DocTotal: 1, DocumentLines: [] },
+    })).rejects.toThrow(/DocTotal, DocumentLines/);
   });
 
   // The invariant, now that no status flag restates it: writing the calculation's inputs empties

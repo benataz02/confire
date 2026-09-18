@@ -1,5 +1,5 @@
 import { type Ast, DslError, parse } from "./dsl";
-import { aggregateKey, derivedKey, type ModelDef, type TableDef, derivedColumns, refKeyCols, isTableGroup, QTY_COL } from "./model";
+import { aggregateKey, derivedKey, type ModelDef, type TableDef, derivedColumns, refKeyCols, isTableGroup, COST_COL, PRICE_COL, QTY_COL } from "./model";
 
 export type Issue = { path: string; message: string; from?: number; to?: number };
 
@@ -9,6 +9,10 @@ export const FUNCS = new Set(["IF", "MIN", "MAX", "ROUND", "CEIL", "FLOOR", "ABS
 
 /** DocumentLine fields an items table may not map a column to: the price split owns them. */
 export const RESERVED_LINE_FIELDS = new Set(["ItemCode", "Quantity", "UnitPrice", "LineNum"]);
+
+/** Column keys an items table may not declare: the grid renders a runtime column under each, and
+ *  a declared one of the same name would be shadowed by it (or shadow it) with no way to tell. */
+const RESERVED_ITEM_COLS = new Set([COST_COL, PRICE_COL]);
 
 /** Scalars a table contributes to every expression scope. */
 export function aggregateKeysOf(t: TableDef): string[] {
@@ -283,6 +287,13 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
     const declared = new Set(t.columns.map((c) => c.key));
     if (!t.columns.some((c) => c.key === QTY_COL && c.type === "number"))
       issues.push({ path: `tables[${i}]`, message: `an items table needs a number column '${QTY_COL}'` });
+    t.columns.forEach((c, j) => {
+      if (RESERVED_ITEM_COLS.has(c.key))
+        issues.push({
+          path: `tables[${i}].columns[${j}].key`,
+          message: `'${c.key}' is the grid's own cost/price column and cannot be declared`,
+        });
+    });
     for (const [col, target] of Object.entries(t.map ?? {})) {
       if (!declared.has(col)) issues.push({ path: `tables[${i}].map`, message: `unknown column '${col}'` });
       if (RESERVED_LINE_FIELDS.has(target))

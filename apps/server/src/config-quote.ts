@@ -6,16 +6,15 @@ import {
   bindings,
   computeOutputs,
   DslError,
-  evalTableRows,
-  splitShares,
-  splitWeights,
-  QTY_COL,
+  itemSplit,
+  PRICE_COL,
   type ItemsTable,
   type ModelDef,
   type ResolvedLookups,
   type TableRows,
   type Val,
 } from "@confire/config-engine";
+import { ENTITY_PROFILES } from "./entity-profiles.ts";
 
 export type ConfigProjectRow = typeof configProject.$inferSelect;
 
@@ -67,6 +66,15 @@ function canonicalJson(v: unknown): string {
   return JSON.stringify(v ?? null);
 }
 
+/** Whole cents, the way B1 rounds a line total. */
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Header fields the quote page may set on a configurator quotation. Read off the Quotations
+ *  profile so the page's write allowlist and the entity page's cannot drift; deliberately NOT the
+ *  profile's `editableCollections` or its `U_` escape hatch — DocumentLines come from the item
+ *  matrix and U_CF_Key is the dedup key, both the server's alone. */
+export const QUOTE_HEADER = new Set(ENTITY_PROFILES.Quotations!.editable);
+
 /** The one items table a model may declare, if it declared one. checkModel caps it at one. */
 const itemsTableOf = (model: ModelDef): ItemsTable | undefined =>
   (model.tables ?? []).find((t): t is ItemsTable => t.role === "items");
@@ -109,17 +117,14 @@ export function buildQuoteLines(
         .map(([k, v]) => `${k}: ${v}`)
         .join(", ") || "Configuration";
 
-    // a row that ships nothing must not be given a share, or the shares would not sum to the total
-    const rows = !items
-      ? []
-      : evalTableRows(
-          items,
-          project.tables[items.key] ?? [],
-          { ...bindings(model, lookups, cand.assignment, project.tables).values, qty: s.batchQty },
-          lookups.tables,
-        ).filter((r) => typeof r[QTY_COL] === "number" && (r[QTY_COL] as number) > 0);
+    // itemSplit drops the rows that ship nothing, or the shares would not sum to the total.
+    const scope = { ...bindings(model, lookups, cand.assignment, project.tables).values, qty: s.batchQty };
+    const split = !items ? [] : itemSplit(
+      items, project.tables[items.key] ?? [], scope, lookups.tables, s.batchQty,
+      { cost: out.unitCost * s.batchQty, price: out.unitPrice * s.batchQty },
+    );
 
-    if (!items || rows.length === 0) {
+    if (!items || split.length === 0) {
       lines.push({
         ItemCode: model.pricing.quoteItemCode,
         ItemDescription: desc,
@@ -130,30 +135,32 @@ export function buildQuoteLines(
       continue;
     }
 
-    const total = out.unitPrice * s.batchQty;
-    const scope = { ...bindings(model, lookups, cand.assignment, project.tables).values, qty: s.batchQty };
-    const shares = splitShares(splitWeights(items, rows, scope, lookups.tables), total);
-    rows.forEach((row, i) => {
-      const quantity = (row[QTY_COL] as number) * s.batchQty;
-      const lineTotal = shares[i]!;
+    for (const l of split) {
+      // The salesperson's price wins over the split: the grid showed it, so the document carries
+      // it. Absence — not a sentinel — is what "they left it alone" looks like, the same rule an
+      // override on a formula cell follows. It is read off `raw`, because the price is not a
+      // declared column and so never appears in the evaluated row.
+      const typed = l.raw[PRICE_COL];
+      const unitPrice =
+        typeof typed === "number" && Number.isFinite(typed) && typed >= 0 ? typed : l.price / l.quantity;
       const line: Record<string, unknown> = {
         // the configurator's generic item stays the B1 item; the customer-facing code rides along
         // in a mapped UDF, so no article master has to be created per configuration.
         ItemCode: model.pricing.quoteItemCode,
         ItemDescription: desc,
-        Quantity: quantity,
-        // ponytail: B1 re-derives LineTotal as round(Quantity * UnitPrice); lineTotal is already
-        // whole cents so that round-trips exactly. Post LineTotal instead if a tenant's DocTotal
-        // ever drifts from quotedValue.
-        UnitPrice: lineTotal / quantity,
+        Quantity: l.quantity,
+        UnitPrice: unitPrice,
       };
       for (const [col, field] of Object.entries(items.map ?? {})) {
-        const v: Val | undefined = row[col];
+        const v: Val | undefined = l.row[col];
         if (v !== undefined && v !== null) line[field] = v;
       }
       lines.push(line);
-      value += lineTotal;
-    });
+      // B1 re-derives LineTotal as round(Quantity * UnitPrice), so rounding the same way here is
+      // what keeps DocTotal equal to the stored quotedValue. It used to follow from splitShares'
+      // whole-cent guarantee; a hand-typed price moves the total, so that no longer covers it.
+      value += round2(unitPrice * l.quantity);
+    }
   }
   return { lines, value, cost };
 }
