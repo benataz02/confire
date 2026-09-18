@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { createORPCClient, onError } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
@@ -25,6 +26,18 @@ export const orpc = createTanstackQueryUtils(client);
  * page session — see the note there about why the role is deliberately not revalidated.
  */
 export const meQuery = orpc.me.queryOptions({ staleTime: Infinity });
+
+/**
+ * The tenant's B1 local currency, for every money figure in the app. It rides on `me` rather than
+ * having a query of its own because B1 gives no way to change a company's local currency once the
+ * database exists — so the right staleTime is the Infinity `meQuery` already has, and the right
+ * number of fetches is the zero extra this costs.
+ *
+ * undefined = SAP has never been reachable for this tenant. money() then renders a bare number.
+ */
+export function useCurrency(): string | undefined {
+  return useQuery(meQuery).data?.currency ?? undefined;
+}
 
 export type RouterOutputs = {
   dashboard: { overview: Awaited<ReturnType<typeof client.dashboard.overview>> };

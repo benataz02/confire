@@ -10,8 +10,9 @@ import {
 import { QueryValueHelp, type QuerySource } from "../ValueHelp.tsx";
 import { displayValue } from "./formHelpers.ts";
 import { addRow, pasteRows, removeRow, setCell, type Row } from "./configTableOps.ts";
-import { money as fmtMoney, useCurrency } from "../../lib/money.ts";
-import type { ItemMoney } from "./itemMoney.ts";
+import { money as fmtMoney } from "../../lib/money.ts";
+import { useCurrency } from "../../orpc.ts";
+import { qtyLabel, type ItemMoney } from "./itemMoney.ts";
 import { colMinWidth } from "./tableWidths.ts";
 
 const rowIndex = (row: unknown) => Number((row as { rowKey: string }).rowKey.split("-")[1]);
@@ -69,9 +70,8 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
   // margin is readable without arithmetic. Neither is a declared column — the cost is never stored
   // and the price is stored only once someone types over it.
   const showMoney = def.role === "items" && !!money;
-  // Setup cost is spread across the run, so a unit price means nothing without the quantity it was
-  // priced at. Dropped when several batches are selected at once and there is no single answer.
-  const at = money?.batchQty ? ` (batch ${money.batchQty})` : "";
+  // The quantity the two figures were priced at — see qtyLabel.
+  const at = qtyLabel(money?.batchQty);
   const costHeader = `Unit cost${at}`;
   const priceHeader = `Unit price${at}`;
   const moneyHeaders = [costHeader, priceHeader];

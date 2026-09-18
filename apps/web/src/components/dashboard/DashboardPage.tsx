@@ -8,12 +8,11 @@ import {
 } from "@ui5/webcomponents-react";
 import { BulletChart, ColumnChart, DonutChart, LineChart } from "@ui5/webcomponents-react-charts";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
-import { meQuery } from "../../orpc.ts";
-import { orpc } from "../../orpc.ts";
+import { meQuery, orpc, useCurrency } from "../../orpc.ts";
 import {
   conversionSlices, deviationPct, greeting, monthLabel, percent, percentPoints, scaled, trendOf,
 } from "./dashboardView.ts";
-import { money, useCurrency } from "../../lib/money.ts";
+import { money } from "../../lib/money.ts";
 
 const WINDOWS = [
   { key: "month", label: "This month" },
@@ -185,7 +184,7 @@ export function DashboardPage() {
                 dimensions={[{ accessor: "month", formatter: (v) => monthLabel(String(v)) }]}
                 measures={[{
                   accessor: "value", label: cur ? `Order value (${cur})` : "Order value", hideDataLabel: true, showDot: false,
-                  formatter: (v: number) => money(v, cur, 0),
+                  formatter: (v: number) => money(v, cur),
                 }]}
               />
             </Card>
@@ -261,7 +260,7 @@ export function DashboardPage() {
                 measures={[
                   {
                     accessor: "confire", label: "via Confire", stackId: "open",
-                    formatter: (v: number) => money(v, cur, 0),
+                    formatter: (v: number) => money(v, cur),
                     highlightColor: (_v, _m, row) =>
                       row.bucket === ageFilter ? "var(--sapHighlightColor)"
                         : row.bucket === "30d+" ? "var(--sapNegativeColor)"
@@ -269,7 +268,7 @@ export function DashboardPage() {
                   },
                   {
                     accessor: "other", label: "Other", stackId: "open",
-                    formatter: (v: number) => money(v, cur, 0),
+                    formatter: (v: number) => money(v, cur),
                     highlightColor: (_v, _m, row) =>
                       row.bucket === ageFilter ? "var(--sapHighlightColor)"
                         : row.bucket === "30d+" ? "var(--sapNegativeColor)"

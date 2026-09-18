@@ -24,7 +24,7 @@ export function SettingsTab({ draft, update, issues, tables, portalMeta, setPort
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "1rem" }}>
-      <Form accessibleMode="Edit" labelSpan="S12 M12 L12 XL12" layout="S1 M1 L2 XL2">
+      <Form accessibleMode="Edit" labelSpan="S12 M12 L12 XL12" layout="S1 M2 L2 XL2">
         <FormGroup headerText="Model">
           <FormItem labelContent={<Label for="model-name" required>Name</Label>}>
             <Input id="model-name" value={draft.name} required

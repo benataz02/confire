@@ -1,6 +1,8 @@
 import { CheckBox, Form, FormItem, Label, Panel, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Text, Title } from "@ui5/webcomponents-react";
 import type { Entries, ModelDef } from "@confire/config-engine";
 import { fmt, isSelected, type Sel } from "../configurator/runView.ts";
+import { money } from "../../lib/money.ts";
+import { useCurrency } from "../../orpc.ts";
 
 export type PortalCandidate = { assignment: Entries; perBatch: { batchQty: number; unitPrice: number; total: number }[] };
 
@@ -13,6 +15,7 @@ export function PortalCandidateDetail({ label, model, candidate, candidateIdx, s
   candidateIdx: number;
   selection: Sel[];
 }) {
+  const currency = useCurrency();
   return (
     <Panel headerText={`Configuration: ${label}`}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "2rem", padding: "0.5rem" }}>
@@ -38,8 +41,8 @@ export function PortalCandidateDetail({ label, model, candidate, candidateIdx, s
             {candidate.perBatch.map((b) => (
               <TableRow key={b.batchQty} rowKey={String(b.batchQty)}>
                 <TableCell><Text>{fmt(b.batchQty)}</Text></TableCell>
-                <TableCell horizontalAlign="End"><Text>{fmt(b.unitPrice)}</Text></TableCell>
-                <TableCell horizontalAlign="End"><Text>{fmt(b.total)}</Text></TableCell>
+                <TableCell horizontalAlign="End"><Text>{money(b.unitPrice, currency)}</Text></TableCell>
+                <TableCell horizontalAlign="End"><Text>{money(b.total, currency)}</Text></TableCell>
                 <TableCell><CheckBox checked={isSelected(selection, candidateIdx, b.batchQty)} disabled /></TableCell>
               </TableRow>
             ))}

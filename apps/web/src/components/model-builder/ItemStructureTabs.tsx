@@ -76,13 +76,14 @@ export function useItemStructureTab({ draft, update, issues, tables }: Props) {
           }}
           headerRow={
             <TableHeaderRow>
-              {/* Description is the only column with no `width`, which is what makes it absorb
-                  everything the fixed ones leave — UI5 splits the slack among the unset columns,
-                  so a second unset column would take half of it back. */}
+              {/* Description and Condition carry no `width`, which is what makes them absorb
+                  everything the fixed ones leave — UI5 splits the slack evenly among the unset
+                  columns, so these two share it. `minWidth` only counts on an unset column;
+                  on a fixed one it is ignored. */}
               <TableHeaderCell width="3rem">#</TableHeaderCell>
-              <TableHeaderCell width="10rem">Item</TableHeaderCell>
+              <TableHeaderCell width="15rem">Item</TableHeaderCell>
               <TableHeaderCell minWidth="14rem">Description</TableHeaderCell>
-              <TableHeaderCell width="12rem">Condition</TableHeaderCell>
+              <TableHeaderCell minWidth="12rem">Condition</TableHeaderCell>
               <TableHeaderCell width="9rem">Qty per unit</TableHeaderCell>
             </TableHeaderRow>
           }>
@@ -134,11 +135,11 @@ export function useItemStructureTab({ draft, update, issues, tables }: Props) {
           headerRow={
             <TableHeaderRow>
               <TableHeaderCell width="3rem" minWidth="3rem">#</TableHeaderCell>
-              <TableHeaderCell minWidth="10rem">Resource</TableHeaderCell>
-              <TableHeaderCell minWidth="11rem">Condition</TableHeaderCell>
-              <TableHeaderCell minWidth="9rem">Setup (min)</TableHeaderCell>
-              <TableHeaderCell minWidth="9rem">Run / unit (min)</TableHeaderCell>
-              <TableHeaderCell minWidth="9rem">Rate / hour</TableHeaderCell>
+              <TableHeaderCell>Resource</TableHeaderCell>
+              <TableHeaderCell>Condition</TableHeaderCell>
+              <TableHeaderCell>Setup (min)</TableHeaderCell>
+              <TableHeaderCell>Run / unit (min)</TableHeaderCell>
+              <TableHeaderCell>Rate / hour</TableHeaderCell>
             </TableHeaderRow>
           }>
           {draft.routing.map((o, i) => (

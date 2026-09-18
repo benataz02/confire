@@ -41,14 +41,15 @@ function Login() {
   const queryClient = useQueryClient();
 
   const signIn = useMutation({
+    // Deliberately unconditional: an existing session must NOT short-circuit this. Another tab
+    // can sign in as someone else while this page sits open, and returning that session would
+    // hand these credentials the wrong workspace. Better Auth replaces the session cookie.
     mutationFn: async (vars: { email: string; password: string }) => {
-      const { data } = await authClient.getSession();
-      if (data?.session) return data; // Prevent duplicate session creation
       const res = await authClient.signIn.email(vars);
       if (res.error) throw new Error(res.error.message ?? "Sign in failed");
       return res.data;
     },
-    // `/` is the apex dispatcher — it routes to the tenant subdomain / onboarding / picker.
+    // `/` is the apex dispatcher — it routes to the user's tenant subdomain, or onboarding.
     onSuccess: async () => {
       // Invalidate the cached null session and re-fetch with the newly-set cookie
       // so _authed's beforeLoad → ensureQueryData sees the real session.

@@ -9,6 +9,8 @@ import {
   type Candidate, type Sel,
 } from "./runView.ts";
 import { CandidatesMatrix } from "./CandidatesMatrix.tsx";
+import { money } from "../../lib/money.ts";
+import { useCurrency } from "../../orpc.ts";
 
 // Internal wizard step 2: the price matrix on top; each selected cell renders its editable
 // output panel below. Two computeOutputs passes per panel: the display pass ignores remove
@@ -27,6 +29,7 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
    *  refuse the write anyway (assertConfigMutable). Fields go readonly, actions go away. */
   readOnly?: boolean;
 }) {
+  const currency = useCurrency();
   const keys = openKeys(model, entries, candidates);
   const setOv = (i: number, ov: OutputOverrides) =>
     onChange(selection.map((s, j) => (j === i ? { ...s, overrides: ov } : s)));
@@ -125,7 +128,7 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
                       ? patchAddedBom(ov, l.id, { unitPrice: e.target.value ?? 0 })
                       : patchBom(ov, l.id, { unitPrice: e.target.value ?? 0 }))} />
                 </TableCell>
-                <TableCell horizontalAlign="End"><Text style={dim("bom", l.id)}>{fmt(l.lineTotal)}</Text></TableCell>
+                <TableCell horizontalAlign="End"><Text style={dim("bom", l.id)}>{money(l.lineTotal, currency)}</Text></TableCell>
                 <TableCell>{rowStatus("bom", l.id, added)}</TableCell>
               </TableRow>
             );
@@ -171,7 +174,7 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
                   <StepInput readonly={readOnly} min={0} value={rate(l)} disabled={isRemoved(ov, "ops", l.id)}
                     onChange={(e) => patch({ ratePerHour: e.target.value ?? 0 })} />
                 </TableCell>
-                <TableCell horizontalAlign="End"><Text style={dim("ops", l.id)}>{fmt(l.cost)}</Text></TableCell>
+                <TableCell horizontalAlign="End"><Text style={dim("ops", l.id)}>{money(l.cost, currency)}</Text></TableCell>
                 <TableCell>{rowStatus("ops", l.id, added)}</TableCell>
               </TableRow>
             );
@@ -182,10 +185,10 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
         <Bar design="Footer" style={{ marginTop: "0.5rem" }}
           startContent={
             <Text>
-              Material {fmt(totals.materialPerUnit)} · labor {fmt(totals.laborPerUnit)} · unit cost {fmt(totals.unitCost)}
+              Material {money(totals.materialPerUnit, currency)} · labor {money(totals.laborPerUnit, currency)} · unit cost {money(totals.unitCost, currency)}
             </Text>
           }
-          endContent={<Text style={{ fontWeight: 600 }}>Unit price {fmt(totals.unitPrice)} · batch total {fmt(totals.batchTotal)}</Text>}
+          endContent={<Text style={{ fontWeight: 600 }}>Unit price {money(totals.unitPrice, currency)} · batch total {money(totals.batchTotal, currency)}</Text>}
         />
       </Panel>
     );
@@ -209,7 +212,7 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
           the grid and the quotation — not this line — are what the customer is charged. */}
       {selection.length > 0 ? (
         <Text style={{ alignSelf: "flex-end", fontWeight: 700 }}>
-          Engineered total across {selection.length} line{selection.length === 1 ? "" : "s"}: {fmt(grand)}
+          Engineered total across {selection.length} line{selection.length === 1 ? "" : "s"}: {money(grand, currency)}
         </Text>
       ) : null}
     </div>

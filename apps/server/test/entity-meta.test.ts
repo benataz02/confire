@@ -19,3 +19,26 @@ test("a stored schema is served from Postgres, without touching the agent", asyn
   // refresh: true is the Refresh button, and it must go back to B1 rather than re-read the row.
   expect(entitySchema(tenantId, noAgent, "Items", true)).rejects.toThrow(/agent called/);
 });
+
+test("DocCurrency gets a value help B1's own metadata does not declare", async () => {
+  const { tenantId } = await makeTenant();
+  const json = {
+    name: "Quotations", label: "Sales Quotation", table: "OQUT", keys: ["DocEntry"],
+    fields: [
+      { name: "DocCurrency", label: "Currency", kind: "string", edmType: "Edm.String" },
+      // B1 declared this one itself; the overlay must not overwrite it.
+      { name: "CardCode", label: "Customer", kind: "string", edmType: "Edm.String",
+        lookup: { entitySet: "BusinessPartners", keyField: "CardCode" } },
+      { name: "Comments", label: "Remarks", kind: "string", edmType: "Edm.String" },
+    ],
+  } as unknown as B1EntitySchema;
+  // Written without the lookup, exactly as an already-cached row looks — the overlay is applied on
+  // read, so no refresh is needed to pick it up.
+  await db.insert(entityMeta).values({ tenantId, entityName: "Quotations", json, fetchedAt: new Date() });
+
+  const out = await entitySchema(tenantId, noAgent, "Quotations");
+  const by = (n: string) => out.fields.find((f) => f.name === n);
+  expect(by("DocCurrency")?.lookup).toEqual({ entitySet: "Currencies", keyField: "Code" });
+  expect(by("CardCode")?.lookup).toEqual({ entitySet: "BusinessPartners", keyField: "CardCode" });
+  expect(by("Comments")?.lookup).toBeUndefined();
+});

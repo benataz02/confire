@@ -3,6 +3,8 @@ import {
 } from "@ui5/webcomponents-react";
 import type { Entries, ModelDef } from "@confire/config-engine";
 import { bestByBatch, candidateLabel, fmt, isSelected, openKeys, type PricedCandidate, type Sel } from "./runView.ts";
+import { money } from "../../lib/money.ts";
+import { useCurrency } from "../../orpc.ts";
 
 // The signature view: rows = candidates (labeled by their open-parameter values), columns =
 // batch quantities, every price cell IS the selection control. One pressed cell = one future
@@ -19,6 +21,7 @@ export function CandidatesMatrix({ model, entries, candidates, selection, onTogg
   /** locked (quoted) — the cells still show their prices, they just stop being controls */
   disabled?: boolean;
 }) {
+  const currency = useCurrency();
   const keys = openKeys(model, entries, candidates);
   const best = bestByBatch(candidates);
   const batches = candidates[0]?.perBatch.map((b) => b.batchQty) ?? [];
@@ -57,7 +60,7 @@ export function CandidatesMatrix({ model, entries, candidates, selection, onTogg
                   <ToggleButton pressed={isSelected(selection, i, b.batchQty)} disabled={disabled}
                     tooltip={best[b.batchQty] === i ? "Lowest price for this quantity" : undefined}
                     onClick={(e) => { e.stopPropagation(); onToggle(i, b.batchQty); }}>
-                    {fmt(b.unitPrice)}
+                    {money(b.unitPrice, currency)}
                   </ToggleButton>
                 </div>
               </TableCell>

@@ -23,12 +23,30 @@ export type RowMoney = {
   /** pieces this row ships across every selected batch — unitCost x quantity is the line cost */
   quantity: number;
 };
+/** One element of what the cost is made of: a BOM line under its description, an operation under
+ *  its resource. Batch totals, so these add up to the same money `rows` splits over the grid. */
+export type CostLine = { kind: "material" | "operation"; label: string; amount: number };
 export type ItemMoney = {
   /** the quantity the figures are priced at — null when several batches are selected at once */
   batchQty: number | null;
   /** indexed by position in the unfiltered grid; a row that ships nothing has no share */
   rows: (RowMoney | undefined)[];
+  /** where the cost comes from, as opposed to where `rows` lands it — same total, other axis */
+  lines: CostLine[];
 };
+
+/** Setup cost is spread across the run, so a unit figure means nothing without the quantity it was
+ *  priced at. Empty when several batches are selected and there is no single answer. */
+export const qtyLabel = (batchQty: number | null | undefined) =>
+  batchQty ? ` (Quantity ${batchQty})` : "";
+
+/** The same description twice — two BOM lines of the same part, or one line across two selected
+ *  batches — is one row: this reads as a cost breakdown, not a line dump. */
+function addLine(m: Map<string, CostLine>, kind: CostLine["kind"], label: string, amount: number) {
+  const cur = m.get(`${kind}|${label}`);
+  if (cur) cur.amount += amount;
+  else m.set(`${kind}|${label}`, { kind, label, amount });
+}
 
 /** Accumulated share of one row across every (candidate, batch) pair that ships it. */
 type Acc = { cost: number; price: number; quantity: number };
@@ -55,6 +73,7 @@ export function itemMoney(args: {
     : [{ candidateIdx: 0, batchQty: batches[0] ?? candidates[0]!.perBatch[0]?.batchQty ?? 1 }];
 
   const acc = new Map<number, Acc>();
+  const lines = new Map<string, CostLine>();
   let any = false;
   for (const s of pairs) {
     const cand = candidates[s.candidateIdx];
@@ -65,6 +84,8 @@ export function itemMoney(args: {
     } catch {
       continue; // undecidable while an input is open — same silence the price badges give
     }
+    for (const b of out.bom) addLine(lines, "material", b.desc.trim() || b.itemCode, b.lineTotal);
+    for (const o of out.ops) addLine(lines, "operation", o.resource, o.cost);
     const scope = { ...bindings(model, lookups, cand.assignment, tables).values, qty: s.batchQty };
     for (const l of itemSplit(items, rows, scope, lookups.tables, s.batchQty, {
       cost: out.unitCost * s.batchQty,
@@ -80,6 +101,7 @@ export function itemMoney(args: {
   const qtys = new Set(pairs.map((s) => s.batchQty));
   return {
     batchQty: qtys.size === 1 ? [...qtys][0]! : null,
+    lines: [...lines.values()],
     rows: rows.map((_, i) => {
       const a = acc.get(i);
       // several pairs -> a quantity-weighted per-unit figure, which is what the document averages to

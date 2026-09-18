@@ -3,8 +3,9 @@ import { Panel, Text, Title } from "@ui5/webcomponents-react";
 import { evalTableRows, ITEM_COL } from "@confire/config-engine";
 import type { Entries, ModelDef, Propagation, ResolvedLookups, TableRows, Val } from "@confire/config-engine";
 import { paramPrices } from "./costElements.ts";
-import { money, useCurrency } from "../../lib/money.ts";
-import type { ItemMoney } from "./itemMoney.ts";
+import { money } from "../../lib/money.ts";
+import { useCurrency } from "../../orpc.ts";
+import { qtyLabel, type CostLine, type ItemMoney } from "./itemMoney.ts";
 import { DocHistory, Similar } from "./HistoryPane.tsx";
 
 // The process page's persistent right-hand rail: cost elements, B1 document history, similar past
@@ -54,6 +55,7 @@ export function InsightsRail({ projectId, model, lk, prop, entries, tables, item
           {lk && prop
             ? <Costs model={model} lookups={lk} prop={prop} />
             : <Text>No priced parameters yet — fill the form, or add price formulas in the model builder.</Text>}
+          {itemMoney ? <LineCosts lines={itemMoney.lines} /> : null}
           {itemMoney ? <ItemCosts rows={itemRows} money={itemMoney} /> : null}
         </div>
       ))}
@@ -65,31 +67,61 @@ export function InsightsRail({ projectId, model, lk, prop, entries, tables, item
   );
 }
 
+const SECTION = {
+  display: "flex", flexDirection: "column", gap: "0.25rem",
+  borderBlockStart: "1px solid var(--sapList_BorderColor)", paddingBlockStart: "0.5rem",
+} as const;
+const RULE = {
+  borderBlockStart: "1px solid var(--sapList_BorderColor)",
+  paddingBlockStart: "0.25rem", marginBlockStart: "0.25rem",
+} as const;
+
+/** The only line this rail draws: a label and an amount, `total` being the same in heavier type
+ *  above a rule. */
+function MoneyRow({ label, amount, cur, total }: { label: string; amount: number; cur?: string; total?: boolean }) {
+  const cell = (t: string) => (total ? <Title level="H6">{t}</Title> : <Text>{t}</Text>);
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", ...(total ? RULE : null) }}>
+      {cell(label)}
+      {cell(money(amount, cur))}
+    </div>
+  );
+}
+
+/** What the cost is *made of* — every BOM line by its description (the item code only when the
+ *  model builder never filled one in) and every operation by its resource. Batch totals from the
+ *  same computeOutputs call the Items block splits, so the two cannot disagree on the money. */
+function LineCosts({ lines }: { lines: CostLine[] }) {
+  const cur = useCurrency();
+  const group = (kind: CostLine["kind"], title: string) => {
+    const ls = lines.filter((l) => l.kind === kind);
+    return ls.length ? (
+      <div style={SECTION}>
+        <Title level="H6">{title}</Title>
+        {ls.map((l) => <MoneyRow key={l.label} label={l.label} amount={l.amount} cur={cur} />)}
+      </div>
+    ) : null;
+  };
+  return <>{group("material", "Materials")}{group("operation", "Operations")}</>;
+}
+
 /** Where the configuration's cost actually lands, row by row, split on the items table's own
  *  `basisExpr`. Line totals, not per-unit: a cost element is an amount. The grid next to it shows
  *  the same money per unit, from the same itemSplit call. */
 function ItemCosts({ rows, money: m }: { rows: Record<string, Val>[]; money: ItemMoney }) {
-  const currency = useCurrency();
+  const cur = useCurrency();
   const lines = m.rows
     .map((r, i) => ({ r, label: String(rows[i]?.[ITEM_COL] ?? "").trim() || `Item ${i + 1}` }))
     .filter((l): l is { r: NonNullable<typeof l.r>; label: string } => !!l.r);
   if (!lines.length) return null;
   const total = lines.reduce((n, l) => n + l.r.unitCost * l.r.quantity, 0);
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem",
-      borderBlockStart: "1px solid var(--sapList_BorderColor)", paddingBlockStart: "0.5rem" }}>
-      <Title level="H6">{m.batchQty ? `Items (batch ${m.batchQty})` : "Items"}</Title>
+    <div style={SECTION}>
+      <Title level="H6">{`Items${qtyLabel(m.batchQty)}`}</Title>
       {lines.map((l, i) => (
-        <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: "1rem" }}>
-          <Text>{l.label}</Text>
-          <Text>{money(l.r.unitCost * l.r.quantity, currency)}</Text>
-        </div>
+        <MoneyRow key={i} label={l.label} amount={l.r.unitCost * l.r.quantity} cur={cur} />
       ))}
-      <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem",
-        borderBlockStart: "1px solid var(--sapList_BorderColor)", paddingBlockStart: "0.25rem", marginBlockStart: "0.25rem" }}>
-        <Title level="H6">Total</Title>
-        <Title level="H6">{money(total, currency)}</Title>
-      </div>
+      <MoneyRow label="Total" amount={total} cur={cur} total />
     </div>
   );
 }
@@ -102,17 +134,8 @@ function Costs({ model, lookups, prop }: { model: ModelDef; lookups: ResolvedLoo
     return <Text>No priced parameters yet — fill the form, or add price formulas in the model builder.</Text>;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-      {rows.map((r) => (
-        <div key={r.key} style={{ display: "flex", justifyContent: "space-between", gap: "1rem" }}>
-          <Text>{r.label}</Text>
-          <Text>{money(r.amount, cur)}</Text>
-        </div>
-      ))}
-      <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem",
-        borderBlockStart: "1px solid var(--sapList_BorderColor)", paddingBlockStart: "0.25rem", marginBlockStart: "0.25rem" }}>
-        <Title level="H6">Total</Title>
-        <Title level="H6">{money(rows.reduce((n, r) => n + r.amount, 0), cur)}</Title>
-      </div>
+      {rows.map((r) => <MoneyRow key={r.key} label={r.label} amount={r.amount} cur={cur} />)}
+      <MoneyRow label="Total" amount={rows.reduce((n, r) => n + r.amount, 0)} cur={cur} total />
     </div>
   );
 }

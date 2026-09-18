@@ -9,7 +9,7 @@ import { apexUrl, hardRedirect } from "../lib/tenant.ts";
 
 // Portal-invite landing page: `https://<slug>.<base>/accept?token=…`. Top-level (not
 // under `_authed`) because the invitee has no membership yet — `_authed`'s beforeLoad
-// would bounce them to /select before acceptInvite ever runs.
+// would bounce them off this workspace before acceptInvite ever runs.
 export const Route = createFileRoute("/accept")({
   validateSearch: (s: Record<string, unknown>) => ({ token: typeof s.token === "string" ? s.token : "" }),
   component: Accept,

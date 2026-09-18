@@ -9,12 +9,14 @@ import {
 } from "../lib/tenant.ts";
 
 export const Route = createFileRoute("/onboarding")({
-  // Auth lives on the apex. Signed-in users with no org land here; any signed-in user may
-  // also create an additional workspace. The apex dispatcher (`/`) routes everyone else.
+  // Auth lives on the apex, and this page is only for users with no company yet: one user
+  // belongs to exactly one company, so anyone who already has one belongs *in* it.
   beforeLoad: async ({ context }) => {
     if (!isApex()) return hardRedirect(apexUrl("/onboarding"));
     const data = await context.queryClient.ensureQueryData(sessionQuery);
     if (!data?.session) throw redirect({ to: "/login" });
+    const org = ((await authClient.organization.list()).data ?? [])[0];
+    if (org) return hardRedirect(tenantUrl(org.slug));
   },
   component: Onboarding,
 });

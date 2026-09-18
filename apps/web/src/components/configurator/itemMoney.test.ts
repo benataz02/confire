@@ -86,6 +86,32 @@ describe("itemMoney", () => {
     expect(m!.rows.filter(Boolean).reduce((a, r) => a + r!.unitPrice * r!.quantity, 0)).toBeCloseTo(60, 8);
   });
 
+  test("the cost lines say what the money is made of, by description", () => {
+    // desc when the builder filled one in, the item code when it did not; routing lands under the
+    // resource. unitCost = 10 material + 16 labor, so the lines must add up to 26 * 3.
+    const withOps: ModelDef = {
+      ...model,
+      bom: [{ id: "sheet", itemCode: '"SHEET"', qty: "1", desc: "Steel sheet" }],
+      routing: [{ id: "cut", resource: "Laser", setupMin: "30", runMinPerUnit: "6", ratePerHour: "60" }],
+    };
+    const m = itemMoney({
+      model: withOps, lookups, items, tables, candidates,
+      selection: [{ candidateIdx: 0, batchQty: 3 }], batches: [3],
+    });
+    expect(m!.lines).toEqual([
+      { kind: "material", label: "Steel sheet", amount: 30 },
+      { kind: "operation", label: "Laser", amount: 48 },
+    ]);
+    // same total the Items block splits over the grid
+    expect(m!.lines.reduce((a, l) => a + l.amount, 0))
+      .toBeCloseTo(m!.rows.reduce((a, r) => a + (r ? r.unitCost * r.quantity : 0), 0), 8);
+  });
+
+  test("an unnamed BOM line falls back to its item code, and repeats merge", () => {
+    const m = call([{ candidateIdx: 0, batchQty: 3 }, { candidateIdx: 0, batchQty: 6 }]);
+    expect(m!.lines).toEqual([{ kind: "material", label: "SHEET", amount: 90 }]); // 3 + 6 sheets
+  });
+
   test("no candidates yet means no money at all, not a zero", () => {
     expect(itemMoney({ model, lookups, items, tables, candidates: [], selection: [], batches: [3] })).toBeNull();
   });

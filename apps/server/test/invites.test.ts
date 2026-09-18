@@ -166,6 +166,28 @@ describe("spec test 4 — invites", () => {
     expect(peek).toEqual({ email: invitee.email, userExists: true });
   });
 
+  test("an external account belongs to one tenant: a second workspace's invite is refused", async () => {
+    const t1 = await makeTenant();
+    const t2 = await makeTenant();
+    const a = await connect(t1.tenantId);
+    await connectTenant(t2.tenantId, a); // one mock agent serves both tenants
+    const admin1 = await makeUser("admin", t1.tenantId);
+    const admin2 = await makeUser("admin", t2.tenantId);
+    const client = await makeUser();
+
+    const first = await invite(t1.slug, admin1.cookie, client.email);
+    await call(router.portal.acceptInvite, { token: first.token },
+      { context: { headers: tenantHeaders(t1.slug, client.cookie) } });
+
+    const second = await invite(t2.slug, admin2.cookie, client.email);
+    const ctx2 = { context: { headers: tenantHeaders(t2.slug, client.cookie) } };
+    expect(await code(call(router.portal.acceptInvite, { token: second.token }, ctx2))).toBe("BAD_REQUEST");
+    // No membership leaked into the second tenant, and the first one still works.
+    expect(await code(call(router.portal.models.list, undefined, ctx2))).toBe("FORBIDDEN");
+    expect(await call(router.portal.models.list, undefined,
+      { context: { headers: tenantHeaders(t1.slug, client.cookie) } })).toEqual([]);
+  });
+
   test("acceptInvite refuses a session whose email is not the invite's", async () => {
     const { tenantId, slug } = await makeTenant();
     await connect(tenantId);

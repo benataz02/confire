@@ -68,6 +68,15 @@ describe("LookupRef columns", () => {
     expect("queryTables" in ModelDefZ.parse(m)).toBe(false);
   });
 
+  // The currency moved to the tenant (sap_connection.localCurrency, served on `me`). Models saved
+  // while it still lived here must keep loading — ModelDefZ only ever runs on save, and this is
+  // what makes the stale key disappear on the next one rather than reject the whole document.
+  test("a model definition no longer carries a currency", () => {
+    const m = structuredClone(model) as Record<string, unknown>;
+    (m.pricing as Record<string, unknown>).currency = "CHF";
+    expect("currency" in (ModelDefZ.parse(m).pricing as Record<string, unknown>)).toBe(false);
+  });
+
   test("history names a masterdata query rather than carrying one", () => {
     const m = structuredClone(model) as Record<string, unknown>;
     m.history = {

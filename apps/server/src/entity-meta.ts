@@ -42,6 +42,33 @@ export async function assertEntity(tenantId: string, b1: B1Transport, name: stri
   return found;
 }
 
+/** Value helps B1's own $metadata does not declare.
+ *
+ *  A NavigationProperty's ReferentialConstraint is what normally yields one (see the parser note in
+ *  packages/b1/src/metadata.ts). B1 declares none for DocCurrency, so without this the quote page's
+ *  currency is a free-text box — and a typo in it reaches SAP.
+ *
+ *  Keyed by field name rather than by entity on purpose: DocCurrency is the same column on every
+ *  B1 marketing document, so one entry covers Quotations, Orders, DeliveryNotes and Invoices. */
+const FIELD_LOOKUPS: Record<string, { entitySet: string; keyField: string }> = {
+  DocCurrency: { entitySet: "Currencies", keyField: "Code" },
+};
+
+/** Overlay FIELD_LOOKUPS. Applied on *read* rather than before the row is written, so the schemas
+ *  already sitting in entity_meta pick it up without a refresh — nothing else would have retired
+ *  them, since a stored schema has no TTL. B1's own constraint wins where it declared one, the
+ *  same precedence metadata.ts applies. */
+function withFieldLookups(schema: B1EntitySchema): B1EntitySchema {
+  if (!schema.fields.some((f) => !f.lookup && FIELD_LOOKUPS[f.name])) return schema;
+  return {
+    ...schema,
+    fields: schema.fields.map((f) => {
+      const extra = f.lookup ? undefined : FIELD_LOOKUPS[f.name];
+      return extra ? { ...f, lookup: extra } : f;
+    }),
+  };
+}
+
 export async function entitySchema(
   tenantId: string,
   b1: B1Transport,
@@ -57,7 +84,7 @@ export async function entitySchema(
     // A hit returns before assertEntity on purpose: the row only exists because the name was
     // checked against the entity list when it was written, so a stored schema costs one Postgres
     // read and no agent call at all — which is the whole point of storing it.
-    if (row && row.fetchedAt.getTime() >= PARSER_EPOCH) return row.json;
+    if (row && row.fetchedAt.getTime() >= PARSER_EPOCH) return withFieldLookups(row.json);
   }
   await assertEntity(tenantId, b1, name);
 
@@ -78,5 +105,5 @@ export async function entitySchema(
       target: [entityMeta.tenantId, entityMeta.entityName],
       set: { json: schema, fetchedAt },
     });
-  return schema;
+  return withFieldLookups(schema);
 }

@@ -11,6 +11,8 @@ import { StepConfigure } from "../configurator/StepConfigure.tsx";
 import { BATCHES_SECTION, ConfiguratorForm } from "../configurator/ConfiguratorForm.tsx";
 import { StepCandidates } from "../configurator/StepCandidates.tsx";
 import { candidateLabel, fmt, openKeys, toggleSelection, type Sel } from "../configurator/runView.ts";
+import { money } from "../../lib/money.ts";
+import { useCurrency } from "../../orpc.ts";
 import { portalStatusUi, type PortalStatus } from "./portalUi.ts";
 import { PortalCandidateDetail } from "./PortalCandidateDetail.tsx";
 import { PortalRequestSummary } from "./PortalRequestSummary.tsx";
@@ -20,6 +22,7 @@ import { mergeQueryPicks, setQueryPick, type QueryPicks } from "../configurator/
 // The client's request flow: Configure → Quantities → Prices → Submit while editable;
 // a read-only summary once submitted. Mirrors ConfigProcessPage's state overlay pattern.
 export function PortalRequestPage({ id }: { id: string }) {
+  const currency = useCurrency();
   const qc = useQueryClient();
   const q = useQuery(orpc.portal.projects.get.queryOptions({ input: { id } }));
   const modelId = q.data?.project.modelId;
@@ -186,13 +189,13 @@ export function PortalRequestPage({ id }: { id: string }) {
                   <TableRow key={i} rowKey={String(i)}>
                     <TableCell><Text>{l.label}</Text></TableCell>
                     <TableCell horizontalAlign="End"><Text>{fmt(l.batchQty)}</Text></TableCell>
-                    <TableCell horizontalAlign="End"><Text>{fmt(l.unitPrice)}</Text></TableCell>
-                    <TableCell horizontalAlign="End"><Text>{fmt(l.total)}</Text></TableCell>
+                    <TableCell horizontalAlign="End"><Text>{money(l.unitPrice, currency)}</Text></TableCell>
+                    <TableCell horizontalAlign="End"><Text>{money(l.total, currency)}</Text></TableCell>
                   </TableRow>
                 ))}
               </Table>
               <div style={{ display: "flex", justifyContent: "flex-end", padding: "0.75rem" }}>
-                <Title level="H5">Total: {fmt(grand)}</Title>
+                <Title level="H5">Total: {money(grand, currency)}</Title>
               </div>
             </Card>
             <MessageStrip design="Information" hideCloseButton>

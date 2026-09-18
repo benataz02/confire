@@ -40,9 +40,9 @@ function Signup() {
   const queryClient = useQueryClient();
 
   const signUp = useMutation({
+    // Unconditional for the same reason as login: a session belonging to someone else must
+    // never pass for "signed up".
     mutationFn: async (vars: { name: string; email: string; password: string }) => {
-      const { data } = await authClient.getSession();
-      if (data?.session) return data; // Prevent duplicate session creation
       // ponytail: no email verification — no mailer in the repo. Enable Better Auth
       //           requireEmailVerification + a sender when one exists.
       const res = await authClient.signUp.email(vars);
@@ -87,7 +87,7 @@ function Signup() {
         {signUp.isPending ? "Creating…" : "Create account"}
       </Button>
       <div className="auth-or">or</div>
-      <SocialButtons callbackURL="/onboarding" />
+      <SocialButtons />
       <p className="auth-alt">
         Already have an account? <Link to="/login" search={{ redirect: redirectTo, email: emailFromInvite }}>Sign in</Link>
       </p>

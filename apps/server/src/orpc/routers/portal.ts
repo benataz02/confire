@@ -251,14 +251,24 @@ export const portalRouter = {
         message: "This invite was sent to a different email address. Sign in with that account to continue.",
       });
 
-    const [m] = await db
-      .select({ role: member.role })
+    // Scoped to the user, not to this org: one account belongs to exactly one workspace, so an
+    // email already invited into another tenant is refused here rather than ending up with a
+    // second membership the lobby can never route to (there is no workspace picker).
+    // ponytail: checked in app code — a UNIQUE index on member.user_id if two portal invites
+    // are ever accepted concurrently in different tenants.
+    const memberships = await db
+      .select({ organizationId: member.organizationId, role: member.role })
       .from(member)
-      .where(and(eq(member.organizationId, org.id), eq(member.userId, context.user.id)))
-      .limit(1);
+      .where(eq(member.userId, context.user.id));
+    const m = memberships.find((x) => x.organizationId === org.id);
     if (m)
       throw new ORPCError("BAD_REQUEST", {
         message: m.role === "client" ? "This account already has portal access." : "This account is already a member of this workspace.",
+      });
+    if (memberships.length)
+      throw new ORPCError("BAD_REQUEST", {
+        message:
+          "This email address already belongs to another workspace. Ask your supplier to send the invite to a different address.",
       });
 
     await db.transaction(async (tx) => {

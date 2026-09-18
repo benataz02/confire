@@ -16,6 +16,8 @@ import "@ui5/webcomponents-icons/dist/undo.js";
 import type { Entries, ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { candidateLabel, fmt, openKeys, type Sel } from "../configurator/runView.ts";
+import { money } from "../../lib/money.ts";
+import { useCurrency } from "../../orpc.ts";
 import { portalStatusUi, type PortalStatus } from "./portalUi.ts";
 import type { PortalCandidate } from "./PortalCandidateDetail.tsx";
 
@@ -55,6 +57,7 @@ export function PortalRequestSummary({ project, model, onWithdraw, onReopen, bus
   onReopen: () => void;
   busy: boolean;
 }) {
+  const currency = useCurrency();
   const quoted = useQuery({
     ...orpc.portal.quotedResult.queryOptions({ input: { projectId: project.id } }),
     enabled: project.status === "quoted",
@@ -138,13 +141,13 @@ export function PortalRequestSummary({ project, model, onWithdraw, onReopen, bus
               <TableRow key={i} rowKey={String(i)}>
                 <TableCell><Text>{l.label}</Text></TableCell>
                 <TableCell horizontalAlign="End"><Text>{fmt(l.batchQty)}</Text></TableCell>
-                <TableCell horizontalAlign="End"><Text>{fmt(l.unitPrice)}</Text></TableCell>
-                <TableCell horizontalAlign="End"><Text>{fmt(l.total)}</Text></TableCell>
+                <TableCell horizontalAlign="End"><Text>{money(l.unitPrice, currency)}</Text></TableCell>
+                <TableCell horizontalAlign="End"><Text>{money(l.total, currency)}</Text></TableCell>
               </TableRow>
             ))}
           </Table>
           <div style={{ display: "flex", justifyContent: "flex-end", padding: "0.75rem" }}>
-            <Title level="H5">Total: {fmt(grand)}</Title>
+            <Title level="H5">Total: {money(grand, currency)}</Title>
           </div>
         </Card>
 

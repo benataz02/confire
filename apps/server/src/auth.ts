@@ -28,6 +28,9 @@ export const auth = betterAuth({
   },
   plugins: [
     organization({
+      // A user belongs to exactly one company — there is no workspace picker anywhere in the
+      // app, so a second one would be unreachable. Better Auth returns FORBIDDEN on create.
+      organizationLimit: 1,
       organizationHooks: {
         // org = tenant. The configurator lists are variant-backed and there is no "enable" event to
         // seed them from, so a new tenant gets its Standard views here or it lands on a viewless list.
@@ -46,8 +49,14 @@ export const auth = betterAuth({
   // Auth lives on the apex, but the app POSTs (sign-out) from every tenant subdomain, so those
   // origins need trusting; baseURL's own origin is trusted automatically. A pattern without
   // `://` is matched against URL.host — which includes the port — hence both forms: prod
-  // (`acme.confire.app`) and dev (`acme.lvh.me:5173`).
-  trustedOrigins: [`*.${baseDomain}`, `*.${baseDomain}:*`, `http://192.168.1.134:5173`],
+  // (`acme.confire.app`) and dev (`acme.lvh.me:5173`). Anything outside the base domain — a LAN
+  // IP to open the app from a phone — is a per-machine fact, so it comes from
+  // APP_TRUSTED_ORIGINS (comma-separated) and never from a literal in here.
+  trustedOrigins: [
+    `*.${baseDomain}`,
+    `*.${baseDomain}:*`,
+    ...(process.env.APP_TRUSTED_ORIGINS ?? "").split(",").map((o) => o.trim()).filter(Boolean),
+  ],
   advanced: {
     crossSubDomainCookies: { enabled: true, domain: `.${baseDomain}` },
   },

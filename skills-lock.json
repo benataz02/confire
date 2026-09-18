@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "accessibility": {
+      "source": "UI5/webcomponents",
+      "sourceType": "github",
+      "skillPath": "skills/accessibility/SKILL.md",
+      "computedHash": "b1b6c8461f40d3debf598d5a365ad69b2fe092ff0a8aa8b0dcd53f423adcdb5b"
+    },
+    "sap-fiori-guidelines": {
+      "source": "SAP/ai-skills-library",
+      "sourceType": "github",
+      "skillPath": "skills/sap-fiori-guidelines/SKILL.md",
+      "computedHash": "9b9df87bb0bf1f86e115fd671ba44afd16ed7754c27bc4e36fddcd651c755fb4"
+    },
+    "styling": {
+      "source": "UI5/webcomponents",
+      "sourceType": "github",
+      "skillPath": "skills/styling/SKILL.md",
+      "computedHash": "3c5d36299cbde09d4ee5817618a09abd69906a9103209e4205bb5337c26fbea1"
+    },
+    "visual-test": {
+      "source": "UI5/webcomponents",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/visual-test/SKILL.md",
+      "computedHash": "be9daeb190df419edafd3e69912524c31fb9049f4a74a31577bd711708cce96c"
+    }
+  }
+}

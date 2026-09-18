@@ -100,18 +100,11 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   const rows: Row[] = [];
   const defOf = (k: string): TableDef | undefined => (draft.tables ?? []).find((t) => t.key === k);
 
-  // A formula is global; `under` only says which parameter row it is drawn beneath. Nothing is
-  // ever left dangling: an anchor naming a parameter that is gone or unplaced re-homes onto the
-  // last placed one, which is also where a new formula goes.
-  const placedParams = draft.structure.sections
-    .flatMap((s) => s.groups.flatMap((g) => (isTableGroup(g) ? [] : g.params)));
-  const lastParam = placedParams.at(-1);
-  const anchorFor = (under?: string) => (under && placedParams.includes(under) ? under : lastParam);
-  const byAnchor = new Map<string, number[]>();
-  draft.computed.forEach((c, i) => {
-    const at = anchorFor(c.under) ?? "";
-    byAnchor.set(at, [...(byAnchor.get(at) ?? []), i]);
-  });
+  // A formula is global and the model stores nothing positional about one, so they all draw under
+  // the last placed parameter — the one row guaranteed to be there to hang them on.
+  const lastParam = draft.structure.sections
+    .flatMap((s) => s.groups.flatMap((g) => (isTableGroup(g) ? [] : g.params))).at(-1);
+  const formulas = draft.computed.map((_, i) => i);
 
   draft.structure.sections.forEach((s, si) => {
     const sId = `S:${s.key}`;
@@ -135,22 +128,22 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       if (collapsed.has(gId)) return;
       g.params.forEach((k) => {
         const p = draft.parameters.find((x) => x.key === k);
-        const formulas = byAnchor.get(k) ?? [];
+        const own = k === lastParam ? formulas : [];
         const pId = `P:${k}`;
         rows.push({
           kind: "struct", key: rowKeyOf({ kind: "param", key: k }), depth: 2, label: p?.label || k,
           detail: p ? `${p.type} · ${p.ui}${p.domain ? (p.domain.kind === "range" ? " · range" : ` · ${p.domain.ref.source}`) : ""}${p.excludeFromDomains ? " · excluded" : ""}` : "missing definition",
           ref: { kind: "param", key: k },
           // Only a parameter that anchors formulas has anything to collapse.
-          collapseId: formulas.length ? pId : undefined,
+          collapseId: own.length ? pId : undefined,
         });
         if (collapsed.has(pId)) return;
-        for (const i of formulas) rows.push({ kind: "formula", key: `c:${i}`, idx: i });
+        for (const i of own) rows.push({ kind: "formula", key: `c:${i}`, idx: i });
       });
     });
   });
   // Only reachable with no parameter placed anywhere — there is no row to hang them under.
-  for (const i of byAnchor.get("") ?? []) rows.push({ kind: "formula", key: `c:${i}`, idx: i });
+  if (!lastParam) for (const i of formulas) rows.push({ kind: "formula", key: `c:${i}`, idx: i });
 
   const saveParam = (p: Param, isNew: boolean, place?: { s: number; g: number }) =>
     update((d) => {
@@ -220,9 +213,9 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       }),
     },
   }));
-  const addFormula = (under?: string) => update((d) => ({
+  const addFormula = () => update((d) => ({
     ...d,
-    computed: [...d.computed, { key: addKey("value", [...d.parameters.map((p) => p.key), ...d.computed.map((c) => c.key)]), expr: "0", under }],
+    computed: [...d.computed, { key: addKey("value", [...d.parameters.map((p) => p.key), ...d.computed.map((c) => c.key)]), expr: "0" }],
   }));
   // A table is a group, so it is added to a section, not into one.
   const addTable = (role: "calc" | "items", s: number) => update((d) => {
@@ -251,7 +244,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
     : ref.kind === "table" ? (defOf(tableKeyAt(draft, ref.s, ref.g) ?? "")?.role === "items" ? undefined : del)
     : (
       <>
-        <TableRowAction icon="add" text="Add formula here" data-act="add" />
+        <TableRowAction icon="add" text="Add formula" data-act="add" />
         {del}
         <TableRowAction icon="copy" text="Duplicate parameter" data-act="dup" />
       </>
@@ -307,7 +300,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
             if (act === "delete") {
               setFEdit(null);
               update((d) => ({ ...d, computed: d.computed.filter((_, j) => j !== i) }));
-            } else addFormula(anchorFor(draft.computed[i]?.under));
+            } else addFormula();
             return;
           }
           const ref = parseRowKey(rowKey);
@@ -316,7 +309,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
           else if (act === "dup" && ref.kind === "param") update((d) => duplicateParam(d, ref.key));
           else if (ref.kind === "section") addGroup(ref.s);
           else if (ref.kind === "group") setEditing({ param: emptyParam(), isNew: true, place: { s: ref.s, g: ref.g } });
-          else if (ref.kind === "param") addFormula(ref.key);
+          else if (ref.kind === "param") addFormula();
         }}
         onRowClick={(e) => {
           const rowKey = ((e.detail.row as unknown) as HTMLElement).getAttribute("row-key")!;

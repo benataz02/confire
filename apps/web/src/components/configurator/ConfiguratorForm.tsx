@@ -14,7 +14,8 @@ import type { ItemMoney } from "./itemMoney.ts";
 import { displayValue, setEntry } from "./formHelpers.ts";
 import { addBatch } from "./configProcessState.ts";
 import { paramPrices } from "./costElements.ts";
-import { money, useCurrency } from "../../lib/money.ts";
+import { money } from "../../lib/money.ts";
+import { useCurrency } from "../../orpc.ts";
 
 /** The ref's display columns for one option value, joined — shown next to the option. */
 function extraOf(ref: LookupRef, t: ResolvedTable | undefined, val: Val): string | undefined {

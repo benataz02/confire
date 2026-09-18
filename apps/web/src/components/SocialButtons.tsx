@@ -19,7 +19,10 @@ const MicrosoftGlyph = () => (
   </svg>
 );
 
-export function SocialButtons({ callbackURL = "/" }: { callbackURL?: string }) {
+// Always the apex dispatcher — it is what knows whether this user has a company yet.
+const callbackURL = "/";
+
+export function SocialButtons() {
   return (
     <div className="auth-social">
       <Button onClick={() => authClient.signIn.social({ provider: "google", callbackURL })}>

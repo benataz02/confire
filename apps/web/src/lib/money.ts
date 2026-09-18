@@ -1,37 +1,25 @@
-import { useQuery } from "@tanstack/react-query";
-import { meQuery } from "../orpc.ts";
-
 // One money formatter for the whole app. There used to be two with the same name and different
-// output — configurator/costElements.ts (locale default, 2 decimals, guarded) and
+// output — configurator/costElements.ts (locale default, 2 decimals, EUR default, guarded) and
 // dashboard/dashboardView.ts (hardcoded en-GB, 0 decimals, unguarded) — so the same figure read
 // differently depending on which page you were on.
+//
+// No default currency. The old `= "EUR"` invented a unit for tenants whose books are in something
+// else; undefined now means "SAP has not said yet" and renders a bare number, which is honest.
+// The currency itself comes from useCurrency() in orpc.ts — this module stays free of the query
+// client so it can be unit-tested without a DOM.
 
 /**
- * The tenant's B1 local currency. It comes off `me`, which _authed.beforeLoad already primes and
- * orpc.ts already caches with staleTime: Infinity — B1 gives no way to change a company's local
- * currency, so even one read per browser session is generous.
- *
- * undefined = SAP has never been reachable for this tenant. Money then renders as a plain number,
- * which is honest; the old `= "EUR"` default was not.
+ * Always two decimals, everywhere, including the dashboard's charts. Both bounds are set, not just
+ * the maximum: Intl's currency style otherwise takes the *currency's* own digit count, so the same
+ * figure would render with 0 decimals under JPY and 3 under KWD. Pinning both is what makes a
+ * column of money line up.
  */
-export function useCurrency(): string | undefined {
-  return useQuery(meQuery).data?.currency ?? undefined;
-}
-
-/**
- * `maxFrac` is for the dashboard's charts, which read in whole units. Everything else takes the
- * currency's own default (2 for most, 0 for JPY — which is why this is not `toFixed(2)`).
- */
-export function money(n: number, currency?: string, maxFrac?: number): string {
+export function money(n: number, currency?: string): string {
+  const digits = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
   try {
-    return new Intl.NumberFormat(
-      undefined,
-      currency
-        ? { style: "currency", currency, maximumFractionDigits: maxFrac }
-        : { maximumFractionDigits: maxFrac ?? 2 },
-    ).format(n);
+    return new Intl.NumberFormat(undefined, currency ? { style: "currency", currency, ...digits } : digits).format(n);
   } catch {
-    // The code is whatever B1 has in OADM/ODOC, not something this app validated. Intl throws on
+    // The code is whatever B1 has in OADM, not something this app validated. Intl throws on
     // anything that is not a well-formed ISO 4217 code — never let that take the page down.
     return `${n.toFixed(2)}${currency ? ` ${currency}` : ""}`;
   }
