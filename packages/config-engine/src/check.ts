@@ -167,10 +167,8 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   });
   model.bom.forEach((l, i) => {
     checkExpr(l.itemCode, `bom[${i}].itemCode`, withQty);
-    checkExpr(l.desc, `bom[${i}].desc`, withQty);
     checkExpr(l.condition, `bom[${i}].condition`, withQty);
     checkExpr(l.qty, `bom[${i}].qty`, withQty);
-    checkExpr(l.price, `bom[${i}].price`, withQty);
   });
   model.routing.forEach((o, i) => {
     checkExpr(o.condition, `routing[${i}].condition`, withQty);
@@ -179,6 +177,10 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
     checkExpr(o.ratePerHour, `routing[${i}].ratePerHour`, withQty);
   });
   checkExpr(model.pricing.priceExpr, "pricing.priceExpr", pricingScope);
+  // Mandatory, not optional: a BOM line carries no price of its own any more, so without a price
+  // list every material costs an unanswerable question.
+  if (!model.pricing.priceList)
+    issues.push({ path: "pricing.priceList", message: "a model needs a price list — it is what prices the BOM materials" });
 
   // computed dependency cycles (computed -> computed edges only)
   const compSet = new Set(computedKeys);
@@ -251,7 +253,6 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
     };
     walk(ast);
   };
-  model.bom.forEach((l, i) => checkLookups(l.price, `bom[${i}].price`));
   model.routing.forEach((o, i) => checkLookups(o.ratePerHour, `routing[${i}].ratePerHour`));
 
   tableDefs.forEach((t, i) => {
@@ -362,13 +363,42 @@ export function referencedTables(model: ModelDef): Set<string> {
   return out;
 }
 
+/** The item codes a resolve has to fetch a price for.
+ *
+ *  An `itemCode` is an expression, but the builder's value help writes a plain string literal, so
+ *  in practice the literals in it ARE the codes. A bare identifier is the other shipped shape — a
+ *  parameter that holds the code — and its resolved domain contributes every value it could take.
+ *  Anything computed (`CONCAT(...)`, a `LOOKUP(...)`) is undecidable before evaluation: it yields
+ *  nothing here, and the line then fails in computeOutputs with "no price for item", which is the
+ *  honest answer rather than a silently free material. */
+export function bomItemCodes(model: ModelDef, domains?: Record<string, { value: unknown }[]>): string[] {
+  const out = new Set<string>();
+  const add = (v: unknown) => { if (typeof v === "string" && v) out.add(v); };
+  const walk = (n: Ast): void => {
+    if (n.t === "lit") add(n.v);
+    else if (n.t === "ident") for (const o of domains?.[n.name] ?? []) add(o.value);
+    else if (n.t === "call") n.args.forEach(walk);
+    else if (n.t === "un") walk(n.e);
+    else if (n.t === "bin") { walk(n.l); walk(n.r); }
+    else if (n.t === "tern") { walk(n.c); walk(n.a); walk(n.b); }
+  };
+  for (const l of model.bom) {
+    try {
+      walk(parse(l.itemCode));
+    } catch {
+      // an unparseable expression is checkModel's problem, not this one's
+    }
+  }
+  return [...out];
+}
+
 /** Every expression string in a model, in no particular order. */
 function* exprsOf(model: ModelDef): Generator<string> {
   for (const p of model.parameters)
     for (const e of [p.defaultExpr, p.visibleWhen, p.requiredWhen, p.priceExpr]) if (e) yield e;
   for (const c of model.computed) yield c.expr;
   for (const c of model.constraints) if (c.kind === "expr") { if (c.when) yield c.when; yield c.assert; }
-  for (const l of model.bom) for (const e of [l.itemCode, l.desc, l.condition, l.qty, l.price]) if (e) yield e;
+  for (const l of model.bom) for (const e of [l.itemCode, l.condition, l.qty]) if (e) yield e;
   for (const o of model.routing)
     for (const e of [o.condition, o.setupMin, o.runMinPerUnit, o.ratePerHour]) if (e) yield e;
   // must include cell formulas, or referencedTables misses the masterdata a LOOKUP() there needs

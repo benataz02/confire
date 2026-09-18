@@ -74,25 +74,21 @@ export const model: ModelDef = {
     {
       id: "conductor",
       itemCode: 'CONCAT("COND-", material)',
-      desc: 'CONCAT(material, " conductor")',
+      desc: "conductor",
       qty: "section * 0.02",
-      price: 'LOOKUP("prices", "code", CONCAT("COND-", material), "price")',
-      scrapPct: 0,
     },
     {
       id: "coating",
       itemCode: '"COAT-1"',
       condition: "coated",
       qty: "1",
-      price: "0.8",
-      scrapPct: 5,
     },
   ],
   routing: [
     { id: "cut", resource: "SAW", setupMin: "10", runMinPerUnit: "0.5", ratePerHour: "60" },
     { id: "coat", resource: "COATER", condition: "coated", setupMin: "30", runMinPerUnit: "0.2 * section", ratePerHour: "60" },
   ],
-  pricing: { priceExpr: "unitCost * 1.4", quoteItemCode: "CABLE-CFG" },
+  pricing: { priceExpr: "unitCost * 1.4", quoteItemCode: "CABLE-CFG", priceList: 1 },
   batchDefaults: [100, 500, 1000],
 };
 
@@ -122,4 +118,6 @@ export const lookups: ResolvedLookups = {
       ],
     },
   },
+  // What the server's price-list read hands the engine: item code -> unit price.
+  prices: { "COND-steel": 1.5, "COND-alu": 2.5, "COAT-1": 0.8 },
 };

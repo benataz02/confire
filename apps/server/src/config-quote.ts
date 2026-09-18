@@ -165,9 +165,15 @@ export function buildQuoteLines(
   return { lines, value, cost };
 }
 
-/** Canonical Quotations draft: the lines above, plus the customer header. */
+/** Canonical Quotations draft: the lines above, plus the customer header.
+ *
+ *  `currency` is the tenant's B1 local currency (b1.ts' tenantCurrency), passed in rather than read
+ *  here so this module stays free of db access. It is only a *default*: DocCurrency is in
+ *  ENTITY_PROFILES.Quotations.editable and therefore in QUOTE_HEADER, and createQuote spreads the
+ *  page's header patch over this seed — so a salesperson quoting a foreign-currency customer can
+ *  still pick their currency in the quote page's value help. */
 export function buildQuoteSeed(
-  project: ConfigProjectRow, model: ModelDef, lookups: ResolvedLookups,
+  project: ConfigProjectRow, model: ModelDef, lookups: ResolvedLookups, currency?: string | null,
 ): Record<string, unknown> {
   if (!project.customer) {
     throw new ORPCError("BAD_REQUEST", { message: "Customer is required before quoting" });
@@ -185,7 +191,6 @@ export function buildQuoteSeed(
     CardName: project.customer.cardName,
     DocumentLines: buildQuoteLines(project, model, lookups).lines,
   };
-  const currency = model.pricing.currency;
   if (currency) seed.DocCurrency = currency;
   return seed;
 }

@@ -1,19 +1,22 @@
 import { useBlocker, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Button, BusyIndicator, MessageStrip,
-  ObjectPage, ObjectPageSection, ObjectPageTitle, ObjectStatus,
-  Title, Toolbar,
+  Bar, Button, BusyIndicator, MessageStrip,
+  ObjectPage, ObjectPageSection, ObjectPageTitle,
+  Text, Title, Toolbar,
 } from "@ui5/webcomponents-react";
 import type { Issue, ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
-import { tabOf, useDraftModel, type TabKey } from "./useDraftModel.ts";
+import { useDraftModel } from "./useDraftModel.ts";
+import { useSectionParam } from "../../lib/sectionParam.ts";
+import { PageMessages } from "../PageMessages.tsx";
+import { builderMessages, SECTION_TITLE } from "./builderMessages.ts";
 import { confirm } from "../confirm.ts";
 import { toast } from "../toast.ts";
 import { SettingsTab } from "./SettingsTab.tsx";
 import { ParamsTab } from "./ParamsTab.tsx";
 import { useRulesTab } from "./RulesTab.tsx";
-import { useLinesTab } from "./LinesTabs.tsx";
+import { useItemStructureTab } from "./ItemStructureTabs.tsx";
 import { useHistoryTab } from "./HistoryTab.tsx";
 import { usePreviewLookups } from "./usePreviewLookups.ts";
 
@@ -28,6 +31,7 @@ export function ModelBuilderPage({ id }: { id?: string }) {
   const m = useDraftModel(id);
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const sectionParam = useSectionParam();
   // Both keys: `list` backs GlobalSearch, `rows` backs the paged list page.
   const invalidateLists = () => {
     void qc.invalidateQueries({ queryKey: orpc.models.list.queryOptions().queryKey });
@@ -69,14 +73,14 @@ export function ModelBuilderPage({ id }: { id?: string }) {
     draft: m.draft ?? EMPTY_MODEL, update: m.update, issues: allIssues,
     lookups: lookups.data, tables: m.tableCols,
   });
-  const historySubSections = useHistoryTab({
+  // History owns the sync mutation, so its failure is the one page message it has to hand back.
+  const history = useHistoryTab({
     draft: m.draft ?? EMPTY_MODEL, update: m.update, issues: allIssues,
     modelId: id ?? "", dirty: m.dirty,
   });
-  const linesSubSections = useLinesTab({
+  const linesSubSections = useItemStructureTab({
     draft: m.draft ?? EMPTY_MODEL, update: m.update, issues: allIssues, tables: m.tableCols,
   });
-  const count = (t: TabKey) => allIssues.filter((i) => tabOf(i.path) === t).length;
 
   if (m.loading || !m.draft || !m.portalMeta) {
     return m.loadError
@@ -86,35 +90,44 @@ export function ModelBuilderPage({ id }: { id?: string }) {
   const draft = m.draft;
   const portalMeta = m.portalMeta;
 
-  // Section title carries the section's open issue count, e.g. "Rules (2)".
-  const secTitle = (label: string, key: TabKey) => (count(key) ? `${label} (${count(key)})` : label);
-  const linesIssues = count("bom") + count("routing");
-  const linesTitle = linesIssues ? `Item Structure (${linesIssues})` : "Item Structure";
+  // One list drives the title's message popover AND the per-section counts, so a tab can never
+  // claim a different number of problems than the popover lists under it.
+  const messages = builderMessages({
+    draft,
+    issues: allIssues,
+    saveError: m.saveError,
+    actionError: (remove.error ?? duplicate.error) as Error | null,
+    lookupsError: lookups.error as Error | null,
+    syncError: history.syncError,
+  });
+  const secTitle = (secId: string) => {
+    const n = messages.filter((x) => x.section === secId && x.type === "Negative").length;
+    return n ? `${SECTION_TITLE[secId]} (${n})` : SECTION_TITLE[secId]!;
+  };
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      {m.saveError ? (
-        <MessageStrip design="Negative" hideCloseButton>
-          {m.serverIssues.length > 0
-            ? `Save failed — ${m.serverIssues.length} issue${m.serverIssues.length === 1 ? "" : "s"}; see the section counts.`
-            : m.saveError.message}
-        </MessageStrip>
-      ) : null}
-      {/* The server refuses a model that configurations still use, and the confirm dialog cannot
-          know that in advance — so the refusal has to be readable here. */}
-      {(remove.error ?? duplicate.error) ? (
-        <MessageStrip design="Negative" hideCloseButton>{(remove.error ?? duplicate.error)!.message}</MessageStrip>
-      ) : null}
-
       <ObjectPage
         mode="IconTabBar"
         style={{ flex: 1, minHeight: 0, height: "100%" }}
+        {...sectionParam.props}
         titleArea={
           <ObjectPageTitle
-            header={<Title level="H4">{draft.name.trim() || "New model"}</Title>}
-            subHeader={m.dirty ? <ObjectStatus state="Critical">Unsaved changes</ObjectStatus> : undefined}
+            header={
+              // Trailing * is the unsaved-changes mark; the native tooltip is what says so, since
+              // ObjectPageTitle has no draft-indicator slot of its own.
+              <Title level="H4" title={m.dirty ? "Unsaved changes" : undefined}>
+                {(draft.name.trim() || "New model") + (m.dirty ? " *" : "")}
+              </Title>
+            }
+            subHeader={draft.description ? <Text>{draft.description}</Text> : undefined}
             actionsBar={
               <Toolbar design="Transparent">
+                {/* Every error, warning and blocker on the page, grouped by the tab it belongs to —
+                    this is the only place they are reported, so it sits before the actions it
+                    explains the disabled state of. */}
+                <PageMessages messages={messages} okText="No issues — the model is valid."
+                  onSection={sectionParam.go} />
                 {id ? (
                   <Button icon="copy" design="Transparent" disabled={m.dirty || duplicate.isPending}
                     tooltip={m.dirty ? "Save first" : "Duplicate model"}
@@ -134,30 +147,40 @@ export function ModelBuilderPage({ id }: { id?: string }) {
                     Delete
                   </Button>
                 ) : null}
-                <Button design="Emphasized" disabled={m.issues.length > 0 || !m.dirty || m.saving || !draft.name.trim()} onClick={() => void m.save()}>
-                  {m.saving ? "Saving…" : "Save"}
-                </Button>
               </Toolbar>
             }
           />
         }
+        footerArea={
+          <Bar design="FloatingFooter" endContent={
+            <>
+              <Button design="Emphasized" disabled={m.issues.length > 0 || !m.dirty || m.saving || !draft.name.trim()}
+                onClick={() => void m.save()}>
+                {m.saving ? "Saving…" : "Save"}
+              </Button>
+              {/* No setDirty(false) here, unlike Delete: leaving with edits is exactly the case the
+                  blocker's "Discard changes?" exists for. */}
+              <Button disabled={m.saving} onClick={() => void navigate({ to: "/models" })}>Cancel</Button>
+            </>
+          } />
+        }
       >
-        <ObjectPageSection id="settings" titleText={secTitle("Settings", "settings")}>
+        <ObjectPageSection id="settings" titleText={secTitle("settings")}>
           <SettingsTab draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
             portalMeta={portalMeta} setPortalMeta={m.setPortalMeta} />
         </ObjectPageSection>
-        <ObjectPageSection id="params" titleText={secTitle("Parameters", "params")}>
+        <ObjectPageSection id="params" titleText={secTitle("params")}>
           <ParamsTab modelId={id ?? ""} draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
-            lookups={lookups.data} lookupsError={lookups.error} onRetryLookups={() => void lookups.refetch()} />
+            lookups={lookups.data} lookupsFailed={!!lookups.error} onRetryLookups={() => void lookups.refetch()} />
         </ObjectPageSection>
-        <ObjectPageSection id="rules" titleText={secTitle("Rules", "rules")}>
+        <ObjectPageSection id="rules" titleText={secTitle("rules")}>
           {rulesSubSections}
         </ObjectPageSection>
-        <ObjectPageSection id="outputs" titleText={linesTitle}>
+        <ObjectPageSection id="outputs" titleText={secTitle("outputs")}>
           {linesSubSections}
         </ObjectPageSection>
-        <ObjectPageSection id="history" titleText={secTitle("History", "history")}>
-          {historySubSections}
+        <ObjectPageSection id="history" titleText={secTitle("history")}>
+          {history.subSections}
         </ObjectPageSection>
       </ObjectPage>
     </div>

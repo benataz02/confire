@@ -18,6 +18,9 @@ import { StepCandidatesReview } from "./StepCandidatesReview.tsx";
 import { InsightsRail } from "./InsightsRail.tsx";
 import { itemMoney } from "./itemMoney.ts";
 import { needsCalculation } from "./configProcessState.ts";
+import { configMessages } from "./configMessages.ts";
+import { PageMessages } from "../PageMessages.tsx";
+import { useSectionParam } from "../../lib/sectionParam.ts";
 
 // Pinned so the picked row's CardName can be read back off it by name — EntityValueHelp aligns the
 // row with [keyField, ...select minus keyField]. Same pair the portal invite dialog uses.
@@ -39,6 +42,7 @@ const CUSTOMER_FILTER = [{ field: "CardType", op: "eq" as const, value: "cCustom
 export function ConfigProcessPage({ id }: { id: string }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const sectionParam = useSectionParam();
   const q = useQuery(orpc.configs.get.queryOptions({ input: { id } }));
   // Cached by _authed's beforeLoad, so this costs nothing. /b1 is admin/owner only.
   const me = useQuery(meQuery);
@@ -249,24 +253,21 @@ export function ConfigProcessPage({ id }: { id: string }) {
       } />
   );
 
-  // No ObjectPageHeader: the "requested" context moved into the title's subHeader (with Reject next
-  // to the other title actions), and the errors into the title's own content slot — they render
-  // only when there is something to say, so nothing eats vertical space in the normal case.
-  const messages = locked || lookups.error || update.error || calc.error || duplicate.error || remove.error ? (
-    <div style={{ paddingBlockStart: "0.5rem", display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
-      {lookups.error ? (
-        <div style={{ display: "flex", alignItems: "center"}}>
-          <MessageStrip design="Negative" hideCloseButton style={{ flex: 1 }}>{lookups.error.message}</MessageStrip>
-          <Button onClick={() => lookups.refetch()}>Retry</Button>
-        </div>
-      ) : null}
-      {update.error || calc.error || duplicate.error || remove.error ? (
-        <MessageStrip design="Negative" hideCloseButton>
-          {(update.error ?? calc.error ?? duplicate.error ?? remove.error)!.message}
-        </MessageStrip>
-      ) : null}
-    </div>
-  ) : null;
+  // No ObjectPageHeader and no message strips: everything the page has to say is one list behind
+  // the title's MessageViewButton, grouped by the section it belongs to.
+  const messages = configMessages({
+    model: model.definition,
+    name: project.name,
+    customer: !!project.customer?.cardCode,
+    prop,
+    candidates: candidates.length,
+    capped: q.data.capped,
+    widest: q.data.widest,
+    lookupsError: lookups.error as Error | null,
+    configError: (update.error ?? calc.error ?? duplicate.error ?? remove.error) as Error | null,
+    selectError: select.error as Error | null,
+    locked,
+  });
 
   // The rail sits OUTSIDE the ObjectPage: ObjectPage collects sub-tabs from direct children only,
   // so wrapping the subsections would silently drop Configure's sub-anchor tabs.
@@ -286,6 +287,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
     <ObjectPage
       mode="IconTabBar"
       hidePinButton
+      {...sectionParam.props}
       titleArea={
         <ObjectPageTitle
           header={<Title>{project.name.trim() || "New configuration"}</Title>}
@@ -299,6 +301,8 @@ export function ConfigProcessPage({ id }: { id: string }) {
           }
           actionsBar={
             <Toolbar design="Transparent">
+              <PageMessages messages={messages} okText="No issues — everything checks out."
+                onSection={sectionParam.go} />
               <Button design="Transparent" disabled={locked}
                 icon={railShown ? "close-command-field" : "open-command-field"}
                 tooltip={locked ? "A quoted configuration has nothing left to configure"
@@ -338,14 +342,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
                 </Button>
               ) : null}
             </Toolbar>
-          }
-          // ObjectPageTitle has no `snappedHeading` — that is DynamicPageTitle's. Its content rows
-          // are snapped/expandedContent, and `snappedHeader` would *replace* the Title. With no
-          // headerArea this title is permanently snapped (ObjectPage only sets
-          // data-header-content-visible when there is one), so snappedContent is the one that
-          // renders; expandedContent is fed the same node for the day a headerArea appears.
-          snappedContent={messages}
-          expandedContent={messages}>
+          }>
           <Tag design={st.state === "None" ? "Neutral" : st.state} style={{ alignSelf: "center" }}>
             {st.text}
           </Tag>
@@ -399,6 +396,8 @@ export function ConfigProcessPage({ id }: { id: string }) {
               </FormItem>
               <FormItem labelContent={<Label required>Customer</Label>}>
                 {locked ? <Text>{project.customer?.cardName ?? ""}</Text> : (
+                /* Wrapper, not a prop: the id is only a jump target for the message popover. */
+                <div id="cfg-customer" style={{ width: "100%" }}>
                 <EntityValueHelp entitySet="BusinessPartners" keyField="CardCode"
                   select={CUSTOMER_SELECT} filter={CUSTOMER_FILTER}
                   value={project.customer?.cardCode}
@@ -412,6 +411,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
                       cardName: String(row?.[CUSTOMER_SELECT.indexOf("CardName")] ?? project.customer?.cardName ?? ""),
                     },
                   })} />
+                </div>
                 )}
               </FormItem>
             </FormGroup>
@@ -424,7 +424,12 @@ export function ConfigProcessPage({ id }: { id: string }) {
               onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
               querySource={{ kind: "project", modelId: project.modelId }} readOnly={locked}
               batches={batches} onBatchesChange={(next) => edit({ batches: next })} />
-          ) : lookups.error ? null : <BusyIndicator active delay={0} />}
+          ) : lookups.error ? (
+            /* Why the options are missing is a page message; the retry it needs is not something a
+               message can carry, so the button stays here — once, on the first section that wanted
+               them, not under every one. */
+            <Button icon="refresh" onClick={() => void lookups.refetch()}>Retry loading options</Button>
+          ) : <BusyIndicator active delay={0} />}
         </ObjectPageSubSection>
         {/* formSections, not structure.sections: a table the author never placed gets a trailing
             subsection of its own, and the anchor bar has to show it. */}
@@ -447,9 +452,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
             selection={selection}
             onToggle={(i, b) => { if (select.isSuccess) select.reset(); setSel(toggleSelection(selection, i, b)); }}
             onChange={(next) => { if (select.isSuccess) select.reset(); setSel(next); }}
-            capped={q.data.capped}
-            widest={q.data.widest}
-            error={select.error?.message ?? null} saved={select.isSuccess} readOnly={locked} />
+            saved={select.isSuccess} readOnly={locked} />
         ) : (
           <Text>No candidates yet.</Text>
         )}

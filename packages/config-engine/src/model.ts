@@ -92,14 +92,16 @@ export const ConstraintZ = z.discriminatedUnion("kind", [
 ]);
 export type Constraint = z.infer<typeof ConstraintZ>;
 
+// No unit price here on purpose: a line names an item, and what that item costs is read live
+// from `pricing.priceList` on every calculate (ResolvedLookups.prices). A stored price would be
+// the one number in a configuration that is a snapshot — see the "nothing is snapshotted" rule.
 export const BomLineZ = z.object({
   id: z.string(),
-  itemCode: z.string(), // expr
-  desc: z.string().optional(), // expr
+  itemCode: z.string(), // expr -> a B1 item code
+  // Plain text, not an expression: it is the item's name, filled from B1 when the line is picked.
+  desc: z.string().optional(),
   condition: z.string().optional(), // expr -> boolean
   qty: z.string(), // expr, per finished unit; batch qty available as `qty`
-  price: z.string(), // expr, cost per item unit
-  scrapPct: z.number().default(0),
 });
 
 export const OperationZ = z.object({
@@ -223,6 +225,9 @@ export const isTableGroup = (g: Group): g is TableGroup => "table" in g;
 
 export const ModelDefZ = z.object({
   name: z.string(),
+  /** free text, shown as the builder's page subtitle. Not the portal card subtitle — that is
+   *  config_model.portalDescription, a column so the catalog list can filter on it. */
+  description: z.string().optional(),
   parameters: z.array(ParamZ),
   structure: z.object({
     sections: z.array(
@@ -236,8 +241,8 @@ export const ModelDefZ = z.object({
   // A computed value is global: it shares one namespace with the parameters and is usable in any
   // expression. The builder lists them flat, so there is nothing positional to store.
   computed: z.array(z.object({ key: KeyZ, expr: z.string() })),
-  // optional, not .default([]): same reason as pricing.currency below — a zod default is required
-  // in the inferred type and would force `tables: []` into every existing ModelDef literal.
+  // optional, not .default([]): a zod default lands in the inferred type as *required*, which
+  // would force `tables: []` into every existing ModelDef literal.
   tables: z.array(TableDefZ).optional(),
   constraints: z.array(ConstraintZ),
   bom: z.array(BomLineZ),
@@ -252,9 +257,16 @@ export const ModelDefZ = z.object({
       display: z.array(z.string()),
     })
     .optional(),
-  // currency is optional, not .default("EUR"): a zod default lands in the inferred type as required
-  // and would force the key into every ModelDef literal. One `?? "EUR"` in money() covers it.
-  pricing: z.object({ priceExpr: z.string(), quoteItemCode: z.string().min(1), currency: z.string().optional() }),
+  // No currency here: it is B1's, fixed when the company database is created, so it belongs to the
+  // tenant rather than to each model — sap_connection.localCurrency, served on `me`.
+  pricing: z.object({
+    priceExpr: z.string(),
+    quoteItemCode: z.string().min(1),
+    // The B1 price list the BOM materials are costed from. Optional here, required by checkModel:
+    // a model saved before price lists existed must still load, it just cannot be saved again
+    // until one is picked.
+    priceList: z.number().int().positive().optional(),
+  }),
   batchDefaults: z.array(z.number().int().positive()),
 });
 export type ModelDef = z.infer<typeof ModelDefZ>;
@@ -274,6 +286,9 @@ export type ResolvedTable = {
 export type ResolvedLookups = {
   domains: Record<string, Option[]>;
   tables: Record<string, ResolvedTable>;
+  /** B1 item code -> unit price in the model's `pricing.priceList`, read live on every resolve.
+   *  Same seam as `tables`: the engine never learns where the number came from. */
+  prices?: Record<string, number>;
 };
 /** User-entered values only; absent key = open parameter. */
 export type Entries = Record<string, Val>;

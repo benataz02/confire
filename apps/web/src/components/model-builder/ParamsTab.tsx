@@ -1,12 +1,13 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   Bar, Button, BusyIndicator, IllustratedMessage, Input,
-  Menu, MenuItem, MessageStrip, SplitButton, SplitterElement, SplitterLayout,
-  Title, Tree, TreeItem, TreeItemCustom,
+  SplitterElement, SplitterLayout, Table, TableCell, TableHeaderCell,
+  TableHeaderRow, TableRow, TableRowAction, Text, Title,
+  type TableHeaderRowDomRef,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/AddColumn.js";
 import { isTableGroup, itemsTable, propagate, type Entries, type ResolvedLookups, type TableRows } from "@confire/config-engine";
-import type { FieldGroup, Issue, ModelDef, Param, TableDef, TableGroup } from "@confire/config-engine";
+import type { Issue, ModelDef, Param, TableDef } from "@confire/config-engine";
 import { confirm } from "../confirm.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { ParamDialog } from "./ParamDialog.tsx";
@@ -19,22 +20,67 @@ import { applyMove, canDrop, deleteNode, duplicateParam, parseRowKey, placeParam
 
 type Tables = TableCols[];
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
-type Section = ModelDef["structure"]["sections"][number];
 
 // mandatory by default: an unanswered field is the usual mistake, and unticking it is one click.
 const emptyParam = (): Param => ({ key: "", label: "", type: "string", ui: "select", mandatory: true });
 
-// Every item carries its own key as data-key: `rowKeyOf` for a structure node, `c:<i>` for a
-// formula. Tree hands the item element back on move/click/toggle, so one attribute addresses them
-// all and `parseRowKey` stays the only thing that knows the format.
-const keyOf = (el: unknown) => (el as HTMLElement | null)?.dataset.key;
+// UI5 cozy icon-button min width — reserved so leaf labels indent past group labels.
+const TOGGLE = "2.25rem";
 
-// Menu opener is resolved by id, so a row key has to survive as one.
-const openerId = (rowKey: string) => `pt-add-${rowKey.replace(/[^\w-]/g, "_")}`;
+function Gutter({ depth, children, collapse, style }: {
+  depth: number;
+  children: ReactNode;
+  collapse?: { collapsed: boolean; onToggle: () => void };
+  style?: CSSProperties;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", paddingInlineStart: `${depth * 1.5}rem`, ...style }}>
+      {collapse ? (
+        // Chevron is a real button, indented with the level; stopPropagation so a toggle never enters edit (onRowClick).
+        <Button design="Transparent" style={{ flex: "0 0 auto" }}
+          icon={collapse.collapsed ? "slim-arrow-right" : "slim-arrow-down"}
+          tooltip={collapse.collapsed ? "Expand" : "Collapse"}
+          accessibilityAttributes={{ expanded: collapse.collapsed ? "false" : "true" }}
+          onClick={(e) => { e.stopPropagation(); collapse.onToggle(); }} />
+      ) : (
+        <span style={{ flex: `0 0 ${TOGGLE}`, inlineSize: TOGGLE }} aria-hidden />
+      )}
+      {children}
+    </div>
+  );
+}
 
-export function ParamsTab({ modelId, draft, update, issues, tables, lookups, lookupsError, onRetryLookups }: {
+// Param-row actions only: section/group/formula stay visible. Touch keeps param actions
+// visible — no hover, and opacity:0 would make delete/dup untappable.
+//
+// Section and group backgrounds have to come from here too: TableRow has no highlight/background
+// prop, and a document-level rule is the one thing that beats the shadow root's own `:host`.
+if (typeof document !== "undefined" && !document.getElementById("confire-params-rows")) {
+  const el = document.createElement("style");
+  el.id = "confire-params-rows";
+  const R = `.confire-params-struct [ui5-table-row]`;
+  el.textContent =
+    `@media (hover: hover){${R}[row-key^="p:"] [ui5-table-row-action]{opacity:0;pointer-events:none}` +
+    `${R}[row-key^="p:"]:hover [ui5-table-row-action],${R}[row-key^="p:"]:focus-within [ui5-table-row-action]{opacity:1;pointer-events:auto}}` +
+    `${R}[row-key^="s:"]{background:var(--sapList_TableGroupHeaderBackground);` +
+    `border-block-end:1px solid var(--sapList_TableGroupHeaderBorderColor)}` +
+    `${R}[row-key^="g:"]{background:var(--sapList_Hover_Background)}`;
+  document.head.appendChild(el);
+}
+
+// UI5 clips the actions-column header (a11y-only "Row Actions") inside the header-row shadow.
+function revealActionsHeader(el: TableHeaderRowDomRef | null) {
+  const sr = el?.shadowRoot;
+  if (!sr || sr.getElementById("confire-actions-hdr")) return;
+  const style = document.createElement("style");
+  style.id = "confire-actions-hdr";
+  style.textContent = `#actions-cell-content{position:static;clip:auto;font-size:0}#actions-cell-content::after{content:"Actions";font-size:var(--sapFontSize);font-family:var(--sapFontSemiboldDuplexFamily);color:var(--sapList_HeaderTextColor)}`;
+  sr.appendChild(style);
+}
+
+export function ParamsTab({ modelId, draft, update, issues, tables, lookups, lookupsFailed, onRetryLookups }: {
   modelId: string; draft: ModelDef; update: Update; issues: Issue[]; tables: Tables;
-  lookups?: ResolvedLookups; lookupsError?: Error | null; onRetryLookups: () => void;
+  lookups?: ResolvedLookups; lookupsFailed?: boolean; onRetryLookups: () => void;
 }) {
   const [editing, setEditing] = useState<{ param: Param; isNew: boolean; place?: { s: number; g: number } } | null>(null);
   // Table being edited in the dialog, by key — the dialog buffers its own copy.
@@ -44,19 +90,19 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   const [fEdit, setFEdit] = useState<number | null>(null);
   // Inline title edit: keep the original so Escape can revert (edits apply live per keystroke).
   const [titleEdit, setTitleEdit] = useState<{ key: string; original: string } | null>(null);
-  // The one row whose add-arrow is open, and the button that opened it.
-  const [rowMenu, setRowMenu] = useState<string | null>(null);
   // Keyed by stable section/group/param key (not row index) so collapse survives drag-reordering.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
     setCollapsed((c) => { const n = new Set(c); n.delete(id) || n.add(id); return n; });
 
+  type StructRow = { kind: "struct"; key: string; depth: number; label: string; detail: string; ref: RowRef; collapseId?: string };
+  type Row = StructRow | { kind: "formula"; key: string; idx: number };
+  const rows: Row[] = [];
   const defOf = (k: string): TableDef | undefined => (draft.tables ?? []).find((t) => t.key === k);
 
-  // A formula is global; `under` only says which parameter it is drawn beneath — which is exactly
-  // what nesting it under that parameter's node expresses. Nothing is ever left dangling: an anchor
-  // naming a parameter that is gone or unplaced re-homes onto the last placed one, which is also
-  // where a new formula goes.
+  // A formula is global; `under` only says which parameter row it is drawn beneath. Nothing is
+  // ever left dangling: an anchor naming a parameter that is gone or unplaced re-homes onto the
+  // last placed one, which is also where a new formula goes.
   const placedParams = draft.structure.sections
     .flatMap((s) => s.groups.flatMap((g) => (isTableGroup(g) ? [] : g.params)));
   const lastParam = placedParams.at(-1);
@@ -67,8 +113,44 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
     byAnchor.set(at, [...(byAnchor.get(at) ?? []), i]);
   });
 
-  // Model-level issues have no row of their own (duplicate key, computed cycle, bad structure ref).
-  const modelIssues = issues.filter((i) => i.path === "model" || i.path === "computed" || i.path === "structure");
+  draft.structure.sections.forEach((s, si) => {
+    const sId = `S:${s.key}`;
+    rows.push({ kind: "struct", key: rowKeyOf({ kind: "section", s: si }), depth: 0, label: s.title, detail: `section · ${s.key}`, ref: { kind: "section", s: si }, collapseId: sId });
+    if (collapsed.has(sId)) return;
+    s.groups.forEach((g, gi) => {
+      // A table is a group, so it draws at group depth with no children and no collapse chevron.
+      if (isTableGroup(g)) {
+        const t = defOf(g.table);
+        rows.push({
+          kind: "struct", key: rowKeyOf({ kind: "table", s: si, g: gi }), depth: 1, label: t?.title || g.table,
+          detail: t
+            ? `${t.role === "items" ? "item grid" : "calculation table"} · ${t.columns.length} column${t.columns.length === 1 ? "" : "s"}`
+            : "missing table",
+          ref: { kind: "table", s: si, g: gi },
+        });
+        return;
+      }
+      const gId = `G:${s.key}/${g.key}`;
+      rows.push({ kind: "struct", key: rowKeyOf({ kind: "group", s: si, g: gi }), depth: 1, label: g.title, detail: `group · ${g.key}`, ref: { kind: "group", s: si, g: gi }, collapseId: gId });
+      if (collapsed.has(gId)) return;
+      g.params.forEach((k) => {
+        const p = draft.parameters.find((x) => x.key === k);
+        const formulas = byAnchor.get(k) ?? [];
+        const pId = `P:${k}`;
+        rows.push({
+          kind: "struct", key: rowKeyOf({ kind: "param", key: k }), depth: 2, label: p?.label || k,
+          detail: p ? `${p.type} · ${p.ui}${p.domain ? (p.domain.kind === "range" ? " · range" : ` · ${p.domain.ref.source}`) : ""}${p.excludeFromDomains ? " · excluded" : ""}` : "missing definition",
+          ref: { kind: "param", key: k },
+          // Only a parameter that anchors formulas has anything to collapse.
+          collapseId: formulas.length ? pId : undefined,
+        });
+        if (collapsed.has(pId)) return;
+        for (const i of formulas) rows.push({ kind: "formula", key: `c:${i}`, idx: i });
+      });
+    });
+  });
+  // Only reachable with no parameter placed anywhere — there is no row to hang them under.
+  for (const i of byAnchor.get("") ?? []) rows.push({ kind: "formula", key: `c:${i}`, idx: i });
 
   const saveParam = (p: Param, isNew: boolean, place?: { s: number; g: number }) =>
     update((d) => {
@@ -147,169 +229,33 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
     const t = role === "items" ? itemsTable() : newCalcTable((d.tables ?? []).map((x) => x.key));
     return placeTable({ ...d, tables: [...(d.tables ?? []), t] }, t.key, s);
   });
-  // checkModel allows at most one items table, and requires exactly one — so the menu entry that
-  // would create a second is disabled rather than producing a model that cannot be saved.
+  // checkModel allows at most one items table, and requires exactly one.
   const hasItems = (draft.tables ?? []).some((t) => t.role === "items");
 
-  // Trailing add/delete live in Tree's Delete-mode `deleteButton` slot — that's the standard
-  // TreeItem end-content, so rows can stay `text` + `additionalText` instead of a custom body.
-  // SplitButton only where the arrow has a real menu; a plain Button everywhere else.
-  //
-  // No stopPropagation anywhere: ListItemBase._onclick bails on `:has(:focus-within)`, so a focused
-  // slotted control already suppresses the row's own click.
-  const addBtn = (rowKey: string, tip: string, onClick: () => void, menu?: boolean) =>
-    menu ? (
-      <SplitButton key="add" id={openerId(rowKey)} icon="add" design="Transparent"
-        accessibleName={tip}
-        accessibilityAttributes={{ root: { title: tip }, arrowButton: { hasPopup: "menu", expanded: rowMenu === rowKey } }}
-        onClick={onClick}
-        onArrowClick={() => setRowMenu(rowKey)} />
-    ) : (
-      <Button key="add" icon="add" design="Transparent" tooltip={tip} onClick={onClick} />
-    );
-  const delBtn = (tip: string, onClick: () => void) => (
-    <Button key="del" icon="delete" design="Transparent" tooltip={tip} onClick={onClick} />
-  );
-
-  const actionsFor = (ref: RowRef) => {
-    const rowKey = rowKeyOf(ref);
-    if (ref.kind === "section")
-      return <>{addBtn(rowKey, "Add group", () => addGroup(ref.s), true)}{delBtn("Delete section", () => void confirmDelete(ref))}</>;
-    if (ref.kind === "group")
-      return <>{addBtn(rowKey, "Add parameter", () => setEditing({ param: emptyParam(), isNew: true, place: { s: ref.s, g: ref.g } }))}{delBtn("Delete group", () => void confirmDelete(ref))}</>;
-    if (ref.kind === "table")
-      // Delete mode always paints the slot; hide it for the mandatory items grid.
-      return defOf(tableKeyAt(draft, ref.s, ref.g) ?? "")?.role === "items"
-        ? <Button key="del" design="Transparent" disabled style={{ display: "none" }} />
-        : delBtn("Delete table", () => void confirmDelete(ref));
-    return <>{addBtn(rowKey, "Add formula here", () => addFormula(ref.key), true)}{delBtn("Delete parameter", () => void confirmDelete(ref))}</>;
-  };
-
-  // TreeItem only takes string `text`, so rename swaps that one row to TreeItemCustom. The Input
-  // keeps its own typing: ListItemBase._onclick/_onkeyup bail on `:has(:focus-within)`.
-  const titleInput = (ref: RowRef, title: string) => (
-    <Input
-      accessibleName="Title"
-      value={title}
-      style={{ width: "100%" }}
-      autoFocus
-      onBlur={() => setTitleEdit(null)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") setTitleEdit(null);
-        else if (e.key === "Escape" && titleEdit) { setTitle(ref, titleEdit.original); setTitleEdit(null); }
-      }}
-      onInput={(e) => setTitle(ref, e.target.value)}
-    />
-  );
-
-  // A formula is global; nesting it under its anchor parameter is exactly what `under` means.
-  // Never movable, and the `c:` guard keeps it out of every drop as a destination too.
-  const formulaItem = (i: number) => {
-    const c = draft.computed[i]!;
-    const issue = issueFor(issues, `computed[${i}].expr`);
-    const actions = (
+  // Everything a row can do is a row action: UI5 shows the first `rowActionCount` in DOM order and
+  // pushes the rest into its own overflow menu, which is why Delete sits second — it stays visible
+  // on every row type while the rarer table adds fall into the menu.
+  const del = <TableRowAction icon="delete" text="Delete" data-act="delete" />;
+  // The items grid is mandatory (checkModel enforces it), so it is the one row with no delete.
+  const actionsFor = (ref: RowRef) =>
+    ref.kind === "section" ? (
       <>
-        <Button key="add" icon="add" design="Transparent" tooltip="Add formula"
-          onClick={() => addFormula(anchorFor(c.under))} />
-        <Button key="del" icon="delete" design="Transparent" tooltip="Delete formula"
-          onClick={() => { setFEdit(null); update((d) => ({ ...d, computed: d.computed.filter((_, j) => j !== i) })); }} />
+        <TableRowAction icon="add" text="Add group" data-act="add" />
+        {del}
+        <TableRowAction icon="table-view" text="Add calculation table" data-act="calc" />
+        {/* TableRowAction has no disabled state, so a second item grid is simply not offered. */}
+        {hasItems ? null : <TableRowAction icon="product" text="Add item grid" data-act="items" />}
+      </>
+    )
+    : ref.kind === "group" ? <><TableRowAction icon="add" text="Add parameter" data-act="add" />{del}</>
+    : ref.kind === "table" ? (defOf(tableKeyAt(draft, ref.s, ref.g) ?? "")?.role === "items" ? undefined : del)
+    : (
+      <>
+        <TableRowAction icon="add" text="Add formula here" data-act="add" />
+        {del}
+        <TableRowAction icon="copy" text="Duplicate parameter" data-act="dup" />
       </>
     );
-    if (fEdit === i) {
-      return (
-        <TreeItemCustom key={`c:${i}`} data-key={`c:${i}`} icon="sum" deleteButton={actions}
-          content={
-            <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", width: "100%", minInlineSize: 0 }}>
-              <Input accessibleName="Formula key" style={{ width: "8rem", flex: "0 0 auto" }} value={c.key} autoFocus
-                onInput={(e) => update((d) => ({ ...d, computed: d.computed.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)) }))} />
-              <ExprInput value={c.expr} model={draft} tables={tables} fieldId={`expr-computed[${i}].expr`} issue={issue}
-                style={{ flex: "1 1 auto", minInlineSize: 0 }}
-                onChange={(v) => update((d) => ({ ...d, computed: d.computed.map((x, j) => (j === i ? { ...x, expr: v ?? "" } : x)) }))} />
-            </div>
-          }
-        />
-      );
-    }
-    return (
-      <TreeItem key={`c:${i}`} data-key={`c:${i}`} icon="sum" text={c.key}
-        additionalText={`= ${c.expr}`} additionalTextState={issue ? "Negative" : undefined}
-        deleteButton={actions} />
-    );
-  };
-
-  const paramItem = (k: string) => {
-    const ref: RowRef = { kind: "param", key: k };
-    const rowKey = rowKeyOf(ref);
-    const p = draft.parameters.find((x) => x.key === k);
-    const id = `P:${k}`;
-    const detail = p
-      ? `${p.type} · ${p.ui}${p.domain ? (p.domain.kind === "range" ? " · range" : ` · ${p.domain.ref.source}`) : ""}${p.excludeFromDomains ? " · excluded" : ""}`
-      : "missing definition";
-    return (
-      <TreeItem key={rowKey} data-key={rowKey} data-collapse={id} movable expanded={!collapsed.has(id)}
-        text={p?.label || k} additionalText={detail} additionalTextState={p ? undefined : "Negative"}
-        deleteButton={actionsFor(ref)}>
-        {(byAnchor.get(k) ?? []).map(formulaItem)}
-      </TreeItem>
-    );
-  };
-
-  // A table is a group, so it draws at group depth — with no children and, being addressed by the
-  // table it names rather than a title of its own, no inline rename either.
-  const tableItem = (g: TableGroup, si: number, gi: number) => {
-    const ref: RowRef = { kind: "table", s: si, g: gi };
-    const rowKey = rowKeyOf(ref);
-    const t = defOf(g.table);
-    const detail = t
-      ? `${t.role === "items" ? "item grid" : "calculation table"} · ${t.columns.length} column${t.columns.length === 1 ? "" : "s"}`
-      : "missing table";
-    return (
-      <TreeItem key={rowKey} data-key={rowKey} movable
-        icon={t?.role === "items" ? "product" : "table-view"}
-        text={t?.title || g.table} additionalText={detail} additionalTextState={t ? undefined : "Negative"}
-        deleteButton={actionsFor(ref)} />
-    );
-  };
-
-  const groupItem = (g: FieldGroup, si: number, gi: number, sectionKey: string) => {
-    const ref: RowRef = { kind: "group", s: si, g: gi };
-    const rowKey = rowKeyOf(ref);
-    const id = `G:${sectionKey}/${g.key}`;
-    return titleEdit?.key === rowKey ? (
-      <TreeItemCustom key={rowKey} data-key={rowKey} data-collapse={id} movable expanded={!collapsed.has(id)}
-        deleteButton={actionsFor(ref)} content={titleInput(ref, g.title)}>
-        {g.params.map(paramItem)}
-      </TreeItemCustom>
-    ) : (
-      <TreeItem key={rowKey} data-key={rowKey} data-collapse={id} movable expanded={!collapsed.has(id)}
-        text={g.title} additionalText={`group · ${g.key}`} deleteButton={actionsFor(ref)}>
-        {g.params.map(paramItem)}
-      </TreeItem>
-    );
-  };
-
-  const sectionItem = (s: Section, si: number) => {
-    const ref: RowRef = { kind: "section", s: si };
-    const rowKey = rowKeyOf(ref);
-    const id = `S:${s.key}`;
-    const kids = s.groups.map((g, gi) => (isTableGroup(g) ? tableItem(g, si, gi) : groupItem(g, si, gi, s.key)));
-    return titleEdit?.key === rowKey ? (
-      <TreeItemCustom key={rowKey} data-key={rowKey} data-collapse={id} movable expanded={!collapsed.has(id)}
-        deleteButton={actionsFor(ref)} content={titleInput(ref, s.title)}>
-        {kids}
-      </TreeItemCustom>
-    ) : (
-      <TreeItem key={rowKey} data-key={rowKey} data-collapse={id} movable expanded={!collapsed.has(id)}
-        text={s.title} additionalText={`section · ${s.key}`} deleteButton={actionsFor(ref)}>
-        {kids}
-      </TreeItem>
-    );
-  };
-
-  // Only reachable with no parameter placed anywhere — there is no row to hang them under.
-  const orphanFormulas = byAnchor.get("") ?? [];
-  const empty = draft.structure.sections.length === 0 && orphanFormulas.length === 0;
-  const menuRef = rowMenu ? parseRowKey(rowMenu) : null;
 
   // ponytail: no responsive drop-below — SplitterLayout is desktop-only, which the model builder
   // is. Wrap it in a DynamicSideContent again if a tablet ever has to open this tab.
@@ -322,11 +268,6 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1rem",
       flex: "1 1 auto", minInlineSize: 0, overflowY: "auto",
     }}>
-      {modelIssues.length ? (
-        <MessageStrip design="Negative" hideCloseButton>
-          {modelIssues.map((i) => i.message).join(" · ")}
-        </MessageStrip>
-      ) : null}
       <div style={{ display: "flex", flexDirection: "column" }}>
       {/* Every other add lives on the row it adds into, so this is the only action with no row to
           hang it on. */}
@@ -335,104 +276,135 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
         endContent={<Button icon="add" onClick={addSection}>Add section</Button>}
       />
 
-      {empty ? (
-        <IllustratedMessage name="AddColumn" design="Dot" titleText="No structure yet"
-          subtitleText="Add a section to start structuring the form, then add groups and parameters." />
-      ) : (
-        <Tree
-          accessibleName="Form structure"
-          selectionMode="Delete"
-          onItemDelete={(e) => {
-            const rowKey = keyOf(e.detail.item);
-            if (!rowKey) return;
-            if (rowKey.startsWith("c:")) {
-              const i = Number(rowKey.slice(2));
+      <Table
+        accessibleName="Form structure"
+        className="confire-params-struct"
+        noData={
+          <IllustratedMessage name="AddColumn" design="Dot" titleText="No structure yet"
+            subtitleText="Add a section to start structuring the form, then add groups and parameters." />
+        }
+        rowActionCount={3}
+        onMoveOver={(e) => {
+          const src = (e.detail.source.element as HTMLElement | null)?.getAttribute("row-key");
+          const dst = (e.detail.destination.element as HTMLElement | null)?.getAttribute("row-key");
+          const placement = e.detail.destination.placement as Placement;
+          // ponytail: formula rows (c:) share this table but aren't structure nodes — never a drag src/dst.
+          if (src?.startsWith("c:") || dst?.startsWith("c:")) return;
+          if (src && dst && canDrop(draft, src, dst, placement)) e.preventDefault();
+        }}
+        onMove={(e) => {
+          const src = (e.detail.source.element as HTMLElement | null)?.getAttribute("row-key");
+          const dst = (e.detail.destination.element as HTMLElement | null)?.getAttribute("row-key");
+          const placement = e.detail.destination.placement as Placement;
+          if (src?.startsWith("c:") || dst?.startsWith("c:")) return;
+          if (src && dst) update((d) => applyMove(d, src, dst, placement));
+        }}
+        onRowActionClick={(e) => {
+          const rowKey = ((e.detail.row as unknown) as HTMLElement).getAttribute("row-key")!;
+          const act = ((e.detail.action as unknown) as HTMLElement).dataset.act;
+          if (rowKey.startsWith("c:")) {
+            const i = Number(rowKey.slice(2));
+            if (act === "delete") {
               setFEdit(null);
               update((d) => ({ ...d, computed: d.computed.filter((_, j) => j !== i) }));
-              return;
-            }
-            const ref = parseRowKey(rowKey);
-            if (ref.kind === "table" && defOf(tableKeyAt(draft, ref.s, ref.g) ?? "")?.role === "items") return;
-            void confirmDelete(ref);
-          }}
-          onMoveOver={(e) => {
-            const src = keyOf(e.detail.source.element);
-            const dst = keyOf(e.detail.destination.element);
-            const placement = e.detail.destination.placement as Placement;
-            // ponytail: formula rows (c:) are drawn in this tree but aren't structure nodes. They
-            // are never movable, and Tree._getItems() walks every rendered item regardless, so this
-            // still has to refuse them as a destination.
-            if (src?.startsWith("c:") || dst?.startsWith("c:")) return;
-            if (src && dst && canDrop(draft, src, dst, placement)) e.preventDefault();
-          }}
-          onMove={(e) => {
-            const src = keyOf(e.detail.source.element);
-            const dst = keyOf(e.detail.destination.element);
-            const placement = e.detail.destination.placement as Placement;
-            if (src?.startsWith("c:") || dst?.startsWith("c:")) return;
-            if (src && dst) update((d) => applyMove(d, src, dst, placement));
-          }}
-          onItemToggle={(e) => {
-            // Controlled: suppress the built-in toggle and drive `expanded` from state, which is
-            // keyed by the stable section/group/param key so a collapse survives drag-reordering.
-            e.preventDefault();
-            const id = (e.detail.item as HTMLElement).dataset.collapse;
-            if (id) toggle(id);
-          }}
-          onItemClick={(e) => {
-            const rowKey = keyOf(e.detail.item);
-            if (!rowKey) return;
-            if (rowKey.startsWith("c:")) return setFEdit(Number(rowKey.slice(2)));
-            const ref = parseRowKey(rowKey);
-            if (ref.kind === "table") {
-              setTableEdit(tableKeyAt(draft, ref.s, ref.g) ?? null);
-            } else if (ref.kind === "param") {
-              const p = draft.parameters.find((x) => x.key === ref.key);
-              if (p) setEditing({ param: structuredClone(p), isNew: false });
-            } else {
-              const grp = ref.kind === "group" ? draft.structure.sections[ref.s]?.groups[ref.g] : undefined;
-              const title = ref.kind === "section" ? draft.structure.sections[ref.s]?.title ?? ""
-                : grp && !isTableGroup(grp) ? grp.title : "";
-              setTitleEdit({ key: rowKey, original: title });
-            }
-          }}
-        >
-          {draft.structure.sections.map(sectionItem)}
-          {orphanFormulas.map(formulaItem)}
-        </Tree>
-      )}
-      </div>
-
-      {/* One menu for whichever row's add-arrow is open. A section adds a group of either kind; a
-          parameter adds a formula or a copy of itself. */}
-      {rowMenu && menuRef ? (
-        <Menu open opener={openerId(rowMenu)} onClose={() => setRowMenu(null)}
-          onItemClick={(e) => {
-            const what = (e.detail.item as HTMLElement).dataset.add;
-            if (menuRef.kind === "section") {
-              if (what === "group") addGroup(menuRef.s);
-              else if (what === "calc" || what === "items") addTable(what, menuRef.s);
-            } else if (menuRef.kind === "param") {
-              if (what === "formula") addFormula(menuRef.key);
-              else if (what === "dup") update((d) => duplicateParam(d, menuRef.key));
-            }
-            setRowMenu(null);
-          }}>
-          {menuRef.kind === "section" ? (
-            <>
-              <MenuItem text="Normal group" icon="add" data-add="group" />
-              <MenuItem text="Calculation table" icon="table-view" data-add="calc" />
-              <MenuItem text="Item grid" icon="product" data-add="items" disabled={hasItems}
-                tooltip={hasItems ? "This model already has an item grid" : undefined} />
-            </>
+            } else addFormula(anchorFor(draft.computed[i]?.under));
+            return;
+          }
+          const ref = parseRowKey(rowKey);
+          if (act === "delete") void confirmDelete(ref);
+          else if (act === "calc" || act === "items") { if (ref.kind === "section") addTable(act, ref.s); }
+          else if (act === "dup" && ref.kind === "param") update((d) => duplicateParam(d, ref.key));
+          else if (ref.kind === "section") addGroup(ref.s);
+          else if (ref.kind === "group") setEditing({ param: emptyParam(), isNew: true, place: { s: ref.s, g: ref.g } });
+          else if (ref.kind === "param") addFormula(ref.key);
+        }}
+        onRowClick={(e) => {
+          const rowKey = ((e.detail.row as unknown) as HTMLElement).getAttribute("row-key")!;
+          if (rowKey.startsWith("c:")) return setFEdit(Number(rowKey.slice(2)));
+          const ref = parseRowKey(rowKey);
+          if (ref.kind === "table") {
+            setTableEdit(tableKeyAt(draft, ref.s, ref.g) ?? null);
+          } else if (ref.kind === "param") {
+            const p = draft.parameters.find((x) => x.key === ref.key);
+            if (p) setEditing({ param: structuredClone(p), isNew: false });
+          } else {
+            const grp = ref.kind === "group" ? draft.structure.sections[ref.s]?.groups[ref.g] : undefined;
+            const title = ref.kind === "section" ? draft.structure.sections[ref.s]?.title ?? ""
+              : grp && !isTableGroup(grp) ? grp.title : "";
+            setTitleEdit({ key: rowKeyOf(ref), original: title });
+          }
+        }}
+        headerRow={
+          <TableHeaderRow ref={revealActionsHeader}>
+            <TableHeaderCell width="45%"><span>Structure</span></TableHeaderCell>
+            <TableHeaderCell><span>Details</span></TableHeaderCell>
+          </TableHeaderRow>
+        }
+      >
+        {rows.map((r) =>
+          r.kind === "formula" ? (
+            // Read-only until clicked: a row of live Inputs is taller than a row of Text, and that
+            // gap is what made the formula block look bolted on.
+            <TableRow key={r.key} rowKey={r.key} interactive
+              actions={<><TableRowAction icon="add" text="Add formula" data-act="add" />{del}</>}>
+              <TableCell>
+                <Gutter depth={3}>
+                  <span style={{ color: "var(--sapContent_LabelColor)", fontStyle: "italic", flex: "0 0 auto" }}>ƒ</span>
+                  {fEdit === r.idx ? (
+                    <Input accessibleName="Formula key" style={{ width: "100%" }} value={draft.computed[r.idx]!.key} autoFocus
+                      onInput={(e) => update((d) => ({ ...d, computed: d.computed.map((x, j) => (j === r.idx ? { ...x, key: e.target.value } : x)) }))} />
+                  ) : (
+                    <Text>{draft.computed[r.idx]!.key}</Text>
+                  )}
+                </Gutter>
+              </TableCell>
+              <TableCell>
+                <div style={{ width: "100%" }}>
+                  {fEdit === r.idx ? (
+                    <ExprInput value={draft.computed[r.idx]!.expr} model={draft} tables={tables} fieldId={`expr-computed[${r.idx}].expr`}
+                      issue={issueFor(issues, `computed[${r.idx}].expr`)}
+                      onChange={(v) => update((d) => ({ ...d, computed: d.computed.map((x, j) => (j === r.idx ? { ...x, expr: v ?? "" } : x)) }))} />
+                  ) : (
+                    <Text style={{ color: issueFor(issues, `computed[${r.idx}].expr`) ? "var(--sapNegativeColor)" : undefined }}>
+                      {`= ${draft.computed[r.idx]!.expr}`}
+                    </Text>
+                  )}
+                </div>
+              </TableCell>
+            </TableRow>
           ) : (
-            <>
-              <MenuItem text="Add formula here" icon="add" data-add="formula" />
-              <MenuItem text="Duplicate parameter" icon="copy" data-add="dup" />
-            </>
-          )}
-        </Menu>
-      ) : null}
+            <TableRow key={r.key} rowKey={r.key} movable interactive actions={actionsFor(r.ref)}>
+              <TableCell>
+                <Gutter depth={r.depth} collapse={r.collapseId
+                  ? { collapsed: collapsed.has(r.collapseId), onToggle: () => toggle(r.collapseId!) }
+                  : undefined}>
+                  {r.ref.kind === "table" ? (
+                    <span style={{ color: "var(--sapContent_LabelColor)", flex: "0 0 auto" }} aria-hidden>▦</span>
+                  ) : null}
+                  {titleEdit?.key === r.key && (r.ref.kind === "section" || r.ref.kind === "group") ? (
+                    <Input
+                      accessibleName="Title"
+                      value={r.label}
+                      autoFocus
+                      onBlur={() => setTitleEdit(null)}
+                      // Enter commits (edits already applied live); Escape reverts to the original title.
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") setTitleEdit(null);
+                        else if (e.key === "Escape") { setTitle(r.ref, titleEdit.original); setTitleEdit(null); }
+                      }}
+                      onInput={(e) => setTitle(r.ref, e.target.value)}
+                    />
+                  ) : (
+                    <Text style={{ fontWeight: r.depth === 0 ? "bold" : "normal" }}>{r.label}</Text>
+                  )}
+                </Gutter>
+              </TableCell>
+              <TableCell><Text>{r.detail}</Text></TableCell>
+            </TableRow>
+          ),
+        )}
+      </Table>
+      </div>
 
       {tableEdit && defOf(tableEdit) ? (
         <TableDialog
@@ -467,7 +439,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       </SplitterElement>
       <SplitterElement minSize={280}>
         <PreviewPane modelId={modelId} draft={draft} issues={issues} lookups={lookups}
-          lookupsError={lookupsError} onRetryLookups={onRetryLookups} />
+          lookupsFailed={lookupsFailed} onRetryLookups={onRetryLookups} />
       </SplitterElement>
     </SplitterLayout>
   );
@@ -475,9 +447,9 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
 
 // SplitterLayout is a React component, not a web component — no `slot` to forward, unlike
 // DynamicSideContent's `sideContent`.
-function PreviewPane({ modelId, draft, issues, lookups, lookupsError, onRetryLookups }: {
+function PreviewPane({ modelId, draft, issues, lookups, lookupsFailed, onRetryLookups }: {
   modelId: string; draft: ModelDef; issues: Issue[];
-  lookups?: ResolvedLookups; lookupsError?: Error | null; onRetryLookups: () => void;
+  lookups?: ResolvedLookups; lookupsFailed?: boolean; onRetryLookups: () => void;
 }) {
   const [entries, setEntries] = useState<Entries>({});
   const [tables, setTables] = useState<TableRows>({});
@@ -490,15 +462,11 @@ function PreviewPane({ modelId, draft, issues, lookups, lookupsError, onRetryLoo
 
   return (
     <div style={{ flex: "1 1 auto", minInlineSize: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      {issues.length > 0 ? (
-        <MessageStrip design="Critical" hideCloseButton>
-          Showing the last valid version — fix {issues.length} error{issues.length === 1 ? "" : "s"} to preview the current draft.
-        </MessageStrip>
-      ) : null}
-      {lookupsError ? (
-        <div style={{ padding: "0 1rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <MessageStrip design="Negative" hideCloseButton style={{ flex: 1 }}>{lookupsError.message}</MessageStrip>
-          <Button onClick={onRetryLookups}>Retry</Button>
+      {/* Why the preview is empty is a page message; the retry it needs is not something a
+          message can carry, so the button stays here. */}
+      {lookupsFailed ? (
+        <div style={{ padding: "0.5rem 1rem" }}>
+          <Button icon="refresh" onClick={onRetryLookups}>Retry loading options</Button>
         </div>
       ) : null}
       <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "0 1rem 1rem" }}>
@@ -507,7 +475,7 @@ function PreviewPane({ modelId, draft, issues, lookups, lookupsError, onRetryLoo
             onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
             querySource={{ kind: "project", modelId }}
             tables={tables} onTablesChange={setTables} />
-        ) : lookupsError ? null : <BusyIndicator active delay={0} />}
+        ) : lookupsFailed ? null : <BusyIndicator active delay={0} />}
       </div>
     </div>
   );

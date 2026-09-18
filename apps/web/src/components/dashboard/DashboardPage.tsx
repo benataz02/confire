@@ -11,8 +11,9 @@ import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import { meQuery } from "../../orpc.ts";
 import { orpc } from "../../orpc.ts";
 import {
-  conversionSlices, deviationPct, greeting, money, monthLabel, percent, percentPoints, scaled, trendOf,
+  conversionSlices, deviationPct, greeting, monthLabel, percent, percentPoints, scaled, trendOf,
 } from "./dashboardView.ts";
+import { money, useCurrency } from "../../lib/money.ts";
 
 const WINDOWS = [
   { key: "month", label: "This month" },
@@ -40,7 +41,10 @@ export function DashboardPage() {
   const isAdmin = me?.role === "admin" || me?.role === "owner";
   const busy = o.isFetching || refresh.isPending;
   const d = o.data;
-  const cur = d?.currency ?? "EUR";
+  // undefined until SAP has answered once for this tenant; the cards then read as bare numbers
+  // rather than "undefined", which is what the empty label below is for.
+  const cur = useCurrency();
+  const curLabel = cur ?? "";
   const windowLabel = WINDOWS.find((w) => w.key === window)!.label;
   const orderValue = scaled(d?.orderValue.total ?? 0);
   const confireValue = scaled(d?.orderValue.confire ?? 0);
@@ -165,12 +169,12 @@ export function DashboardPage() {
             <Card accessibleName="Order value" loading={busy} header={
               <AnalyticalCardHeader
                 titleText="Order value" subtitleText={windowLabel}
-                value={orderValue.value} scale={orderValue.scale} unitOfMeasurement={cur}
+                value={orderValue.value} scale={orderValue.scale} unitOfMeasurement={curLabel}
                 trend={trendOf(d.orderValue.total, d.orderValue.prevTotal)} state="None"
               >
                 <NumericSideIndicator
                   titleText="via Confire" number={confireValue.value}
-                  unit={confireValue.scale ? `${confireValue.scale} ${cur}` : cur}
+                  unit={[confireValue.scale, curLabel].filter(Boolean).join(" ")}
                 />
                 {vsPrior && <NumericSideIndicator titleText="vs prior" number={vsPrior.number} unit={vsPrior.unit} />}
               </AnalyticalCardHeader>
@@ -180,8 +184,8 @@ export function DashboardPage() {
                 chartConfig={{ xAxisVisible: false, yAxisWidth: 28, margin: { left: 0, right: 8, top: 8, bottom: 8 } }}
                 dimensions={[{ accessor: "month", formatter: (v) => monthLabel(String(v)) }]}
                 measures={[{
-                  accessor: "value", label: `Order value (${cur})`, hideDataLabel: true, showDot: false,
-                  formatter: (v: number) => money(v, cur),
+                  accessor: "value", label: cur ? `Order value (${cur})` : "Order value", hideDataLabel: true, showDot: false,
+                  formatter: (v: number) => money(v, cur, 0),
                 }]}
               />
             </Card>
@@ -257,7 +261,7 @@ export function DashboardPage() {
                 measures={[
                   {
                     accessor: "confire", label: "via Confire", stackId: "open",
-                    formatter: (v: number) => money(v, cur),
+                    formatter: (v: number) => money(v, cur, 0),
                     highlightColor: (_v, _m, row) =>
                       row.bucket === ageFilter ? "var(--sapHighlightColor)"
                         : row.bucket === "30d+" ? "var(--sapNegativeColor)"
@@ -265,7 +269,7 @@ export function DashboardPage() {
                   },
                   {
                     accessor: "other", label: "Other", stackId: "open",
-                    formatter: (v: number) => money(v, cur),
+                    formatter: (v: number) => money(v, cur, 0),
                     highlightColor: (_v, _m, row) =>
                       row.bucket === ageFilter ? "var(--sapHighlightColor)"
                         : row.bucket === "30d+" ? "var(--sapNegativeColor)"

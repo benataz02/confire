@@ -25,18 +25,24 @@ const model: ModelDef = {
   structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["size", "grade"] }] }] },
   computed: [],
   constraints: [],
-  bom: [{ id: "body", itemCode: '"BODY"', qty: 'size == "S" ? 1 : 2', price: "3", scrapPct: 0 }],
+  bom: [{ id: "body", itemCode: '"BODY"', qty: 'size == "S" ? 1 : 2' }],
   routing: [{ id: "cut", resource: "SAW", setupMin: "10", runMinPerUnit: "1", ratePerHour: "60" }],
-  pricing: { priceExpr: "unitCost * 2", quoteItemCode: "BOX" },
+  pricing: { priceExpr: "unitCost * 2", quoteItemCode: "BOX", priceList: 1 },
   batchDefaults: [10],
 };
 
-/** This model names no query masterdata, so resolving its lookups must not touch the agent. */
-const noFetch: QueryRunner = () => Promise.reject(new Error("no live queries expected"));
+/** No query masterdata — the only live read such a model makes is its BOM's price list. */
+const noFetch: QueryRunner = async (_target, query) => {
+  if (!query.filter) throw new Error("no live queries expected");
+  return { rows: [{ ItemCode: "SHEET", ItemPrices: [{ PriceList: 1, Price: 10 }] }] };
+};
 
+// Two shapes reach this: the `items` query table (a $select'd page) and the BOM's price-list read
+// (whole Items rows, filtered to the BOM's codes, no $select — ItemPrices cannot be $selected).
 const fakeFetch: QueryRunner = async (target, query, columns) => {
   expect(target).toBe("b1");
-  expect(query).toEqual({ entitySet: "Items" });
+  expect(query.entitySet).toBe("Items");
+  if (query.filter) return { rows: [{ ItemCode: "BODY", ItemPrices: [{ PriceList: 1, Price: 3 }] }] };
   expect(columns).toEqual(["ItemCode"]);
   return { rows: [{ ItemCode: "A" }, { ItemCode: "B" }] };
 };
@@ -158,25 +164,34 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
       structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["material"] }] }] },
       computed: [],
       constraints: [],
-      bom: [{ id: "body", itemCode: "material", qty: "1", price: "material_Price", scrapPct: 0 }],
+      bom: [{ id: "body", itemCode: "material", qty: "1" }],
       routing: [],
-      pricing: { priceExpr: "unitCost", quoteItemCode: "BOX" },
+      pricing: { priceExpr: "unitCost", quoteItemCode: "BOX", priceList: 1 },
       batchDefaults: [1],
     };
     await seedQueryTable("priced", ["ItemCode", "Price"]);
     const id = await seed("off-page", offPageModel, { material: "B" }, [1]);
 
     const reads: (string | undefined)[] = [];
-    const fetcher: QueryRunner = async (_target, query) => {
+    const catalog: Record<string, number> = { A: 3, B: 11 };
+    const fetcher: QueryRunner = async (_target, query, columns) => {
       reads.push(query.filter);
       if (!query.filter) return { rows: [{ ItemCode: "A", Price: 3 }] };
+      // no $select = the BOM price read; a $select'd one is the value-help enrich
+      if (!columns.length)
+        return {
+          rows: Object.entries(catalog)
+            .filter(([c]) => query.filter!.includes(`'${c}'`))
+            .map(([c, p]) => ({ ItemCode: c, ItemPrices: [{ PriceList: 1, Price: p }] })),
+        };
       expect(query.filter).toBe("ItemCode eq 'B'");
       return { rows: [{ ItemCode: "B", Price: 11 }] };
     };
 
     await calculateProject(tenantId, id, fetcher);
-    // Canonical first page, then the exact fetch for the off-page value the project already holds.
-    expect(reads).toHaveLength(2);
+    // Canonical page, the BOM price read over the domain, the exact fetch for the off-page value
+    // the project already holds, and the price read that chases that value.
+    expect(reads).toHaveLength(4);
     const project = await load(id);
     expect(project.candidates[0]!.perBatch[0]!.outputs.unitCost).toBe(11);
   });
@@ -195,14 +210,14 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
 
     const first = await calculateProject(tenantId, id, counting);
     expect(first.reused).toBe(false);
-    expect(fetches).toBe(1);
+    expect(fetches).toBe(2); // the query table, plus the BOM's price-list read
 
     // Nothing changed: the reuse check must return before any lookup resolution, so the fetch
     // count cannot move and the stored candidates come straight back.
     const again = await calculateProject(tenantId, id, counting);
     expect(again.reused).toBe(true);
     expect(again.candidateCount).toBe(first.candidateCount);
-    expect(fetches).toBe(1);
+    expect(fetches).toBe(2);
 
     // A real edit through the API: configs.calculate writes entries AND empties candidates in one
     // statement, which is the invariant that lets a non-null calculatedAt stand in for "these
@@ -213,8 +228,8 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     expect(edited.reused).toBe(false);
     expect(edited.candidateCount).toBe(2); // size pinned to L, two grades left
 
-    // The model was never touched, so none of that resolved a query table again.
-    expect(fetches).toBe(1);
+    // The model was never touched, so none of that resolved a query table or a price again.
+    expect(fetches).toBe(2);
   });
 
   test("editing the model invalidates the stored calculation", async () => {
@@ -261,12 +276,15 @@ describe("config tables (integration)", () => {
       },
     ],
     constraints: [],
-    bom: [{ id: "sheet", itemCode: '"SHEET"', qty: "1", price: "10", scrapPct: 0 }],
+    bom: [{ id: "sheet", itemCode: '"SHEET"', qty: "1" }],
     // the table's sum is the whole point: drilling time comes from the rows, not from a parameter
     routing: [{ id: "drill", resource: "CNC", setupMin: "5", runMinPerUnit: "holes_minutes", ratePerHour: "60" }],
-    pricing: { priceExpr: "unitCost * 2", quoteItemCode: "SHEET-CFG" },
+    pricing: { priceExpr: "unitCost * 2", quoteItemCode: "SHEET-CFG", priceList: 1 },
     batchDefaults: [3],
   };
+
+  // What the price-list read hands the engine for this model's one BOM line.
+  const SHEET_LOOKUPS = { domains: {}, tables: {}, prices: { SHEET: 10 } };
 
   const rows = {
     holes: [{ size: 10 }, { size: 20 }],
@@ -292,7 +310,7 @@ describe("config tables (integration)", () => {
       customer: { cardCode: "C1", cardName: "Acme" },
       selection: [{ candidateIdx: 0, batchQty: 3 }],
     };
-    const { lines, value } = buildQuoteLines(withPick, tableModel, { domains: {}, tables: {} });
+    const { lines, value } = buildQuoteLines(withPick, tableModel, SHEET_LOOKUPS);
 
     expect(lines).toHaveLength(2);
     expect(lines.map((l) => l.U_CF_ItemCode)).toEqual(["PART-A", "PART-B"]);
@@ -318,7 +336,7 @@ describe("config tables (integration)", () => {
     const [project] = await db.select().from(configProject).where(eq(configProject.id, projectId));
     const { lines } = buildQuoteLines(
       { ...project!, customer: { cardCode: "C1", cardName: "Acme" }, selection: [{ candidateIdx: 0, batchQty: 3 }] },
-      tableModel, { domains: {}, tables: {} },
+      tableModel, SHEET_LOOKUPS,
     );
     expect(lines).toHaveLength(1);
     expect(lines[0]!.ItemCode).toBe("SHEET-CFG");
@@ -334,7 +352,7 @@ describe("config tables (integration)", () => {
     const [project] = await db.select().from(configProject).where(eq(configProject.id, projectId));
     const { lines, value } = buildQuoteLines(
       { ...project!, customer: { cardCode: "C1", cardName: "Acme" }, selection: [{ candidateIdx: 0, batchQty: 3 }] },
-      tableModel, { domains: {}, tables: {} },
+      tableModel, SHEET_LOOKUPS,
     );
 
     expect(lines[0]!.UnitPrice).toBe(99);
@@ -373,7 +391,10 @@ describe("config tables (integration)", () => {
     const admin = await makeUser("admin", tid);
     const ctx = { context: { headers: tenantHeaders(slug, admin.cookie) } };
 
-    const [m] = await db.insert(configModel).values({ tenantId: tid, name: tableModel.name, definition: tableModel })
+    // No BOM: this path goes through the real endpoint, which resolves its own runner, and a
+    // priced BOM is a live price-list read — it would go looking for the tenant's agent.
+    const noBom: ModelDef = { ...tableModel, bom: [] };
+    const [m] = await db.insert(configModel).values({ tenantId: tid, name: noBom.name, definition: noBom })
       .returning({ id: configModel.id });
     const [p] = await db.insert(configProject)
       .values({ tenantId: tid, modelId: m!.id, name: "stale", batches: [3], entries: { thickness: 3 }, tables: rows, createdBy: admin.userId })
@@ -406,8 +427,8 @@ describe("config tables (integration)", () => {
 });
 
 describe.skipIf(!process.env.DATABASE_URL)("configs.duplicate (integration)", () => {
-  // TEST_MODEL names no query masterdata, so the recalculate inside duplicate resolves its lookups
-  // without an agent — the copy still comes back genuinely calculated.
+  // TEST_MODEL names no query masterdata and carries no BOM, so the recalculate inside duplicate
+  // resolves its lookups without an agent — the copy still comes back genuinely calculated.
   test("a quoted configuration copies its inputs, drops everything quote-shaped, and recalculates", async () => {
     const { tenantId: tid, slug } = await makeTenant();
     const admin = await makeUser("admin", tid);

@@ -14,7 +14,7 @@ export type ProjectRow = {
 };
 
 export type Overview = {
-  window: Window; currency: string;
+  window: Window;
   computedAt: string | null; snapshotError: string | null;
   orderValue: {
     total: number; confire: number; prevTotal: number;
@@ -172,7 +172,6 @@ export function buildOverview(input: {
 
   return {
     window,
-    currency: payload?.currency ?? "EUR",
     computedAt: snapshot?.computedAt.toISOString() ?? null,
     snapshotError: snapshot?.lastError ?? null,
     orderValue: {

@@ -4,7 +4,7 @@ import { and, count, eq, inArray, max } from "drizzle-orm";
 import { db, configHistory, configModel, configProject } from "@confire/db";
 import { checkModel, ModelDefZ } from "@confire/config-engine";
 import { adminProcedure } from "../base.ts";
-import { queryRowOf, queryRowsFor, resolveLookups } from "../../lookups.ts";
+import { needsSap, queryRowOf, resolveLookups } from "../../lookups.ts";
 import { knownTables, masterdataRows } from "./masterdata.ts";
 import { runnerFor, tenantConnector } from "../../b1.ts";
 import { syncModelHistory } from "../../history-sync.ts";
@@ -169,7 +169,7 @@ export const modelsRouter = {
         const rows = await masterdataRows(context.tenantId);
         return await resolveLookups(
           input.definition, rows,
-          queryRowsFor(input.definition, rows).length
+          needsSap(input.definition, rows)
             ? runnerFor(await tenantConnector(context.tenantId))
             : () => Promise.reject(new Error("Model has no live queries")),
         );

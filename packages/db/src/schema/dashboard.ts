@@ -20,7 +20,6 @@ export type OpenQuote = {
  *  (or "" when the document has none) -> Bucket. Bucketing by month AND rep is what lets one
  *  hourly fetch serve every time window and both the "mine" and "tenant" scopes. */
 export type B1Snapshot = {
-  currency: string;
   months: Record<string, Record<string, Bucket>>;
   openQuotes: OpenQuote[];
   openQuotesTruncated: boolean;

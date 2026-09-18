@@ -24,14 +24,14 @@ const model: ModelDef = {
     ],
   }],
   constraints: [],
-  bom: [{ id: "sheet", itemCode: '"SHEET"', qty: "1", price: "10", scrapPct: 0 }],
+  bom: [{ id: "sheet", itemCode: '"SHEET"', qty: "1" }],
   routing: [],
-  pricing: { priceExpr: "unitCost * 2", quoteItemCode: "SHEET-CFG" },
+  pricing: { priceExpr: "unitCost * 2", quoteItemCode: "SHEET-CFG", priceList: 1 },
   batchDefaults: [3],
 };
 
 const items = model.tables![0]! as Extract<(typeof model.tables)[number], { role: "items" }>;
-const lookups: ResolvedLookups = { domains: {}, tables: {} };
+const lookups: ResolvedLookups = { domains: {}, tables: {}, prices: { SHEET: 10 } };
 const tables: TableRows = {
   parts: [
     { itemcode: "A", quantity: 1, area: 2 },

@@ -1,11 +1,12 @@
 import type { AnalyticalTableColumnDefinition } from "@ui5/webcomponents-react";
-import type { ListVariantDef, FilterCond } from "@confire/db";
+import type { B1Field } from "@confire/b1";
+import type { ListVariantDef, FilterCond, ObjectVariantDef } from "@confire/db";
 
 // The pure half of a list view: column descriptors, the local executor, cell formatting. No hooks,
 // no orpc — variants.ts re-exports all of it, and the test imports this module directly (orpc.ts
 // touches `window` at module scope, so anything importing it can't be unit-tested under bun).
 
-export type { ListVariantDef, FilterCond, FilterOp } from "@confire/db";
+export type { ListVariantDef, FilterCond, FilterOp, ObjectVariantDef } from "@confire/db";
 
 // VariantManagement's dialog flags come back as boolean | "true" | "false" (string-bool). Coerce.
 export const truthy = (v: unknown): boolean => v === true || v === "true";
@@ -85,6 +86,52 @@ export const optionFilterValues = (c?: FilterCond): string[] =>
 // Rendered columns only — the server unions in the schema's identity keys for the OData $select.
 export const visibleColumns = (spec: ListVariantDef, columns: ListColumn[]): string[] =>
   spec.select.length ? spec.select : columns.map((c) => c.name);
+
+// --- object views --------------------------------------------------------------------------------
+// The object-page half of a saved view. `header` is the scalar form, `sections[].id` names a
+// collection and `sections[].fields` its table columns — so one function answers both "which fields"
+// and "which sections", and EntityField renders the narrowed collection unchanged because its
+// columns come from `field.fields`. Same projection shape as portalSchema on the server.
+
+/** Fields a view names, in the view's order. A name with no matching field is dropped rather than
+ *  thrown: the same rule compileList applies to `select`, so a view outliving a UDF still opens. */
+const pickFields = (all: B1Field[], want: ObjectVariantDef["header"]): B1Field[] =>
+  want.flatMap((w) => {
+    if (!w.visible) return [];
+    const hit = all.find((f) => f.name === w.name);
+    return hit ? [w.label ? { ...hit, label: w.label } : hit] : [];
+  });
+
+/**
+ * One B1 schema + one object view -> what the ObjectPage draws.
+ *
+ * A view with neither half filled means "show everything" — the same emptiness test the seeder uses
+ * to decide a Standard row has never been shaped (seed-variants.ts), so the two cannot drift.
+ *
+ * `always` is the escape hatch that keeps the page usable in edit/create mode: a hand-edited view
+ * that drops CardCode would otherwise make a create page unable to send a field the server requires.
+ */
+export function applyObjectDef(
+  fields: B1Field[],
+  def: ObjectVariantDef | null,
+  always: string[] = [],
+): { scalars: B1Field[]; sections: B1Field[] } {
+  const scalars = fields.filter((f) => f.kind !== "collection");
+  const collections = fields.filter((f) => f.kind === "collection");
+  if (!def || (!def.header.length && !def.sections.length)) return { scalars, sections: collections };
+
+  const header = def.header.length ? pickFields(scalars, def.header) : scalars;
+  const missing = always.filter((n) => !header.some((f) => f.name === n));
+  return {
+    scalars: [...header, ...scalars.filter((f) => missing.includes(f.name))],
+    sections: def.sections.flatMap((s) => {
+      if (!s.visible) return [];
+      const c = collections.find((f) => f.name === s.id);
+      if (!c) return [];
+      return [s.fields.length ? { ...c, fields: pickFields(c.fields ?? [], s.fields) } : c];
+    }),
+  };
+}
 
 /** The part of a saved view that IS the query, and nothing else. `labels` and `filterBar` are
  *  presentation: no executor reads them, but they live in the same jsonb document,

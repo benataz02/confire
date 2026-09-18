@@ -32,6 +32,10 @@ export function SettingsTab({ draft, update, issues, tables, portalMeta, setPort
               valueStateMessage={<div>Enter a name</div>}
               onInput={(e) => update((d) => ({ ...d, name: e.target.value }))} />
           </FormItem>
+          <FormItem labelContent={<Label for="model-description">Description</Label>}>
+            <Input id="model-description" value={draft.description ?? ""} placeholder="Shown under the model name"
+              onInput={(e) => update((d) => ({ ...d, description: e.target.value || undefined }))} />
+          </FormItem>
           <FormItem labelContent={<Label>Default batch sizes</Label>}>
             <Input value={batchText} placeholder="1, 10, 100" onInput={(e) => setBatches(e.target.value)}
               valueState={draft.batchDefaults.length ? "None" : "Negative"}
@@ -39,6 +43,22 @@ export function SettingsTab({ draft, update, issues, tables, portalMeta, setPort
           </FormItem>
         </FormGroup>
         <FormGroup headerText="Pricing">
+          {/* Mandatory: BOM lines carry no price of their own — this list is where every material's
+              unit price is read from, live, on each calculation. */}
+          <FormItem labelContent={<Label required>BOM price list</Label>}>
+            {/* Wrapper, not a prop on EntityValueHelp: the id is only a jump target for the
+                message popover, and `field-<issue path>` is the convention for one. */}
+            <div id="field-pricing.priceList" style={{ width: "100%" }}>
+            <EntityValueHelp entitySet="PriceLists" keyField="PriceListNo" select={["PriceListNo", "PriceListName"]}
+              value={draft.pricing.priceList ?? undefined}
+              valueState={draft.pricing.priceList ? "None" : "Negative"}
+              headerText="Select a price list"
+              onChange={(v) => update((d) => ({
+                ...d,
+                pricing: { ...d.pricing, priceList: v == null || v === "" ? undefined : Number(v) },
+              }))} />
+            </div>
+          </FormItem>
           <FormItem labelContent={<Label required>Unit price expression</Label>}>
             <ExprInput value={draft.pricing.priceExpr} model={draft} extraVars={["qty", "unitCost"]} tables={tables}
               fieldId="expr-pricing.priceExpr" issue={issueFor(issues, "pricing.priceExpr")}
@@ -50,11 +70,6 @@ export function SettingsTab({ draft, update, issues, tables, portalMeta, setPort
               valueState={draft.pricing.quoteItemCode ? "None" : "Negative"}
               headerText="Select an item"
               onChange={(v) => update((d) => ({ ...d, pricing: { ...d.pricing, quoteItemCode: v == null ? "" : String(v) } }))} />
-          </FormItem>
-          {/* free text, because B1 currency codes are free text; blank = EUR (see money()) */}
-          <FormItem labelContent={<Label>Currency</Label>}>
-            <Input value={draft.pricing.currency ?? ""} placeholder="EUR"
-              onInput={(e) => update((d) => ({ ...d, pricing: { ...d.pricing, currency: e.target.value || undefined } }))} />
           </FormItem>
         </FormGroup>
         <FormGroup headerText="Client portal">

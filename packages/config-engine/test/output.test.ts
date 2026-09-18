@@ -11,13 +11,14 @@ describe("computeOutputs", () => {
     expect(o.bom.map((l) => l.id)).toEqual(["conductor", "coating"]);
     const [cond, coat] = o.bom;
     expect(cond!.itemCode).toBe("COND-steel");
-    expect(cond!.desc).toBe("steel conductor");
+    expect(cond!.desc).toBe("conductor");
     expect(cond!.qtyPerUnit).toBeCloseTo(0.32);
     expect(cond!.totalQty).toBeCloseTo(32);
     expect(cond!.unitPrice).toBeCloseTo(1.5);
     expect(cond!.lineTotal).toBeCloseTo(48);
-    expect(coat!.totalQty).toBeCloseTo(105); // scrap 5%
-    expect(o.materialPerUnit).toBeCloseTo(1.32);
+    expect(coat!.totalQty).toBeCloseTo(100);
+    expect(coat!.unitPrice).toBeCloseTo(0.8); // from lookups.prices, not the model
+    expect(o.materialPerUnit).toBeCloseTo(1.28);
 
     expect(o.ops.map((op) => op.id)).toEqual(["cut", "coat"]);
     const coatOp = o.ops[1]!;
@@ -26,9 +27,9 @@ describe("computeOutputs", () => {
     expect(coatOp.cost).toBeCloseTo(350);
     expect(o.laborPerUnit).toBeCloseTo(4.1);
 
-    expect(o.unitCost).toBeCloseTo(5.42);
-    expect(o.unitPrice).toBeCloseTo(7.588);
-    expect(o.batchTotal).toBeCloseTo(758.8);
+    expect(o.unitCost).toBeCloseTo(5.38);
+    expect(o.unitPrice).toBeCloseTo(7.532);
+    expect(o.batchTotal).toBeCloseTo(753.2);
   });
 
   test("uncoated: conditional line and op drop out", () => {
@@ -44,9 +45,9 @@ describe("computeOutputs", () => {
     expect(big.batchTotal).toBeGreaterThan(small.batchTotal);
   });
 
-  test("missing lookup row surfaces as DslError", () => {
+  test("an item the price list does not carry surfaces as DslError", () => {
     const badLookups = structuredClone(lookups);
-    badLookups.tables.prices!.rows = [];
+    delete badLookups.prices!["COAT-1"];
     expect(() => computeOutputs(model, badLookups, full, 100)).toThrow(DslError);
   });
 
@@ -62,30 +63,30 @@ describe("computeOutputs", () => {
 });
 
 describe("computeOutputs overrides", () => {
-  // Base (coated steel 16mm², batch 100): materialPerUnit 1.32, laborPerUnit 4.1,
-  // unitCost 5.42, unitPrice 7.588 — from the hand-computed test above.
+  // Base (coated steel 16mm², batch 100): materialPerUnit 1.28, laborPerUnit 4.1,
+  // unitCost 5.38, unitPrice 7.532 — from the hand-computed test above.
 
   test("price override + op removal recompute the chain", () => {
     const o = computeOutputs(model, lookups, full, 100, {
       bom: [{ id: "coating", unitPrice: 1 }],
       ops: [{ id: "coat", remove: true }],
     });
-    // coating: 1 * 1.05 (scrap) * 1.0 = 1.05; conductor unchanged 0.48
-    expect(o.materialPerUnit).toBeCloseTo(1.53);
+    // coating: 1 * 1.0 = 1.0 (the override beats the price list); conductor unchanged 0.48
+    expect(o.materialPerUnit).toBeCloseTo(1.48);
     expect(o.ops.map((op) => op.id)).toEqual(["cut"]);
     expect(o.laborPerUnit).toBeCloseTo(0.6);
-    expect(o.unitCost).toBeCloseTo(2.13);
-    expect(o.unitPrice).toBeCloseTo(2.982); // priceExpr (×1.4) re-applied
+    expect(o.unitCost).toBeCloseTo(2.08);
+    expect(o.unitPrice).toBeCloseTo(2.912); // priceExpr (×1.4) re-applied
   });
 
-  test("qty override replaces expr result, scrap still applies", () => {
+  test("qty override replaces the expr result", () => {
     const o = computeOutputs(model, lookups, full, 100, {
       bom: [{ id: "coating", qtyPerUnit: 2 }],
     });
     const coat = o.bom.find((l) => l.id === "coating")!;
     expect(coat.qtyPerUnit).toBeCloseTo(2);
-    expect(coat.totalQty).toBeCloseTo(210); // 2 * 1.05 * 100
-    expect(o.materialPerUnit).toBeCloseTo(0.48 + 2 * 1.05 * 0.8);
+    expect(coat.totalQty).toBeCloseTo(200);
+    expect(o.materialPerUnit).toBeCloseTo(0.48 + 2 * 0.8);
   });
 
   test("added BOM line and added op join the totals", () => {
@@ -95,10 +96,10 @@ describe("computeOutputs overrides", () => {
     });
     expect(o.bom.map((l) => l.id)).toEqual(["conductor", "coating", "pack"]);
     expect(o.bom[2]!.lineTotal).toBeCloseTo(20); // 0.1 * 100 * 2
-    expect(o.materialPerUnit).toBeCloseTo(1.52);
+    expect(o.materialPerUnit).toBeCloseTo(1.48);
     expect(o.ops.map((op) => op.id)).toEqual(["cut", "coat", "qa"]);
     expect(o.laborPerUnit).toBeCloseTo(4.7); // +0.6/min at 60/h = +0.6
-    expect(o.unitCost).toBeCloseTo(6.22);
+    expect(o.unitCost).toBeCloseTo(6.18);
   });
 
   test("removing a BOM line", () => {

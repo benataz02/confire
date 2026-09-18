@@ -1,4 +1,4 @@
-import { refKeyCols, referencedTables } from "@confire/config-engine";
+import { bomItemCodes, refKeyCols, referencedTables } from "@confire/config-engine";
 import type {
   Entries, LookupRef, ModelDef, ODataQuery, Option, QuerySource, ResolvedLookups, ResolvedTable,
   TableRows, Val,
@@ -73,8 +73,10 @@ const versions = new Map<string, number>();
 export const masterdataVersion = (tenantId: string) => versions.get(tenantId) ?? 0;
 export const bumpMasterdata = (tenantId: string) => { versions.set(tenantId, Date.now()); };
 
-/** True when resolving this model needs the tenant's agent. */
-export const needsSap = (model: ModelDef, rows: MasterdataRow[]): boolean => queryRowsFor(model, rows).length > 0;
+/** True when resolving this model needs the tenant's agent — a query table it names, or a BOM
+ *  whose materials are priced from the tenant's price list. */
+export const needsSap = (model: ModelDef, rows: MasterdataRow[]): boolean =>
+  queryRowsFor(model, rows).length > 0 || (!!model.pricing.priceList && model.bom.length > 0);
 
 export const queryRowOf = (rows: MasterdataRow[], name: string): MasterdataQueryRow | undefined =>
   rows.find((r): r is MasterdataQueryRow => r.name === name && r.kind === "query" && !!r.query);
@@ -254,7 +256,9 @@ export async function enrichLookups(
       for (const row of fetched.rows) append(ref.table, fetched.columns, row);
     }
   }
-  return tables === canonical.tables ? canonical : { domains: canonical.domains, tables };
+  const prices = await enrichBomPrices(model, canonical.prices ?? {}, entries, run);
+  if (tables === canonical.tables && prices === canonical.prices) return canonical;
+  return { ...canonical, tables, prices };
 }
 
 /** Fetch each query row and add it to `tables` (mutates in place). Concurrent: every read is a
@@ -276,6 +280,62 @@ export async function addQueryTables(
       ...(r.query.hidden ? { hidden: r.query.hidden } : {}),
     };
   });
+}
+
+/** Items per price read. Same bound, and the same reason, as ENRICH_VALUES_MAX.
+ *  ponytail: one page; page the read if a BOM ever runs past it. */
+const PRICE_ITEMS_MAX = 50;
+
+/** The BOM's unit prices, read live from the model's B1 price list. This is what replaced a stored
+ *  price per BOM line: the number is resolved on every calculate, like everything else here.
+ *
+ *  No `$select`: `ItemPrices` is a complex *collection* on Items, and B1 rejects selecting one
+ *  (the same 400 `$select=DocumentLines` earns — see doc-history.ts). The read asks for whole item
+ *  rows and picks the price list's line out here. An item B1 does not return, or one with no line
+ *  for this list, is simply absent: computeOutputs then refuses that BOM line by name rather than
+ *  costing the material at zero. */
+async function readItemPrices(
+  list: number, codes: string[], run: QueryRunner,
+): Promise<Record<string, number>> {
+  if (!codes.length) return {};
+  const capped = codes.slice(0, PRICE_ITEMS_MAX);
+  const page = await run("b1", withAnyOf({ entitySet: "Items" }, "ItemCode", capped), [], { top: capped.length });
+  const prices: Record<string, number> = {};
+  for (const row of page.rows) {
+    const code = row.ItemCode;
+    const line = (row.ItemPrices as { PriceList?: number; Price?: number }[] | undefined)
+      ?.find((pr) => pr.PriceList === list);
+    if (typeof code === "string" && typeof line?.Price === "number") prices[code] = line.Price;
+  }
+  return prices;
+}
+
+export function fetchBomPrices(
+  model: ModelDef, domains: ResolvedLookups["domains"], run: QueryRunner,
+): Promise<Record<string, number>> {
+  const list = model.pricing.priceList;
+  if (!list) return Promise.resolve({});
+  return readItemPrices(list, bomItemCodes(model, domains), run);
+}
+
+/** The price half of enrichLookups, and there for the same reason: the canonical read priced what
+ *  the resolved *domains* could hold, and a persisted entry may name a value off that page. Only
+ *  codes an entry contributes are chased — a literal B1 had no price for stays unpriced instead of
+ *  costing a SAP hop on every recalculate. */
+export async function enrichBomPrices(
+  model: ModelDef, have: Record<string, number>, entries: Entries, run: QueryRunner,
+): Promise<Record<string, number>> {
+  const list = model.pricing.priceList;
+  if (!list) return have;
+  const asDomains = Object.fromEntries(
+    Object.entries(entries)
+      .filter(([, v]) => typeof v === "string")
+      .map(([k, v]) => [k, [{ value: v }]]),
+  );
+  const literals = new Set(bomItemCodes(model));
+  const missing = bomItemCodes(model, asDomains).filter((c) => !literals.has(c) && !(c in have));
+  if (!missing.length) return have;
+  return { ...have, ...(await readItemPrices(list, missing, run)) };
 }
 
 export async function resolveLookups(
@@ -300,5 +360,7 @@ export async function resolveLookups(
     if (p.domain?.kind !== "options") continue;
     domains[p.key] = optionsFromRef(p.domain.ref, tables);
   }
-  return { domains, tables };
+  // After the domains: a BOM line whose item code is a parameter is priced across everything that
+  // parameter could hold, and those values are only known once its domain is resolved.
+  return { domains, tables, prices: await fetchBomPrices(model, domains, runOnce) };
 }

@@ -10,7 +10,7 @@ import {
 import { QueryValueHelp, type QuerySource } from "../ValueHelp.tsx";
 import { displayValue } from "./formHelpers.ts";
 import { addRow, pasteRows, removeRow, setCell, type Row } from "./configTableOps.ts";
-import { money as fmtMoney } from "./costElements.ts";
+import { money as fmtMoney, useCurrency } from "../../lib/money.ts";
 import type { ItemMoney } from "./itemMoney.ts";
 import { colMinWidth } from "./tableWidths.ts";
 
@@ -31,7 +31,7 @@ const header = (c: TableColumn) => c.label + (c.unit ? ` (${c.unit})` : "");
  * than stored. The cell controls follow ConfiguratorForm.control()'s branch order so a column and a
  * parameter of the same type look and behave the same.
  */
-export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPick, disabled, readOnly, querySource, money, currency }: {
+export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPick, disabled, readOnly, querySource, money }: {
   def: TableDef;
   rows: Row[];
   /** the model's current values — row formulas read these, and row cells shadow them */
@@ -48,8 +48,10 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
   /** Derived cost/price per row for an `items` grid. Absent = no money columns at all, which is how
    *  the portal stays free of cost data: PortalRequestPage simply does not pass it. */
   money?: ItemMoney | null;
-  currency?: string;
 }) {
+  // Off `me`, not off a prop: the currency is the tenant's, identical for every table on the page,
+  // so threading it down from the model was carrying a constant through four components.
+  const currency = useCurrency();
   // Same function the server runs, so a computed cell cannot disagree with the quote.
   const evaluated = useMemo(
     () => evalTableRows(def, rows, scopeVars, lookups.tables),

@@ -13,7 +13,8 @@ import { ConfigTable } from "./ConfigTable.tsx";
 import type { ItemMoney } from "./itemMoney.ts";
 import { displayValue, setEntry } from "./formHelpers.ts";
 import { addBatch } from "./configProcessState.ts";
-import { money, paramPrices } from "./costElements.ts";
+import { paramPrices } from "./costElements.ts";
+import { money, useCurrency } from "../../lib/money.ts";
 
 /** The ref's display columns for one option value, joined — shown next to the option. */
 function extraOf(ref: LookupRef, t: ResolvedTable | undefined, val: Val): string | undefined {
@@ -123,6 +124,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
    *  how the builder preview and the client portal stay free of cost data */
   itemMoney?: ItemMoney | null;
 }) {
+  const currency = useCurrency();
   // Same source the rail's Costs card reads, so a badge and the card can never disagree.
   const priceOf = useMemo(
     () => new Map(paramPrices(model, prop, lk.tables).map((c) => [c.key, c.amount])),
@@ -346,7 +348,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
             return <TableGroup key={`${g.table}:${gi}`} def={def} rows={tableRows[g.table] ?? []}
               scopeVars={prop.values} lookups={lk} querySource={querySource}
               disabled={disabled || !onTablesChange} readOnly={readOnly}
-              money={def.role === "items" ? itemMoney : undefined} currency={model.pricing.currency}
+              money={def.role === "items" ? itemMoney : undefined}
               onQueryPick={onQueryPick} onChange={(rows) => setRows(g.table, rows)} />;
           }
           const content = g.params.filter((k) => prop.visible[k]);
@@ -372,12 +374,14 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
                       </Label>
                       {priceOf.has(k) ? (
                         <ObjectStatus style={{ marginInlineStart: "auto" }}>
-                          {money(priceOf.get(k)!, model.pricing.currency)}
+                          {money(priceOf.get(k)!, currency)}
                         </ObjectStatus>
                       ) : null}
                     </div>
                   }>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "0.125rem", width: "100%" }}>
+                    {/* data-param is what a conflict message in the page's popover scrolls to —
+                        the controls themselves vary too much to each carry an id. */}
+                    <div data-param={k} style={{ display: "flex", flexDirection: "column", gap: "0.125rem", width: "100%" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
                         {control(k)}
                         {prop.defaulted.has(k) ? <ObjectStatus state="Information">auto</ObjectStatus> : null}

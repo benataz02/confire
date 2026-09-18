@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type CSSProperties } from "react";
 import { BusyIndicator, Button, List, ListItemCustom, MessageStrip, Tag, Text } from "@ui5/webcomponents-react";
 import type { Entries, ModelDef, Val } from "@confire/config-engine";
-import { money } from "./costElements.ts";
+import { money } from "../../lib/money.ts";
 import { formatCell } from "../../listSpec.ts";
 import { orpc } from "../../orpc.ts";
 
@@ -119,8 +119,9 @@ export function DocHistory({ projectId, itemCodes, open }: {
               </div>
             </div>
             <div style={{ textAlign: "end" }}>
-              {/* `|| undefined` so money() falls back to its own default — passing "" explicitly
-                  skips the default parameter and Intl throws on an empty currency code. */}
+              {/* The *document's* currency, not the tenant's: a past quotation to a foreign-currency
+                  customer was priced in that customer's currency, and relabelling it in ours would
+                  be a lie. `|| undefined` because "" would reach Intl as a currency code. */}
               <div style={FIGURE}>{money(r.unitPrice, r.currency || undefined)}</div>
               <div style={{ ...MUTED, whiteSpace: "nowrap" }}>{`× ${r.quantity}`}</div>
             </div>

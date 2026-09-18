@@ -14,6 +14,10 @@ export const sapConnection = pgTable("sap_connection", {
   accessClientId: text("access_client_id"),
   accessClientSecret: text("access_client_secret"),
   beasEnabled: boolean("beas_enabled").notNull().default(false),
+  /** B1's local currency (OADM.MainCurncy), read once from CompanyService_GetAdminInfo. A company's
+   *  local currency is fixed when its database is created, so — like entity_meta below — there is
+   *  no TTL; null only means "not read yet". */
+  localCurrency: text("local_currency"),
   status: text("status", { enum: ["ok", "error"] }).notNull().default("ok"),
   lastOkAt: timestamp("last_ok_at", { withTimezone: true }),
   lastError: text("last_error"),

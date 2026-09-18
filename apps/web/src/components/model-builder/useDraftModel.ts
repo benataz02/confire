@@ -7,8 +7,6 @@ import type { TableCols } from "./exprHelpers.ts";
 import { toast } from "../toast.ts";
 import { starterModel } from "./starterModel.ts";
 
-export type TabKey = "params" | "rules" | "bom" | "routing" | "history" | "settings";
-
 export const issueFor = (issues: Issue[], path: string) => issues.find((i) => i.path === path);
 
 function colKeys(columns: unknown): string[] {
@@ -19,18 +17,6 @@ function colKeys(columns: unknown): string[] {
     else if (c && typeof c === "object" && "key" in c && typeof c.key === "string") keys.push(c.key);
   }
   return keys;
-}
-
-export function tabOf(path: string): TabKey {
-  // Tables live in the structure tree on the Parameters tab, so every one of these lands there.
-  if (path.startsWith("parameters") || path.startsWith("structure") || path.startsWith("computed")
-      || path.startsWith("tables") || path === "model")
-    return "params";
-  if (path.startsWith("constraints")) return "rules";
-  if (path.startsWith("bom")) return "bom";
-  if (path.startsWith("routing")) return "routing";
-  if (path.startsWith("history")) return "history";
-  return "settings"; // pricing.*
 }
 
 // One draft ModelDef in memory; checkModel on every change is the same gate the server runs

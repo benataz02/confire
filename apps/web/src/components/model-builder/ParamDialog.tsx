@@ -259,7 +259,7 @@ export function ParamDialog({ draft, tables, initial, isNew, onOk, onCancel }: {
                 onChange={(e) => set({ readonly: e.target.checked || undefined })} />
             </FormItem>
 
-            <FormItem labelContent={lbl("Price formula", "This parameter’s contribution to the quote line. The result appears at the top right of the field, in the model currency.")}>
+            <FormItem labelContent={lbl("Price formula", "This parameter’s contribution to the quote line. The result appears at the top right of the field, in the company currency.")}>
               <ExprInput optional rows={3} value={p.priceExpr} model={scope} tables={tables}
                 fieldId={`expr-parameters[${at}].priceExpr`} issue={exprIssue("priceExpr")}
                 onChange={(v) => set({ priceExpr: v })} />

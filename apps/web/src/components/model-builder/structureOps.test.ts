@@ -1,6 +1,13 @@
 import { expect, test } from "bun:test";
 import { checkModel, isTableGroup, placedTables, type ModelDef } from "@confire/config-engine";
 import { starterModel } from "./starterModel.ts";
+
+// The starter cannot name a price list — only the admin can pick one. Every other issue would be
+// a real structural problem, which is what these assertions are watching for.
+const PRICE_LIST_ONLY = [{
+  path: "pricing.priceList",
+  message: "a model needs a price list — it is what prices the BOM materials",
+}];
 import {
   applyMove, canDrop, deleteNode, parseRowKey, placeParam, placeTable, removeFromStructure, rowKeyOf,
   tableKeyAt,
@@ -25,7 +32,7 @@ const groupKinds = (m: ModelDef, s: number) =>
   m.structure.sections[s]!.groups.map((g) => (isTableGroup(g) ? `table:${g.table}` : `group:${g.key}`));
 
 test("the fixture is a model the save gate accepts", () => {
-  expect(checkModel(model(), [])).toEqual([]);
+  expect(checkModel(model(), [])).toEqual(PRICE_LIST_ONLY);
   expect(placedTables(model())).toEqual(["items"]);
 });
 
@@ -61,7 +68,7 @@ test("moving a table to another section keeps its key", () => {
   expect(groupKinds(moved, 0)).toEqual(["group:g"]);
   expect(groupKinds(moved, 1)).toEqual(["group:g2", "table:items"]);
   expect(placedTables(moved)).toEqual(["items"]);
-  expect(checkModel(moved, [])).toEqual([]);
+  expect(checkModel(moved, [])).toEqual(PRICE_LIST_ONLY);
 });
 
 test("a field group moved into a section that already has its key is renamed", () => {

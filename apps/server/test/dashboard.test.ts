@@ -6,7 +6,7 @@ const NOW = new Date("2026-08-19T12:00:00Z");
 const day = 24 * 60 * 60 * 1000;
 
 const emptySnapshot: B1Snapshot = {
-  currency: "EUR", months: {}, openQuotes: [], openQuotesTruncated: false,
+  months: {}, openQuotes: [], openQuotesTruncated: false,
   grossProfitAvailable: false,
 };
 

@@ -4,7 +4,7 @@ export { columnOptions, evalTableRows, itemSplit, splitShares, splitWeights, tab
 export type { ItemLine } from "./tables";
 export { DslError, evaluate, parse } from "./dsl";
 export type { Ast, Scope } from "./dsl";
-export { checkModel, FUNCS, RESERVED_LINE_FIELDS, aggregateKeysOf, referencedTables } from "./check";
+export { checkModel, FUNCS, RESERVED_LINE_FIELDS, aggregateKeysOf, bomItemCodes, referencedTables } from "./check";
 export type { Issue, KnownTable } from "./check";
 export { bindings, domainOf, propagate } from "./propagate";
 export type { Bindings, DomainOption, Propagation } from "./propagate";

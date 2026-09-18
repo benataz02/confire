@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { orpc } from "./orpc.ts";
-import { EMPTY_SPEC, sameDef, type ListVariantDef } from "./listSpec.ts";
+import { EMPTY_SPEC, sameDef, type ListVariantDef, type ObjectVariantDef } from "./listSpec.ts";
 
 // The pure list-view logic lives in listSpec.ts (no orpc import, so it's unit-testable); re-exported
 // here so pages have a single import path.
@@ -104,3 +104,31 @@ export function useListSpec(entity: string) {
 }
 
 export type ListSpec = ReturnType<typeof useListSpec>;
+
+// The object-page half. Deliberately NOT useListSpec parameterised by page: an object page has no
+// layout editor, so spec/setSpec/dirty/save/remove would all be dead surface here. Internal only —
+// the portal's object page is already narrowed server-side by portalSchema, and its views are a
+// single read-only row.
+//
+// The applied view is derived, not stored in an effect: nothing the page fetches depends on it, so
+// there is no `initedFor` gate to keep a stale entity's field names out of a request.
+export function useObjectVariant(entity: string, enabled: boolean) {
+  const q = useQuery({ ...orpc.variants.list.queryOptions({ input: { page: "object", entity } }), enabled });
+  const variants = q.data?.variants ?? NO_VARIANTS;
+  const [picked, setPicked] = useState<string | null>(null);
+
+  // A personal default wins over the shared Standard — same order as applyDefault above.
+  const row =
+    variants.find((v) => v.name === picked) ??
+    variants.find((v) => v.isDefault && !v.shared) ??
+    variants.find((v) => v.isDefault) ??
+    variants[0];
+
+  return {
+    variants,
+    selected: row?.name ?? "",
+    /** null = no view at all (seed never ran): the page falls back to rendering everything. */
+    def: (row?.definition as ObjectVariantDef | undefined) ?? null,
+    apply: setPicked,
+  };
+}

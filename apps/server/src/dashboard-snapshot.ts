@@ -73,7 +73,6 @@ export function foldRows(input: {
   }));
 
   return {
-    currency: "EUR", // ponytail: tenant default; per-document DocCurrency when a tenant is multi-currency.
     months,
     openQuotes,
     openQuotesTruncated: input.open.length > OPEN_QUOTE_CAP,

@@ -12,3 +12,61 @@
 @media (prefers-reduced-motion: reduce) {
   .confire-rail, .confire-rail-out { animation: none }
 }
+
+/* ObjectPage loading skeleton. Bars are AnalyticalTable's TablePlaceholder cells
+   (placeholderShimmer, sapFontSize, sapElement_BorderCornerRadius) laid out as an OP. */
+@keyframes confire-op-skel-shimmer {
+  0% { background-position-x: 100% }
+  100% { background-position-x: 0 }
+}
+.confire-op-skel { padding: 1rem 2rem 2rem }
+.confire-op-skel-bar {
+  display: block;
+  height: var(--sapFontSize);
+  border-radius: var(--sapElement_BorderCornerRadius);
+  animation-duration: 2s;
+  animation-fill-mode: forwards;
+  animation-iteration-count: infinite;
+  animation-name: confire-op-skel-shimmer;
+  animation-timing-function: linear;
+  background-image: var(--sapContent_Placeholderloading_Gradient);
+  background-repeat: no-repeat;
+  background-size: 1000px 104px;
+}
+.confire-op-skel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding-block: 0.5rem 1rem;
+  border-bottom: 1px solid var(--sapObjectHeader_BorderColor);
+}
+.confire-op-skel-heading { display: flex; flex-direction: column; gap: 0.5rem }
+.confire-op-skel-actions, .confire-op-skel-tabs { display: flex; align-items: center; gap: 0.5rem }
+.confire-op-skel-tabs {
+  gap: 1.5rem;
+  padding-block: 0.75rem;
+  border-bottom: 1px solid var(--sapObjectHeader_BorderColor);
+  margin-bottom: 1rem;
+}
+.confire-op-skel-section { display: flex; flex-direction: column }
+.confire-op-skel-field {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  height: var(--sapElement_LineHeight);
+}
+.confire-op-skel-bar--title { width: 12rem; height: var(--sapFontLargeSize) }
+.confire-op-skel-bar--sub { width: 18rem }
+.confire-op-skel-bar--chip { width: 4.5rem }
+.confire-op-skel-bar--tab { width: 5rem }
+.confire-op-skel-bar--section { width: 10rem; margin-block: 0.5rem }
+.confire-op-skel-bar--label { width: 6rem }
+.confire-op-skel-bar--value { width: 60% }
+@media (prefers-reduced-motion: reduce) {
+  .confire-op-skel-bar { animation: none }
+}
+
+/* MessageView brings its own list padding and needs a fixed height; the popover's padding would
+   double the first and its own scroller would fight the second. */
+.confire-msgpop::part(content) { padding: 0 }

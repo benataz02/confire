@@ -35,6 +35,38 @@ export async function tenantConnector(tenantId: string): Promise<Connector> {
   };
 }
 
+/** The tenant's B1 local currency — what every money figure in the app is denominated in.
+ *
+ *  Read through `sap_connection.localCurrency`: B1 offers no way to change a company's local
+ *  currency once the database exists, so one successful read is cached forever and there is no
+ *  TTL to get wrong. Populated lazily rather than at sign-in, because better-auth has no sign-in
+ *  hook and, more to the point, logging in must not depend on the customer's agent being up.
+ *
+ *  Never throws, for the same reason: `me` calls this on every cold load, and a tenant whose
+ *  tunnel is down still has to get its app shell. null just means unsymbolled numbers.
+ *
+ *  No new transport method: CompanyService_GetAdminInfo is a plain GET directly under the Service
+ *  Layer base, which is exactly the URL readEntitySet builds when there are no query options. It
+ *  answers with a single object, not a collection, so there is no `rowsOf` here. */
+export async function tenantCurrency(tenantId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ localCurrency: sapConnection.localCurrency })
+    .from(sapConnection)
+    .where(eq(sapConnection.tenantId, tenantId))
+    .limit(1);
+  if (!row) return null;
+  if (row.localCurrency) return row.localCurrency;
+  try {
+    const { data } = await (await tenantConnector(tenantId)).b1.readEntitySet("CompanyService_GetAdminInfo");
+    const cur = (data as { LocalCurrency?: unknown } | null)?.LocalCurrency;
+    if (typeof cur !== "string" || !cur) return null;
+    await db.update(sapConnection).set({ localCurrency: cur }).where(eq(sapConnection.tenantId, tenantId));
+    return cur;
+  } catch {
+    return null;
+  }
+}
+
 export function transportFor(c: Connector, target: "b1" | "beas"): B1Transport {
   const t = target === "beas" ? c.beas : c.b1;
   if (!t) throw new ORPCError("SERVICE_UNAVAILABLE", { message: "Beas is not enabled for this workspace." });

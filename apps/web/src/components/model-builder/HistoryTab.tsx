@@ -47,8 +47,6 @@ export function useHistoryTab({ draft, update, issues, modelId, dirty }: {
   }));
 
   const errMsg = (path: string) => issueFor(issues, path)?.message;
-  const strip = (msg?: string, key?: string) =>
-    msg ? <MessageStrip key={key} design="Negative" hideCloseButton>{msg}</MessageStrip> : null;
   const vs = (msg?: string) => ({
     valueState: (msg ? "Negative" : "None") as "Negative" | "None",
     valueStateMessage: msg ? <div>{msg}</div> : undefined,
@@ -56,7 +54,9 @@ export function useHistoryTab({ draft, update, issues, modelId, dirty }: {
   const tableIssue = errMsg("history.table");
   const lastSyncedAt = info.data?.lastSyncedAt;
 
-  return [
+  // Every error here is reported once, in the page's message popover — the Select's own valueState
+  // is the local echo. `syncError` is the one the page cannot derive itself.
+  const subSections = [
     <ObjectPageSubSection key="history-query" id="history-query" titleText="History query"
       actions={
         <Button icon="synchronize" design="Transparent"
@@ -66,11 +66,6 @@ export function useHistoryTab({ draft, update, issues, modelId, dirty }: {
           {sync.isPending ? "Syncing…" : "Sync now"}
         </Button>
       }>
-      {strip(tableIssue)}
-      {sync.error?.message ? strip(sync.error.message) : null}
-      {h.table && (dirty || !modelId) ? (
-        <MessageStrip design="Critical" hideCloseButton>Save the model first — sync runs the saved query.</MessageStrip>
-      ) : null}
       <Form {...FORM}>
         <FormGroup accessibleName="History query">
           <FormItem labelContent={<Label>Query</Label>}>
@@ -180,7 +175,8 @@ export function useHistoryTab({ draft, update, issues, modelId, dirty }: {
           );
         })}
       </Table>
-      {h.mappings.map((_, i) => strip(errMsg(`history.mappings[${i}]`), `m-${i}`))}
     </ObjectPageSubSection>,
   ];
+
+  return { subSections, syncError: (sync.error ?? null) as Error | null };
 }

@@ -27,7 +27,7 @@
     "build:web": "bun --cwd apps/web build",
     "seed:dev": "bun --env-file=.env scripts/seed-dev.ts",
     "seed:portal-client": "bun --env-file=.env scripts/seed-portal-client.ts",
-    "seed:standard": "bun scripts/seed-standard.ts",
+    "seed:standard": "bun --env-file=.env scripts/seed-standard.ts",
     "e2e": "bun scripts/e2e.ts",
     "print:smoke": "bun scripts/print-smoke.ts",
     "test:engine": "bun test packages/config-engine",

@@ -11,7 +11,7 @@ import {
 } from "@confire/config-engine";
 import { userProcedure } from "../base.ts";
 import { B1Error, rowsOf } from "@confire/b1";
-import { runnerFor, tenantConnector, viaB1 } from "../../b1.ts";
+import { runnerFor, tenantConnector, tenantCurrency, viaB1 } from "../../b1.ts";
 import { masterdataRows } from "./masterdata.ts";
 import {
   enrichLookups, fetchQueryTable, masterdataVersion, needsSap, queryPageSource, resolveLookups,
@@ -309,7 +309,7 @@ export async function quoteDraft(tenantId: string, projectId: string) {
   });
   return {
     commandId,
-    data: buildQuoteSeed(project, model.definition, lookups),
+    data: buildQuoteSeed(project, model.definition, lookups, await tenantCurrency(tenantId)),
     totals: quotedTotals(project, model.definition, lookups),
     quoted: project.b1DocEntry === null ? null : { docEntry: project.b1DocEntry, quotedAt: project.quotedAt },
   };
@@ -338,7 +338,7 @@ export async function createQuote(
     throw new ORPCError("CONFLICT", { message: "STATE_CHANGED" });
 
   const { model, lookups } = await liveEngine(tenantId, project);
-  const seed = buildQuoteSeed(project, model.definition, lookups);
+  const seed = buildQuoteSeed(project, model.definition, lookups, await tenantCurrency(tenantId));
   const { b1 } = await tenantConnector(tenantId);
 
   return viaB1(async () => {

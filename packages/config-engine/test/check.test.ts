@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from "bun:test";
-import { checkModel, referencedTables } from "../src/check";
+import { bomItemCodes, checkModel, referencedTables } from "../src/check";
 import type { ModelDef } from "../src/model";
 import { fieldGroup, model } from "./fixture";
 
@@ -224,7 +224,7 @@ describe("referencedTables", () => {
   it("collects domain refs and statically-known LOOKUP names", () => {
     const m = structuredClone(model);
     m.parameters[0]!.domain = { kind: "options", ref: { source: "query", table: "items", valueCol: "ItemCode" } };
-    m.bom[0]!.price = 'LOOKUP("prices", "code", material, "price")';
+    m.bom[0]!.qty = 'LOOKUP("prices", "code", material, "price")';
     m.pricing.priceExpr = 'unitCost * LOOKUP("margins", "k", "std", "v")';
     expect([...referencedTables(m)].sort()).toEqual(["items", "margins", "prices"]);
   });
@@ -232,13 +232,41 @@ describe("referencedTables", () => {
   it("keeps going past an unparseable expression, and ignores manual domains", () => {
     const m = structuredClone(model);
     m.computed[0]!.expr = "1 + "; // checkModel's problem, not this one's
+    m.bom[0]!.qty = 'LOOKUP("prices", "code", material, "price")';
     m.parameters[0]!.domain = { kind: "options", ref: { source: "manual", options: [{ value: "a" }] } };
-    expect([...referencedTables(m)]).toEqual(["prices"]); // still found, in the fixture's bom price
+    expect([...referencedTables(m)]).toEqual(["prices"]); // still found, past the bad expression
   });
 
   it("does not treat the history cache source as a live lookup", () => {
     const m = structuredClone(model);
     m.history = { table: "past", mappings: [], display: [] };
-    expect([...referencedTables(m)]).toEqual(["prices"]);
+    expect([...referencedTables(m)]).toEqual([]); // "past" is a history cache source, not a lookup
+  });
+});
+
+describe("bomItemCodes", () => {
+  const withItem = (itemCode: string): ModelDef => {
+    const m = structuredClone(model);
+    m.bom = [{ id: "l", itemCode, qty: "1" }];
+    return m;
+  };
+
+  it("reads the literal the value help writes", () => {
+    expect(bomItemCodes(withItem('"CBL-STL"'))).toEqual(["CBL-STL"]);
+  });
+
+  it("takes both branches of a conditional item code", () => {
+    expect(bomItemCodes(withItem('material == "steel" ? "A" : "B"')).sort())
+      .toEqual(["A", "B", "steel"]); // the condition's literal rides along; B1 just returns nothing for it
+  });
+
+  it("expands a parameter-held item code over its resolved domain", () => {
+    const domains = { material: [{ value: "COND-steel" }, { value: "COND-alu" }] };
+    expect(bomItemCodes(withItem("material"), domains).sort()).toEqual(["COND-alu", "COND-steel"]);
+  });
+
+  it("yields nothing for a code only decidable at evaluation time", () => {
+    expect(bomItemCodes(withItem('CONCAT("X", 1 + 1)'))).toEqual(["X"]);
+    expect(bomItemCodes(withItem("1 + "))).toEqual([]); // unparseable: checkModel's problem
   });
 });

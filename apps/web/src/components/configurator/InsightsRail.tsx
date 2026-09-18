@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { Panel, Text, Title } from "@ui5/webcomponents-react";
 import { evalTableRows, ITEM_COL } from "@confire/config-engine";
 import type { Entries, ModelDef, Propagation, ResolvedLookups, TableRows, Val } from "@confire/config-engine";
-import { money, paramPrices } from "./costElements.ts";
+import { paramPrices } from "./costElements.ts";
+import { money, useCurrency } from "../../lib/money.ts";
 import type { ItemMoney } from "./itemMoney.ts";
 import { DocHistory, Similar } from "./HistoryPane.tsx";
 
@@ -53,7 +54,7 @@ export function InsightsRail({ projectId, model, lk, prop, entries, tables, item
           {lk && prop
             ? <Costs model={model} lookups={lk} prop={prop} />
             : <Text>No priced parameters yet — fill the form, or add price formulas in the model builder.</Text>}
-          {itemMoney ? <ItemCosts rows={itemRows} money={itemMoney} currency={model.pricing.currency} /> : null}
+          {itemMoney ? <ItemCosts rows={itemRows} money={itemMoney} /> : null}
         </div>
       ))}
       {panel("documents", "Documents",
@@ -67,7 +68,8 @@ export function InsightsRail({ projectId, model, lk, prop, entries, tables, item
 /** Where the configuration's cost actually lands, row by row, split on the items table's own
  *  `basisExpr`. Line totals, not per-unit: a cost element is an amount. The grid next to it shows
  *  the same money per unit, from the same itemSplit call. */
-function ItemCosts({ rows, money: m, currency }: { rows: Record<string, Val>[]; money: ItemMoney; currency?: string }) {
+function ItemCosts({ rows, money: m }: { rows: Record<string, Val>[]; money: ItemMoney }) {
+  const currency = useCurrency();
   const lines = m.rows
     .map((r, i) => ({ r, label: String(rows[i]?.[ITEM_COL] ?? "").trim() || `Item ${i + 1}` }))
     .filter((l): l is { r: NonNullable<typeof l.r>; label: string } => !!l.r);
@@ -95,7 +97,7 @@ function ItemCosts({ rows, money: m, currency }: { rows: Record<string, Val>[]; 
 // Same paramPrices() the per-field badges read, so the card and the badges cannot disagree.
 function Costs({ model, lookups, prop }: { model: ModelDef; lookups: ResolvedLookups; prop: Propagation }) {
   const rows = paramPrices(model, prop, lookups.tables);
-  const cur = model.pricing.currency;
+  const cur = useCurrency();
   if (!rows.length)
     return <Text>No priced parameters yet — fill the form, or add price formulas in the model builder.</Text>;
   return (

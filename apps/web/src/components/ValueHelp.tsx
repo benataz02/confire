@@ -390,6 +390,7 @@ export function QueryValueHelp({
  *  query is a ListVariantDef compiled server-side (the browser never sends a $filter string). */
 export function EntityValueHelp({
   entitySet, keyField, value, onChange, headerText, select, filter, valueState, disabled, readonly,
+  showValue, required,
 }: {
   entitySet: string;
   keyField: string;
@@ -407,6 +408,10 @@ export function EntityValueHelp({
   disabled?: boolean;
   /** locked: the picked code stays readable, the dialog just won't open */
   readonly?: boolean;
+  /** show the key rather than the label — for a field whose column IS the key (an item code) */
+  showValue?: boolean;
+  /** mandatory field — see ValueHelp */
+  required?: boolean;
 }) {
   const [search, setSearch] = useState<string | null>(null); // null = untouched: don't fetch yet
 
@@ -457,7 +462,7 @@ export function EntityValueHelp({
       options={optionsOf(table, columns[0]!, columns[1])} value={value} onChange={onChange} headerText={headerText}
       table={table} valueCol={columns[0]!} columns={columns.slice(1)}
       onSearch={setSearch} onOpen={() => setSearch("")}
-      disabled={disabled} readonly={readonly}
+      disabled={disabled} readonly={readonly} showValue={showValue} required={required}
       valueState={page.error ? "Negative" : valueState}
       {...pagingProps(page, search !== null)}
     />

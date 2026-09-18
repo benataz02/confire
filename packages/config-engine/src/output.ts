@@ -105,16 +105,25 @@ export function computeOutputs(
     const ov = bomOv.get(l.id);
     if (ov?.remove || !included(l.condition)) continue;
     const qtyPerUnit = ov?.qtyPerUnit ?? numeric(l.qty, `bom '${l.id}' qty`);
-    const effQty = qtyPerUnit * (1 + l.scrapPct / 100);
-    const unitPrice = ov?.unitPrice ?? numeric(l.price, `bom '${l.id}' price`);
     const itemCode = String(evaluate(l.itemCode, scope) ?? "");
-    const desc = l.desc === undefined ? "" : String(evaluate(l.desc, scope) ?? "");
-    const totalQty = effQty * batchQty;
+    // No stored price to fall back on: an item whose code the resolve could not price (not in the
+    // price list, or a code only decidable here) stops the calculation rather than costing zero.
+    const listed = lookups.prices?.[itemCode];
+    const unitPrice = ov?.unitPrice ?? listed;
+    if (unitPrice === undefined)
+      throw new DslError(
+        model.pricing.priceList
+          ? `bom '${l.id}': item '${itemCode}' has no price in price list ${model.pricing.priceList}`
+          : `bom '${l.id}': the model has no price list, so '${itemCode}' cannot be priced`,
+        0, 0,
+      );
+    const desc = l.desc ?? "";
+    const totalQty = qtyPerUnit * batchQty;
     bom.push({ id: l.id, itemCode, desc, qtyPerUnit, totalQty, unitPrice, lineTotal: totalQty * unitPrice });
-    materialPerUnit += effQty * unitPrice;
+    materialPerUnit += qtyPerUnit * unitPrice;
   }
   for (const a of overrides?.addBom ?? []) {
-    const totalQty = a.qtyPerUnit * batchQty; // added lines: no scrap, no condition
+    const totalQty = a.qtyPerUnit * batchQty; // added lines carry their own price, and no condition
     bom.push({
       id: a.id, itemCode: a.itemCode, desc: a.desc ?? "",
       qtyPerUnit: a.qtyPerUnit, totalQty, unitPrice: a.unitPrice, lineTotal: totalQty * a.unitPrice,

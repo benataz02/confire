@@ -106,6 +106,13 @@ export async function ensureConfiguratorVariants(tenantId: string, userId: strin
 // fields a salesperson looks at".
 
 const DOC_HEADER = ["DocNum", "CardCode", "CardName", "DocDueDate", "NumAtCard"];
+// An object page has room for more than a list row does, and the five above leave out the things
+// you open a document to see. Kept separate rather than widening DOC_HEADER: five columns is the
+// right list, eleven fields is the right form.
+const DOC_OBJECT_HEADER = [
+  "DocNum", "CardCode", "CardName", "DocDate", "DocDueDate", "NumAtCard",
+  "DocumentStatus", "DocCurrency", "DocTotal", "SalesPersonCode", "Comments",
+];
 const DOC_LINES = ["VisOrder", "ItemCode", "ItemDescription", "Quantity", "UnitPrice", "LineTotal"];
 const DOC_ENTITIES = new Set(["Quotations", "Orders", "DeliveryNotes", "Invoices", "PurchaseOrders"]);
 
@@ -121,6 +128,11 @@ export function entityVariantDefs(entity: string): { list: ListVariantDef; objec
     ? DOC_HEADER
     : [profile?.titleField, ...(profile?.subtitleFields ?? [])].filter((f): f is string => !!f);
 
+  // The object form is a superset of the write allowlist, so the object page never hides a field
+  // its own Edit button can change — which is also why it reuses the profile rather than adding a
+  // fourth hand-list. Deduped: titleField and subtitleFields overlap `editable` on most entities.
+  const objectHeader = [...new Set(isDoc ? DOC_OBJECT_HEADER : [...header, ...(profile?.editable ?? [])])];
+
   return {
     // The header fields are also the filter bar: the five things you search a document list by are
     // the five it shows. Newest first — DocEntry, not DocNum, which restarts per series.
@@ -131,8 +143,10 @@ export function entityVariantDefs(entity: string): { list: ListVariantDef; objec
       filterBar: header,
     },
     object: {
-      header: shown(header),
+      header: shown(objectHeader),
       // Only DocumentLines is laid out: it is the one collection with a canonical reading order.
+      // ponytail: a non-document entity gets no sections at all, so BusinessPartners shows no
+      // addresses or contacts — lay those out when a page actually asks for them.
       sections: isDoc ? [{ id: "DocumentLines", visible: true, fields: shown(DOC_LINES) }] : [],
     },
   };

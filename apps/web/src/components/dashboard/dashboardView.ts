@@ -2,12 +2,6 @@ import type { RouterOutputs } from "../../orpc.ts";
 
 export type Overview = RouterOutputs["dashboard"]["overview"];
 
-export function money(value: number, currency: string): string {
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency", currency, maximumFractionDigits: 0,
-  }).format(value);
-}
-
 export function percent(value: number | null): string {
   return value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 }

@@ -6,15 +6,6 @@ import { evaluate, type ModelDef, type Propagation, type ResolvedLookups } from 
 
 export type CostElement = { key: string; label: string; amount: number };
 
-export function money(n: number, currency = "EUR"): string {
-  try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(n);
-  } catch {
-    // currency is free text a user typed in Settings — never let it throw the form away
-    return `${n.toFixed(2)} ${currency}`;
-  }
-}
-
 /** Priced, visible parameters with an evaluable numeric priceExpr, in model order. */
 export function paramPrices(
   model: ModelDef,

@@ -90,7 +90,17 @@ saves cannot produce a parse/unknown-ref error at runtime.
 tenant `config_masterdata` rows (kind `table` = values maintained in Confire, kind `query` = a live
 B1/Beas read) are all resolved to the same shape by `apps/server/src/lookups.ts` before the engine
 runs. **A model holds no table definitions**: it names masterdata, and `referencedTables` decides
-which query rows a resolve actually fetches — a model naming none never touches the agent.
+which query rows a resolve actually fetches.
+
+`ResolvedLookups.prices` is the same seam for **BOM material cost**. A BOM line carries no price:
+it names an item, and `pricing.priceList` (a B1 `PriceListNo`, mandatory — `checkModel` refuses a
+model without one) is what the unit price is read from, live, on every resolve. `bomItemCodes`
+decides what to ask for: the string literals in each `itemCode` expression (the builder's value
+help writes one), plus the resolved domain of a bare identifier, because a parameter holding the
+code is the other shipped shape. An item the read could not price stops the calculation by name
+rather than costing zero. So "never touches the agent" now means: no query table **and** no priced
+BOM — see `needsSap`. The read asks for whole `Items` rows on purpose: `ItemPrices` is a complex
+collection and B1 rejects `$select`ing one.
 
 **Nothing is snapshotted.** One configuration is one row: `config_project` carries its own
 `entries` + `candidates` + `selection`, and a recalculate overwrites them in place. Model and

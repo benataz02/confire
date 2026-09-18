@@ -14,7 +14,7 @@ import { CandidatesMatrix } from "./CandidatesMatrix.tsx";
 // output panel below. Two computeOutputs passes per panel: the display pass ignores remove
 // flags (removed rows stay visible, struck through) and the totals pass applies everything —
 // the numbers shown are exactly what the server will recompute and store on Save selection.
-export function StepCandidatesReview({ model, lookups, entries, candidates, selection, onToggle, onChange, capped, widest, error, saved, readOnly }: {
+export function StepCandidatesReview({ model, lookups, entries, candidates, selection, onToggle, onChange, saved, readOnly }: {
   model: ModelDef;
   lookups: ResolvedLookups;
   entries: Entries;
@@ -22,9 +22,6 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
   selection: Sel[];
   onToggle: (candidateIdx: number, batchQty: number) => void;
   onChange: (next: Sel[]) => void;
-  capped: boolean;
-  widest?: { key: string; size: number };
-  error: string | null;
   saved: boolean;
   /** locked (quoted): every number stays readable, nothing is editable — configs.select would
    *  refuse the write anyway (assertConfigMutable). Fields go readonly, actions go away. */
@@ -201,9 +198,10 @@ export function StepCandidatesReview({ model, lookups, entries, candidates, sele
         quotation line and can be adjusted below. Totals recompute as you type; saving stores the
         selection and the server recomputes every number from the run snapshot.
       </Text>
+      {/* capped/widest are not forwarded: this page reports them in its message popover, while the
+          portal wizard has no such place and keeps the matrix's own strip. */}
       <CandidatesMatrix model={model} entries={entries} candidates={candidates.map(toPriced)}
-        selection={selection} onToggle={onToggle} capped={capped} widest={widest} disabled={readOnly} />
-      {error ? <MessageStrip design="Negative" hideCloseButton>{error}</MessageStrip> : null}
+        selection={selection} onToggle={onToggle} capped={false} disabled={readOnly} />
       {saved ? <MessageStrip design="Positive" hideCloseButton>Selection saved — totals recomputed on the server.</MessageStrip> : null}
       {panels}
       {/* "Engineered", not "Total": this is what the BOM and routing price the run at. A price typed
