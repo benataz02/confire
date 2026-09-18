@@ -39,10 +39,10 @@ export const auth = betterAuth({
       },
     }),
   ],
-  // Cheap session reads: every oRPC call resolves a session, and the tenant/role boundary
-  // (membershipFromHost) is a live DB join on top of it. Safe to cache because nothing reads
-  // session.activeOrganizationId. Cost: a revoked session stays valid for up to maxAge.
-  session: { cookieCache: { enabled: true, maxAge: 300 } },
+  // Off: a signed session_data cookie would keep a deleted/expired row "valid" for maxAge,
+  // and login's getSession would bounce the 401 interceptor back to the tenant. oRPC also
+  // passes disableCookieCache so a future re-enable cannot paper over the tenant boundary.
+  session: { cookieCache: { enabled: false } },
   // Auth lives on the apex, but the app POSTs (sign-out) from every tenant subdomain, so those
   // origins need trusting; baseURL's own origin is trusted automatically. A pattern without
   // `://` is matched against URL.host — which includes the port — hence both forms: prod

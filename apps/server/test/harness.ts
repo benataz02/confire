@@ -17,20 +17,24 @@ export async function makeTenant(): Promise<{ tenantId: string; slug: string }> 
 export async function makeUser(
   role?: "member" | "admin" | "owner" | "client",
   tenantId?: string,
-): Promise<{ userId: string; email: string; cookie: string }> {
+): Promise<{ userId: string; email: string; cookie: string; cookies: string }> {
   const email = `u${uid()}@test.local`;
   const res = await auth.api.signUpEmail({
     body: { email, password: "test1234", name: email },
     returnHeaders: true,
   });
-  const cookie = res.headers.get("set-cookie")!.split(";")[0]!;
+  // First cookie is session_token (what most tests send). `cookies` is the full Cookie header
+  // including session_data — that's the Better Auth cookie cache, and the hole requireSession
+  // has to punch through.
+  const cookies = res.headers.getSetCookie().map((c) => c.split(";")[0]!).join("; ");
+  const cookie = cookies.split("; ")[0] ?? res.headers.get("set-cookie")!.split(";")[0]!;
   const userId = res.response.user.id;
   if (role && tenantId) {
     await db.insert(member).values({
       id: crypto.randomUUID(), organizationId: tenantId, userId, role, createdAt: new Date(),
     });
   }
-  return { userId, email, cookie };
+  return { userId, email, cookie, cookies };
 }
 
 /** Bind a client-role user to a CardCode (skips the invite flow for tests that don't test it). */

@@ -15,7 +15,13 @@ export const base = os.$context<InitialContext>();
 
 // --- Layer 1: human user via Better Auth session ---
 const requireSession = base.middleware(async ({ context, next }) => {
-  const data = await auth.api.getSession({ headers: context.headers });
+  // Cookie cache is a signed snapshot, not a pointer at the row — a deleted or expired
+  // session would otherwise stay valid for session.cookieCache.maxAge. Same as Better Auth's
+  // sensitiveSessionMiddleware: the tenant boundary is a live read.
+  const data = await auth.api.getSession({
+    headers: context.headers,
+    query: { disableCookieCache: true },
+  });
   if (!data) throw new ORPCError("UNAUTHORIZED");
   return next({ context: { session: data.session, user: data.user } });
 });

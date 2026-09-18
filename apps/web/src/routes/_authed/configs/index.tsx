@@ -18,7 +18,7 @@ export const Route = createFileRoute("/_authed/configs/")({ component: Configs }
 // Both exist at runtime; only this one type-checks.
 const StatusCell = ({ cell }: { cell: { value?: unknown } }) => {
   const ui = statusUi[cell.value as keyof typeof statusUi];
-  return ui ? <ObjectStatus state={ui.state}>{ui.text}</ObjectStatus> : <Text>{String(cell.value ?? "")}</Text>;
+  return ui ? <ObjectStatus inverted state={ui.state}>{ui.text}</ObjectStatus> : <Text>{String(cell.value ?? "")}</Text>;
 };
 
 // `customer` is jsonb; the server flattens it to customerName so it can be filtered/sorted/searched

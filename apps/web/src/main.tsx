@@ -9,7 +9,13 @@ import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen.ts";
 import { RouteError, RouteNotFound } from "./components/Boundaries.tsx";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (n, err) => (err as { code?: string }).code !== "UNAUTHORIZED" && n < 3,
+    },
+  },
+});
 
 const router = createRouter({
   routeTree,

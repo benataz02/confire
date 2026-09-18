@@ -14,14 +14,14 @@ type Tables = TableCols[];
 
 // labelSpan 12 = labels on top, the shape ConfiguratorForm uses, so a field looks identical here
 // and on the real form. A group flows its items across the columns its form spans, so PAIRS puts
-// two fields per row, FULL one and TRIPLE three — one Form per group is what makes that hold,
-// because a Form with more groups than columns gives every group a single column instead.
-// FormItem's own `columnSpan` is not the way out: a documented no-op since UI5 2.23.
+// two fields per row and TRIPLE three — one Form per group is what makes that hold, because a
+// Form with more groups than columns gives every group a single column instead.
+// FormItem's own `columnSpan` is not the way out: a documented no-op since UI5 2.23. A section
+// worth one field is not a section: put that field in a neighbouring group instead.
 //
 // The fill is column-major — items 1,2,3 go down the first column, then 4,5,6 down the second —
 // so neighbours in the source are stacked, not side by side. Order items by column, not by row.
 export const PAIRS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2", headerLevel: "H5" } as const;
-export const FULL = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M1 L1 XL1", headerLevel: "H5" } as const;
 const TRIPLE = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M3 L3 XL3", headerLevel: "H5" } as const;
 export const W = { width: "100%" } as const;
 const ICON = { marginInlineStart: "0.375rem", cursor: "help", color: "var(--sapContent_NonInteractiveIconColor)" } as const;
@@ -165,6 +165,15 @@ export function ParamDialog({ draft, tables, initial, isNew, onOk, onCancel }: {
                 onInput={(e) => set({ label: e.target.value })} />
             </FormItem>
 
+            {/* The help text annotates the label, so it closes the first column rather than sitting
+                in the second: this column is everything the salesperson reads. */}
+            <FormItem labelContent={lbl("Help text", "Becomes the information icon next to this field’s label on the form. One sentence is plenty.")}>
+              <TextArea rows={3} value={p.help ?? ""} style={W}
+                onInput={(e) => set({ help: e.target.value || undefined })} />
+            </FormItem>
+
+            {/* Second column starts here: what the field holds and how it is asked. Type leads it
+                because it decides which controls are legal — see controlIssue. */}
             <FormItem labelContent={lbl("Type", "How the value is stored and compared. Numbers compare and add up in formulas; text does not.")}>
               <Select value={p.type} style={W}
                 onChange={(e) => set({ type: optValue(e) as Param["type"] })}>
@@ -177,7 +186,6 @@ export function ParamDialog({ draft, tables, initial, isNew, onOk, onCancel }: {
                 onInput={(e) => set({ unit: e.target.value || undefined })} />
             </FormItem>
 
-            {/* Second column starts here: what the field does, next to what the field is. */}
             <FormItem labelContent={lbl("Control", "Which input the salesperson gets on the configuration form.")}>
               {/* Six controls is past what a segmented button should carry, and the hint belongs
                   under the field rather than in six tooltips nobody hovers. */}
@@ -191,36 +199,23 @@ export function ParamDialog({ draft, tables, initial, isNew, onOk, onCancel }: {
                 <Text style={HINT}>{UI_META[p.ui].hint}</Text>
               </FlexBox>
             </FormItem>
-
-            <FormItem labelContent={lbl("Default value", "Filled in automatically and marked “auto”, recalculating whenever its inputs change, until the salesperson edits it by hand.")}>
-              <ExprInput optional rows={3} value={p.defaultExpr} model={scope} tables={tables}
-                fieldId={`expr-parameters[${at}].defaultExpr`} issue={exprIssue("defaultExpr")}
-                onChange={(v) => set({ defaultExpr: v })} />
-            </FormItem>
-
-            <FormItem labelContent={lbl("Help text", "Becomes the information icon next to this field’s label on the form. One sentence is plenty.")}>
-              <TextArea rows={3} value={p.help ?? ""} style={W}
-                onInput={(e) => set({ help: e.target.value || undefined })} />
-            </FormItem>
-
-            <FormItem labelContent={lbl("Restrictions", "Read-only: the salesperson sees the value but cannot change it — right for anything a default formula owns. Exclude from domains: this parameter stops narrowing other parameters’ options, for when it is an outcome rather than a choice.")}>
-              <FlexBox direction="Column" gap="0.5rem">
-                <CheckBox text="Read-only" checked={!!p.readonly}
-                  onChange={(e) => set({ readonly: e.target.checked || undefined })} />
-                <CheckBox text="Exclude from domains" checked={!!p.excludeFromDomains}
-                  onChange={(e) => set({ excludeFromDomains: e.target.checked || undefined })} />
-              </FlexBox>
-            </FormItem>
           </FormGroup>
         </Form>
 
-        <Form {...FULL} accessibleMode="Edit" headerText="Value domain">
+        <Form {...PAIRS} accessibleMode="Edit" headerText="Value domain">
           <FormGroup accessibleName="Value domain">
             <FormItem labelContent={lbl("Where the values come from", "The set of values this parameter may take before any rule narrows it. Free entry constrains nothing — combination rules on the Rules tab still apply.")}>
               <Select accessibleName="Value domain" value={domainKind(p.domain)} style={W}
                 onChange={(e) => set({ domain: newDomain(optValue(e), tables) })}>
                 {DOMAIN_KINDS.map(([v, l]) => <Option key={v} value={v}>{l}</Option>)}
               </Select>
+            </FormItem>
+
+            {/* Second column: the same subject seen from the other side — this one is about the
+                domains of the *other* parameters, so it belongs here rather than among the flags. */}
+            <FormItem labelContent={lbl("Exclude from domains", "This parameter stops narrowing other parameters’ options — for when it is an outcome rather than a choice.")}>
+              <CheckBox text="Does not narrow other parameters" checked={!!p.excludeFromDomains}
+                onChange={(e) => set({ excludeFromDomains: e.target.checked || undefined })} />
             </FormItem>
           </FormGroup>
         </Form>
@@ -248,22 +243,36 @@ export function ParamDialog({ draft, tables, initial, isNew, onOk, onCancel }: {
           <ManualOptions ref_={manualRef} onChange={(ref) => set({ domain: { kind: "options", ref } })} />
         ) : null}
 
+        {/* Every formula the parameter owns, in one place: four editors of the same height, two per
+            column, each beside the flag that answers the same question without a formula. */}
         <Form {...PAIRS} accessibleMode="Edit" headerText="Behavior">
           <FormGroup accessibleName="Behavior">
+            {/* First column: what the field is worth. Read-only sits under the default that owns it. */}
+            <FormItem labelContent={lbl("Default value", "Filled in automatically and marked “auto”, recalculating whenever its inputs change, until the salesperson edits it by hand.")}>
+              <ExprInput optional rows={3} value={p.defaultExpr} model={scope} tables={tables}
+                fieldId={`expr-parameters[${at}].defaultExpr`} issue={exprIssue("defaultExpr")}
+                onChange={(v) => set({ defaultExpr: v })} />
+            </FormItem>
+
+            <FormItem labelContent={lbl("Read-only", "The salesperson sees the value but cannot change it — right for anything a default formula owns.")}>
+              <CheckBox text="Cannot be edited by hand" checked={!!p.readonly}
+                onChange={(e) => set({ readonly: e.target.checked || undefined })} />
+            </FormItem>
+
             <FormItem labelContent={lbl("Price formula", "This parameter’s contribution to the quote line. The result appears at the top right of the field, in the model currency.")}>
               <ExprInput optional rows={3} value={p.priceExpr} model={scope} tables={tables}
                 fieldId={`expr-parameters[${at}].priceExpr`} issue={exprIssue("priceExpr")}
                 onChange={(v) => set({ priceExpr: v })} />
             </FormItem>
 
+            {/* Second column: when the field applies. The always-on flag sits directly above the
+                conditional version of the same question, so an author reads one then the other. */}
             <FormItem labelContent={lbl("Visible when", "Hides the field when this is false; a hidden field keeps the value it already had. Empty means always visible.")}>
               <ExprInput optional rows={3} placeholder="always visible" value={p.visibleWhen} model={scope}
                 tables={tables} fieldId={`expr-parameters[${at}].visibleWhen`} issue={exprIssue("visibleWhen")}
                 onChange={(v) => set({ visibleWhen: v })} />
             </FormItem>
 
-            {/* Second column: the always-on flag sits directly above the conditional version of
-                the same question, so an author reads one then the other. */}
             <FormItem labelContent={lbl("Mandatory", "The salesperson has to answer this one: the label gets an asterisk and the field stays in the error state until it has a value. A default formula filling it counts as an answer.")}>
               <CheckBox text="Must have a value" checked={!!p.mandatory}
                 onChange={(e) => set({ mandatory: e.target.checked || undefined })} />
