@@ -17,7 +17,7 @@ export type QueryOptions = {
 };
 
 /** $crossjoin as data, not a hand-built string. The only way to filter a document by its lines:
- *  B1's $filter has no lambda operators (see apps/server/src/doc-history.ts). */
+ *  B1's $filter has no lambda operators (see apps/server/src/doc-chain.ts). */
 export type CrossJoinSpec = {
   /** e.g. ["Orders", "Orders/DocumentLines"] */
   entities: string[];

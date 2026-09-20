@@ -11,8 +11,7 @@
 import { db, pool, organization, sapConnection } from "@confire/db";
 import { eq } from "drizzle-orm";
 import { countOf, nextLinkOf, rowsOf } from "@confire/b1";
-import { tenantConnector } from "../apps/server/src/b1.ts";
-import { docHistoryQuery, flattenDocs } from "../apps/server/src/doc-history.ts";
+import { runnerFor, tenantConnector } from "../apps/server/src/b1.ts";
 import { snapshotQueries } from "../apps/server/src/dashboard-snapshot.ts";
 
 const slug = process.argv[2] ?? process.env.SLUG ?? "alumigraf";
@@ -82,12 +81,21 @@ await step("/next refuses a foreign origin", async () => {
   return "rejected by the agent";
 });
 
-await step("doc-history crossjoin", async () => {
-  const [anyOrder] = rowsOf((await b1.readEntitySet("Orders", { select: ["CardCode"], top: 1 })).data);
-  if (!anyOrder) return "no orders in this company — skipped";
-  const cardCode = String(anyOrder.CardCode);
-  const res = await b1.crossJoin(docHistoryQuery("Orders", { cardCode, top: 5 }));
-  return `${flattenDocs("order", res.data, { cardCode }).length} rows for ${cardCode}`;
+// The masterdata sync's whole mechanic: follow `nextSkip` until it is undefined. If the runner
+// ever stopped emitting a cursor, or emitted one that never ended, a sync would silently truncate
+// or never terminate — and both failures are invisible from inside Confire.
+await step("paged read advances and terminates", async () => {
+  const run = runnerFor(await tenantConnector(org.id));
+  let skip: number | undefined = 0;
+  let rows = 0;
+  for (let page = 0; skip !== undefined && page < 3; page++) {
+    const r: Awaited<ReturnType<typeof run>> = await run("b1", { entitySet: "Items" }, ["ItemCode"], { skip });
+    if (skip !== undefined && r.nextSkip !== undefined && r.nextSkip <= skip)
+      throw new Error(`cursor did not advance: ${skip} -> ${r.nextSkip}`);
+    rows += r.rows.length;
+    skip = r.nextSkip;
+  }
+  return `${rows} item rows over ${skip === undefined ? "all" : "3"} pages`;
 });
 
 await step("dashboard snapshot streams", async () => {

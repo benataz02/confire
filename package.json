@@ -21,7 +21,7 @@
     "db:push": "bun --env-file=../../.env --cwd packages/db drizzle-kit push",
     "db:studio": "bun --env-file=../../.env --cwd packages/db drizzle-kit studio",
     "auth:generate": "bun --cwd apps/server better-auth-generate",
-    "dev": "cmd /c scripts/dev.cmd",
+    "dev": "bun run --parallel dev:server dev:web",
     "dev:server": "bun run --hot apps/server/src/index.ts",
     "dev:web": "bun --cwd apps/web dev",
     "build:web": "bun --cwd apps/web build",

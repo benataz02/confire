@@ -73,11 +73,7 @@ export function ModelBuilderPage({ id }: { id?: string }) {
     draft: m.draft ?? EMPTY_MODEL, update: m.update, issues: allIssues,
     lookups: lookups.data, tables: m.tableCols,
   });
-  // History owns the sync mutation, so its failure is the one page message it has to hand back.
-  const history = useHistoryTab({
-    draft: m.draft ?? EMPTY_MODEL, update: m.update, issues: allIssues,
-    modelId: id ?? "", dirty: m.dirty,
-  });
+  const history = useHistoryTab({ draft: m.draft ?? EMPTY_MODEL, update: m.update, issues: allIssues });
   const linesSubSections = useItemStructureTab({
     draft: m.draft ?? EMPTY_MODEL, update: m.update, issues: allIssues, tables: m.tableCols,
   });
@@ -98,7 +94,6 @@ export function ModelBuilderPage({ id }: { id?: string }) {
     saveError: m.saveError,
     actionError: (remove.error ?? duplicate.error) as Error | null,
     lookupsError: lookups.error as Error | null,
-    syncError: history.syncError,
   });
   const secTitle = (secId: string) => {
     const n = messages.filter((x) => x.section === secId && x.type === "Negative").length;

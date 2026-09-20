@@ -1,9 +1,16 @@
 import type { B1Transport, CrossJoinSpec } from "@confire/b1";
 
 // The forward document walk: from the quotation Confire wrote (config_project.b1DocEntry — the only B1
-// link Confire stores) to whatever SAP has since made of it. Written in the same style as
-// doc-history.ts and reusing the same machinery, for the same reason: B1's $filter has no lambda
-// operators, so a document cannot be filtered by its lines except through $crossjoin.
+// link Confire stores) to whatever SAP has since made of it.
+//
+// $crossjoin, not $expand: B1's $filter has no lambda operators, so a document cannot be filtered
+// by its lines directly. All three alternatives were tried against b1s/v2 and all three 400 with
+// code 201 — keep this list, it is the reason the join is written by hand:
+//   DocumentLines/any(d: d/ItemCode eq 'X')  -> "Invalid symbol in the filter condition"
+//   DocumentLines/ItemCode eq 'X'            -> "Property 'DocumentLines/ItemCode' is invalid"
+//   $expand=DocumentLines(...)               -> not a nav property (it's a complex collection)
+// The DocEntry equality below IS the join; without it the crossjoin pairs every document with
+// every line in the company.
 //
 // The BaseType codes are DOCUMENT_FLOWS' (doc-copy.ts) — the same table the forward copy writes,
 // so the walk and the write agree by construction:
@@ -40,8 +47,8 @@ export function chainQuery(entity: ChainEntity, clauses: string[], top = 50): Cr
     ],
     filter: `${entity}/DocEntry eq ${entity}/DocumentLines/DocEntry and (${clauses.join(" or ")})`,
     orderby: `${entity}/DocDate desc`,
-    // ponytail: $top counts (doc, line) pairs, not documents — same caveat as doc-history.ts.
-    //           A quotation copied into more than ~50 order lines would truncate; raise it then.
+    // ponytail: $top counts (doc, line) pairs, not documents. A quotation copied into more than
+    //           ~50 order lines would truncate; raise it then.
     top,
   };
 }

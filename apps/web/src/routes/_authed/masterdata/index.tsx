@@ -10,8 +10,8 @@ import { toast } from "../../../components/toast.ts";
 
 export const Route = createFileRoute("/_authed/masterdata/")({ component: Masterdata });
 
-// Tenant masterdata: one list for both kinds. A "table" keeps its values here, a "query" reads
-// them live from SAP — models reference either by name and never hold the definition.
+// Tenant masterdata: one list for both kinds. A "table" keeps its values here, a "query" caches
+// them from SAP on a sync — models reference either by name and never hold the definition.
 
 const COLUMNS: ListColumn[] = [
   { name: "name", type: "string", label: "Name" },
@@ -19,6 +19,8 @@ const COLUMNS: ListColumn[] = [
   { name: "source", type: "string", label: "Source" },
   { name: "columnCount", type: "number", label: "Columns" },
   { name: "rowCount", type: "string", label: "Rows" },
+  // A query's rows are a cache now, so how old they are is a property of the row worth sorting on.
+  { name: "syncedAt", type: "date", label: "Last synced" },
   { name: "updatedAt", type: "date", label: "Last changed" },
 ];
 

@@ -10,7 +10,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { eq, and } from "drizzle-orm";
-import { db, organization, configModel, portalClient, pool } from "@confire/db";
+import { db, organization, configMasterdata, configMasterdataRow, configModel, portalClient, pool } from "@confire/db";
 import type { ModelDef } from "@confire/config-engine";
 import { hashToken } from "../apps/server/src/crypto.ts";
 
@@ -21,7 +21,10 @@ const cardName = process.argv[5] ?? "Test Client Co";
 const baseDomain = process.env.APP_BASE_DOMAIN ?? "lvh.me";
 if (!slug) throw new Error("usage: bun run seed:portal-client <slug> [email] [cardCode] [cardName]");
 
-// Agent-free demo model (no query masterdata) — runs and prices without the on-prem agent.
+// Agent-free demo model. Its BOM is priced, which used to mean a live `Items` read and therefore
+// an agent — prices come out of the masterdata cache now, so seeding that cache below is what
+// finally makes "runs and prices without the on-prem agent" true rather than aspirational.
+const ITEM_TABLE = "seed items";
 const DEMO_MODEL: ModelDef = {
   name: "Cable assembly (seed)",
   parameters: [
@@ -38,7 +41,7 @@ const DEMO_MODEL: ModelDef = {
   constraints: [],
   bom: [{ id: "conductor", itemCode: '"COND-1"', qty: "2" }],
   routing: [{ id: "cut", resource: "SAW", setupMin: "10", runMinPerUnit: "0.5", ratePerHour: "60" }],
-  pricing: { priceExpr: "unitCost * 1.4", quoteItemCode: "CFG", priceList: 1 },
+  pricing: { priceExpr: "unitCost * 1.4", quoteItemCode: "CFG", priceList: 1, itemTable: ITEM_TABLE },
   batchDefaults: [100, 500],
 };
 
@@ -49,6 +52,25 @@ async function main(): Promise<void> {
     .where(eq(organization.slug, slug!))
     .limit(1);
   if (!org) throw new Error(`No organization with slug '${slug}'. Onboard it first.`);
+
+  // The item/price source, pre-filled: no syncMinutes, so nothing ever tries to refresh it from a
+  // SAP that this demo does not have. Whole rows, as a real `Items` read returns them.
+  const [md] = await db
+    .insert(configMasterdata)
+    .values({
+      tenantId: org.id, name: ITEM_TABLE, kind: "query",
+      query: { target: "b1", query: { entitySet: "Items" }, columns: [] },
+      syncedAt: new Date(), rowCount: 1,
+    })
+    .onConflictDoNothing()
+    .returning({ id: configMasterdata.id });
+  if (md) {
+    await db.insert(configMasterdataRow).values([{
+      tenantId: org.id, masterdataId: md.id, seq: 0,
+      row: { ItemCode: "COND-1", ItemName: "Conductor", ItemPrices: [{ PriceList: 1, Price: 4 }] },
+    }]);
+    console.log(`Seeded '${ITEM_TABLE}' with 1 cached item price.`);
+  }
 
   const [published] = await db
     .select({ id: configModel.id })

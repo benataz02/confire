@@ -1,4 +1,4 @@
-import { boolean, index, jsonb, integer, numeric, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, jsonb, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { Entries, ModelDef, OutputOverrides, Outputs, QuerySource, TableRows, Val } from "@confire/config-engine";
 
 // Configurator persistence: a mutable model, and one configuration document that carries its own
@@ -30,12 +30,18 @@ export type MasterdataQuery = QuerySource & {
   labels?: Record<string, string>;
   /** keys omitted from the value-help dialog. Still fetched, still derived. */
   hidden?: string[];
+  /** Minutes before the cache is stale and a read triggers a background sync. Absent = manual
+   *  sync only. Lives in the jsonb because the admin authors it, like `labels`/`hidden` — the
+   *  sync's own state (syncedAt/syncError/rowCount) is columns, so a save cannot clobber it. */
+  syncMinutes?: number;
 };
 
 // Admin-maintained masterdata, referenced by name from LookupRef/LOOKUP(). Two kinds in one table:
-// "table" keeps its values in `columns`/`rows`, "query" keeps a live read in `query` and leaves
-// both empty. Models reference either kind identically — they never hold the definition.
-// ponytail: jsonb rows; real table if >10k rows
+// "table" keeps its values here in `columns`/`rows`; "query" keeps the B1/Beas read in `query` and
+// its VALUES in config_masterdata_row, refilled by a sync. Models reference either kind
+// identically — they never hold the definition, and the resolver never learns which kind it was.
+// ponytail: a "table" kind's rows stay one jsonb blob — they are hand-typed, so tens of rows.
+//           Only synced rows, which have no ceiling, get the subtable.
 export const configMasterdata = pgTable(
   "config_masterdata",
   {
@@ -46,6 +52,11 @@ export const configMasterdata = pgTable(
     columns: jsonb("columns").$type<ConfigTableColumn[]>().notNull().default([]),
     rows: jsonb("rows").$type<Val[][]>().notNull().default([]),
     query: jsonb("query").$type<MasterdataQuery>(),
+    // Sync state for a "query" row. Written only by the sync, never by the editor's save — which
+    // is why these are columns and `syncMinutes` is not.
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
+    syncError: text("sync_error"),
+    rowCount: integer("row_count").notNull().default(0),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("config_masterdata_tenant_name_uq").on(t.tenantId, t.name)],
@@ -118,17 +129,23 @@ export const configProject = pgTable(
 
 export type ConfigProject = typeof configProject.$inferSelect;
 
-// Historic configuration rows pulled from the model's history query; wholesale-replaced per sync.
-// ponytail: jsonb row per record, ~tens of thousands of rows per model; real columns/pgvector if
-// a tenant outgrows in-process scoring.
-export const configHistory = pgTable(
-  "config_history",
+// Cached values of a "query" masterdata, wholesale-replaced per sync.
+//
+// Raw B1 JSON, deliberately NOT Val-projected on write: a price list line lives inside the nested
+// `ItemPrices` collection, and flattening it to a Val at write time would leave "[object Object]".
+// Projection to the engine's Val[][] happens at read time instead, which also means the cache is a
+// faithful mirror of what B1 returned rather than a lossy copy of it.
+//
+// `seq` is the row's position in the read, so `ORDER BY seq` replays the query's own `orderby`.
+// Without it the value help would page a random-uuid order and the masterdata's Sort field would
+// silently mean nothing. The composite key IS the paging index — there is no second one to keep.
+export const configMasterdataRow = pgTable(
+  "config_masterdata_row",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
     tenantId: text("tenant_id").notNull(),
-    modelId: uuid("model_id").notNull(),
-    row: jsonb("row").$type<Record<string, Val>>().notNull(),
-    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+    masterdataId: uuid("masterdata_id").notNull(),
+    seq: integer("seq").notNull(),
+    row: jsonb("row").$type<Record<string, unknown>>().notNull(),
   },
-  (t) => [index("config_history_tenant_model_idx").on(t.tenantId, t.modelId)],
+  (t) => [primaryKey({ columns: [t.tenantId, t.masterdataId, t.seq] })],
 );

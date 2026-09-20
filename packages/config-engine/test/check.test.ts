@@ -1,9 +1,12 @@
 import { describe, expect, it, test } from "bun:test";
-import { bomItemCodes, checkModel, referencedTables } from "../src/check";
+import { bomItemCodes, checkModel, referencedTables, syncTables } from "../src/check";
 import type { ModelDef } from "../src/model";
 import { fieldGroup, model } from "./fixture";
 
-const PRICES = [{ name: "prices", columns: ["code", "price"] }];
+// The model's namespace: the manual price table it LOOKUPs, and the `Items` query its BOM is
+// costed from. The latter declares no columns on purpose — an Items read sends no $select, so the
+// nested price collection survives into the cache.
+const PRICES = [{ name: "prices", columns: ["code", "price"] }, { name: "items", columns: [] }];
 
 describe("checkModel", () => {
   test("fixture model is clean", () => {
@@ -148,12 +151,12 @@ describe("lookup ref validation", () => {
   });
 
   it("flags a ref to an unknown table", () => {
-    const issues = checkModel(withRef({ source: "table", table: "ghost", valueCol: "x" }), [{ name: "prices", columns: ["code", "price"] }]);
+    const issues = checkModel(withRef({ source: "table", table: "ghost", valueCol: "x" }), PRICES);
     expect(issues.some((i) => i.message.includes("unknown table 'ghost'"))).toBe(true);
   });
 
   it("flags unknown columns in a ref", () => {
-    const issues = checkModel(withRef({ source: "table", table: "prices", valueCol: "nope", columns: ["alsoNope"] }), [{ name: "prices", columns: ["code", "price"] }]);
+    const issues = checkModel(withRef({ source: "table", table: "prices", valueCol: "nope", columns: ["alsoNope"] }), PRICES);
     expect(issues.some((i) => i.message.includes("no column 'nope'"))).toBe(true);
     expect(issues.some((i) => i.message.includes("no column 'alsoNope'"))).toBe(true);
   });
@@ -161,7 +164,7 @@ describe("lookup ref validation", () => {
   it("puts derived keys in scope and flags collisions", () => {
     const ok = checkModel(
       withRef({ source: "table", table: "prices", valueCol: "code" }, { computed: [{ key: "p2", expr: "pick_price * 2" }] }),
-      [{ name: "prices", columns: ["code", "price"] }],
+      PRICES,
     );
     expect(ok).toEqual([]);
     const hidden = checkModel(
@@ -169,12 +172,12 @@ describe("lookup ref validation", () => {
         { source: "table", table: "prices", valueCol: "code", columns: [] },
         { computed: [{ key: "p2", expr: "pick_price * 2" }] },
       ),
-      [{ name: "prices", columns: ["code", "price"] }],
+      PRICES,
     );
     expect(hidden).toEqual([]);
     const collide = checkModel(
       withRef({ source: "table", table: "prices", valueCol: "code" }, { computed: [{ key: "pick_price", expr: "1" }] }),
-      [{ name: "prices", columns: ["code", "price"] }],
+      PRICES,
     );
     expect(collide.some((i) => i.message.includes("collides"))).toBe(true);
   });
@@ -215,7 +218,7 @@ describe("lookup ref validation", () => {
   it("flags a derived key placed in the structure like a real parameter", () => {
     const bad = withRef({ source: "table", table: "prices", valueCol: "code" });
     fieldGroup(bad).params.push("pick_price");
-    const issues = checkModel(bad, [{ name: "prices", columns: ["code", "price"] }]);
+    const issues = checkModel(bad, PRICES);
     expect(issues.some((i) => i.path === "structure" && i.message.includes("pick_price"))).toBe(true);
   });
 });
@@ -241,6 +244,41 @@ describe("referencedTables", () => {
     const m = structuredClone(model);
     m.history = { table: "past", mappings: [], display: [] };
     expect([...referencedTables(m)]).toEqual([]); // "past" is a history cache source, not a lookup
+  });
+});
+
+describe("syncTables", () => {
+  // referencedTables answers "what may this model page as a lookup"; syncTables answers "what has
+  // to be kept fresh". The cache sources belong in the second set and not the first, and the delete
+  // guard uses this one — before it existed, it re-added history.table by hand and forgot prices.
+  it("adds the cache sources referencedTables leaves out", () => {
+    const m = structuredClone(model);
+    m.bom[0]!.qty = 'LOOKUP("prices", "code", material, "price")'; // a live lookup
+    m.history = { table: "past", mappings: [], display: [] };      // a cache source
+    expect([...referencedTables(m)]).toEqual(["prices"]);
+    // "items" is pricing.itemTable on the fixture — the other cache source.
+    expect([...syncTables(m)].sort()).toEqual(["items", "past", "prices"]);
+  });
+
+  it("is referencedTables when a model names no cache source", () => {
+    const m = structuredClone(model);
+    m.pricing = { ...m.pricing, itemTable: undefined };
+    expect([...syncTables(m)].sort()).toEqual([...referencedTables(m)].sort());
+  });
+});
+
+describe("pricing.itemTable", () => {
+  it("is required once a model has a BOM, and must name a known table", () => {
+    const noTable = { ...model, pricing: { ...model.pricing, itemTable: undefined } };
+    expect(checkModel(noTable, PRICES).map((i) => i.path)).toContain("pricing.itemTable");
+
+    const ghost = { ...model, pricing: { ...model.pricing, itemTable: "nope" } };
+    expect(checkModel(ghost, PRICES).some((i) => i.message.includes("unknown table 'nope'"))).toBe(true);
+  });
+
+  it("is not required by a model with no BOM — there is nothing to price", () => {
+    const noBom = { ...model, bom: [], pricing: { ...model.pricing, itemTable: undefined } };
+    expect(checkModel(noBom, PRICES).some((i) => i.path === "pricing.itemTable")).toBe(false);
   });
 });
 

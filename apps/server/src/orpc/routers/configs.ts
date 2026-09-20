@@ -6,22 +6,21 @@ import {
   type ConfigCandidate, type ConfigSelection, type ProjectEvent,
 } from "@confire/db";
 import {
-  computeOutputs, DslError, enumerate, EntriesZ, OutputOverridesZ, propagate, referencedTables, TableRowsZ,
+  computeOutputs, DslError, enumerate, EntriesZ, OutputOverridesZ, propagate, referencedTables, syncTables, TableRowsZ,
   type Entries, type ModelDef, type Outputs, type ResolvedLookups, type TableRows, type Val,
 } from "@confire/config-engine";
 import { userProcedure } from "../base.ts";
 import { B1Error, rowsOf } from "@confire/b1";
-import { runnerFor, tenantConnector, tenantCurrency, viaB1 } from "../../b1.ts";
+import { tenantConnector, tenantCurrency, viaB1 } from "../../b1.ts";
 import { masterdataRows } from "./masterdata.ts";
 import {
-  enrichLookups, fetchQueryTable, masterdataVersion, needsSap, queryPageSource, resolveLookups,
-  type MasterdataRow, type QueryRunner,
+  bindEntryValues, masterdataVersion, queryPageSource, queryRowOf, resolveLookups, toResolvedTable,
+  type MasterdataRow, type RowCache,
 } from "../../lookups.ts";
+import { ensureFresh, pageRows, rowCache, syncNow } from "../../masterdata-sync.ts";
 import { compileSpec, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
-import { loadHistoryRows } from "../../history-sync.ts";
 import { scoreRows } from "../../similarity.ts";
 import { copyName } from "../../copy-name.ts";
-import { docHistoryQuery, flattenDocs, sortDocRows, type DocRow } from "../../doc-history.ts";
 import {
   assertConfigMutable,
   buildQuoteSeed,
@@ -34,16 +33,6 @@ import {
 // The configuration process API: any member drives a project (draft -> quoted).
 // Trust model: browser propagates for preview; THESE handlers compute the numbers that get
 // stored. Lookups: ~5-min cache for interactive use, always fresh inside calculateProject.
-
-/** A runner for this model: the tenant's agent when the model reads live data, and otherwise one
- *  that would throw if anything called it — so an agent-free model never touches sap_connection.
- *  "Reads live data" is a property of the model *and* the tenant's masterdata now: true only when
- *  a table the model names is of kind "query". */
-export async function modelRunner(tenantId: string, m: ModelDef, rows?: MasterdataRow[]): Promise<QueryRunner> {
-  if (!needsSap(m, rows ?? (await masterdataRows(tenantId))))
-    return () => Promise.reject(new Error("Model has no live queries"));
-  return runnerFor(await tenantConnector(tenantId));
-}
 
 export async function loadModel(tenantId: string, modelId: string) {
   const [m] = await db
@@ -58,60 +47,62 @@ export async function loadModel(tenantId: string, modelId: string) {
   return m;
 }
 
-async function freshLookups(model: ModelDef, rows: MasterdataRow[], run: QueryRunner): Promise<ResolvedLookups> {
-  try {
-    return await resolveLookups(model, rows, run);
-  } catch (e) {
-    if (e instanceof ORPCError) throw e; // SAP-not-connected etc. — keep the specific message
-    throw new ORPCError("BAD_GATEWAY", { message: e instanceof Error ? e.message : String(e) });
-  }
-}
-
 // ponytail: per-process cache keyed by model updatedAt (auto-invalidates on save);
 // Redis/LRU only if the server ever scales past one Bun process.
-const CACHE_TTL_MS = 5 * 60_000;
-// The *promise* is cached, not the value: concurrent cold callers then share one lookup fetch
-// instead of racing (same trick as resolveLookups' fetchOnce).
+//
+// Short, because a miss is now a handful of indexed SQL reads rather than a round trip to the
+// customer's network. It exists to stop the process page's auto-calculate re-projecting the same
+// tables on every keystroke, and nothing more.
+const CACHE_TTL_MS = 30_000;
+// The *promise* is cached, not the value: concurrent cold callers then share one resolve.
 const lookupCache = new Map<string, { at: number; lookups: Promise<ResolvedLookups> }>();
 
-/** The one way to resolve a model's lookups. Every caller goes through this cache — a run fired by
- *  the process page's auto-calculate would otherwise re-GET every query table on each keystroke. */
-export function cachedLookups(
+/** The model's canonical lookups, memoized.
+ *
+ *  Reads Postgres and nothing else, so unlike its predecessor it has no failure mode worth
+ *  wrapping — there is no agent on this path to be unreachable and no BAD_GATEWAY to report. A
+ *  query table whose cache is empty resolves to an empty table, the form still renders, and
+ *  `ensureFresh` fills it in behind the request.
+ *
+ *  Keyed by the model and the masterdata version and nothing else. A configuration's entries stay
+ *  out of the key deliberately: they are unbounded user input, and a key that grew with them would
+ *  turn this Map into a leak and miss on every keystroke. `bindEntryValues` is the per-
+ *  configuration half, and it is cheap enough not to need caching. */
+function canonicalLookups(
   tenantId: string, model: Awaited<ReturnType<typeof loadModel>>,
-  run?: QueryRunner, rows?: MasterdataRow[],
+  cache?: RowCache, rows?: MasterdataRow[],
 ): Promise<ResolvedLookups> {
-  // masterdataVersion is in the key because a table edit changes the answer without touching the model.
   const key = `${tenantId}:${model.id}:${model.updatedAt.getTime()}:${masterdataVersion(tenantId)}`;
   const hit = lookupCache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.lookups;
-  // An injected runner is the test seam (see configurator.test.ts); production resolves the
-  // tenant's agent — but only for a model that actually reads live data.
   const p = (async () => {
     const md = rows ?? (await masterdataRows(tenantId));
-    return freshLookups(model.definition, md, run ?? (await modelRunner(tenantId, model.definition, md)));
+    // Fire the frequency-driven refresh for the tables this model reads, off the request path.
+    ensureFresh(tenantId, md.filter((r) => syncTables(model.definition).has(r.name)));
+    return resolveLookups(model.definition, md, cache ?? rowCache(tenantId));
   })();
-  p.catch(() => lookupCache.delete(key)); // a failed live lookup must not poison the key for 5 minutes
+  p.catch(() => lookupCache.delete(key));
   lookupCache.set(key, { at: Date.now(), lookups: p });
   return p;
 }
 
-/** Cached lookups plus the off-page query rows a persisted entry depends on — the one call every
- *  read path makes. `enrichLookups` is not optional: a stored entry, or a stored grid cell, can
- *  name a row that is not on the canonical first page. */
-export async function enrichedLookups(
-  tenantId: string, model: Awaited<ReturnType<typeof loadModel>>, entries: Entries,
-  run?: QueryRunner, tableRows?: TableRows,
+/** Canonical lookups plus the rows a stored configuration depends on — the one call every read
+ *  path makes. The binding is not optional: a persisted entry, or a stored grid cell, can name a
+ *  row that is not on the canonical page. */
+export async function cachedLookups(
+  tenantId: string, model: Awaited<ReturnType<typeof loadModel>>,
+  entries: Entries = {}, tableRows: TableRows = {}, cache?: RowCache, rows?: MasterdataRow[],
 ): Promise<ResolvedLookups> {
-  const rows = await masterdataRows(tenantId);
-  const runner = run ?? (await modelRunner(tenantId, model.definition, rows));
-  return enrichLookups(
-    model.definition, rows, entries, await cachedLookups(tenantId, model, runner, rows), runner, tableRows,
-  );
+  const md = rows ?? (await masterdataRows(tenantId));
+  const rc = cache ?? rowCache(tenantId);
+  const canonical = await canonicalLookups(tenantId, model, rc, md);
+  return bindEntryValues(model.definition, md, canonical, rc, entries, tableRows);
 }
 
-/** One page of a model's query table, for the value help. The caller names a table; the query is
+/** One page of a model's query table, for the value help. The caller names a table; the table is
  *  resolved from the tenant's masterdata by queryPageSource (`masterdata.queryPage` is the
- *  ad-hoc-query variant and stays admin-only). The cursor is a plain row offset and nothing else. */
+ *  ad-hoc-query variant and stays admin-only, because it takes a query instead of naming one).
+ *  The cursor is a plain row offset and nothing else. */
 export const QueryPageZ = z.object({
   modelId: z.uuid(),
   table: z.string().min(1),
@@ -129,24 +120,30 @@ export async function queryTablePage(
 ) {
   if (scopeTo && !referencedTables(scopeTo).has(input.table))
     throw new ORPCError("BAD_REQUEST", { message: `Model does not use query table '${input.table}'` });
-  let q;
+  const rows = await masterdataRows(tenantId);
+  let src;
   try {
-    q = queryPageSource(await masterdataRows(tenantId), input);
+    src = queryPageSource(rows, input);
   } catch (e) {
     throw new ORPCError("BAD_REQUEST", { message: e instanceof Error ? e.message : String(e) });
   }
-  const run = runnerFor(await tenantConnector(tenantId));
-  return fetchQueryTable(run, q.target, q.query, q.columns, { skip: q.skip });
+  ensureFresh(tenantId, [src.row]);
+  const page = await pageRows(tenantId, src.row.id, src.q);
+  return {
+    ...toResolvedTable(page.rows, src.row.query.columns),
+    ...(page.nextSkip === undefined ? {} : { nextSkip: page.nextSkip }),
+    ...(src.row.query.labels ? { labels: src.row.query.labels } : {}),
+    ...(src.row.query.hidden ? { hidden: src.row.query.hidden } : {}),
+  };
 }
 
 /** Live model + lookups for a stored calculation. There is no snapshot: stored candidates are
- *  always re-priced against what the model and SAP say now. `enrichLookups` is not optional — it
- *  re-appends the off-page query rows a persisted entry may depend on. */
+ *  always re-priced against what the model and the cache say now. */
 export async function liveEngine(
   tenantId: string, project: { modelId: string; entries: Entries; tables?: TableRows },
 ) {
   const model = await loadModel(tenantId, project.modelId);
-  return { model, lookups: await enrichedLookups(tenantId, model, project.entries, undefined, project.tables) };
+  return { model, lookups: await cachedLookups(tenantId, model, project.entries, project.tables) };
 }
 
 /** The calculate path, shared by configs.calculate and portal.run.
@@ -156,10 +153,10 @@ export async function liveEngine(
  *  writer of entries/batches/tables empties `candidates` and nulls `calculatedAt` in the same
  *  statement, so a non-null one cannot describe stale inputs.
  *
- *  `run` stays injectable for tests and for portal.run; omitted, enrichedLookups builds it from
- *  the model — and only past the reuse check, so a no-op recalculate never pays for it. */
+ *  `cache` stays injectable for tests; omitted, cachedLookups builds one for the tenant — and only
+ *  past the reuse check, so a no-op recalculate never pays for it. */
 export async function calculateProject(
-  tenantId: string, projectId: string, run?: QueryRunner,
+  tenantId: string, projectId: string, cache?: RowCache,
 ) {
   const [project] = await db
     .select({
@@ -176,8 +173,8 @@ export async function calculateProject(
 
   const model = await loadModel(tenantId, project.modelId);
 
-  // Runs before the runner and the lookups resolve: a no-op recalculate must not pay for a
-  // resolution it is about to throw away. The process page auto-calculates ~1s after every edit.
+  // Runs before the lookups resolve: a no-op recalculate must not pay for a resolution it is
+  // about to throw away. The process page auto-calculates ~1s after every edit.
   if (project.calculatedAt && project.calculatedAt >= model.updatedAt) {
     return {
       projectVersion: project.updatedAt.toISOString(), reused: true,
@@ -186,7 +183,7 @@ export async function calculateProject(
     };
   }
 
-  const lookups = await enrichedLookups(tenantId, model, entries, run, tableRows);
+  const lookups = await cachedLookups(tenantId, model, entries, tableRows, cache);
 
   try {
     const pre = propagate(model.definition, lookups, entries, tableRows);
@@ -222,42 +219,6 @@ export async function calculateProject(
   }
 }
 
-// Exact help: live B1 Orders + Quotations for the project customer and/or the item codes in the
-// configuration's items grid. The codes are only ever quoted filter values.
-export async function fetchDocHistory(
-  tenantId: string,
-  projectId: string,
-  itemCodes: string[] = [],
-): Promise<{ itemCodes: string[]; cardCode: string | null; rows: DocRow[] }> {
-  const [project] = await db
-    .select({ customer: configProject.customer })
-    .from(configProject)
-    .where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId)))
-    .limit(1);
-  if (!project) throw new ORPCError("NOT_FOUND");
-  const codes = [...new Set(itemCodes.map((c) => c.trim()).filter(Boolean))];
-  const cardCode = project.customer?.cardCode;
-  if (!codes.length && !cardCode) return { itemCodes: [], cardCode: null, rows: [] };
-
-  const opts = { itemCodes: codes, cardCode };
-  const { b1 } = await tenantConnector(tenantId);
-  // Two crossjoins in parallel — one per document type; B1 has no union.
-  const [orders, quotes] = await viaB1(() =>
-    Promise.all([
-      b1.crossJoin(docHistoryQuery("Orders", opts)),
-      b1.crossJoin(docHistoryQuery("Quotations", opts)),
-    ]),
-  );
-  return {
-    itemCodes: codes,
-    cardCode: cardCode ?? null,
-    rows: sortDocRows([
-      ...flattenDocs("order", orders.data, opts),
-      ...flattenDocs("quotation", quotes.data, opts),
-    ]),
-  };
-}
-
 // Similarity help: rank cached historic rows against the live (unsaved) entries. `values` are
 // the row's mapped param values, coerced to each param's type — what the Copy button applies.
 export async function searchSimilarRows(tenantId: string, projectId: string, entries: Entries) {
@@ -269,8 +230,14 @@ export async function searchSimilarRows(tenantId: string, projectId: string, ent
   if (!project) throw new ORPCError("NOT_FOUND");
   const model = await loadModel(tenantId, project.modelId);
   const h = model.definition.history;
-  if (!h?.mappings.length) return { results: [] };
-  const rows = await loadHistoryRows(tenantId, model.id);
+  if (!h?.mappings.length || !h.table) return { results: [] };
+  // The history query is an ordinary masterdata query now, cached by the same sync as every other
+  // one — there is no config_history table and no second sync path behind this any more.
+  const md = await masterdataRows(tenantId);
+  const source = queryRowOf(md, h.table);
+  if (!source) return { results: [] };
+  ensureFresh(tenantId, [source]);
+  const rows = (await rowCache(tenantId)(source.id)) as Record<string, Val>[];
   const typeOf = new Map(model.definition.parameters.map((p) => [p.key, p.type]));
   const coerce = (param: string, v: Val): Val =>
     v === null ? null
@@ -653,14 +620,48 @@ export const configsRouter = {
     return { ok: true };
   }),
 
-  // Resolved lookups for client-side live propagation (wizard step 1). Cached ~5 min; key includes
-  // the model's updatedAt so a model save is picked up immediately. Query tables contain the same
-  // canonical first page used by runs and portal imports.
+  // Resolved lookups for client-side live propagation, plus the sync state of the tables they
+  // came from. Postgres only: this call cannot fail because SAP is down, which is what lets the
+  // form render every section, parameter, BOM and routing line with the agent switched off.
   lookups: userProcedure
     .input(z.object({ modelId: z.uuid(), entries: EntriesZ.optional() }))
     .handler(async ({ input, context }) => {
       const model = await loadModel(context.tenantId, input.modelId);
-      return enrichedLookups(context.tenantId, model, input.entries ?? {});
+      const md = await masterdataRows(context.tenantId);
+      const lookups = await cachedLookups(context.tenantId, model, input.entries ?? {}, {}, undefined, md);
+      const named = syncTables(model.definition);
+      return {
+        ...lookups,
+        // Freshness travels with the data rather than in a second query: the page shows "synced
+        // 3 h ago" or the last sync's error without having to ask again.
+        sync: md
+          .filter((r) => r.kind === "query" && named.has(r.name))
+          .map((r) => ({
+            table: r.name, syncedAt: r.syncedAt ?? null, syncError: r.syncError ?? null,
+            rowCount: r.rowCount ?? 0,
+          })),
+      };
+    }),
+
+  /** Refill the cache for every query table this configuration's model reads. The toolbar button;
+   *  unlike the background refresh it reports failure, because a user asked for it. */
+  sync: userProcedure
+    .input(z.object({ id: z.uuid() }))
+    .handler(async ({ input, context }) => {
+      const [project] = await db
+        .select({ modelId: configProject.modelId })
+        .from(configProject)
+        .where(and(eq(configProject.id, input.id), eq(configProject.tenantId, context.tenantId)))
+        .limit(1);
+      if (!project) throw new ORPCError("NOT_FOUND");
+      const model = await loadModel(context.tenantId, project.modelId);
+      const named = syncTables(model.definition);
+      const due = (await masterdataRows(context.tenantId)).filter((r) => r.kind === "query" && !!r.query && named.has(r.name));
+      // Sequential on purpose: each one walks every page of a B1 read, and firing them together
+      // would point N concurrent multi-page walks at one customer's Service Layer.
+      let count = 0;
+      for (const md of due) count += (await syncNow(context.tenantId, md as never)).count;
+      return { tables: due.length, count };
     }),
 
   // Value help paging for a query-backed parameter (see queryTablePage).
@@ -668,13 +669,6 @@ export const configsRouter = {
     await loadModel(context.tenantId, input.modelId); // the model must exist and be this tenant's
     return queryTablePage(context.tenantId, input);
   }),
-
-  // Exact help: live B1 Orders + Quotations for the project customer and/or its item codes. The
-  // codes come from the client (the items grid as it stands, unsaved); capped here, because each
-  // one is another OR clause in the crossjoin's $filter.
-  docHistory: userProcedure
-    .input(z.object({ id: z.uuid(), itemCodes: z.array(z.string()).max(20).optional() }))
-    .handler(({ input, context }) => fetchDocHistory(context.tenantId, input.id, input.itemCodes)),
 
   // Similarity help: rank cached historic rows against the live (unsaved) entries. `values` are
   // the row's mapped param values, coerced to each param's type — what the Copy button applies.

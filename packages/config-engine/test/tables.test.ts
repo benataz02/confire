@@ -6,7 +6,7 @@ import { placedTables } from "../src/model";
 import { evalTableRows, itemSplit, splitShares, splitWeights, tableAggregates } from "../src/tables";
 import { fieldGroup, lookups, model as base } from "./fixture";
 
-const known = [{ name: "prices", columns: ["code", "price"] }];
+const known = [{ name: "items", columns: [] }, { name: "prices", columns: ["code", "price"] }];
 
 /** n machined holes: an options column, then two formula columns chained in declaration order. */
 const holes: TableDef = {

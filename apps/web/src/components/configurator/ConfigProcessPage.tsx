@@ -118,6 +118,14 @@ export function ConfigProcessPage({ id }: { id: string }) {
   const remove = useMutation(orpc.configs.remove.mutationOptions({
     onSuccess: () => { invalidateLists(); toast("Configuration deleted"); void navigate({ to: "/configs" }); },
   }));
+  // Refill the cache the form is drawn from. Not setProject: the answer changes the *lookups*, not
+  // the project, so the lookups query is what gets invalidated.
+  const sync = useMutation(orpc.configs.sync.mutationOptions({
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: orpc.configs.lookups.queryOptions({ input: { modelId: modelId! } }).queryKey });
+      toast(r.tables ? `Synced ${r.count} rows from ${r.tables} ${r.tables === 1 ? "query" : "queries"}` : "Nothing to sync");
+    },
+  }));
 
   const project = q.data?.project;
   const model = q.data?.model;
@@ -264,6 +272,8 @@ export function ConfigProcessPage({ id }: { id: string }) {
     capped: q.data.capped,
     widest: q.data.widest,
     lookupsError: lookups.error as Error | null,
+    sync: lookups.data?.sync,
+    syncError: sync.error as Error | null,
     configError: (update.error ?? calc.error ?? duplicate.error ?? remove.error) as Error | null,
     selectError: select.error as Error | null,
     locked,
@@ -294,6 +304,13 @@ export function ConfigProcessPage({ id }: { id: string }) {
           subHeader={
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
               {project.customer?.cardName ? <Text>{project.customer.cardName}</Text> : null}
+              {/* The data the form is drawn from is cached, so there has to be a way to ask for it
+                  again without waiting for the frequency to come round. */}
+              <Button icon="synchronize" design="Transparent" disabled={sync.isPending}
+                tooltip="Refresh the SAP data this model reads"
+                onClick={() => sync.mutate({ id })}>
+                {sync.isPending ? "Syncing…" : "Sync data"}
+              </Button>
               {project.status === "requested" ? (
                 <Text>Requested by {createdByEmail ?? "a portal user"}</Text>
               ) : null}
@@ -326,6 +343,13 @@ export function ConfigProcessPage({ id }: { id: string }) {
                   })) remove.mutate({ ids: [id] });
                 }}>
                 Delete
+              </Button>
+              {/* The data the form is drawn from is cached, so there has to be a way to ask for it
+                  again without waiting for the frequency to come round. */}
+              <Button icon="synchronize" design="Transparent" disabled={sync.isPending}
+                tooltip="Refresh the SAP data this model reads"
+                onClick={() => sync.mutate({ id })}>
+                {sync.isPending ? "Syncing…" : "Sync data"}
               </Button>
               {project.status === "requested" ? (
                 <Button design="Negative" onClick={() => setRejectOpen(true)}>Reject</Button>

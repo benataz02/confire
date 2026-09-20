@@ -12,11 +12,7 @@ Everything runs on **Bun** (no npm — see `package.json` workspaces).
 ```bash
 docker compose up -d db                 # Postgres 17 on :5432 (dev runs server/web with bun)
 bun install
-bun run db:push                         # drizzle-kit push — the ONLY schema migration path
-bun run seed:dev [slug]                 # a user + org; sign in at http://lvh.me:5173
-bun run dev                             # 3 PowerShell windows: web (:5173), server (:3000), agent
-bun run kill                            # scripts/kill-dev.ps1 — frees the dev ports on Windows
-bun run kill                            # scripts/kill-dev.ps1 — frees the dev ports on Windows
+bun run db:push                         # drizzle-kit push — the ONLY schema migration 
 ```
 
 There is no lint step. Type-checking is the gate, and it is **per project** — there is no root
@@ -30,15 +26,6 @@ bun --cwd apps/web build                # also regenerates routeTree.gen.ts (git
 
 Note `apps/server/tsconfig.json` also includes `../../scripts`, so the seed/migration/e2e scripts
 are checked there rather than in a project of their own.
-
-Live-SAP work:
-
-```bash
-bun run seed:agent <slug> http://localhost:4000 <secret>   # secret must match agent.json
-bun run e2e <slug>                      # cloud -> agent -> Service Layer smoke test
-bun run migrate:queries [--write]       # one-way queryTables path -> structured query migration
-bun run migrate:masterdata [--write]    # one-way model queryTables -> config_masterdata rows
-```
 
 ## The three processes
 
@@ -87,25 +74,26 @@ expression language; `check.ts` validates a whole model and is the gate on save,
 saves cannot produce a parse/unknown-ref error at runtime.
 
 `ResolvedLookups` is the seam: the engine never sees where options came from — manual lists and
-tenant `config_masterdata` rows (kind `table` = values maintained in Confire, kind `query` = a live
-B1/Beas read) are all resolved to the same shape by `apps/server/src/lookups.ts` before the engine
-runs. **A model holds no table definitions**: it names masterdata, and `referencedTables` decides
-which query rows a resolve actually fetches.
+tenant `config_masterdata` rows (kind `table` = values maintained in Confire, kind `query` = rows
+cached from a B1/Beas read) are all resolved to the same shape by `apps/server/src/lookups.ts`
+before the engine runs. **A model holds no table definitions**: it names masterdata, and
+`referencedTables` decides which of them a resolve actually loads.
 
 `ResolvedLookups.prices` is the same seam for **BOM material cost**. A BOM line carries no price:
-it names an item, and `pricing.priceList` (a B1 `PriceListNo`, mandatory — `checkModel` refuses a
-model without one) is what the unit price is read from, live, on every resolve. `bomItemCodes`
-decides what to ask for: the string literals in each `itemCode` expression (the builder's value
-help writes one), plus the resolved domain of a bare identifier, because a parameter holding the
-code is the other shipped shape. An item the read could not price stops the calculation by name
-rather than costing zero. So "never touches the agent" now means: no query table **and** no priced
-BOM — see `needsSap`. The read asks for whole `Items` rows on purpose: `ItemPrices` is a complex
-collection and B1 rejects `$select`ing one.
+it names an item, and `pricing.priceList` (a B1 `PriceListNo`) says which price, while
+`pricing.itemTable` names the masterdata query whose cached rows hold it — both mandatory once a
+model has a BOM, `checkModel` refuses it otherwise. `bomItemCodes` decides which codes to look up:
+the string literals in each `itemCode` expression (the builder's value help writes one), plus the
+resolved domain of a bare identifier, because a parameter holding the code is the other shipped
+shape. It is also what keeps `prices` small enough to send to the browser. An item with no line for
+the price list stops the calculation by name rather than costing zero. The item query declares **no
+columns** on purpose: `columns` becomes `$select`, `ItemPrices` is a complex collection B1 rejects
+selecting, so the read asks for whole rows and the cache stores them raw.
 
 **Nothing is snapshotted.** One configuration is one row: `config_project` carries its own
 `entries` + `candidates` + `selection`, and a recalculate overwrites them in place. Model and
-lookups are resolved *live* on every read (`liveEngine` in `orpc/routers/configs.ts`), so a
-quoted configuration is re-priced against what SAP says now rather than what it said then —
+lookups are resolved on every read (`liveEngine` in `orpc/routers/configs.ts`), so a quoted
+configuration is re-priced against what the cache says now rather than what it said then —
 `quotedValue`/`quotedCost` are the only frozen numbers, captured for the dashboard.
 
 **Inputs and candidates move in one statement.** `candidates` is emptied in the same `UPDATE` that
@@ -149,17 +137,44 @@ and a different agent route prefix.
 
 ## Live queries are data, not paths
 
-`config_masterdata.query` is `{ entitySet, filter?, orderby?, top? }`. `$select` is **derived
-from `columns`** and never stored, so the two cannot disagree. Value-help paging uses a `$skip`
-offset — a cursor that can express nothing but paging, which is what the old "parse both URLs and
-compare their searchParams" check was trying to guarantee.
+`config_masterdata.query` is `{ entitySet, filter?, orderby? }` plus the display-only `labels`/
+`hidden` and the `syncMinutes` staleness setting. `$select` is **derived from `columns`** and never
+stored, so the two cannot disagree. Value-help paging uses a `$skip` offset — a cursor that can
+express nothing but paging.
 
 `apps/server/src/b1.ts` is where a tenant becomes transports: `tenantConnector` → `runnerFor`
-(the `QueryRunner` seam every pure module is written against and every test fakes) and
+(the `QueryRunner` seam, which only the **sync** and the editor's live preview still hold) and
 `toOrpcError` (B1 status/code → `ORPCError`, a lookup rather than a regex over a message).
+`runnerFor` returns one page per call and nothing else — the sync walks a table by following
+`nextSkip`, so no multi-page branch can hide an unbounded read.
 
-`doc-history.ts` uses `$crossjoin`, not `$expand`: B1's `$filter` has no lambda operators, and the
+`doc-chain.ts` uses `$crossjoin`, not `$expand`: B1's `$filter` has no lambda operators, and the
 file records the three verified 400s that prove it. The `DocEntry` equality **is** the join.
+
+## The masterdata cache — the runtime never touches SAP
+
+A `query` masterdata's **values** live in `config_masterdata_row`, refilled wholesale by
+`masterdata-sync.ts`. `resolveLookups` reads Postgres and nothing else, which is the point: with
+the agent switched off the configurator still renders every section, parameter, BOM and routing
+line with its cached options, and a stale cache is a page message instead of a failed request.
+
+- **The sync streams.** It walks the single-page cursor and inserts each page, so a table with no
+  declared row limit still costs O(page) memory. `packages/b1`'s `readPages` buffers everything and
+  is deliberately not used here. Delete + refill share one transaction: a walk that dies partway
+  leaves the last good sync in place rather than a table truncated where it stopped.
+- **`seq` is the read's order**, and the composite primary key — that is what replays the query's
+  own `orderby` when the value help pages it back out.
+- **Rows are stored raw**, not `Val`-projected: a price list line lives inside the nested
+  `ItemPrices` collection, which no flat column list can name. Projection happens at read time.
+- **Freshness is a TTL checked on read**, not a schedule — there is no job runner in this repo, and
+  `ensureFresh` fires off the request path and never throws, so a cold cache serves empty and fills
+  in behind rather than hanging a page load. Failures land in `config_masterdata.syncError`.
+- `syncTables(model)` = `referencedTables` ∪ `history.table` ∪ `pricing.itemTable` — what has to be
+  kept fresh, as opposed to what a client may page. The delete guard uses it.
+- `cachedLookups` splits in two on purpose: the canonical resolve is memoized per (tenant, model,
+  masterdata version), and `bindEntryValues` — which loads the rows a *stored* configuration names
+  past the canonical page — stays uncached, because entries are unbounded user input and a key that
+  grew with them would leak.
 
 ## Writing to SAP
 
@@ -208,8 +223,8 @@ is silently dropped (a saved view outliving a UDF should still open).
 ## Design docs
 
 `docs/superpowers/specs/` and `docs/superpowers/plans/` hold the design record per feature, dated.
-`docs/*.md` are the operator/user guides (model builder, history pane, durable
-writes) — update them when you change the surface they describe.
+`docs/*.md` are the operator/user guides (model builder, durable writes) — update them when you
+change the surface they describe.
 
 ---
 

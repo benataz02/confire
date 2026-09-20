@@ -1,13 +1,12 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, count, eq, inArray, max } from "drizzle-orm";
-import { db, configHistory, configModel, configProject } from "@confire/db";
-import { checkModel, ModelDefZ } from "@confire/config-engine";
+import { and, eq, inArray } from "drizzle-orm";
+import { db, configModel, configProject } from "@confire/db";
+import { checkModel, ModelDefZ, syncTables } from "@confire/config-engine";
 import { adminProcedure } from "../base.ts";
-import { needsSap, queryRowOf, resolveLookups } from "../../lookups.ts";
+import { resolveLookups } from "../../lookups.ts";
 import { knownTables, masterdataRows } from "./masterdata.ts";
-import { runnerFor, tenantConnector } from "../../b1.ts";
-import { syncModelHistory } from "../../history-sync.ts";
+import { ensureFresh, rowCache } from "../../masterdata-sync.ts";
 import { compileSpec, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { copyName } from "../../copy-name.ts";
 
@@ -91,7 +90,8 @@ export const modelsRouter = {
   // client-side copy would silently drop portalDescription (a column, not part of the jsonb).
   // No checkModel: a byte-identical copy of a stored definition either already passed on save, or
   // now fails only because masterdata was deleted since — an unhelpful error on an unedited copy.
-  // config_history is not copied; the definition keeps history.table, so "Sync now" repopulates it.
+  // Nothing cached is copied: the definition keeps its table names, and the cache belongs to the
+  // masterdata rows those names point at, not to the model.
   duplicate: adminProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
     const [row] = await db
       .select()
@@ -134,48 +134,18 @@ export const modelsRouter = {
   }),
 
 
-  // "Sync now": run the model's history query through the agent and wholesale-replace config_history.
-  syncHistory: adminProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
-    const [m] = await db
-      .select({ id: configModel.id, definition: configModel.definition })
-      .from(configModel)
-      .where(and(eq(configModel.id, input.id), eq(configModel.tenantId, context.tenantId)))
-      .limit(1);
-    if (!m) throw new ORPCError("NOT_FOUND");
-    const name = m.definition.history?.table;
-    if (!name)
-      throw new ORPCError("BAD_REQUEST", { message: "Pick a masterdata query on the History tab, then save." });
-    const q = queryRowOf(await masterdataRows(context.tenantId), name);
-    if (!q)
-      throw new ORPCError("BAD_REQUEST", { message: `Unknown query '${name}'` });
-    return syncModelHistory(context.tenantId, m.id, q.query, runnerFor(await tenantConnector(context.tenantId)));
-  }),
-
-  historyInfo: adminProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
-    const [r] = await db
-      .select({ count: count(), lastSyncedAt: max(configHistory.syncedAt) })
-      .from(configHistory)
-      .where(and(eq(configHistory.tenantId, context.tenantId), eq(configHistory.modelId, input.id)));
-    return { count: r?.count ?? 0, lastSyncedAt: r?.lastSyncedAt ?? null };
-  }),
-
-  // Live preview for the (possibly unsaved) builder draft: same resolver as configs.lookups/run,
-  // keyed by the posted definition instead of a saved model id. Client sends a stripped-down
-  // "lookup skeleton" so typing in expression fields doesn't refetch.
+  // Live preview for the (possibly unsaved) builder draft: same resolver as configs.lookups, keyed
+  // by the posted definition instead of a saved model id. Client sends a stripped-down "lookup
+  // skeleton" so typing in expression fields doesn't refetch.
+  //
+  // No try/catch any more: the resolve reads the cache, so the only errors left are the model's
+  // own (an unknown table, a missing column) and those are the builder's to show as issues rather
+  // than a gateway failure.
   previewLookups: adminProcedure
     .input(z.object({ definition: ModelDefZ }))
     .handler(async ({ input, context }) => {
-      try {
-        const rows = await masterdataRows(context.tenantId);
-        return await resolveLookups(
-          input.definition, rows,
-          needsSap(input.definition, rows)
-            ? runnerFor(await tenantConnector(context.tenantId))
-            : () => Promise.reject(new Error("Model has no live queries")),
-        );
-      } catch (e) {
-        if (e instanceof ORPCError) throw e; // SAP-unavailable etc. — keep the specific message
-        throw new ORPCError("BAD_GATEWAY", { message: e instanceof Error ? e.message : String(e) });
-      }
+      const rows = await masterdataRows(context.tenantId);
+      ensureFresh(context.tenantId, rows.filter((r) => syncTables(input.definition).has(r.name)));
+      return resolveLookups(input.definition, rows, rowCache(context.tenantId));
     }),
 };

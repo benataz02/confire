@@ -4,15 +4,19 @@ import type {
   TableRows, Val,
 } from "@confire/config-engine";
 import { andFilter, escapeLiteral } from "@confire/b1";
-import { ORPCError } from "@orpc/server";
 
-// Resolve a model's external references (manual lists, and the tenant's masterdata — rows
-// maintained here or query-backed B1/Beas reads) into the engine's ResolvedLookups. The read hop
-// is injected so this stays testable and DB/transport-free; production callers pass
-// runnerFor(connector) from b1.ts.
+// Resolve a model's external references (manual lists, and the tenant's masterdata) into the
+// engine's ResolvedLookups.
 //
-// Nothing here builds a URL any more: a query is `{ entitySet, filter, orderby, top }` and
-// packages/b1's query.ts is the only place that turns one into a path.
+// Every value comes from Postgres now: a "table" masterdata from its own jsonb, a "query"
+// masterdata from the rows a sync cached (masterdata-sync.ts). **Nothing on this path talks to
+// SAP.** That is the whole point of the rewrite — a configuration renders its options, its BOM
+// and its prices with the agent switched off, and a stale cache is a note on the page instead of
+// a failed request.
+//
+// Two seams, and the module knows nothing behind either: `RowCache` is where cached rows come
+// from (faked wholesale in tests), and `QueryRunner` is the read hop the *sync* uses. Only the
+// sync and the masterdata editor's live preview still hold a QueryRunner.
 
 /** Rows per B1 page: the `$top` Confire asks for, and (via packages/b1's pageHeader) the
  *  `Prefer: odata.maxpagesize` that goes with it. The Service Layer's own default is **20**, so
@@ -24,33 +28,65 @@ export type QueryPage = {
   rows: Record<string, unknown>[];
   /** $skip for the next page; absent = the last page. */
   nextSkip?: number;
-  /** a multi-page read stopped at its page cap — rows are incomplete. */
-  truncated?: boolean;
 };
 
-/** The injected read hop. One page per call unless `maxPages` says otherwise. */
+/** The injected read hop, one page per call. Used by the sync and by the editor's live preview —
+ *  never by a resolve. */
 export type QueryRunner = (
   target: "b1" | "beas",
   query: ODataQuery,
   columns: string[],
-  opts?: { skip?: number; top?: number; maxPages?: number },
+  opts?: { skip?: number; top?: number },
 ) => Promise<QueryPage>;
 
-/** A live read plus the two display-only fields the value-help dialog reads. Structurally the
- *  `query` column of config_masterdata; spelled out here so this module stays DB-free. */
-export type MasterdataQuery = QuerySource & { labels?: Record<string, string>; hidden?: string[] };
-/** One config_masterdata row: values maintained here (`columns`/`rows`) or a live read (`query`). */
+/** What a caller wants out of the cache: a page of it, or the rows holding particular values in
+ *  one column. One shape rather than three methods, so a test fakes one function. */
+export type RowQuery = {
+  skip?: number;
+  top?: number;
+  /** restrict to rows whose `col` holds one of `values` — the off-page binding and price reads */
+  col?: string;
+  values?: Val[];
+  /** case-insensitive substring over `searchCols` — the value help's search box */
+  search?: string;
+  searchCols?: string[];
+};
+
+/** Cached rows of one query masterdata, raw as B1 returned them. */
+export type RowCache = (masterdataId: string, q?: RowQuery) => Promise<Record<string, unknown>[]>;
+
+/** A live read plus the two display-only fields the value-help dialog reads, and the sync
+ *  frequency. Structurally the `query` column of config_masterdata; spelled out here so this
+ *  module stays DB-free. */
+export type MasterdataQuery = QuerySource & {
+  labels?: Record<string, string>;
+  hidden?: string[];
+  syncMinutes?: number;
+};
+
+/** One config_masterdata row: values maintained here (`columns`/`rows`) or cached from a live read
+ *  (`query` + the sync state beside it). */
 export type MasterdataRow = {
+  id: string;
   name: string;
   kind: "table" | "query";
   columns: { key: string }[];
   rows: Val[][];
   query?: MasterdataQuery | null;
+  syncedAt?: Date | null;
+  syncError?: string | null;
+  rowCount?: number;
 };
 export type MasterdataQueryRow = MasterdataRow & { query: MasterdataQuery };
 
+/** Scalars only. A nested B1 collection (`ItemPrices`) is not a cell value — it is read straight
+ *  off the raw row by the price path, and `String()`-ing it here would put "[object Object]" in a
+ *  column. Absent and non-scalar both resolve to null. */
 const asVal = (v: unknown): Val =>
-  typeof v === "number" || typeof v === "boolean" || v === null || v === undefined ? ((v ?? null) as Val) : String(v);
+  v === null || v === undefined ? null
+  : typeof v === "number" || typeof v === "boolean" ? v
+  : typeof v === "object" ? null
+  : String(v);
 
 export function tablesFromMasterdata(rows: MasterdataRow[]): Record<string, ResolvedTable> {
   const out: Record<string, ResolvedTable> = {};
@@ -58,25 +94,21 @@ export function tablesFromMasterdata(rows: MasterdataRow[]): Record<string, Reso
   return out;
 }
 
-/** The query rows a model actually reads. Masterdata is tenant-wide now, so without this filter
- *  every model would fetch every tenant query — one SAP hop each, for tables it never names. */
+/** The query rows a model actually reads as a lookup. Masterdata is tenant-wide, so without this
+ *  filter every model would load every tenant query. `pricing.itemTable` is deliberately NOT here:
+ *  its rows are read for prices, by code, not shipped to the browser as a table. */
 export function queryRowsFor(model: ModelDef, rows: MasterdataRow[]): MasterdataQueryRow[] {
   const named = referencedTables(model);
   return rows.filter((r): r is MasterdataQueryRow => r.kind === "query" && !!r.query && named.has(r.name));
 }
 
-// Bumped whenever a tenant's masterdata changes; configs.ts folds it into its lookup cache key so
-// an edited table shows up at once instead of after the 5-minute TTL.
+// Bumped whenever a tenant's masterdata changes — an edit, or a finished sync. configs.ts folds it
+// into its lookup cache key so new rows show up at once instead of after the TTL.
 // ponytail: per-process, like the cache it feeds — a second server process would need the row's
-// updatedAt in the key instead.
+// updatedAt/syncedAt in the key instead.
 const versions = new Map<string, number>();
 export const masterdataVersion = (tenantId: string) => versions.get(tenantId) ?? 0;
 export const bumpMasterdata = (tenantId: string) => { versions.set(tenantId, Date.now()); };
-
-/** True when resolving this model needs the tenant's agent — a query table it names, or a BOM
- *  whose materials are priced from the tenant's price list. */
-export const needsSap = (model: ModelDef, rows: MasterdataRow[]): boolean =>
-  queryRowsFor(model, rows).length > 0 || (!!model.pricing.priceList && model.bom.length > 0);
 
 export const queryRowOf = (rows: MasterdataRow[], name: string): MasterdataQueryRow | undefined =>
   rows.find((r): r is MasterdataQueryRow => r.name === name && r.kind === "query" && !!r.query);
@@ -98,11 +130,21 @@ export function optionsFromRef(ref: LookupRef, tables: Record<string, ResolvedTa
 }
 
 // Response field names, in first-seen order — the query's columns by convention. Non-identifier
-// keys (@odata.etag &c.) are dropped: columns become `<param>_<col>` values in the DSL.
+// keys (@odata.etag &c.) are dropped: columns become `<param>_<col>` values in the DSL. So are
+// nested collections, which have no scalar to show (see asVal).
 const fieldsOf = (rows: Record<string, unknown>[]): string[] =>
-  [...new Set(rows.flatMap((r) => Object.keys(r)))].filter((k) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k));
+  [...new Set(rows.flatMap((r) => Object.keys(r)))]
+    .filter((k) => IDENT.test(k) && !rows.some((r) => typeof r[k] === "object" && r[k] !== null));
 
 const IDENT = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+/** Raw cached rows -> the engine's table shape. Columns come from the masterdata's declared list
+ *  when it has one, and otherwise from the rows themselves — which is the `Items` case, where no
+ *  `$select` is sent precisely so the nested price collection survives. */
+export function toResolvedTable(raw: Record<string, unknown>[], columns?: string[]): ResolvedTable {
+  const cols = columns?.length ? columns : fieldsOf(raw);
+  return { columns: cols, rows: raw.map((r) => cols.map((c) => asVal(r[c]))) };
+}
 
 /** AND a `contains(col,'q')` OR-group onto a query's $filter. Was regex surgery on a
  *  URL-encoded `$filter=` group; with a structured query it is string composition. */
@@ -113,254 +155,206 @@ export function withSearch(query: ODataQuery, cols: string[], q: string): ODataQ
   return { ...query, filter: andFilter(query.filter, ors.join(" or ")) };
 }
 
-/** AND an exact `col eq <literal>` onto a query's $filter. */
-export function withExact(query: ODataQuery, col: string, value: Val): ODataQuery {
-  return withAnyOf(query, col, [value]);
-}
-
-/** AND an OR-group of `col eq <literal>` onto a query's $filter: n picked rows, one read.
- *  andFilter parenthesises both sides, so the group cannot be split by `and` precedence. */
-export function withAnyOf(query: ODataQuery, col: string, values: Val[]): ODataQuery {
-  if (!values.length) return query;
-  const eq = (v: Val) => `${col} eq ${typeof v === "string" ? `'${escapeLiteral(v)}'` : String(v)}`;
-  return { ...query, filter: andFilter(query.filter, values.map(eq).join(" or ")) };
-}
-
-/** Resolve a value-help page request. The query always comes from the tenant's masterdata, never
- *  from the client; `cursor` is a plain `$skip` offset and can express nothing else — which is
- *  what the old "parse both URLs and compare their searchParams" check was trying to guarantee. */
+/** Resolve a value-help page request against the tenant's masterdata. The table always comes from
+ *  masterdata, never from the client, and `cursor` is a plain row offset that can express nothing
+ *  but paging. The read itself is now a SQL page of the cache — see masterdata-sync's rowCache. */
 export function queryPageSource(
   rows: MasterdataRow[],
   input: { table: string; search?: string; searchCols?: string[]; cursor?: number },
-): QuerySource & { skip?: number } {
+): { row: MasterdataQueryRow; q: RowQuery } {
   const row = queryRowOf(rows, input.table);
   if (!row) throw new Error(`Unknown query table '${input.table}'`);
-  const qt = { name: row.name, ...row.query };
   const searchCols = input.searchCols ?? [];
-  const unknownCol = searchCols.find((c) => !qt.columns.includes(c));
-  if (unknownCol) throw new Error(`Search column '${unknownCol}' is not declared by query table '${qt.name}'`);
+  const declared = row.query.columns;
+  // Only enforced when the masterdata declares its columns: an `Items` query declares none on
+  // purpose (no $select, so the nested price collection survives), and its fields are whatever
+  // B1 returned.
+  const unknownCol = declared.length ? searchCols.find((c) => !declared.includes(c)) : undefined;
+  if (unknownCol) throw new Error(`Search column '${unknownCol}' is not declared by query table '${row.name}'`);
   if (input.cursor !== undefined && (!Number.isInteger(input.cursor) || input.cursor < 0))
     throw new Error("Cursor must be a non-negative row offset");
   return {
-    target: qt.target,
-    query: withSearch(qt.query, searchCols, input.search ?? ""),
-    columns: qt.columns,
-    ...(input.cursor ? { skip: input.cursor } : {}),
+    row,
+    q: { skip: input.cursor ?? 0, top: DEFAULT_PAGE, search: input.search, searchCols },
   };
 }
 
-/** Read a query and shape it as a table; columns come from the response unless pinned. */
+/** One live read, shaped as a table. The sync and the masterdata editor's "Test fetch" are the
+ *  only callers left — a resolve never gets here. */
 export async function fetchQueryTable(
   run: QueryRunner,
   target: "b1" | "beas",
   query: ODataQuery,
   columns?: string[],
-  opts?: { skip?: number; top?: number; maxPages?: number },
-): Promise<ResolvedTable> {
+  opts?: { skip?: number; top?: number },
+): Promise<ResolvedTable & { nextSkip?: number }> {
   const page = await run(target, query, columns ?? [], opts);
-  const cols = columns?.length ? columns : fieldsOf(page.rows);
   return {
-    columns: cols,
-    rows: page.rows.map((r) => cols.map((c) => asVal(r[c]))),
+    ...toResolvedTable(page.rows, columns),
     ...(page.nextSkip === undefined ? {} : { nextSkip: page.nextSkip }),
   };
 }
 
-/** Values one enrich read asks for at a time.
- *  ponytail: a 50-term `or` is a long but ordinary URL; a grid deeper than that leaves the rest
- *  underived (null in a formula, like an unbound parameter). Page the read if one ever appears. */
-const ENRICH_VALUES_MAX = 50;
+/** B1's own field names on the `Items` entity. Hardcoded for the same reason `readItemPrices`
+ *  hardcoded them: `pricing.itemTable` is an `Items` read by definition, and the price lives in a
+ *  nested collection no masterdata column list could name. */
+const ITEM_CODE = "ItemCode";
+const ITEM_PRICES = "ItemPrices";
 
-/** Add only server-verified rows needed to bind persisted query selections. Domains stay the
- *  canonical first page, and cached lookup objects are never mutated. `tableRows` carries the
- *  project's own grid rows: their option cells derive columns exactly as a parameter does. */
-export async function enrichLookups(
-  model: ModelDef,
-  rows: MasterdataRow[],
-  entries: Entries,
-  canonical: ResolvedLookups,
-  run: QueryRunner,
-  tableRows: TableRows = {},
-): Promise<ResolvedLookups> {
-  let tables = canonical.tables;
-  /** Append one fetched row under the canonical table's own column order, copy-on-write. */
-  const append = (name: string, cols: string[], row: Val[]) => {
-    const current = tables[name];
-    const base = current?.columns.length ? current : { ...current, columns: cols, rows: current?.rows ?? [] };
-    const aligned = base.columns.map((col) => {
-      const i = cols.indexOf(col);
-      return i < 0 ? null : (row[i] ?? null);
-    });
-    if (base.rows.some((r) => r.length === aligned.length && r.every((v, i) => v === aligned[i]))) return;
-    if (tables === canonical.tables) tables = { ...tables };
-    tables[name] = { ...base, rows: [...base.rows, aligned] };
-  };
-
-  for (const p of model.parameters) {
-    const ref = p.domain?.kind === "options" ? p.domain.ref : undefined;
-    const value = entries[p.key];
-    if (ref?.source !== "query" || !(p.key in entries) || Array.isArray(value)) continue;
-
-    const source = queryRowOf(rows, ref.table)?.query;
-    const valueCol = source && refKeyCols(ref, source.columns).valueCol;
-    if (!source || !valueCol || !IDENT.test(valueCol))
-      throw new ORPCError("BAD_REQUEST", { message: `Invalid lookup definition for parameter '${p.key}'` });
-
-    const current = tables[ref.table];
-    const currentKey = current?.columns.indexOf(valueCol) ?? -1;
-    if (currentKey >= 0 && current!.rows.some((row) => row[currentKey] === value)) continue;
-
-    const invalid = () => new ORPCError("BAD_REQUEST", {
-      message: `Invalid lookup value for parameter '${p.key}': value is missing or stale`,
-    });
-    if (typeof value === "number" && !Number.isFinite(value)) throw invalid();
-    const fetched = await fetchQueryTable(
-      run, source.target, withExact(source.query, valueCol, value ?? null), source.columns,
-    );
-    const fetchedKey = fetched.columns.indexOf(valueCol);
-    const row = fetched.rows[0];
-    if (!row || fetchedKey < 0 || row[fetchedKey] !== value) throw invalid();
-
-    append(ref.table, fetched.columns, row);
-  }
-
-  // A table's option cells have the same off-page problem an entry does — and a grid is n rows
-  // deep, so the values are OR'd into one read per column rather than one read per row. A value
-  // that comes back with nothing is left alone: unlike a parameter's, a stale cell does not
-  // invalidate the configuration, and failing here would make the project unopenable.
-  for (const def of model.tables ?? []) {
-    const defRows = tableRows[def.key] ?? [];
-    if (!defRows.length) continue;
-    for (const c of def.columns) {
-      if (c.cell.kind !== "options" || c.cell.ref.source !== "query") continue;
-      const ref = c.cell.ref;
-      const source = queryRowOf(rows, ref.table)?.query;
-      const valueCol = source && refKeyCols(ref, source.columns).valueCol;
-      if (!source || !valueCol || !IDENT.test(valueCol)) continue; // checkModel's business, not the read path's
-
-      const current = tables[ref.table];
-      const ci = current?.columns.indexOf(valueCol) ?? -1;
-      const have = new Set(ci < 0 ? [] : current!.rows.map((r) => r[ci]));
-      const missing = [...new Set(
-        defRows
-          .map((r) => r[c.key])
-          .filter((v): v is Val =>
-            v !== undefined && v !== null && !Array.isArray(v) && !have.has(v)
-            && (typeof v !== "number" || Number.isFinite(v))),
-      )].slice(0, ENRICH_VALUES_MAX);
-      if (!missing.length) continue;
-
-      const fetched = await fetchQueryTable(
-        run, source.target, withAnyOf(source.query, valueCol, missing), source.columns,
-      );
-      for (const row of fetched.rows) append(ref.table, fetched.columns, row);
-    }
-  }
-  const prices = await enrichBomPrices(model, canonical.prices ?? {}, entries, run);
-  if (tables === canonical.tables && prices === canonical.prices) return canonical;
-  return { ...canonical, tables, prices };
-}
-
-/** Fetch each query row and add it to `tables` (mutates in place). Concurrent: every read is a
- *  live SAP hop. `resolveLookups`'s `runOnce` still collapses two tables that share one read.
- *  `labels`/`hidden` ride along on the resolved table — that is how the value-help dialog gets
- *  its headers now that the model no longer carries the query. */
-export async function addQueryTables(
-  tables: Record<string, ResolvedTable>,
-  queryRows: MasterdataQueryRow[],
-  run: QueryRunner,
-): Promise<void> {
-  const fetched = await Promise.all(
-    queryRows.map((r) => fetchQueryTable(run, r.query.target, r.query.query, r.query.columns)),
-  );
-  queryRows.forEach((r, i) => {
-    tables[r.name] = {
-      ...fetched[i]!,
-      ...(r.query.labels ? { labels: r.query.labels } : {}),
-      ...(r.query.hidden ? { hidden: r.query.hidden } : {}),
-    };
-  });
-}
-
-/** Items per price read. Same bound, and the same reason, as ENRICH_VALUES_MAX.
- *  ponytail: one page; page the read if a BOM ever runs past it. */
-const PRICE_ITEMS_MAX = 50;
-
-/** The BOM's unit prices, read live from the model's B1 price list. This is what replaced a stored
- *  price per BOM line: the number is resolved on every calculate, like everything else here.
+/** The BOM's unit prices, read out of the cached `Items` rows.
  *
- *  No `$select`: `ItemPrices` is a complex *collection* on Items, and B1 rejects selecting one
- *  (the same 400 `$select=DocumentLines` earns — see doc-history.ts). The read asks for whole item
- *  rows and picks the price list's line out here. An item B1 does not return, or one with no line
- *  for this list, is simply absent: computeOutputs then refuses that BOM line by name rather than
- *  costing the material at zero. */
-async function readItemPrices(
-  list: number, codes: string[], run: QueryRunner,
+ *  Scoped by `bomItemCodes` rather than built from the whole table: `prices` crosses the wire to
+ *  the browser with the rest of ResolvedLookups, and a tenant's item masterdata is tens of
+ *  thousands of rows. An item the cache has no line for is simply absent — computeOutputs then
+ *  refuses that BOM line by name rather than costing the material at zero. */
+async function cachedPrices(
+  model: ModelDef, rows: MasterdataRow[], domains: ResolvedLookups["domains"], cache: RowCache,
 ): Promise<Record<string, number>> {
-  if (!codes.length) return {};
-  const capped = codes.slice(0, PRICE_ITEMS_MAX);
-  const page = await run("b1", withAnyOf({ entitySet: "Items" }, "ItemCode", capped), [], { top: capped.length });
+  const { priceList, itemTable } = model.pricing;
+  if (!priceList || !itemTable) return {};
+  const source = queryRowOf(rows, itemTable);
+  const codes = bomItemCodes(model, domains);
+  if (!source || !codes.length) return {};
+  const raw = await cache(source.id, { col: ITEM_CODE, values: codes });
   const prices: Record<string, number> = {};
-  for (const row of page.rows) {
-    const code = row.ItemCode;
-    const line = (row.ItemPrices as { PriceList?: number; Price?: number }[] | undefined)
-      ?.find((pr) => pr.PriceList === list);
+  for (const r of raw) {
+    const code = r[ITEM_CODE];
+    const line = (r[ITEM_PRICES] as { PriceList?: number; Price?: number }[] | undefined)
+      ?.find((pr) => pr.PriceList === priceList);
     if (typeof code === "string" && typeof line?.Price === "number") prices[code] = line.Price;
   }
   return prices;
 }
 
-export function fetchBomPrices(
-  model: ModelDef, domains: ResolvedLookups["domains"], run: QueryRunner,
-): Promise<Record<string, number>> {
-  const list = model.pricing.priceList;
-  if (!list) return Promise.resolve({});
-  return readItemPrices(list, bomItemCodes(model, domains), run);
+/** Every (table, column, values) triple a persisted selection needs bound, deduped so two
+ *  parameters over the same table cost one cache read. */
+function offPageNeeds(
+  model: ModelDef, rows: MasterdataRow[], tables: Record<string, ResolvedTable>,
+  entries: Entries, tableRows: TableRows,
+): Map<string, { row: MasterdataQueryRow; col: string; values: Val[] }> {
+  const needs = new Map<string, { row: MasterdataQueryRow; col: string; values: Val[] }>();
+  const want = (ref: LookupRef, vals: unknown[]) => {
+    if (ref.source !== "query") return;
+    const source = queryRowOf(rows, ref.table);
+    if (!source) return;
+    const { valueCol } = refKeyCols(ref, tables[ref.table]?.columns ?? source.query.columns);
+    if (!valueCol || !IDENT.test(valueCol)) return; // checkModel's business, not the read path's
+    const current = tables[ref.table];
+    const ci = current?.columns.indexOf(valueCol) ?? -1;
+    const have = new Set(ci < 0 ? [] : current!.rows.map((r) => r[ci]));
+    const missing = vals.filter(
+      (v): v is Val =>
+        v !== undefined && v !== null && v !== "" && !Array.isArray(v) && !have.has(v as Val)
+        && (typeof v !== "number" || Number.isFinite(v)),
+    );
+    if (!missing.length) return;
+    const key = `${source.id}:${valueCol}`;
+    const at = needs.get(key) ?? { row: source, col: valueCol, values: [] };
+    at.values = [...new Set([...at.values, ...missing])];
+    needs.set(key, at);
+  };
+
+  for (const p of model.parameters)
+    if (p.domain?.kind === "options" && p.key in entries) want(p.domain.ref, [entries[p.key]]);
+  for (const def of model.tables ?? []) {
+    const defRows = tableRows[def.key] ?? [];
+    if (!defRows.length) continue;
+    for (const c of def.columns)
+      if (c.cell.kind === "options") want(c.cell.ref, defRows.map((r) => r[c.key]));
+  }
+  return needs;
 }
 
-/** The price half of enrichLookups, and there for the same reason: the canonical read priced what
- *  the resolved *domains* could hold, and a persisted entry may name a value off that page. Only
- *  codes an entry contributes are chased — a literal B1 had no price for stays unpriced instead of
- *  costing a SAP hop on every recalculate. */
-export async function enrichBomPrices(
-  model: ModelDef, have: Record<string, number>, entries: Entries, run: QueryRunner,
-): Promise<Record<string, number>> {
-  const list = model.pricing.priceList;
-  if (!list) return have;
-  const asDomains = Object.fromEntries(
-    Object.entries(entries)
-      .filter(([, v]) => typeof v === "string")
-      .map(([k, v]) => [k, [{ value: v }]]),
-  );
-  const literals = new Set(bomItemCodes(model));
-  const missing = bomItemCodes(model, asDomains).filter((c) => !literals.has(c) && !(c in have));
-  if (!missing.length) return have;
-  return { ...have, ...(await readItemPrices(list, missing, run)) };
+/** Append fetched rows under the table's own column order, deduped. */
+function appendRows(table: ResolvedTable, raw: Record<string, unknown>[]): ResolvedTable {
+  if (!raw.length) return table;
+  const added = raw.map((r) => table.columns.map((c) => asVal(r[c])));
+  const seen = new Set(table.rows.map((r) => JSON.stringify(r)));
+  const fresh = added.filter((r) => !seen.has(JSON.stringify(r)));
+  return fresh.length ? { ...table, rows: [...table.rows, ...fresh] } : table;
 }
 
+/** A model's lookups as the *model* defines them, with no configuration in sight: the canonical
+ *  page of every query table it names, the manual tables whole, and the BOM prices over those
+ *  domains. Entries-free on purpose — this is what `cachedLookups` memoizes per (tenant, model,
+ *  masterdata version), and folding a configuration's entries into it would make the key unbounded
+ *  in user input. `bindEntryValues` is the per-configuration half. */
 export async function resolveLookups(
   model: ModelDef,
   rows: MasterdataRow[],
-  run: QueryRunner,
+  cache: RowCache,
 ): Promise<ResolvedLookups> {
-  // Memoize per (target, query, skip): two query tables may share one read.
-  const seen = new Map<string, Promise<QueryPage>>();
-  const runOnce: QueryRunner = (target, query, columns, opts) => {
-    const k = `${target} ${JSON.stringify(query)} ${opts?.skip ?? 0} ${opts?.maxPages ?? 1}`;
-    let p = seen.get(k);
-    if (!p) seen.set(k, (p = run(target, query, columns, opts)));
-    return p;
-  };
-
   const tables = tablesFromMasterdata(rows);
-  await addQueryTables(tables, queryRowsFor(model, rows), runOnce);
 
+  // The canonical page of every query table the model names. Concurrent: each is its own SQL read.
+  const named = queryRowsFor(model, rows);
+  const pages = await Promise.all(named.map((r) => cache(r.id, { top: DEFAULT_PAGE })));
+  named.forEach((r, i) => {
+    const raw = pages[i]!;
+    tables[r.name] = {
+      ...toResolvedTable(raw, r.query.columns),
+      ...(raw.length >= DEFAULT_PAGE ? { nextSkip: DEFAULT_PAGE } : {}),
+      ...(r.query.labels ? { labels: r.query.labels } : {}),
+      ...(r.query.hidden ? { hidden: r.query.hidden } : {}),
+    };
+  });
+
+  const domains = projectDomains(model, tables);
+  // After the domains: a BOM line whose item code is a parameter is priced across everything that
+  // parameter could hold, and those values are only known once its domain is resolved.
+  return { domains, tables, prices: await cachedPrices(model, rows, domains, cache) };
+}
+
+function projectDomains(
+  model: ModelDef, tables: Record<string, ResolvedTable>, only?: Set<string>,
+): ResolvedLookups["domains"] {
   const domains: ResolvedLookups["domains"] = {};
   for (const p of model.parameters) {
     if (p.domain?.kind !== "options") continue;
-    domains[p.key] = optionsFromRef(p.domain.ref, tables);
+    const ref = p.domain.ref;
+    if (only && (ref.source === "manual" || !only.has(ref.table))) continue;
+    domains[p.key] = optionsFromRef(ref, tables);
   }
-  // After the domains: a BOM line whose item code is a parameter is priced across everything that
-  // parameter could hold, and those values are only known once its domain is resolved.
-  return { domains, tables, prices: await fetchBomPrices(model, domains, runOnce) };
+  return domains;
+}
+
+/** Add the rows a *stored* configuration depends on: a value picked months ago may sit past the
+ *  canonical page, and without it the parameter shows as unset and its derived columns bind to
+ *  null. This was `enrichLookups` and one live SAP round trip per parameter; it is one indexed
+ *  SQL read per (table, column) now.
+ *
+ *  Uncached, and cheap enough to stay that way — which is what keeps `cachedLookups`' key free of
+ *  entries. The affected domains are re-projected so the bound value shows up in the dropdown too,
+ *  which the live version could not afford to do.
+ *
+ *  Returns `canonical` itself when nothing was missing, so a caller can compare by identity. */
+export async function bindEntryValues(
+  model: ModelDef,
+  rows: MasterdataRow[],
+  canonical: ResolvedLookups,
+  cache: RowCache,
+  entries: Entries = {},
+  tableRows: TableRows = {},
+): Promise<ResolvedLookups> {
+  const needs = [...offPageNeeds(model, rows, canonical.tables, entries, tableRows).values()];
+  if (!needs.length) return canonical;
+  const bound = await Promise.all(needs.map((n) => cache(n.row.id, { col: n.col, values: n.values })));
+
+  const tables = { ...canonical.tables };
+  const touched = new Set<string>();
+  needs.forEach((n, i) => {
+    const t = tables[n.row.name];
+    if (!t) return;
+    const next = appendRows(t, bound[i]!);
+    if (next === t) return;
+    tables[n.row.name] = next;
+    touched.add(n.row.name);
+  });
+  if (!touched.size) return canonical;
+
+  const domains = { ...canonical.domains, ...projectDomains(model, tables, touched) };
+  // A bare-identifier BOM item code is priced across its parameter's domain, so a newly bound
+  // value needs its price fetched too — the codes that were already priced are not re-read.
+  const prices = { ...canonical.prices, ...(await cachedPrices(model, rows, domains, cache)) };
+  return { domains, tables, prices };
 }

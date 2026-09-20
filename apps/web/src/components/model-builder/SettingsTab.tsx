@@ -5,6 +5,7 @@ import { EntityValueHelp } from "../ValueHelp.tsx";
 import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
+import { MasterdataQuerySelect } from "./MasterdataQuerySelect.tsx";
 
 export function SettingsTab({ draft, update, issues, tables, portalMeta, setPortalMeta }: {
   draft: ModelDef;
@@ -57,6 +58,17 @@ export function SettingsTab({ draft, update, issues, tables, portalMeta, setPort
                 ...d,
                 pricing: { ...d.pricing, priceList: v == null || v === "" ? undefined : Number(v) },
               }))} />
+            </div>
+          </FormItem>
+          {/* Where those prices are cached. An `Items` masterdata query with no columns selected,
+              so B1 returns whole rows and the nested ItemPrices collection survives the sync —
+              a $select on it is rejected. */}
+          <FormItem labelContent={<Label required>Item price source</Label>}>
+            <div id="field-pricing.itemTable" style={{ width: "100%" }}>
+              <MasterdataQuerySelect required accessibleName="Item masterdata query"
+                value={draft.pricing.itemTable}
+                issue={issueFor(issues, "pricing.itemTable")?.message}
+                onChange={(itemTable) => update((d) => ({ ...d, pricing: { ...d.pricing, itemTable } }))} />
             </div>
           </FormItem>
           <FormItem labelContent={<Label required>Unit price expression</Label>}>

@@ -51,9 +51,7 @@ test("operation failures are messages too, ungrouped from any section", () => {
     draft, issues: [],
     saveError: new Error("CONFLICT"),
     actionError: new Error("still in use"),
-    syncError: new Error("agent offline"),
   });
   expect(msgs.find((m) => m.id === "save")?.section).toBeUndefined();
   expect(msgs.find((m) => m.id === "action")?.group).toBe("Model");
-  expect(msgs.find((m) => m.id === "sync")?.section).toBe("history");
 });

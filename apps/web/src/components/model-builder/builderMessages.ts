@@ -65,8 +65,6 @@ export function builderMessages(a: {
   actionError?: Error | null;
   /** the preview's value help could not be resolved (agent offline, broken query) */
   lookupsError?: Error | null;
-  /** the History tab's "Sync now" */
-  syncError?: Error | null;
 }): PageMessage[] {
   const out: PageMessage[] = [];
 
@@ -99,12 +97,6 @@ export function builderMessages(a: {
       id: "preview", type: "Critical",
       text: `Preview shows the last valid version — fix ${a.issues.length} error${a.issues.length === 1 ? "" : "s"} to preview the current draft.`,
       group: SECTION_TITLE.params!, section: "params",
-    });
-
-  if (a.syncError)
-    out.push({
-      id: "sync", type: "Negative", text: a.syncError.message, detail: "History sync failed",
-      group: SECTION_TITLE.history!, section: "history",
     });
 
   // No section: these are about the model as a whole, so there is nowhere to jump.

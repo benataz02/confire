@@ -1,10 +1,11 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { db, configMasterdata, configModel } from "@confire/db";
-import { ODataQueryZ, QuerySourceZ, ValZ, referencedTables } from "@confire/config-engine";
+import { db, configMasterdata, configMasterdataRow, configModel } from "@confire/db";
+import { ODataQueryZ, QuerySourceZ, ValZ, syncTables } from "@confire/config-engine";
 import { adminProcedure } from "../base.ts";
-import { bumpMasterdata, DEFAULT_PAGE, fetchQueryTable, withSearch, type MasterdataRow } from "../../lookups.ts";
+import { bumpMasterdata, DEFAULT_PAGE, fetchQueryTable, queryRowOf, withSearch, type MasterdataRow } from "../../lookups.ts";
+import { syncNow } from "../../masterdata-sync.ts";
 import { compileSpec, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { runnerFor, tenantConnector } from "../../b1.ts";
 import { copyName } from "../../copy-name.ts";
@@ -24,6 +25,8 @@ const MasterdataQueryZ = QuerySourceZ.extend({
   labels: z.record(z.string(), z.string()).optional(),
   /** keys omitted from the value-help dialog. Still fetched, still derived. */
   hidden: z.array(z.string()).optional(),
+  /** minutes before a read triggers a background re-sync; absent = manual only */
+  syncMinutes: z.number().int().positive().optional(),
 });
 
 const base = { id: z.uuid().optional(), name: z.string().min(1) };
@@ -32,12 +35,15 @@ const SaveZ = z.discriminatedUnion("kind", [
   z.object({ ...base, kind: z.literal("query"), query: MasterdataQueryZ }),
 ]);
 
-/** Every masterdata row of a tenant, in the shape the resolvers take. */
+/** Every masterdata row of a tenant, in the shape the resolvers take. `id` is in there now
+ *  because it is the key of the row cache, and the sync state because a resolve reports it. */
 export async function masterdataRows(tenantId: string): Promise<MasterdataRow[]> {
   return db
     .select({
-      name: configMasterdata.name, kind: configMasterdata.kind,
+      id: configMasterdata.id, name: configMasterdata.name, kind: configMasterdata.kind,
       columns: configMasterdata.columns, rows: configMasterdata.rows, query: configMasterdata.query,
+      syncedAt: configMasterdata.syncedAt, syncError: configMasterdata.syncError,
+      rowCount: configMasterdata.rowCount,
     })
     .from(configMasterdata)
     .where(eq(configMasterdata.tenantId, tenantId));
@@ -63,7 +69,7 @@ const COLUMN_COUNT = sql<number>`case when ${configMasterdata.kind} = 'query'
   then coalesce(jsonb_array_length(${configMasterdata.query}->'columns'), 0)
   else jsonb_array_length(${configMasterdata.columns}) end`;
 const ROW_COUNT = sql<string>`case when ${configMasterdata.kind} = 'query'
-  then 'Live' else jsonb_array_length(${configMasterdata.rows})::text end`;
+  then ${configMasterdata.rowCount}::text else jsonb_array_length(${configMasterdata.rows})::text end`;
 
 const MASTERDATA_FIELDS: SqlFields = {
   name: { col: configMasterdata.name, kind: "string" },
@@ -71,8 +77,19 @@ const MASTERDATA_FIELDS: SqlFields = {
   source: { col: SOURCE, kind: "string" },
   columnCount: { col: COLUMN_COUNT, kind: "number" },
   rowCount: { col: ROW_COUNT, kind: "string" },
+  syncedAt: { col: configMasterdata.syncedAt, kind: "date" },
   updatedAt: { col: configMasterdata.updatedAt, kind: "date" },
 };
+
+/** One row by id, tenant-fenced. */
+async function one(tenantId: string, id: string) {
+  const [row] = await db
+    .select({ name: configMasterdata.name })
+    .from(configMasterdata)
+    .where(and(eq(configMasterdata.id, id), eq(configMasterdata.tenantId, tenantId)));
+  if (!row) throw new ORPCError("NOT_FOUND");
+  return row;
+}
 
 export const masterdataRouter = {
   /** One page of the masterdata list for a saved view. Deliberately not `list` with paging bolted
@@ -83,7 +100,8 @@ export const masterdataRouter = {
     const raw = await db
       .select({
         id: configMasterdata.id, name: configMasterdata.name, kind: KIND, source: SOURCE,
-        columnCount: COLUMN_COUNT, rowCount: ROW_COUNT, updatedAt: configMasterdata.updatedAt,
+        columnCount: COLUMN_COUNT, rowCount: ROW_COUNT, syncedAt: configMasterdata.syncedAt,
+        syncError: configMasterdata.syncError, updatedAt: configMasterdata.updatedAt,
         _total: TOTAL,
       })
       .from(configMasterdata)
@@ -101,11 +119,12 @@ export const masterdataRouter = {
   ),
 
   save: adminProcedure.input(SaveZ).handler(async ({ input, context }) => {
-    // The kind's own fields are written and the other kind's are reset, so a row can never carry
-    // half of each.
+    // The kind's own fields are written and the other kind's are reset. A query save also clears
+    // the sync state: the cached rows answer the query as it was, so an edited entity set or
+    // filter must re-sync before anything reads them rather than serve the old answer.
     const fields = input.kind === "table"
-      ? { kind: "table" as const, columns: input.columns, rows: input.rows, query: null }
-      : { kind: "query" as const, columns: [], rows: [], query: input.query };
+      ? { kind: "table" as const, columns: input.columns, rows: input.rows, query: null, syncedAt: null, syncError: null, rowCount: 0 }
+      : { kind: "query" as const, columns: [], rows: [], query: input.query, syncedAt: null, syncError: null, rowCount: 0 };
     if (input.kind === "table") {
       for (const r of input.rows) {
         if (r.length !== input.columns.length)
@@ -121,6 +140,10 @@ export const masterdataRouter = {
           .where(and(eq(configMasterdata.id, input.id), eq(configMasterdata.tenantId, context.tenantId)))
           .returning({ id: configMasterdata.id });
         if (!updated.length) throw new ORPCError("NOT_FOUND");
+        // The sync state was reset above; the rows themselves have to go with it.
+        await db
+          .delete(configMasterdataRow)
+          .where(and(eq(configMasterdataRow.tenantId, context.tenantId), eq(configMasterdataRow.masterdataId, input.id)));
         bumpMasterdata(context.tenantId);
         return { id: input.id };
       }
@@ -179,13 +202,12 @@ export const masterdataRouter = {
       .from(configModel)
       .where(eq(configModel.tenantId, context.tenantId));
     // table name -> the models still naming it. Still one scan over the tenant's models whatever
-    // the batch size (see the ponytail note above).
+    // the batch size (see the ponytail note above). `syncTables`, not `referencedTables`: the
+    // history and item/price queries are cache sources rather than live lookups, but they are
+    // still names a model holds, and deleting one would leave it pointing at nothing.
     const used = new Map<string, string[]>();
     for (const m of models) {
-      // history.table is a cache source, not a live lookup, so referencedTables omits it — still
-      // a name this model holds, and deleting it would leave Sync now pointing at nothing.
-      const refs = referencedTables(m.definition);
-      if (m.definition.history?.table) refs.add(m.definition.history.table);
+      const refs = syncTables(m.definition);
       for (const r of rows) if (refs.has(r.name)) used.set(r.name, [...(used.get(r.name) ?? []), m.name]);
     }
     if (used.size)
@@ -194,9 +216,22 @@ export const masterdataRouter = {
           .map(([name, ms]) => `'${name}' is used by ${ms.length === 1 ? "model" : "models"} ${ms.join(", ")}`)
           .join("; ")}. Remove the reference there first.`,
       });
-    await db.delete(configMasterdata).where(and(inArray(configMasterdata.id, input.ids), eq(configMasterdata.tenantId, context.tenantId)));
+    await db.transaction(async (tx) => {
+      await tx.delete(configMasterdataRow)
+        .where(and(inArray(configMasterdataRow.masterdataId, input.ids), eq(configMasterdataRow.tenantId, context.tenantId)));
+      await tx.delete(configMasterdata)
+        .where(and(inArray(configMasterdata.id, input.ids), eq(configMasterdata.tenantId, context.tenantId)));
+    });
     bumpMasterdata(context.tenantId);
     return { ok: true };
+  }),
+
+  /** Refill a query masterdata's cache now, reporting failure. The frequency-driven refresh is
+   *  `ensureFresh` on the read path; this is the button for "I changed something in SAP". */
+  sync: adminProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
+    const md = queryRowOf(await masterdataRows(context.tenantId), (await one(context.tenantId, input.id)).name);
+    if (!md) throw new ORPCError("BAD_REQUEST", { message: "Only a query table can be synced" });
+    return syncNow(context.tenantId, md);
   }),
 
   // One page of an ad-hoc query: the editor's "Test fetch" (columns come from the response, never

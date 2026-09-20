@@ -1,14 +1,14 @@
-import { useNavigate } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
-  Button, Form, FormGroup, FormItem, IllustratedMessage, Label, Link, MessageStrip,
-  MultiComboBox, MultiComboBoxItem, ObjectPageSubSection, ObjectStatus, Option, Select, StepInput,
+  Button, Form, FormGroup, FormItem, IllustratedMessage, Label, MessageStrip,
+  MultiComboBox, MultiComboBoxItem, ObjectPageSubSection, Option, Select, StepInput,
   Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import type { Issue, ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { issueFor } from "./useDraftModel.ts";
+import { MasterdataQuerySelect } from "./MasterdataQuerySelect.tsx";
 
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
 type History = NonNullable<ModelDef["history"]>;
@@ -17,22 +17,21 @@ const EMPTY: History = { mappings: [], display: [] };
 const FORM = { accessibleMode: "Edit", layout: "S1 M1 L1 XL1", labelSpan: "S12 M12 L12 XL12", headerLevel: "H5" } as const;
 const titled = (label: string, n: number) => (n ? `${label} (${n})` : label);
 
-// Admin config for the similarity half of the process page's help pane: which masterdata query
-// to cache, param↔column mappings with match type + weight, and the columns each result shows.
-// Exact help is not configured here — it matches on the project's customer and the items grid.
+// Admin config for the process page's "Similar configurations" pane: which masterdata query to
+// rank against, param↔column mappings with match type + weight, and the columns each result shows.
+//
+// No sync controls here any more. The history query is an ordinary masterdata query now, cached by
+// the same circuit as every other one, so "Sync now", "Last synced" and the row count live on the
+// masterdata row itself — one place, whatever names it.
 //
 // A hook, not a component: ObjectPage builds the anchor bar's sub-tabs by scanning
 // section.props.children for ObjectPageSubSection *elements*, so a component in between hides
 // them. ModelBuilderPage calls this and drops the result straight into its ObjectPageSection.
-export function useHistoryTab({ draft, update, issues, modelId, dirty }: {
+export function useHistoryTab({ draft, update, issues }: {
   draft: ModelDef;
   update: Update;
   issues: Issue[];
-  modelId: string;
-  dirty: boolean;
 }) {
-  const navigate = useNavigate();
-  const qc = useQueryClient();
   const h = draft.history ?? EMPTY;
   const setH = (patch: Partial<History>) => update((d) => ({ ...d, history: { ...EMPTY, ...d.history, ...patch } }));
 
@@ -41,70 +40,22 @@ export function useHistoryTab({ draft, update, issues, modelId, dirty }: {
   const picked = queries.find((t) => t.name === h.table);
   const cols = picked?.query?.columns ?? [];
 
-  const info = useQuery({ ...orpc.models.historyInfo.queryOptions({ input: { id: modelId } }), enabled: !!modelId });
-  const sync = useMutation(orpc.models.syncHistory.mutationOptions({
-    onSuccess: () => qc.invalidateQueries({ queryKey: orpc.models.historyInfo.queryOptions({ input: { id: modelId } }).queryKey }),
-  }));
 
   const errMsg = (path: string) => issueFor(issues, path)?.message;
   const vs = (msg?: string) => ({
     valueState: (msg ? "Negative" : "None") as "Negative" | "None",
     valueStateMessage: msg ? <div>{msg}</div> : undefined,
   });
-  const tableIssue = errMsg("history.table");
-  const lastSyncedAt = info.data?.lastSyncedAt;
-
   // Every error here is reported once, in the page's message popover — the Select's own valueState
-  // is the local echo. `syncError` is the one the page cannot derive itself.
+  // is the local echo.
   const subSections = [
-    <ObjectPageSubSection key="history-query" id="history-query" titleText="History query"
-      actions={
-        <Button icon="synchronize" design="Transparent"
-          disabled={sync.isPending || dirty || !modelId || !h.table}
-          tooltip={dirty ? "Save the model first — sync runs the saved query." : !h.table ? "Pick a query first" : "Sync now"}
-          onClick={() => sync.mutate({ id: modelId })}>
-          {sync.isPending ? "Syncing…" : "Sync now"}
-        </Button>
-      }>
+    <ObjectPageSubSection key="history-query" id="history-query" titleText="History query">
       <Form {...FORM}>
         <FormGroup accessibleName="History query">
           <FormItem labelContent={<Label>Query</Label>}>
-            <Select value={h.table ?? ""} accessibleName="Masterdata query"
-              valueState={tableIssue ? "Negative" : !queries.length ? "Information" : "None"}
-              valueStateMessage={<div>{tableIssue
-                ?? (queries.length ? "Choose a query." : "No queries are defined yet — add one on the Masterdata page.")}</div>}
-              onChange={(e) => setH({ table: e.detail.selectedOption.value || undefined })}>
-              <Option value="">{queries.length ? "— none —" : "— none defined —"}</Option>
-              {queries.map((q) => (
-                <Option key={q.id} value={q.name} additionalText={q.query?.query.entitySet}>
-                  {q.name}
-                </Option>
-              ))}
-            </Select>
-            {picked ? (
-              <Link icon="inspect" wrappingType="None"
-                onClick={() => void navigate({ to: "/masterdata/$id", params: { id: picked.id } })}>
-                Open in Masterdata
-              </Link>
-            ) : (
-              <Link icon="add" wrappingType="None"
-                onClick={() => void navigate({ to: "/masterdata/new" })}>
-                Create a query
-              </Link>
-            )}
-          </FormItem>
-          <FormItem labelContent={<Label>Last synced</Label>}>
-            <ObjectStatus inverted showDefaultIcon
-              state={lastSyncedAt ? "Positive" : "Information"}>
-              {lastSyncedAt
-                ? new Date(lastSyncedAt).toLocaleString()
-                : info.isFetched || !modelId ? "Never" : "Checking…"}
-            </ObjectStatus>
-          </FormItem>
-          <FormItem labelContent={<Label>Cached rows</Label>}>
-            <ObjectStatus inverted state={info.data?.count ? "Positive" : "None"}>
-              {info.data ? `${info.data.count}` : "—"}
-            </ObjectStatus>
+            <MasterdataQuerySelect accessibleName="Masterdata query"
+              value={h.table} issue={errMsg("history.table")}
+              onChange={(table) => setH({ table })} />
           </FormItem>
           <FormItem labelContent={<Label>Columns shown on each result</Label>}>
             <MultiComboBox style={{ width: "100%" }}
@@ -178,5 +129,5 @@ export function useHistoryTab({ draft, update, issues, modelId, dirty }: {
     </ObjectPageSubSection>,
   ];
 
-  return { subSections, syncError: (sync.error ?? null) as Error | null };
+  return { subSections };
 }

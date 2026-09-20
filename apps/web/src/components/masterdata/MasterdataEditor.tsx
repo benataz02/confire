@@ -20,7 +20,7 @@ import { toast } from "../toast.ts";
 
 type Col = { key: string; label: string; type: "string" | "number" | "boolean" };
 type Cell = Exclude<Val, string[]>;
-type QueryDef = QuerySource & { labels?: Record<string, string>; hidden?: string[] };
+type QueryDef = QuerySource & { labels?: Record<string, string>; hidden?: string[]; syncMinutes?: number };
 type Draft = { name: string; kind: "table" | "query"; columns: Col[]; rows: Cell[][]; query: QueryDef };
 
 const emptyDraft = (): Draft => ({
@@ -130,6 +130,11 @@ export function MasterdataEditor({ id }: { id?: string }) {
     void qc.invalidateQueries({ queryKey: orpc.masterdata.list.queryOptions().queryKey });
     void qc.invalidateQueries({ queryKey: orpc.masterdata.rows.key() });
   };
+  // Refill this table's cache now. Invalidates the same two keys a save does: `rowCount` and
+  // `syncedAt` are on the row, so the list page is as stale as this editor after one.
+  const sync = useMutation(orpc.masterdata.sync.mutationOptions({
+    onSuccess: (r) => { invalidate(); toast(`Synced ${plural(r.count, "row")}`); },
+  }));
   const saveOpts = orpc.masterdata.save.mutationOptions({
     onSuccess: (r) => {
       setDirty(false);
@@ -225,6 +230,14 @@ export function MasterdataEditor({ id }: { id?: string }) {
           expandedContent={errorStrip}
           actionsBar={
             <Toolbar design="Transparent" accessibleName="Table actions">
+              {id && d.kind === "query" ? (
+                // Disabled while dirty for the same reason Duplicate is: the sync runs the SAVED
+                // query, so running it against edits still on screen would cache the wrong answer.
+                <ToolbarButton text={sync.isPending ? "Syncing…" : "Sync now"} icon="synchronize"
+                  accessibleName="Sync now" disabled={dirty || sync.isPending}
+                  tooltip={dirty ? "Save first — the sync runs the saved query." : "Refill the cache from SAP"}
+                  onClick={() => sync.mutate({ id })} />
+              ) : null}
               {id ? (
                 // Disabled while dirty: duplicate copies what is stored, not what is on screen,
                 // and a clean copy also never trips the unsaved-changes blocker on the way out.
@@ -423,6 +436,30 @@ export function MasterdataEditor({ id }: { id?: string }) {
                 <Input value={d.query.query.orderby ?? ""} placeholder="ItemName"
                   onInput={(e) => setOData({ orderby: e.target.value || undefined })} />
               </FormItem>
+              {/* Not a schedule — there is no job runner. It is how old the cache may get before a
+                  read refreshes it in the background, so a table nobody opens never costs a call. */}
+              <FormItem labelContent={<Label>Sync every</Label>}>
+                <Input type="Number" value={d.query.syncMinutes?.toString() ?? ""} placeholder="Manual only"
+                  accessibleName="Sync frequency in minutes"
+                  onInput={(e) => {
+                    const n = Number(e.target.value);
+                    setQuery({ syncMinutes: Number.isInteger(n) && n > 0 ? n : undefined });
+                  }} />
+                <Text style={{ opacity: 0.7, whiteSpace: "nowrap" }}>minutes</Text>
+              </FormItem>
+            </FormGroup>
+            <FormGroup headerText="Cache">
+              <FormItem labelContent={<Label>Last synced</Label>}>
+                <Text>{row?.syncedAt ? new Date(row.syncedAt).toLocaleString() : id ? "Never" : "—"}</Text>
+              </FormItem>
+              <FormItem labelContent={<Label>Cached rows</Label>}>
+                <Text>{id ? plural(row?.rowCount ?? 0, "row") : "—"}</Text>
+              </FormItem>
+              {row?.syncError ? (
+                <FormItem labelContent={<Label>Last error</Label>}>
+                  <MessageStrip design="Negative" hideCloseButton>{row.syncError}</MessageStrip>
+                </FormItem>
+              ) : null}
             </FormGroup>
             <FormGroup accessibleName="Preview" {...WIDE}>
               <Panel ref={panelRef} accessibleRole="Region" accessibleName="Preview" collapsed

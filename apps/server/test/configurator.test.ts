@@ -1,12 +1,12 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { db, configMasterdata, configModel, configProject, type ConfigCandidate } from "@confire/db";
+import { db, configMasterdata, configMasterdataRow, configModel, configProject, type ConfigCandidate } from "@confire/db";
 import type { Entries, ModelDef, ResolvedLookups } from "@confire/config-engine";
-import { applySelection, calculateProject, createQuote } from "../src/orpc/routers/configs.ts";
+import { applySelection, cachedLookups, calculateProject, createQuote, loadModel } from "../src/orpc/routers/configs.ts";
 import { buildQuoteLines, configDocumentCommandId } from "../src/config-quote.ts";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
-import type { QueryRunner } from "../src/lookups.ts";
+import type { RowCache } from "../src/lookups.ts";
 
 const tenantId = `test-cfg-${crypto.randomUUID()}`;
 
@@ -27,25 +27,34 @@ const model: ModelDef = {
   constraints: [],
   bom: [{ id: "body", itemCode: '"BODY"', qty: 'size == "S" ? 1 : 2' }],
   routing: [{ id: "cut", resource: "SAW", setupMin: "10", runMinPerUnit: "1", ratePerHour: "60" }],
-  pricing: { priceExpr: "unitCost * 2", quoteItemCode: "BOX", priceList: 1 },
+  pricing: { priceExpr: "unitCost * 2", quoteItemCode: "BOX", priceList: 1, itemTable: "catalog" },
   batchDefaults: [10],
 };
 
-/** No query masterdata — the only live read such a model makes is its BOM's price list. */
-const noFetch: QueryRunner = async (_target, query) => {
-  if (!query.filter) throw new Error("no live queries expected");
-  return { rows: [{ ItemCode: "SHEET", ItemPrices: [{ PriceList: 1, Price: 10 }] }] };
-};
+// The masterdata ids the fakes dispatch on, filled by seedQueryTable.
+const ids: Record<string, string> = {};
 
-// Two shapes reach this: the `items` query table (a $select'd page) and the BOM's price-list read
-// (whole Items rows, filtered to the BOM's codes, no $select — ItemPrices cannot be $selected).
-const fakeFetch: QueryRunner = async (target, query, columns) => {
-  expect(target).toBe("b1");
-  expect(query.entitySet).toBe("Items");
-  if (query.filter) return { rows: [{ ItemCode: "BODY", ItemPrices: [{ PriceList: 1, Price: 3 }] }] };
-  expect(columns).toEqual(["ItemCode"]);
-  return { rows: [{ ItemCode: "A" }, { ItemCode: "B" }] };
-};
+/** A RowCache over literal rows, honouring the two shapes a resolve asks for: a page of a table,
+ *  and the rows holding particular values in one column. This is the whole seam now — a resolve
+ *  never reaches an agent, so there is no runner left to fake. */
+const cacheOf = (byName: Record<string, Record<string, unknown>[]>, log?: unknown[]): RowCache =>
+  async (id, q) => {
+    log?.push({ id, ...q });
+    const name = Object.keys(ids).find((n) => ids[n] === id);
+    const rows = (name && byName[name]) ?? [];
+    if (q?.col && q.values) return rows.filter((r) => q.values!.some((v) => String(v) === String(r[q.col!])));
+    return q?.top === undefined ? rows : rows.slice(q.skip ?? 0, (q.skip ?? 0) + q.top);
+  };
+
+/** A model with no query masterdata still prices its BOM — out of the cached item table. */
+const noFetch: RowCache = cacheOf({ catalog: [{ ItemCode: "SHEET", ItemPrices: [{ PriceList: 1, Price: 10 }] }] });
+
+// The `items` table backs the `grade` domain (a $select'd page); `catalog` backs the BOM's prices
+// (whole Items rows, so the nested ItemPrices collection survives — it cannot be $selected).
+const fakeFetch: RowCache = cacheOf({
+  items: [{ ItemCode: "A" }, { ItemCode: "B" }],
+  catalog: [{ ItemCode: "BODY", ItemPrices: [{ PriceList: 1, Price: 3 }] }],
+});
 
 const lookups: ResolvedLookups = {
   domains: { grade: [{ value: "A", label: "A" }, { value: "B", label: "B" }] },
@@ -54,10 +63,12 @@ const lookups: ResolvedLookups = {
 
 // A query table is tenant masterdata now, not part of any model: one row, referenced by name.
 const seedQueryTable = async (name: string, columns: string[]) => {
-  await db.insert(configMasterdata).values({
+  const [r] = await db.insert(configMasterdata).values({
     tenantId, name, kind: "query",
     query: { target: "b1", query: { entitySet: "Items" }, columns },
-  }).onConflictDoNothing();
+  }).onConflictDoNothing().returning({ id: configMasterdata.id });
+  if (r) ids[name] = r.id;
+  return ids[name]!;
 };
 
 const seed = async (name: string, def: ModelDef, entries: Entries, batches: number[]) => {
@@ -122,6 +133,7 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
 
   test("candidates land on config_project and flip its status; applySelection recomputes overrides", async () => {
     await seedQueryTable("items", ["ItemCode"]);
+    await seedQueryTable("catalog", []);
     const id = await seed("proj", model, {}, [10]);
 
     const res = await calculateProject(tenantId, id, fakeFetch);
@@ -154,7 +166,7 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     expect(() => applySelection(model, lookups, project.candidates, [{ candidateIdx: 99, batchQty: 10 }])).toThrow();
   });
 
-  test("a persisted off-page selection is enriched before pricing", async () => {
+  test("a persisted off-page selection is bound, and lands in its domain as well as its price", async () => {
     const offPageModel: ModelDef = {
       name: "Off-page material",
       parameters: [{
@@ -166,58 +178,69 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
       constraints: [],
       bom: [{ id: "body", itemCode: "material", qty: "1" }],
       routing: [],
-      pricing: { priceExpr: "unitCost", quoteItemCode: "BOX", priceList: 1 },
+      pricing: { priceExpr: "unitCost", quoteItemCode: "BOX", priceList: 1, itemTable: "catalog" },
       batchDefaults: [1],
     };
     await seedQueryTable("priced", ["ItemCode", "Price"]);
+    await seedQueryTable("catalog", []);
     const id = await seed("off-page", offPageModel, { material: "B" }, [1]);
 
-    const reads: (string | undefined)[] = [];
-    const catalog: Record<string, number> = { A: 3, B: 11 };
-    const fetcher: QueryRunner = async (_target, query, columns) => {
-      reads.push(query.filter);
-      if (!query.filter) return { rows: [{ ItemCode: "A", Price: 3 }] };
-      // no $select = the BOM price read; a $select'd one is the value-help enrich
-      if (!columns.length)
-        return {
-          rows: Object.entries(catalog)
-            .filter(([c]) => query.filter!.includes(`'${c}'`))
-            .map(([c, p]) => ({ ItemCode: c, ItemPrices: [{ PriceList: 1, Price: p }] })),
-        };
-      expect(query.filter).toBe("ItemCode eq 'B'");
-      return { rows: [{ ItemCode: "B", Price: 11 }] };
+    const reads: { id: string; col?: string; top?: number }[] = [];
+    // "B" is past the canonical page: only "A" comes back from an unfiltered read, so binding the
+    // stored entry is the only way the configuration can price itself at all.
+    const cache: RowCache = async (mdId, q) => {
+      reads.push({ id: mdId, col: q?.col, top: q?.top });
+      if (mdId === ids.priced)
+        return q?.col
+          ? [{ ItemCode: "B", Price: 11 }].filter((r) => q.values!.includes(r.ItemCode))
+          : [{ ItemCode: "A", Price: 3 }];
+      if (mdId === ids.catalog)
+        return [
+          { ItemCode: "A", ItemPrices: [{ PriceList: 1, Price: 3 }] },
+          { ItemCode: "B", ItemPrices: [{ PriceList: 1, Price: 11 }] },
+        ].filter((r) => (q?.values ?? []).includes(r.ItemCode));
+      return [];
     };
 
-    await calculateProject(tenantId, id, fetcher);
-    // Canonical page, the BOM price read over the domain, the exact fetch for the off-page value
-    // the project already holds, and the price read that chases that value.
-    expect(reads).toHaveLength(4);
+    await calculateProject(tenantId, id, cache);
+    // canonical page of `priced`; the price read over that one-value domain; the bind of the
+    // stored "B"; and the price read again, now that "B" is in the domain.
+    expect(reads.map((r) => `${r.id === ids.priced ? "priced" : "catalog"}:${r.col ?? "page"}`))
+      .toEqual(["priced:page", "catalog:ItemCode", "priced:ItemCode", "catalog:ItemCode"]);
     const project = await load(id);
     expect(project.candidates[0]!.perBatch[0]!.outputs.unitCost).toBe(11);
+
+    // The bound value is in the *domain*, not merely in the table: the old live enrich could only
+    // afford to append the row, so a stored off-page pick showed as an empty Select.
+    const lk = await cachedLookups(
+      tenantId, (await loadModel(tenantId, (await load(id)).modelId)), { material: "B" }, {}, cache,
+    );
+    expect(lk.domains.material!.map((o) => o.value)).toEqual(["A", "B"]);
   });
 
   // The auto-calculate on the process page fires ~1s after every field edit. Each calculation used
   // to re-GET every query table through the agent; this counts the fetches so that regression is loud.
   test("recalculating does not re-fetch query tables: reuse short-circuits, and the cache absorbs the rest", async () => {
     await seedQueryTable("items", ["ItemCode"]);
+    await seedQueryTable("catalog", []);
     const id = await seed("no-refetch", model, {}, [10]);
 
-    let fetches = 0;
-    const counting: QueryRunner = async (target, query, columns, opts) => {
-      fetches++;
-      return fakeFetch(target, query, columns, opts);
+    let reads = 0;
+    const counting: RowCache = async (mdId, q) => {
+      reads++;
+      return fakeFetch(mdId, q);
     };
 
     const first = await calculateProject(tenantId, id, counting);
     expect(first.reused).toBe(false);
-    expect(fetches).toBe(2); // the query table, plus the BOM's price-list read
+    expect(reads).toBe(2); // the query table's canonical page, plus the BOM's price read
 
     // Nothing changed: the reuse check must return before any lookup resolution, so the fetch
     // count cannot move and the stored candidates come straight back.
     const again = await calculateProject(tenantId, id, counting);
     expect(again.reused).toBe(true);
     expect(again.candidateCount).toBe(first.candidateCount);
-    expect(fetches).toBe(2);
+    expect(reads).toBe(2);
 
     // A real edit through the API: configs.calculate writes entries AND empties candidates in one
     // statement, which is the invariant that lets a non-null calculatedAt stand in for "these
@@ -228,11 +251,15 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     expect(edited.reused).toBe(false);
     expect(edited.candidateCount).toBe(2); // size pinned to L, two grades left
 
-    // The model was never touched, so none of that resolved a query table or a price again.
-    expect(fetches).toBe(2);
+    // Still two. The model was never touched, so the canonical resolve came out of the cache, and
+    // binding the new entry read nothing because `size` is a manual domain — only a query-backed
+    // value that sits past the canonical page costs a read, and then exactly one.
+    expect(reads).toBe(2);
   });
 
   test("editing the model invalidates the stored calculation", async () => {
+    await seedQueryTable("items", ["ItemCode"]);
+    await seedQueryTable("catalog", []);
     const id = await seed("model-edit", model, {}, [10]);
     await calculateProject(tenantId, id, fakeFetch);
     expect((await calculateProject(tenantId, id, fakeFetch)).reused).toBe(true);
@@ -279,7 +306,7 @@ describe("config tables (integration)", () => {
     bom: [{ id: "sheet", itemCode: '"SHEET"', qty: "1" }],
     // the table's sum is the whole point: drilling time comes from the rows, not from a parameter
     routing: [{ id: "drill", resource: "CNC", setupMin: "5", runMinPerUnit: "holes_minutes", ratePerHour: "60" }],
-    pricing: { priceExpr: "unitCost * 2", quoteItemCode: "SHEET-CFG", priceList: 1 },
+    pricing: { priceExpr: "unitCost * 2", quoteItemCode: "SHEET-CFG", priceList: 1, itemTable: "catalog" },
     batchDefaults: [3],
   };
 
@@ -295,6 +322,7 @@ describe("config tables (integration)", () => {
   };
 
   test("rows reach the routing, and the split lines sum to the quoted total", async () => {
+    await seedQueryTable("catalog", []); // tableModel prices its SHEET line out of it
     const projectId = await seed("merged", tableModel, { thickness: 3 }, [3]);
     await db.update(configProject).set({ tables: rows }).where(eq(configProject.id, projectId));
 
@@ -330,6 +358,7 @@ describe("config tables (integration)", () => {
   });
 
   test("no rows in the item matrix is the pre-feature single line", async () => {
+    await seedQueryTable("catalog", []); // tableModel prices its SHEET line out of it
     const projectId = await seed("unmerged", tableModel, { thickness: 3 }, [3]);
     await db.update(configProject).set({ tables: { holes: rows.holes } }).where(eq(configProject.id, projectId));
     await calculateProject(tenantId, projectId, noFetch);
@@ -344,6 +373,7 @@ describe("config tables (integration)", () => {
   });
 
   test("a hand-typed unit price wins over the split and moves the quoted value", async () => {
+    await seedQueryTable("catalog", []); // tableModel prices its SHEET line out of it
     const projectId = await seed("priced", tableModel, { thickness: 3 }, [3]);
     const priced = { ...rows, parts: [{ ...rows.parts[0]!, unitprice: 99 }, rows.parts[1]!] };
     await db.update(configProject).set({ tables: priced }).where(eq(configProject.id, projectId));
@@ -529,5 +559,79 @@ describe.skipIf(!process.env.DATABASE_URL)("configs.create (integration)", () =>
     expect(row!.customer).toEqual({ cardCode: "C0001", cardName: "Acme" });
     expect(row!.modelId).toBe(m!.id);
     expect(row!.batches).toEqual(TEST_MODEL.batchDefaults);
+  });
+});
+
+// The acceptance criterion of the masterdata-cache rewrite: this tenant has NO sap_connection row,
+// so any read that reached for the agent would throw SERVICE_UNAVAILABLE ("SAP is not connected").
+// Nothing is injected here — calculateProject builds its own rowCache and goes to Postgres.
+describe.skipIf(!process.env.DATABASE_URL)("calculating with no agent at all", () => {
+  const offlineTenant = `test-offline-${crypto.randomUUID()}`;
+
+  afterAll(async () => {
+    await db.delete(configMasterdataRow).where(eq(configMasterdataRow.tenantId, offlineTenant));
+    await db.delete(configProject).where(eq(configProject.tenantId, offlineTenant));
+    await db.delete(configModel).where(eq(configModel.tenantId, offlineTenant));
+    await db.delete(configMasterdata).where(eq(configMasterdata.tenantId, offlineTenant));
+  });
+
+  test("options and BOM prices both come out of the cache", async () => {
+    const cache = async (name: string, rows: Record<string, unknown>[], columns: string[]) => {
+      const [md] = await db.insert(configMasterdata).values({
+        tenantId: offlineTenant, name, kind: "query",
+        // No syncMinutes: nothing may decide this is stale and go looking for an agent mid-test.
+        query: { target: "b1", query: { entitySet: "Items" }, columns },
+        syncedAt: new Date(), rowCount: rows.length,
+      }).returning({ id: configMasterdata.id });
+      if (rows.length)
+        await db.insert(configMasterdataRow).values(
+          rows.map((row, seq) => ({ tenantId: offlineTenant, masterdataId: md!.id, seq, row })),
+        );
+    };
+    await cache("items", [{ ItemCode: "A" }, { ItemCode: "B" }], ["ItemCode"]);
+    await cache("catalog", [
+      { ItemCode: "BODY", ItemPrices: [{ PriceList: 1, Price: 3 }] },
+    ], []);
+
+    const [m] = await db.insert(configModel)
+      .values({ tenantId: offlineTenant, name: model.name, definition: model })
+      .returning({ id: configModel.id });
+    const [p] = await db.insert(configProject)
+      .values({ tenantId: offlineTenant, modelId: m!.id, name: "offline", batches: [10], entries: {}, createdBy: "tester" })
+      .returning({ id: configProject.id });
+
+    const res = await calculateProject(offlineTenant, p!.id);
+    expect(res.candidateCount).toBe(4); // 2 sizes × 2 grades — the grades came from the cache
+
+    const outputs = res.candidates!.find((c) => c.assignment.size === "S")!.perBatch[0]!.outputs;
+    expect(outputs.unitCost).toBeCloseTo(5);   // material 3 from the cached ItemPrices, labour 2
+    expect(outputs.unitPrice).toBeCloseTo(10);
+  });
+
+  test("a table that was never synced leaves the form renderable, not broken", async () => {
+    // No cached rows and no sync state at all — the cold-start case.
+    await db.insert(configMasterdata).values({
+      tenantId: offlineTenant, name: "empty", kind: "query",
+      query: { target: "b1", query: { entitySet: "Items" }, columns: ["ItemCode"] },
+    });
+    const def: ModelDef = {
+      ...model,
+      parameters: [{
+        key: "grade", label: "Grade", type: "string", ui: "select",
+        domain: { kind: "options", ref: { source: "query", table: "empty", valueCol: "ItemCode" } },
+      }],
+      structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["grade"] }] }] },
+      bom: [],
+      pricing: { priceExpr: "unitCost", quoteItemCode: "BOX", priceList: 1 },
+    };
+    const [m] = await db.insert(configModel)
+      .values({ tenantId: offlineTenant, name: def.name, definition: def })
+      .returning({ id: configModel.id });
+
+    // The resolve succeeds — an unsynced table is an empty one, not an error. That is what keeps
+    // every section, parameter and routing line on screen while the cache fills in behind.
+    const lk = await cachedLookups(offlineTenant, await loadModel(offlineTenant, m!.id));
+    expect(lk.tables.empty).toEqual({ columns: ["ItemCode"], rows: [] });
+    expect(lk.domains.grade).toEqual([]);
   });
 });

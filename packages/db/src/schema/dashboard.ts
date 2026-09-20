@@ -26,7 +26,7 @@ export type B1Snapshot = {
   grossProfitAvailable: boolean;
 };
 
-// One row per tenant, replaced wholesale — same posture as config_history.
+// One row per tenant, replaced wholesale — same posture as config_masterdata_row.
 // ponytail: jsonb blob, not modelled tables; real tables only if the dashboard needs drill-down.
 export const dashboardSnapshot = pgTable("dashboard_snapshot", {
   tenantId: text("tenant_id").primaryKey(),

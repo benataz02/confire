@@ -19,8 +19,8 @@ import { bad, readOne, readRows } from "../../entity-read.ts";
 import { printDocument } from "../../print.ts";
 import { documentChain } from "../../doc-chain.ts";
 import {
-  applySelection, calculateProject, CONFIG_FIELDS, enrichedLookups, liveEngine,
-  loadModel, modelRunner, pushEvent, QueryPageZ, queryTablePage,
+  applySelection, calculateProject, cachedLookups, CONFIG_FIELDS, liveEngine,
+  loadModel, pushEvent, QueryPageZ, queryTablePage,
 } from "./configs.ts";
 
 // The client portal API. Trust model: every clientProcedure handler is scoped by
@@ -620,9 +620,7 @@ export const portalRouter = {
       throw new ORPCError("BAD_REQUEST", { message: "A submitted request is locked — withdraw it to make changes." });
     const model = await loadModel(context.tenantId, p.modelId);
     if (!model.portal) throw new ORPCError("BAD_REQUEST", { message: UNAVAILABLE });
-    const { candidateCount, capped, widest } = await calculateProject(
-      context.tenantId, p.id, await modelRunner(context.tenantId, model.definition),
-    );
+    const { candidateCount, capped, widest } = await calculateProject(context.tenantId, p.id);
     return { candidateCount, capped, widest };
   }),
 
@@ -634,7 +632,7 @@ export const portalRouter = {
     .handler(async ({ input, context }) => {
       const model = await loadModel(context.tenantId, input.modelId);
       if (!model.portal) throw new ORPCError("BAD_REQUEST", { message: UNAVAILABLE });
-      return enrichedLookups(context.tenantId, model, input.entries ?? {});
+      return cachedLookups(context.tenantId, model, input.entries ?? {});
     }),
 
   // Value help paging, model-scoped exactly like the internal one: a portal client names a query

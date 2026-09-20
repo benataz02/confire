@@ -6,18 +6,18 @@ import { paramPrices } from "./costElements.ts";
 import { money } from "../../lib/money.ts";
 import { useCurrency } from "../../orpc.ts";
 import { qtyLabel, type CostLine, type ItemMoney } from "./itemMoney.ts";
-import { DocHistory, Similar } from "./HistoryPane.tsx";
+import { Similar } from "./HistoryPane.tsx";
 
-// The process page's persistent right-hand rail: cost elements, B1 document history, similar past
-// configurations. Three Panels rather than cards — `collapsed`/`onToggle` are native, and `fixed`
-// on the only open one keeps at least one expanded without an accordion state machine.
+// The process page's persistent right-hand rail: cost elements and similar past configurations.
+// Panels rather than cards — `collapsed`/`onToggle` are native, and `fixed` on the only open one
+// keeps at least one expanded without an accordion state machine.
 export function InsightsRail({ projectId, model, lk, prop, entries, tables, itemMoney, onCopy, open, onToggle, slot, className }: {
   projectId: string;
   model: ModelDef;
   lk?: ResolvedLookups;
   prop?: Propagation | null;
   entries: Entries;
-  /** the configuration's table rows — the items grid in here is what doc history matches on */
+  /** the configuration's table rows — the items grid in here drives the per-item cost split */
   tables: TableRows;
   /** derived cost/price per items row; absent = no Items block in the Costs panel */
   itemMoney?: ItemMoney | null;
@@ -30,14 +30,10 @@ export function InsightsRail({ projectId, model, lk, prop, entries, tables, item
   /** the caller's slide animation — same element as `slot`, so no extra DOM node */
   className?: string;
 }) {
-  // The items grid IS the item list: no model setting names an item-code parameter any more.
-  // Evaluated, not the raw cells, so a computed item code counts — the same evalTableRows the grid
-  // and the quotation's lines are drawn from. ponytail: 20, because each code is another OR clause
-  // in the crossjoin filter and the oRPC input caps it there; page the rest if a grid ever needs it.
+  // Evaluated rows, not the raw cells, so a computed item code counts — the same evalTableRows the
+  // grid and the quotation's lines are drawn from.
   const items = (model.tables ?? []).find((t) => t.role === "items");
   const itemRows = items ? evalTableRows(items, tables[items.key] ?? [], prop?.values ?? {}, lk?.tables) : [];
-  const itemCodes = [...new Set(itemRows.map((r) => String(r[ITEM_COL] ?? "").trim()).filter(Boolean))]
-    .slice(0, 20);
 
   const panel = (key: string, title: string, body: ReactNode) => (
     <Panel headerText={title} collapsed={!open.has(key)} fixed={open.has(key) && open.size === 1}
@@ -59,8 +55,6 @@ export function InsightsRail({ projectId, model, lk, prop, entries, tables, item
           {itemMoney ? <ItemCosts rows={itemRows} money={itemMoney} /> : null}
         </div>
       ))}
-      {panel("documents", "Documents",
-        <DocHistory projectId={projectId} itemCodes={itemCodes} open={open.has("documents")} />)}
       {panel("similars", "Similar configurations",
         <Similar projectId={projectId} model={model} entries={entries} onCopy={onCopy} />)}
     </div>

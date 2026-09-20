@@ -25,6 +25,11 @@ export function configMessages(a: {
   capped: boolean;
   widest?: { key: string; size: number };
   lookupsError?: Error | null;
+  /** per-table freshness from configs.lookups — the data is cached, so "old" and "never synced"
+   *  are states the page has to be able to say out loud */
+  sync?: { table: string; syncedAt: string | Date | null; syncError: string | null; rowCount: number }[];
+  /** a sync the user asked for, that failed */
+  syncError?: Error | null;
   /** update / calculate / duplicate / delete — whichever failed last */
   configError?: Error | null;
   selectError?: Error | null;
@@ -70,6 +75,30 @@ export function configMessages(a: {
     out.push({
       id: "config", type: "Negative", text: a.configError.message,
       detail: "The last change did not go through", ...CONFIGURE,
+    });
+
+  // Option lists come from a cache now, so the page always renders — but it owes the user the
+  // truth about how old the data is. Never-synced is Critical (the lists are empty and that is
+  // why); a failed sync is Negative but non-blocking; merely stale says nothing, because that is
+  // what a sync frequency is for.
+  for (const t of a.sync ?? []) {
+    if (t.syncError)
+      out.push({
+        id: `sync:${t.table}`, type: "Negative", text: `'${t.table}' could not be refreshed: ${t.syncError}`,
+        detail: t.rowCount ? `Showing the ${t.rowCount} rows from the last good sync.` : "No data has been cached yet.",
+        ...CONFIGURE,
+      });
+    else if (!t.syncedAt)
+      out.push({
+        id: `sync:${t.table}`, type: "Critical", text: `'${t.table}' has not been synced yet`,
+        detail: "Its options are empty until the first sync finishes. Press Sync data.",
+        ...CONFIGURE,
+      });
+  }
+  if (a.syncError)
+    out.push({
+      id: "sync", type: "Negative", text: a.syncError.message,
+      detail: "Sync failed", ...CONFIGURE,
     });
 
   if (a.capped)

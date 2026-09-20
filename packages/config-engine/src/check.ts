@@ -181,6 +181,12 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   // list every material costs an unanswerable question.
   if (!model.pricing.priceList)
     issues.push({ path: "pricing.priceList", message: "a model needs a price list — it is what prices the BOM materials" });
+  // The price list says WHICH price; the item table says where the prices are cached. A BOM
+  // without one cannot be costed at all, so it is refused at save rather than at calculate.
+  if (model.bom.length && !model.pricing.itemTable)
+    issues.push({ path: "pricing.itemTable", message: "a model with a BOM needs an item masterdata query — it is where the prices are read from" });
+  else if (model.pricing.itemTable && !tableCols.has(model.pricing.itemTable))
+    issues.push({ path: "pricing.itemTable", message: `unknown table '${model.pricing.itemTable}'` });
 
   // computed dependency cycles (computed -> computed edges only)
   const compSet = new Set(computedKeys);
@@ -360,6 +366,20 @@ export function referencedTables(model: ModelDef): Set<string> {
       // an unparseable expression is checkModel's problem, not this one's
     }
   }
+  return out;
+}
+
+/** Every masterdata query a SYNC has to keep fresh for this model: the live lookups above, plus
+ *  the two cache sources `referencedTables` deliberately leaves out — the history query and the
+ *  item/price query. Kept separate from `referencedTables` because that one also fences the
+ *  portal's value-help paging, where a cache source is not a table the client may page.
+ *
+ *  This is the one place that knows the full set, which is what lets `masterdata.remove` stop
+ *  guessing: before it, the delete guard had to re-add `history.table` by hand. */
+export function syncTables(model: ModelDef): Set<string> {
+  const out = referencedTables(model);
+  if (model.history?.table) out.add(model.history.table);
+  if (model.pricing.itemTable) out.add(model.pricing.itemTable);
   return out;
 }
 

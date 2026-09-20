@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { db, sapConnection } from "@confire/db";
-import { B1Error, RemoteTransport, nextLinkOf, readPages, rowsOrThrow, type AgentTarget, type B1Transport, type Connector } from "@confire/b1";
+import { B1Error, RemoteTransport, nextLinkOf, rowsOrThrow, type AgentTarget, type B1Transport, type Connector } from "@confire/b1";
 import { decryptSecret } from "./crypto.ts";
 import { DEFAULT_PAGE, type QueryRunner } from "./lookups.ts";
 
@@ -110,7 +110,11 @@ export async function viaB1<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** The production QueryRunner: turns a model's structured query into transport calls.
- *  `$select` is derived here from the source's declared columns — the model never stores one. */
+ *  `$select` is derived here from the source's declared columns — the model never stores one.
+ *
+ *  One page per call, always. The masterdata sync walks a table by following `nextSkip` and
+ *  inserting each page as it lands, so there is no multi-page branch here to hide an unbounded
+ *  read behind — see packages/b1's note on why there is no `readAll`. */
 export function runnerFor(conn: Connector): QueryRunner {
   return (target, query, columns, opts) =>
     viaB1(async () => {
@@ -120,14 +124,6 @@ export function runnerFor(conn: Connector): QueryRunner {
         orderby: query.orderby,
         ...(columns.length ? { select: columns } : {}),
       };
-
-      if (opts?.maxPages && opts.maxPages > 1) {
-        // Multi-page read (history sync). No $top: the bound is the page cap, stated by the caller.
-        const { rows, truncated } = await readPages(
-          t, query.entitySet, { ...base, maxPageSize: DEFAULT_PAGE }, { maxPages: opts.maxPages },
-        );
-        return { rows, truncated };
-      }
 
       // The caller may ask for less than a page (the masterdata editor's preview reads five rows);
       // DEFAULT_PAGE stays the ceiling, so `size` can only ever shrink the read.

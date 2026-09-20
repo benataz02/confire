@@ -266,6 +266,11 @@ export const ModelDefZ = z.object({
     // a model saved before price lists existed must still load, it just cannot be saved again
     // until one is picked.
     priceList: z.number().int().positive().optional(),
+    // The tenant masterdata query whose cached rows carry the item prices — an `Items` read with
+    // no declared columns, so B1 returns whole rows and the nested `ItemPrices` collection
+    // survives into the cache. `priceList` then picks the line out of it. Named here rather than
+    // built in, for the same reason `history.table` is: the query is the tenant's, defined once.
+    itemTable: z.string().min(1).optional(),
   }),
   batchDefaults: z.array(z.number().int().positive()),
 });
