@@ -45,6 +45,15 @@ test("anchors point at the control the issue is about", () => {
   expect(anchorOf("structure", draft)).toBeUndefined();
 });
 
+test("an unsaved new model reports nothing but what actually failed", () => {
+  const draft = { ...starterModel(""), name: "" };
+  const msgs = builderMessages({
+    draft, issues: checkModel(draft), tried: false, saveError: new Error("boom"),
+  });
+  // No name blocker, no checkModel issue, no stale-preview note — the counter stays clean until Save.
+  expect(msgs.map((m) => m.id)).toEqual(["save"]);
+});
+
 test("operation failures are messages too, ungrouped from any section", () => {
   const draft = named();
   const msgs = builderMessages({

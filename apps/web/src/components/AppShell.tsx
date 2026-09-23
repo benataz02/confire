@@ -47,6 +47,18 @@ export function AppShell() {
   const isAdmin = me.data?.role === "admin" || me.data?.role === "owner";
   const isClient = me.data?.role === "client";
   const pins = useQuery({ ...orpc.entities.navPins.queryOptions(), enabled: isAdmin });
+  const queryClient = useQueryClient();
+  // After onboarding the four default pins land in the sidenav; warm entity_meta so the first
+  // list open is a Postgres read rather than a $metadata round trip through the agent.
+  useEffect(() => {
+    for (const p of pins.data?.entities ?? []) {
+      void queryClient.prefetchQuery({
+        ...orpc.entities.schema.queryOptions({ input: { entity: p.name } }),
+        staleTime: 24 * 60 * 60_000,
+        retry: false,
+      });
+    }
+  }, [queryClient, pins.data]);
 
   const onSelect: SideNavigationPropTypes["onSelectionChange"] = (e) => {
     const el = e.detail.item as HTMLElement;
@@ -119,8 +131,6 @@ export function AppShell() {
     setTheme(theme);
     localStorage.setItem('theme', theme);
   }, [theme]);
-
-  const queryClient = useQueryClient();
 
   const signOut = async () => {
     await authClient.signOut();

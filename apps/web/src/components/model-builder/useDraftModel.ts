@@ -29,6 +29,12 @@ export function useDraftModel(id?: string) {
   const [draft, setDraft] = useState<ModelDef | null>(() => (id ? null : starterModel("")));
   const [dirty, setDirty] = useState(false);
   const [serverIssues, setServerIssues] = useState<Issue[]>([]);
+  // A brand-new model is empty by definition, so painting its mandatory fields red — and listing
+  // them in the message popover — before the author has touched anything is noise. Like
+  // ParamDialog's `tried`, the first Save reveals them.
+  // A *saved* model starts validated: it passed checkModel to get into the database, so anything
+  // wrong with it is something this session just introduced, and saying so at once is the point.
+  const [tried, setTried] = useState(!!id);
   const [portalMeta, setPortalMetaState] = useState<{ portal: boolean; portalDescription: string } | null>(
     () => (id ? null : { portal: false, portalDescription: "" }),
   );
@@ -68,6 +74,7 @@ export function useDraftModel(id?: string) {
       onSuccess: (row) => {
         setDirty(false);
         setServerIssues([]);
+        setTried(true); // it is a saved model now, errors introduced from here on are live
         qc.invalidateQueries({ queryKey: orpc.models.list.queryOptions().queryKey });
         qc.invalidateQueries({ queryKey: orpc.models.rows.key() });
         // save RETURNs the saved row, so seed the cache with it instead of refetching models.get.
@@ -93,6 +100,8 @@ export function useDraftModel(id?: string) {
     issues: modelIssues,
     serverIssues,
     dirty,
+    /** Save has been pressed at least once — only then do the fields show their own errors. */
+    tried,
     /** Clear the unsaved-changes blocker before navigating away deliberately (Delete). */
     setDirty,
     portalMeta,
@@ -100,8 +109,12 @@ export function useDraftModel(id?: string) {
       setPortalMetaState(p);
       setDirty(true);
     },
+    // Save stays enabled and the first click on an invalid model reveals the errors instead of
+    // saving, so the button never greys out without saying why (same deal as ParamDialog).
     save: () => {
-      if (!draft || !portalMeta || !draft.name.trim()) return;
+      if (!draft || !portalMeta) return;
+      setTried(true);
+      if (modelIssues.length > 0 || !draft.name.trim()) return;
       saveMut.mutate({
         ...(id ? { id } : {}),
         definition: draft,

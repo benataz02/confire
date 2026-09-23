@@ -35,14 +35,31 @@ const curated = (entity: string) => {
 
 const PIN_CAP = 20;
 
-const pinsOf = async (tenantId: string, userId: string): Promise<B1NavPin[]> => {
+/** Seeded on first connect and on the first pin read if no row exists yet. */
+export const DEFAULT_NAV_PINS: B1NavPin[] = [
+  { name: "Quotations", label: "Quotations" },
+  { name: "Orders", label: "Orders" },
+  { name: "BusinessPartners", label: "Business Partners" },
+  { name: "Items", label: "Items" },
+];
+
+export async function seedDefaultNavPins(tenantId: string, userId: string): Promise<void> {
+  await db.insert(b1NavPin).values({
+    tenantId, userId, entities: DEFAULT_NAV_PINS, updatedAt: new Date(),
+  }).onConflictDoNothing();
+}
+
+const pinsRow = async (tenantId: string, userId: string): Promise<B1NavPin[] | undefined> => {
   const [row] = await db
     .select({ entities: b1NavPin.entities })
     .from(b1NavPin)
     .where(and(eq(b1NavPin.tenantId, tenantId), eq(b1NavPin.userId, userId)))
     .limit(1);
-  return row?.entities ?? [];
+  return row?.entities;
 };
+
+const pinsOf = async (tenantId: string, userId: string): Promise<B1NavPin[]> =>
+  (await pinsRow(tenantId, userId)) ?? [];
 
 export const entitiesRouter = {
   /** Every entity set B1 exposes, with its business categories for navigation. */
@@ -198,10 +215,18 @@ export const entitiesRouter = {
     .input(z.object({ entity: EntityZ, docEntry: z.number().int() }))
     .handler(({ input, context }) => printDocument(context.tenantId, input.entity, input.docEntry)),
 
-  /** Entity sets this admin pinned onto the SAP sidenav group. Empty until the first pin. */
-  navPins: adminProcedure.handler(async ({ context }) => ({
-    entities: await pinsOf(context.tenantId, context.userId),
-  })),
+  /** Entity sets this admin pinned onto the SAP sidenav group. */
+  navPins: adminProcedure.handler(async ({ context }) => {
+    const { tenantId, userId } = context;
+    let entities = await pinsRow(tenantId, userId);
+    if (entities === undefined) {
+      // Onboarded before connect seeded pins, or another admin: seed once.
+      // A stored empty list is a choice and must not come back.
+      await seedDefaultNavPins(tenantId, userId);
+      entities = DEFAULT_NAV_PINS;
+    }
+    return { entities };
+  }),
 
   /** Add or remove one pin. Names only — labels are a snapshot from the catalog at pin time. */
   setNavPin: adminProcedure

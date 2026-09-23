@@ -224,6 +224,9 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     const reqProps = {
       required: req,
       valueState: req && (v === undefined || v === null || v === "") ? "Negative" : "None",
+      // UI5's default message is "Invalid entry", which is the wrong complaint: nothing was
+      // entered. Name the field instead — the popup can sit over a field scrolled away from its label.
+      valueStateMessage: <div>{`${p.label || p.key} has to be answered before this configuration can be quoted.`}</div>,
     } as const;
 
     if (p.ui === "radio")

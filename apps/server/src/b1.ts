@@ -5,7 +5,8 @@ import { B1Error, RemoteTransport, nextLinkOf, rowsOrThrow, type AgentTarget, ty
 import { decryptSecret } from "./crypto.ts";
 import { DEFAULT_PAGE, type QueryRunner } from "./lookups.ts";
 
-export const SAP_UNAVAILABLE = "SAP is not connected.";
+export const SAP_UNAVAILABLE =
+  "No on-prem agent is configured for this workspace. Run seed:agent with the secret from agent.json.";
 
 export type { Connector };
 

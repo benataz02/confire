@@ -278,6 +278,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
             <FormItem labelContent={<Label required>Name</Label>}>
               <Input value={d.name} placeholder="prices" required
                 valueState={submitted && !d.name.trim() ? "Negative" : "None"}
+                valueStateMessage={<div>Give the source a name — this is what a model writes inside LOOKUP().</div>}
                 onInput={(e) => edit((x) => ({ ...x, name: e.target.value }))} />
             </FormItem>
             <FormItem labelContent={<Label required>Kind</Label>}>
@@ -334,6 +335,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
                           : iconSlot}
                         <Input placeholder="key" value={c.key} style={{ width: "100%" }}
                           valueState={submitted && !c.key.trim() ? "Negative" : "None"}
+                          valueStateMessage={<div>Every column needs a key — delete the row if it is not wanted.</div>}
                           onInput={(e) => edit((x) => ({ ...x, columns: x.columns.map((y, j) => (j === i ? { ...y, key: e.target.value } : y)) }))} />
                       </div>
                     </TableCell>
@@ -419,6 +421,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
               <FormItem labelContent={<Label required>Entity set</Label>}>
                 <Input value={d.query.query.entitySet} placeholder="Items" required
                   valueState={submitted && !d.query.query.entitySet ? "Negative" : "None"}
+                  valueStateMessage={<div>Name the Service Layer entity set to read, e.g. Items.</div>}
                   onInput={(e) => setOData({ entitySet: e.target.value.trim() })} />
               </FormItem>
               <FormItem labelContent={<Label>Select</Label>}>

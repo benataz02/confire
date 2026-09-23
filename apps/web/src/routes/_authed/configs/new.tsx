@@ -21,6 +21,8 @@ function NewConfig() {
   const [name, setName] = useState("");
   const [modelId, setModelId] = useState("");
   const [customer, setCustomer] = useState<{ cardCode: string; cardName: string } | null>(null);
+  // An untouched form is not an error yet — Create is what turns the empty name red.
+  const [tried, setTried] = useState(false);
 
   useEffect(() => {
     if (!modelId && models.data?.[0]) setModelId(models.data[0].id);
@@ -54,8 +56,10 @@ function NewConfig() {
       footerArea={
         <Bar design="FloatingFooter" endContent={
           <>
-            <Button design="Emphasized" disabled={!name.trim() || !modelId || create.isPending}
-              onClick={() => create.mutate({ modelId, name: name.trim(), customer })}>
+            <Button design="Emphasized" disabled={create.isPending}
+              onClick={() => (name.trim() && modelId
+                ? create.mutate({ modelId, name: name.trim(), customer })
+                : setTried(true))}>
               {create.isPending ? "Creating…" : "Create"}
             </Button>
             <Button onClick={() => void navigate({ to: "/configs" })}>Cancel</Button>
@@ -73,7 +77,8 @@ function NewConfig() {
             ) : null}
             <FormItem labelContent={<Label for="cfg-new-name" required>Name</Label>}>
               <Input id="cfg-new-name" value={name} style={{ width: "100%" }}
-                valueState={name.trim() ? "None" : "Negative"}
+                valueState={tried && !name.trim() ? "Negative" : "None"}
+                valueStateMessage={<div>Give the configuration a name — it is how it shows up in the list.</div>}
                 onInput={(e) => setName(e.target.value ?? "")} />
             </FormItem>
             <FormItem labelContent={<Label required>Model</Label>}>

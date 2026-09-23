@@ -2,7 +2,7 @@
   "mcpServers": {
     "ui5-wcr": {
       "type": "stdio",
-      "command": "pnpx",
+      "command": "bunx",
       "args": [
         "@ui5/webcomponents-react-mcp@latest"
       ]

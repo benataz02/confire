@@ -91,6 +91,7 @@ export function ModelBuilderPage({ id }: { id?: string }) {
   const messages = builderMessages({
     draft,
     issues: allIssues,
+    tried: m.tried,
     saveError: m.saveError,
     actionError: (remove.error ?? duplicate.error) as Error | null,
     lookupsError: lookups.error as Error | null,
@@ -121,7 +122,10 @@ export function ModelBuilderPage({ id }: { id?: string }) {
                 {/* Every error, warning and blocker on the page, grouped by the tab it belongs to —
                     this is the only place they are reported, so it sits before the actions it
                     explains the disabled state of. */}
-                <PageMessages messages={messages} okText="No issues — the model is valid."
+                <PageMessages messages={messages}
+                  okText={m.tried
+                    ? "No issues — the model is valid."
+                    : "Nothing reported yet — Save checks the model."}
                   onSection={sectionParam.go} />
                 {id ? (
                   <Button icon="copy" design="Transparent" disabled={m.dirty || duplicate.isPending}
@@ -149,7 +153,9 @@ export function ModelBuilderPage({ id }: { id?: string }) {
         footerArea={
           <Bar design="FloatingFooter" endContent={
             <>
-              <Button design="Emphasized" disabled={m.issues.length > 0 || !m.dirty || m.saving || !draft.name.trim()}
+              {/* Not disabled on issues: pressing it is what turns the empty mandatory fields red,
+                  and the popover above already carries the list. */}
+              <Button design="Emphasized" disabled={!m.dirty || m.saving}
                 onClick={() => void m.save()}>
                 {m.saving ? "Saving…" : "Save"}
               </Button>
@@ -162,7 +168,7 @@ export function ModelBuilderPage({ id }: { id?: string }) {
       >
         <ObjectPageSection id="settings" titleText={secTitle("settings")}>
           <SettingsTab draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
-            portalMeta={portalMeta} setPortalMeta={m.setPortalMeta} />
+            tried={m.tried} portalMeta={portalMeta} setPortalMeta={m.setPortalMeta} />
         </ObjectPageSection>
         <ObjectPageSection id="params" titleText={secTitle("params")}>
           <ParamsTab modelId={id ?? ""} draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}

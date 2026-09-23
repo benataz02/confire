@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { authClient, sessionQuery } from "../auth-client.ts";
-import { meQuery } from "../orpc.ts";
+import { meQuery, sapGate } from "../orpc.ts";
 import { apexUrl, currentSlug, hardRedirect, tenantUrl } from "../lib/tenant.ts";
 import { AppShell } from "../components/AppShell.tsx";
 
@@ -21,6 +21,8 @@ export const Route = createFileRoute("/_authed")({
       const orgs = (await authClient.organization.list()).data ?? [];
       const org = orgs[0];
       if (!org) throw redirect({ to: "/onboarding" });
+      const gate = await sapGate(context.queryClient);
+      if (gate === "setup") throw redirect({ to: "/onboarding" });
       return hardRedirect(tenantUrl(org.slug));
     }
 

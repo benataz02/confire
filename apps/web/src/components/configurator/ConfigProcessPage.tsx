@@ -388,6 +388,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
                 <Input id="cfg-name" value={project.name} style={{ width: "100%" }}
                   disabled={update.isPending}
                   valueState={project.name.trim() ? "None" : "Negative"}
+                  valueStateMessage={<div>The configuration needs a name before it can be quoted.</div>}
                   onChange={(e) => {
                     const v = (e.target.value ?? "").trim();
                     if (v && v !== project.name) update.mutate({ id, name: v });
@@ -426,6 +427,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
                   select={CUSTOMER_SELECT} filter={CUSTOMER_FILTER}
                   value={project.customer?.cardCode}
                   valueState={project.customer?.cardCode ? "None" : "Negative"}
+                  valueStateMessage="Pick the customer the quote is written for — SAP needs a business partner on the document."
                   headerText="Select a customer"
                   onChange={(v, row) => update.mutate({
                     id,

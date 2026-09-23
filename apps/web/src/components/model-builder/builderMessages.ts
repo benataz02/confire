@@ -60,6 +60,11 @@ export function builderMessages(a: {
   draft: ModelDef;
   /** checkModel's issues plus whatever the server rejected the last save with */
   issues: Issue[];
+  /** Save has been pressed (or the model was loaded from the database). Until then the model's own
+   *  errors stay out of the popover, exactly as they stay out of the fields' negative state —
+   *  MessageViewButton would otherwise open a new model with a red counter on it. Defaults to true;
+   *  things that actually *failed* are reported either way. */
+  tried?: boolean;
   saveError?: Error | null;
   /** duplicate/delete refusal — the server knows things the confirm dialog cannot */
   actionError?: Error | null;
@@ -67,15 +72,16 @@ export function builderMessages(a: {
   lookupsError?: Error | null;
 }): PageMessage[] {
   const out: PageMessage[] = [];
+  const validate = a.tried !== false;
 
-  if (!a.draft.name.trim())
+  if (validate && !a.draft.name.trim())
     out.push({
       id: "name", type: "Negative", text: "Enter a model name",
       detail: "A model cannot be saved unnamed.",
       group: SECTION_TITLE.settings!, section: "settings", anchor: "#model-name",
     });
 
-  a.issues.forEach((issue, i) => {
+  if (validate) a.issues.forEach((issue, i) => {
     const section = sectionOf(issue.path);
     out.push({
       id: `${issue.path}:${i}`, type: "Negative", text: issue.message, detail: issue.path,
@@ -92,7 +98,7 @@ export function builderMessages(a: {
 
   // The preview falls back to the last valid draft while the model has errors; without saying so it
   // would just stop tracking the edits mid-typing with no explanation.
-  if (a.issues.length)
+  if (validate && a.issues.length)
     out.push({
       id: "preview", type: "Critical",
       text: `Preview shows the last valid version — fix ${a.issues.length} error${a.issues.length === 1 ? "" : "s"} to preview the current draft.`,

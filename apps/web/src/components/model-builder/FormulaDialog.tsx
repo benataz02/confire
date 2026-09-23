@@ -19,6 +19,8 @@ export function FormulaDialog({ draft, tables, initial, issue, onCancel, onOk }:
   onOk: (c: Computed) => void;
 }) {
   const [c, setC] = useState<Computed>(initial);
+  // Like ParamDialog: an untouched new formula isn't an error yet — the first Save reveals it.
+  const [tried, setTried] = useState(false);
   const keyOk = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(c.key);
   const keyTaken =
     draft.parameters.some((p) => p.key === c.key) ||
@@ -30,7 +32,8 @@ export function FormulaDialog({ draft, tables, initial, issue, onCancel, onOk }:
       footer={
         <Bar design="Footer" endContent={
           <>
-            <Button design="Emphasized" disabled={!keyOk || keyTaken} onClick={() => onOk(c)}>Save</Button>
+            <Button design="Emphasized"
+              onClick={() => (keyOk && !keyTaken ? onOk(c) : setTried(true))}>Save</Button>
             <Button onClick={onCancel}>Cancel</Button>
           </>
         } />
@@ -39,8 +42,10 @@ export function FormulaDialog({ draft, tables, initial, issue, onCancel, onOk }:
       <Form {...PAIRS} style={{ padding: "1rem" }}>
         <FormGroup accessibleName="Formula">
           <FormItem labelContent={lbl("Key", "The name other expressions use to read this value. It shares one namespace with the parameter keys.", true)}>
-            <Input value={c.key} style={W} valueState={keyOk && !keyTaken ? "None" : "Negative"}
-              valueStateMessage={<div>{keyTaken ? "Another parameter or formula already uses this key." : "Must be a valid identifier."}</div>}
+            <Input value={c.key} style={W} valueState={!tried || (keyOk && !keyTaken) ? "None" : "Negative"}
+              valueStateMessage={<div>{keyTaken
+                ? "Another parameter or formula already uses this key."
+                : "Letters, digits and underscore only, and it cannot start with a digit."}</div>}
               onInput={(e) => setC((x) => ({ ...x, key: e.target.value }))} />
           </FormItem>
           <FormItem labelContent={lbl("Expression", "Evaluated on every change. It can read any parameter, any other formula, and each table's aggregates.")}>

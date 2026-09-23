@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { createORPCClient, onError } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
@@ -26,6 +27,20 @@ export const orpc = createTanstackQueryUtils(client);
  * page session — see the note there about why the role is deliberately not revalidated.
  */
 export const meQuery = orpc.me.queryOptions({ staleTime: Infinity });
+
+/**
+ * Owner/admin of the user's one org: whether sap_connection exists.
+ * FORBIDDEN means a member/client — they belong on the tenant, not the agent form.
+ */
+export async function sapGate(qc: QueryClient): Promise<"connected" | "setup" | "member"> {
+  try {
+    const r = await qc.fetchQuery({ ...orpc.sap.connection.queryOptions(), retry: false, staleTime: 0 });
+    return r.connected ? "connected" : "setup";
+  } catch (e) {
+    if ((e as { code?: string }).code === "FORBIDDEN") return "member";
+    throw e;
+  }
+}
 
 /**
  * The tenant's B1 local currency, for every money figure in the app. It rides on `me` rather than

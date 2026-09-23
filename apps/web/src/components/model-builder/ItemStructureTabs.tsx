@@ -96,6 +96,7 @@ export function useItemStructureTab({ draft, update, issues, tables }: Props) {
                   showValue headerText="Select an item"
                   value={asCode(l.itemCode) ?? (l.itemCode.trim() || undefined)}
                   valueState={l.itemCode.trim() ? "None" : "Negative"}
+                  valueStateMessage="Pick the item this line consumes — its unit price comes from the model's price list."
                   onChange={(v, row) => setBom(i, {
                     itemCode: v == null ? '' : JSON.stringify(String(v)),
                     ...(row?.[1] == null ? {} : { desc: String(row[1]) }),

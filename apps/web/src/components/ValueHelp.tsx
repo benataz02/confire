@@ -244,13 +244,19 @@ export function ValueHelp({
   // Nothing to show yet: spin on the field and hold the dialog back until the first page lands.
   const pending = !!loading && !table.rows.length;
 
+  // Without a message slot UI5 falls back to its own "Invalid entry", which names neither the
+  // field nor what to do about it — say what is missing instead.
   return (
     <>
       <Input showSuggestions filter="None" value={shown} placeholder="Type or pick…"
         showClearIcon={!readonly} style={{ width: "100%" }} disabled={disabled} readonly={readonly}
         required={required}
         valueState={valueState ?? (required && !raw ? "Negative" : undefined)}
-        valueStateMessage={valueStateMessage ? <div>{valueStateMessage}</div> : undefined}
+        valueStateMessage={
+          valueStateMessage ? <div>{valueStateMessage}</div>
+            : required && !raw ? <div>Pick a value from the list.</div>
+            : undefined
+        }
         icon={
           readonly ? undefined
             : loading ? <BusyIndicator active delay={0} size="S" />
@@ -379,6 +385,7 @@ export function QueryValueHelp({
       }}
       disabled={disabled} readonly={readonly} showValue={showValue} required={required}
       valueState={page.error ? "Negative" : undefined}
+      valueStateMessage={page.error ? (page.error as Error).message : undefined}
       table={resolved} valueCol={valueCol} columns={displayColumns(lookupRef, resolved.columns)}
       columnLabels={canonicalTable?.labels} hidden={canonicalTable?.hidden}
       onSearch={setSearch} onOpen={() => setSearch("")}
@@ -389,8 +396,8 @@ export function QueryValueHelp({
 /** Value help over a B1 entity set via `entities.rows`. Same dialog as QueryValueHelp; the
  *  query is a ListVariantDef compiled server-side (the browser never sends a $filter string). */
 export function EntityValueHelp({
-  entitySet, keyField, value, onChange, headerText, select, filter, valueState, disabled, readonly,
-  showValue, required,
+  entitySet, keyField, value, onChange, headerText, select, filter, valueState, valueStateMessage,
+  disabled, readonly, showValue, required,
 }: {
   entitySet: string;
   keyField: string;
@@ -405,6 +412,8 @@ export function EntityValueHelp({
   filter?: FilterCond[];
   /** caller's state (e.g. required-but-empty); a fetch error still wins. */
   valueState?: "None" | "Positive" | "Critical" | "Negative" | "Information";
+  /** what is wrong, in words — without it UI5 shows the generic "Invalid entry" */
+  valueStateMessage?: ReactNode;
   disabled?: boolean;
   /** locked: the picked code stays readable, the dialog just won't open */
   readonly?: boolean;
@@ -464,6 +473,7 @@ export function EntityValueHelp({
       onSearch={setSearch} onOpen={() => setSearch("")}
       disabled={disabled} readonly={readonly} showValue={showValue} required={required}
       valueState={page.error ? "Negative" : valueState}
+      valueStateMessage={page.error ? page.error.message : valueStateMessage}
       {...pagingProps(page, search !== null)}
     />
   );

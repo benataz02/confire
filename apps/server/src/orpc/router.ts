@@ -5,6 +5,7 @@ import { configsRouter } from "./routers/configs.ts";
 import { portalClientsRouter, portalRouter } from "./routers/portal.ts";
 import { dashboardRouter } from "./routers/dashboard.ts";
 import { entitiesRouter } from "./routers/entities.ts";
+import { sapRouter } from "./routers/sap.ts";
 import { sessionProcedure, membershipFromHost } from "./base.ts";
 import { tenantCurrency } from "../b1.ts";
 
@@ -30,6 +31,7 @@ export const router = {
   portalClients: portalClientsRouter,
   dashboard: dashboardRouter,
   entities: entitiesRouter,
+  sap: sapRouter,
 };
 
 export type AppRouter = typeof router;

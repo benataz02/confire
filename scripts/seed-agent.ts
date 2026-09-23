@@ -11,8 +11,8 @@
  * local dev). It is stored encrypted.
  */
 import { eq } from "drizzle-orm";
-import { db, pool, organization, sapConnection } from "@confire/db";
-import { encryptSecret } from "../apps/server/src/crypto.ts";
+import { db, pool, organization } from "@confire/db";
+import { upsertSapConnection } from "../apps/server/src/seed-agent.ts";
 
 const [slug, agentUrl = "http://localhost:4000", secret = "dev-secret-change-me-min-32-chars-long"] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const flag = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split("=").slice(1).join("=") ?? null;
@@ -28,17 +28,15 @@ if (!org) {
   process.exit(1);
 }
 
-const row = {
-  tenantId: org.id,
+const accessClientId = flag("access-id");
+const beasEnabled = process.argv.includes("--beas");
+await upsertSapConnection(org.id, {
   agentUrl,
-  secret: encryptSecret(secret),
-  accessClientId: flag("access-id"),
+  secret,
+  accessClientId,
   accessClientSecret: flag("access-secret"),
-  beasEnabled: process.argv.includes("--beas"),
-  status: "ok" as const,
-};
+  beasEnabled,
+});
 
-await db.insert(sapConnection).values(row).onConflictDoUpdate({ target: sapConnection.tenantId, set: row });
-
-console.log(`${slug} -> ${agentUrl}${row.accessClientId ? " (behind Cloudflare Access)" : ""}${row.beasEnabled ? " + beas" : ""}`);
+console.log(`${slug} -> ${agentUrl}${accessClientId ? " (behind Cloudflare Access)" : ""}${beasEnabled ? " + beas" : ""}`);
 await pool.end();

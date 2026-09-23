@@ -563,7 +563,7 @@ describe.skipIf(!process.env.DATABASE_URL)("configs.create (integration)", () =>
 });
 
 // The acceptance criterion of the masterdata-cache rewrite: this tenant has NO sap_connection row,
-// so any read that reached for the agent would throw SERVICE_UNAVAILABLE ("SAP is not connected").
+// so any read that reached for the agent would throw SERVICE_UNAVAILABLE (agent not configured).
 // Nothing is injected here — calculateProject builds its own rowCache and goes to Postgres.
 describe.skipIf(!process.env.DATABASE_URL)("calculating with no agent at all", () => {
   const offlineTenant = `test-offline-${crypto.randomUUID()}`;
