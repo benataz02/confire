@@ -19,6 +19,12 @@
       "skillPath": "skills/styling/SKILL.md",
       "computedHash": "3c5d36299cbde09d4ee5817618a09abd69906a9103209e4205bb5337c26fbea1"
     },
+    "typesafe-ai": {
+      "source": "typesafe-ai/skills",
+      "sourceType": "github",
+      "skillPath": "skills/typesafe-ai/SKILL.md",
+      "computedHash": "db61a2a2136db2f2c581a3b301dbc649db9e318d596e8fb6f52546dbefc6920f"
+    },
     "visual-test": {
       "source": "UI5/webcomponents",
       "sourceType": "github",
