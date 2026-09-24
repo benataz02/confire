@@ -47,7 +47,6 @@ export function configDocumentCommandId(input: {
     .map((s) => ({
       assignment: input.candidates[s.candidateIdx]?.assignment ?? null,
       batchQty: s.batchQty,
-      overrides: s.overrides,
     }));
   const raw = `${input.tenantId}|${input.projectId}|${canonicalJson({ sel, tables: input.tables })}`;
   return createHash("sha256").update(raw).digest("hex");
@@ -102,7 +101,7 @@ export function buildQuoteLines(
     if (!cand) continue;
     let out;
     try {
-      out = computeOutputs(model, lookups, cand.assignment, s.batchQty, s.overrides, project.tables);
+      out = computeOutputs(model, lookups, cand.assignment, s.batchQty, project.tables);
     } catch (e) {
       if (e instanceof DslError || e instanceof RangeError) {
         throw new ORPCError("BAD_REQUEST", { message: e.message });

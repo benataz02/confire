@@ -40,7 +40,7 @@ const tables: TableRows = {
 };
 const batchOf = (n: number) => ({
   batchQty: n,
-  outputs: computeOutputs(model, lookups, { thickness: 3 }, n, undefined, tables),
+  outputs: computeOutputs(model, lookups, { thickness: 3 }, n, tables),
 });
 const candidates: Candidate[] = [{ assignment: { thickness: 3 }, perBatch: [batchOf(3), batchOf(6)] }];
 const call = (selection: Parameters<typeof itemMoney>[0]["selection"], batches = [3]) =>

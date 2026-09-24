@@ -1,18 +1,22 @@
-import type { Entries, ModelDef, OutputOverrides, Outputs } from "@confire/config-engine";
-import { randomUuid } from "../../uuid.ts";
+import type { Entries, ModelDef, Outputs } from "@confire/config-engine";
 
 // Pure view logic for the configuration wizard. Client-side mirrors of the server's
 // ConfigCandidate/ConfigSelection jsonb shapes (web doesn't depend on @confire/db; structural match).
 export type Candidate = { assignment: Entries; perBatch: { batchQty: number; outputs: Outputs }[] };
-export type Sel = { candidateIdx: number; batchQty: number; overrides?: OutputOverrides };
+export type Sel = { candidateIdx: number; batchQty: number };
 
-// Minimal shape the candidates matrix needs — the portal feeds it sanitized data,
-// the internal wizard maps full Candidates down with toPriced().
-export type PricedCandidate = { assignment: Entries; perBatch: { batchQty: number; unitPrice: number }[] };
+// What the price analysis needs — exactly the portal's sanitized payload, plus `unitCost` when the
+// internal page maps full Candidates down with toPriced(). Absent cost = no margin row.
+export type PricedCandidate = {
+  assignment: Entries;
+  perBatch: { batchQty: number; unitPrice: number; total: number; unitCost?: number }[];
+};
 
 export const toPriced = (c: Candidate): PricedCandidate => ({
   assignment: c.assignment,
-  perBatch: c.perBatch.map((b) => ({ batchQty: b.batchQty, unitPrice: b.outputs.unitPrice })),
+  perBatch: c.perBatch.map((b) => ({
+    batchQty: b.batchQty, unitPrice: b.outputs.unitPrice, total: b.outputs.batchTotal, unitCost: b.outputs.unitCost,
+  })),
 });
 
 export const fmt = (n: number): string => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -55,51 +59,14 @@ export const toggleSelection = (sel: Sel[], candidateIdx: number, batchQty: numb
     ? sel.filter((s) => !(s.candidateIdx === candidateIdx && s.batchQty === batchQty))
     : [...sel, { candidateIdx, batchQty }];
 
-type BomOv = NonNullable<OutputOverrides["bom"]>[number];
-type OpOv = NonNullable<OutputOverrides["ops"]>[number];
-type AddedBom = NonNullable<OutputOverrides["addBom"]>[number];
-type AddedOp = NonNullable<OutputOverrides["addOps"]>[number];
+// Rows the price chart draws: every configuration with a picked cell, in pick order — or, before
+// anything is picked, the cheapest one at the first quantity, so the chart is never empty.
+export function chartRows(candidates: PricedCandidate[], selection: Sel[]): number[] {
+  if (selection.length) return [...new Set(selection.map((s) => s.candidateIdx))];
+  const first = candidates[0]?.perBatch[0]?.batchQty;
+  return first === undefined ? [] : [bestByBatch(candidates)[first]!];
+}
 
-const upsert = <T extends { id: string }>(list: T[] | undefined, id: string, patch: Partial<T>): T[] => {
-  const next = [...(list ?? [])];
-  const i = next.findIndex((o) => o.id === id);
-  if (i >= 0) next[i] = { ...next[i]!, ...patch };
-  else next.push({ id, ...patch } as T);
-  return next;
-};
-
-export const patchBom = (ov: OutputOverrides, id: string, patch: Partial<BomOv>): OutputOverrides =>
-  ({ ...ov, bom: upsert(ov.bom, id, patch) });
-export const patchOp = (ov: OutputOverrides, id: string, patch: Partial<OpOv>): OutputOverrides =>
-  ({ ...ov, ops: upsert(ov.ops, id, patch) });
-export const resetLine = (ov: OutputOverrides, kind: "bom" | "ops", id: string): OutputOverrides =>
-  ({ ...ov, [kind]: (ov[kind] ?? []).filter((o) => o.id !== id) });
-export const isEdited = (ov: OutputOverrides, kind: "bom" | "ops", id: string): boolean =>
-  (ov[kind] ?? []).some((o) => o.id === id);
-export const isRemoved = (ov: OutputOverrides, kind: "bom" | "ops", id: string): boolean =>
-  (ov[kind] ?? []).some((o) => o.id === id && o.remove === true);
-
-export const addBomLine = (ov: OutputOverrides): OutputOverrides =>
-  ({ ...ov, addBom: [...(ov.addBom ?? []), { id: randomUuid(), itemCode: "NEW", qtyPerUnit: 1, unitPrice: 0 }] });
-export const addOpLine = (ov: OutputOverrides): OutputOverrides =>
-  ({ ...ov, addOps: [...(ov.addOps ?? []), { id: randomUuid(), resource: "NEW", setupMin: 0, runMinPerUnit: 0, ratePerHour: 0 }] });
-export const patchAddedBom = (ov: OutputOverrides, id: string, patch: Partial<AddedBom>): OutputOverrides =>
-  ({ ...ov, addBom: (ov.addBom ?? []).map((o) => (o.id === id ? { ...o, ...patch } : o)) });
-export const patchAddedOp = (ov: OutputOverrides, id: string, patch: Partial<AddedOp>): OutputOverrides =>
-  ({ ...ov, addOps: (ov.addOps ?? []).map((o) => (o.id === id ? { ...o, ...patch } : o)) });
-export const removeAddedBom = (ov: OutputOverrides, id: string): OutputOverrides =>
-  ({ ...ov, addBom: (ov.addBom ?? []).filter((o) => o.id !== id) });
-export const removeAddedOp = (ov: OutputOverrides, id: string): OutputOverrides =>
-  ({ ...ov, addOps: (ov.addOps ?? []).filter((o) => o.id !== id) });
-
-// Same overrides with remove flags dropped: the display pass keeps removed rows visible
-// (struck through) while the totals pass uses the full overrides.
-export const withoutRemovals = (ov: OutputOverrides | undefined): OutputOverrides | undefined =>
-  ov && {
-    ...ov,
-    bom: ov.bom?.map(({ remove: _remove, ...rest }) => rest),
-    ops: ov.ops?.map(({ remove: _remove, ...rest }) => rest),
-  };
-
-export const cleanOverrides = (ov: OutputOverrides | undefined): OutputOverrides | undefined =>
-  ov && (ov.bom?.length || ov.ops?.length || ov.addBom?.length || ov.addOps?.length) ? ov : undefined;
+/** Share of the price that is margin; null where there is no price to take a share of. */
+export const margin = (unitPrice: number, unitCost: number): number | null =>
+  unitPrice === 0 ? null : (unitPrice - unitCost) / unitPrice;

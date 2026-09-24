@@ -14,8 +14,9 @@ import type { Candidate, Sel } from "./runView.ts";
 //
 // The split is `itemSplit`, the same function buildQuoteLines calls, against the same scope, so
 // what the salesperson reads here is what the server posts. `computeOutputs` runs rather than
-// `candidate.perBatch[].outputs` being read off the row: a selection may carry BOM/routing
-// overrides, and the engine is the only thing that knows what they do to the cost.
+// `candidate.perBatch[].outputs` being read off the row: the server re-prices against the live
+// cache and the current table rows when it posts (nothing is snapshotted), so the stored figures
+// could show a price the quotation will not carry.
 
 export type RowMoney = {
   unitCost: number;
@@ -80,7 +81,7 @@ export function itemMoney(args: {
     if (!cand) continue;
     let out;
     try {
-      out = computeOutputs(model, lookups, cand.assignment, s.batchQty, s.overrides, tables);
+      out = computeOutputs(model, lookups, cand.assignment, s.batchQty, tables);
     } catch {
       continue; // undecidable while an input is open — same silence the price badges give
     }

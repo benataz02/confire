@@ -8,13 +8,14 @@ import {
 } from "@ui5/webcomponents-react";
 import { propagate, type Entries, type ItemsTable, type TableRows, type Val } from "@confire/config-engine";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts";
-import { client, meQuery, orpc } from "../../orpc.ts";
+import { client, meQuery, orpc, useCurrency } from "../../orpc.ts";
+import { money as formatMoney } from "../../lib/money.ts";
 import { confirm } from "../confirm.ts";
 import { toast } from "../toast.ts";
-import { cleanOverrides, statusUi, toggleSelection, type Sel } from "./runView.ts";
+import { statusUi, toggleSelection, toPriced, type Sel } from "./runView.ts";
 import { BATCHES_SECTION, ConfiguratorForm, ConsistencyStatus, formSections } from "./ConfiguratorForm.tsx";
 import { EntityValueHelp } from "../ValueHelp.tsx";
-import { StepCandidatesReview } from "./StepCandidatesReview.tsx";
+import { PriceAnalysis } from "./PriceAnalysis.tsx";
 import { InsightsRail } from "./InsightsRail.tsx";
 import { itemMoney } from "./itemMoney.ts";
 import { needsCalculation } from "./configProcessState.ts";
@@ -42,6 +43,7 @@ const CUSTOMER_FILTER = [{ field: "CardType", op: "eq" as const, value: "cCustom
 export function ConfigProcessPage({ id }: { id: string }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const currency = useCurrency();
   const sectionParam = useSectionParam();
   const q = useQuery(orpc.configs.get.queryOptions({ input: { id } }));
   // Cached by _authed's beforeLoad, so this costs nothing. /b1 is admin/owner only.
@@ -216,9 +218,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
     if (!candidates.length || selection.length === 0) return;
     select.mutate({
       projectId: id,
-      selection: selection.map((s) => ({
-        candidateIdx: s.candidateIdx, batchQty: s.batchQty, overrides: cleanOverrides(s.overrides),
-      })),
+      selection: selection.map((s) => ({ candidateIdx: s.candidateIdx, batchQty: s.batchQty })),
     });
   };
 
@@ -227,6 +227,10 @@ export function ConfigProcessPage({ id }: { id: string }) {
     return <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{q.error.message}</MessageStrip>;
   if (!project || !model) return null;
   const st = statusUi[project.status] ?? statusUi.draft;
+  // What the picked cells price at, before any hand-typed price in the items grid moves it — the
+  // grid and the quotation, not this figure, are what the customer is charged.
+  const selectedTotal = selection.reduce((n, s) =>
+    n + (candidates[s.candidateIdx]?.perBatch.find((b) => b.batchQty === s.batchQty)?.outputs.batchTotal ?? 0), 0);
 
   const footer = (
     <Bar design="FloatingFooter"
@@ -238,6 +242,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
           {candidates.length > 0 ? (
             <Text>
               {selection.length} quotation line{selection.length === 1 ? "" : "s"} selected
+              {selection.length ? ` · ${formatMoney(selectedTotal, currency)}` : ""}
             </Text>
           ) : null}
         </div>
@@ -472,13 +477,13 @@ export function ConfigProcessPage({ id }: { id: string }) {
         ))}
       </ObjectPageSection>
       <ObjectPageSection id="candidates" titleText="Candidates">
-        {candidates.length > 0 && model && lk ? (
-          <StepCandidatesReview model={model.definition} lookups={lk}
-            entries={project!.entries} candidates={candidates}
-            selection={selection}
-            onToggle={(i, b) => { if (select.isSuccess) select.reset(); setSel(toggleSelection(selection, i, b)); }}
-            onChange={(next) => { if (select.isSuccess) select.reset(); setSel(next); }}
-            saved={select.isSuccess} readOnly={locked} />
+        {/* capped/widest are not passed: this page reports them in its message popover. No lookups
+            needed either — the prices are the calculation's own, so they render with the agent off. */}
+        {candidates.length > 0 ? (
+          <PriceAnalysis model={model.definition} entries={project.entries}
+            candidates={candidates.map(toPriced)} selection={selection}
+            onToggle={(i, b) => { select.reset(); setSel(toggleSelection(selection, i, b)); }}
+            disabled={locked} />
         ) : (
           <Text>No candidates yet.</Text>
         )}

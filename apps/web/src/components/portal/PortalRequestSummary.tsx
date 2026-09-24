@@ -15,11 +15,10 @@ import "@ui5/webcomponents-icons/dist/decline.js";
 import "@ui5/webcomponents-icons/dist/undo.js";
 import type { Entries, ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
-import { candidateLabel, fmt, openKeys, type Sel } from "../configurator/runView.ts";
+import { candidateLabel, fmt, openKeys, type PricedCandidate, type Sel } from "../configurator/runView.ts";
 import { money } from "../../lib/money.ts";
 import { useCurrency } from "../../orpc.ts";
 import { portalStatusUi, type PortalStatus } from "./portalUi.ts";
-import type { PortalCandidate } from "./PortalCandidateDetail.tsx";
 
 type Ev = { at: string; kind: "created" | "submitted" | "withdrawn" | "rejected" | "quoted"; note?: string };
 const EV_UI: Record<Ev["kind"], { icon: string; text: string }> = {
@@ -50,7 +49,7 @@ type TimelineEntry = {
 export function PortalRequestSummary({ project, model, onWithdraw, onReopen, busy }: {
   project: {
     id: string; name: string; status: PortalStatus; rejectionNote: string | null; events: Ev[];
-    entries: Entries; candidates: PortalCandidate[]; selection: Sel[] | null;
+    entries: Entries; candidates: PricedCandidate[]; selection: Sel[] | null;
   };
   model: { name: string; definition: ModelDef };
   onWithdraw: () => void;

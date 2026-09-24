@@ -10,5 +10,5 @@ export { bindings, domainOf, propagate } from "./propagate";
 export type { Bindings, DomainOption, Propagation } from "./propagate";
 export { enumerate } from "./enumerate";
 export type { Enumeration } from "./enumerate";
-export { computeOutputs, OutputOverridesZ } from "./output";
-export type { BomResult, OpResult, Outputs, OutputOverrides } from "./output";
+export { computeOutputs } from "./output";
+export type { BomResult, OpResult, Outputs } from "./output";

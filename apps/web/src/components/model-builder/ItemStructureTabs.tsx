@@ -24,9 +24,9 @@ const newId = (prefix: string, taken: string[]) => {
   return `${prefix}${n}`;
 };
 
-// A line's id is not shown any more: it is the key overrides are stored under, not something a
-// modeller names. The visible counter is the row's position, so deleting a row renumbers the
-// column without touching an id an override may already point at.
+// A line's id is not shown any more: it is an internal key (error messages name it), not something
+// a modeller names. The visible counter is the row's position, so deleting a row renumbers the
+// column without touching the id.
 const counter = (i: number) => <span>{i + 1}</span>;
 
 // An item code is still an expression — the value help just writes the common case, a quoted

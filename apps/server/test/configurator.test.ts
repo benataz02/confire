@@ -59,6 +59,7 @@ const fakeFetch: RowCache = cacheOf({
 const lookups: ResolvedLookups = {
   domains: { grade: [{ value: "A", label: "A" }, { value: "B", label: "B" }] },
   tables: { items: { columns: ["ItemCode"], rows: [["A"], ["B"]] } },
+  prices: { BODY: 3 }, // the same price the seeded `catalog` row gives the calculation
 };
 
 // A query table is tenant masterdata now, not part of any model: one row, referenced by name.
@@ -131,7 +132,7 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     await db.delete(configMasterdata).where(eq(configMasterdata.tenantId, tenantId));
   });
 
-  test("candidates land on config_project and flip its status; applySelection recomputes overrides", async () => {
+  test("candidates land on config_project and flip its status; applySelection recomputes them", async () => {
     await seedQueryTable("items", ["ItemCode"]);
     await seedQueryTable("catalog", []);
     const id = await seed("proj", model, {}, [10]);
@@ -155,12 +156,10 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     expect(outputs.unitPrice).toBeCloseTo(10);
     expect(outputs.batchTotal).toBeCloseTo(100);
 
-    // select: price override 3 → 4 on the same candidate: unitCost 6, unitPrice 12.
-    const selections = applySelection(model, lookups, project.candidates, [
-      { candidateIdx: idx, batchQty: 10, overrides: { bom: [{ id: "body", unitPrice: 4 }] } },
-    ]);
-    expect(selections[0]!.outputs.unitCost).toBeCloseTo(6);
-    expect(selections[0]!.outputs.unitPrice).toBeCloseTo(12);
+    // select recomputes against the live lookups and lands on the same numbers the calculation stored.
+    const selections = applySelection(model, lookups, project.candidates, [{ candidateIdx: idx, batchQty: 10 }]);
+    expect(selections[0]!.outputs.unitCost).toBeCloseTo(5);
+    expect(selections[0]!.outputs.unitPrice).toBeCloseTo(10);
 
     // out-of-range candidate index is rejected
     expect(() => applySelection(model, lookups, project.candidates, [{ candidateIdx: 99, batchQty: 10 }])).toThrow();
