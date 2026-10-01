@@ -389,8 +389,8 @@ export function syncTables(model: ModelDef): Set<string> {
  *  in practice the literals in it ARE the codes. A bare identifier is the other shipped shape — a
  *  parameter that holds the code — and its resolved domain contributes every value it could take.
  *  Anything computed (`CONCAT(...)`, a `LOOKUP(...)`) is undecidable before evaluation: it yields
- *  nothing here, and the line then fails in computeOutputs with "no price for item", which is the
- *  honest answer rather than a silently free material. */
+ *  nothing here, and the line then costs 0 in computeOutputs, flagged `unpriced` — the process
+ *  page names every such item in its messages, so a free material is never a silent one. */
 export function bomItemCodes(model: ModelDef, domains?: Record<string, { value: unknown }[]>): string[] {
   const out = new Set<string>();
   const add = (v: unknown) => { if (typeof v === "string" && v) out.add(v); };

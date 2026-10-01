@@ -11,6 +11,8 @@ export type BomResult = {
   totalQty: number;
   unitPrice: number;
   lineTotal: number;
+  /** the price list has no line for this item, so it was costed at 0 — the page warns about it */
+  unpriced?: true;
 };
 export type OpResult = {
   id: string;
@@ -53,19 +55,17 @@ export function computeOutputs(
     if (!included(l.condition)) continue;
     const qtyPerUnit = numeric(l.qty, `bom '${l.id}' qty`);
     const itemCode = String(evaluate(l.itemCode, scope) ?? "");
-    // No stored price to fall back on: an item whose code the resolve could not price (not in the
-    // price list, or a code only decidable here) stops the calculation rather than costing zero.
-    const unitPrice = lookups.prices?.[itemCode];
-    if (unitPrice === undefined)
-      throw new DslError(
-        model.pricing.priceList
-          ? `bom '${l.id}': item '${itemCode}' has no price in price list ${model.pricing.priceList}`
-          : `bom '${l.id}': the model has no price list, so '${itemCode}' cannot be priced`,
-        0, 0,
-      );
+    // An item the resolve could not price (not in the price list, not synced yet, or a code only
+    // decidable here) costs 0 and is flagged rather than stopping the calculation — so a cache
+    // missing one price still quotes, and the process page names the item in its messages.
+    const listed = lookups.prices?.[itemCode];
+    const unitPrice = listed ?? 0;
     const desc = l.desc ?? "";
     const totalQty = qtyPerUnit * batchQty;
-    bom.push({ id: l.id, itemCode, desc, qtyPerUnit, totalQty, unitPrice, lineTotal: totalQty * unitPrice });
+    bom.push({
+      id: l.id, itemCode, desc, qtyPerUnit, totalQty, unitPrice, lineTotal: totalQty * unitPrice,
+      ...(listed === undefined ? { unpriced: true as const } : {}),
+    });
     materialPerUnit += qtyPerUnit * unitPrice;
   }
   const ops: OpResult[] = [];

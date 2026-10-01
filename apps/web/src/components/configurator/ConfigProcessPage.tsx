@@ -4,7 +4,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import {
   Bar, Button, BusyIndicator, Dialog, DynamicSideContent, Form, FormGroup, FormItem, Input, Label,
   MessageStrip, ObjectPage, ObjectPageSection, ObjectPageSubSection, ObjectPageTitle, ObjectStatus,
-  Option, Select, Tag, Text, TextArea, Title, Toolbar,
+  Option, Select, Tag, Text, TextArea, Title, ToggleButton, Toolbar,
 } from "@ui5/webcomponents-react";
 import { propagate, type Entries, type ItemsTable, type TableRows, type Val } from "@confire/config-engine";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts";
@@ -12,7 +12,7 @@ import { client, meQuery, orpc, useCurrency } from "../../orpc.ts";
 import { money as formatMoney } from "../../lib/money.ts";
 import { confirm } from "../confirm.ts";
 import { toast } from "../toast.ts";
-import { statusUi, toggleSelection, toPriced, type Sel } from "./runView.ts";
+import { statusUi, toggleSelection, toPriced, unpricedItems, type Sel } from "./runView.ts";
 import { BATCHES_SECTION, ConfiguratorForm, ConsistencyStatus, formSections } from "./ConfiguratorForm.tsx";
 import { EntityValueHelp } from "../ValueHelp.tsx";
 import { PriceAnalysis } from "./PriceAnalysis.tsx";
@@ -70,21 +70,10 @@ export function ConfigProcessPage({ id }: { id: string }) {
   const [selOverride, setSel] = useState<Sel[] | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [note, setNote] = useState("");
-  // Which insight panels are expanded. Lives here (not in the rail) so scrolling past Configure
-  // doesn't reset it. Panel's `fixed` keeps the last open one from collapsing.
-  const [openPanels, setOpenPanels] = useState(new Set(["costs"]));
   // Rail visibility. Two flags, not one: DynamicSideContent hides its side column with a hard
   // display:none, so the exit animation has to finish before the column goes.
   const [railOpen, setRailOpen] = useState(true);
   const [railMounted, setRailMounted] = useState(true);
-  const togglePanel = (k: string) =>
-    setOpenPanels((o) => {
-      if (!o.has(k)) return new Set(o).add(k);
-      if (o.size === 1) return o; // last one open — `fixed` blocks this anyway
-      const n = new Set(o);
-      n.delete(k);
-      return n;
-    });
   // Every mutation returns the part of configs.get's payload it could have changed, so the
   // response IS the refetch — no invalidate, no second round trip per edit.
   const setProject = (patch: Partial<Payload>) =>
@@ -205,13 +194,17 @@ export function ConfigProcessPage({ id }: { id: string }) {
     return () => clearTimeout(t);
   }, [railShown]);
 
+  // Fills only empty params; page-level propagate() takes it from here. Nothing to fill is not an
+  // edit: a draft equal to the saved inputs would still cost a calculation.
   const copyValues = (values: Record<string, Val>) => {
     const next = { ...entries };
+    let n = 0;
     for (const [k, v] of Object.entries(values)) {
       const cur = next[k];
-      if ((cur === undefined || cur === null || cur === "") && v !== null && v !== undefined) next[k] = v;
+      if ((cur === undefined || cur === null || cur === "") && v !== null && v !== undefined) { next[k] = v; n++; }
     }
-    edit({ entries: next }); // fills only empty params; page-level propagate() takes it from here
+    if (n) edit({ entries: next });
+    toast(n ? `Filled ${n} field${n === 1 ? "" : "s"}` : "Those fields already have values");
   };
 
   const saveSelection = () => {
@@ -274,6 +267,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
     customer: !!project.customer?.cardCode,
     prop,
     candidates: candidates.length,
+    unpriced: unpricedItems(candidates),
     capped: q.data.capped,
     widest: q.data.widest,
     lookupsError: lookups.error as Error | null,
@@ -292,10 +286,11 @@ export function ConfigProcessPage({ id }: { id: string }) {
     <>
     <DynamicSideContent
       sideContentVisibility="AlwaysShow"
+      accessibilityAttributes={{ sideContent: { ariaLabel: "Insights" } }}
       hideSideContent={!railShown && !railMounted}
       sideContent={
         <InsightsRail projectId={id} model={model.definition} lk={lk} prop={prop} entries={entries}
-          tables={tables} itemMoney={money} onCopy={copyValues} open={openPanels} onToggle={togglePanel}
+          tables={tables} itemMoney={money} onCopy={copyValues}
           className={railShown ? "confire-rail" : "confire-rail confire-rail-out"} />
       }>
 
@@ -309,13 +304,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
           subHeader={
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
               {project.customer?.cardName ? <Text>{project.customer.cardName}</Text> : null}
-              {/* The data the form is drawn from is cached, so there has to be a way to ask for it
-                  again without waiting for the frequency to come round. */}
-              <Button icon="synchronize" design="Transparent" disabled={sync.isPending}
-                tooltip="Refresh the SAP data this model reads"
-                onClick={() => sync.mutate({ id })}>
-                {sync.isPending ? "Syncing…" : "Sync data"}
-              </Button>
               {project.status === "requested" ? (
                 <Text>Requested by {createdByEmail ?? "a portal user"}</Text>
               ) : null}
@@ -325,7 +313,8 @@ export function ConfigProcessPage({ id }: { id: string }) {
             <Toolbar design="Transparent">
               <PageMessages messages={messages} okText="No issues — everything checks out."
                 onSection={sectionParam.go} />
-              <Button design="Transparent" disabled={locked}
+              {/* A toggle, so the pressed state is announced — Fiori's trigger for side content. */}
+              <ToggleButton design="Transparent" disabled={locked} pressed={railShown}
                 icon={railShown ? "close-command-field" : "open-command-field"}
                 tooltip={locked ? "A quoted configuration has nothing left to configure"
                   : railShown ? "Hide insights" : "Show insights"}

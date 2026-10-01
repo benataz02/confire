@@ -86,8 +86,9 @@ model has a BOM, `checkModel` refuses it otherwise. `bomItemCodes` decides which
 the string literals in each `itemCode` expression (the builder's value help writes one), plus the
 resolved domain of a bare identifier, because a parameter holding the code is the other shipped
 shape. It is also what keeps `prices` small enough to send to the browser. An item with no line for
-the price list stops the calculation by name rather than costing zero. The item query declares **no
-columns** on purpose: `columns` becomes `$select`, `ItemPrices` is a complex collection B1 rejects
+the price list costs 0 and its BOM line is flagged `unpriced`; the process page names each one as a
+warning, so one missing price never stops a calculation (or offline work). The item query declares
+**no columns** on purpose: `columns` becomes `$select`, `ItemPrices` is a complex collection B1 rejects
 selecting, so the read asks for whole rows and the cache stores them raw.
 
 **Nothing is snapshotted.** One configuration is one row: `config_project` carries its own

@@ -44,6 +44,16 @@ test("the enumeration cap is a Candidates warning naming the widest parameter", 
   expect(msg!.detail).toBe("Width is widest with 40 options");
 });
 
+test("an item costed at 0 is a Candidates warning, one per item, naming the price list", () => {
+  const msgs = configMessages({
+    ...base, model: { ...model, pricing: { priceList: 3 } } as ModelDef, unpriced: ["MP_1", "MP_2"],
+  });
+  expect(msgs.map((m) => m.id)).toEqual(["unpriced:MP_1", "unpriced:MP_2"]);
+  expect(msgs.every((m) => m.type === "Critical" && m.group === "Candidates")).toBe(true);
+  expect(msgs[0]!.text).toBe("No price for MP_1 in price list 3");
+  expect(msgs[0]!.detail).toContain("costed at 0");
+});
+
 test("a clean configuration has nothing to say", () => {
   expect(configMessages(base)).toEqual([]);
 });

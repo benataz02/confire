@@ -7,7 +7,7 @@ import {
   computeOutputs,
   DslError,
   itemSplit,
-  PRICE_COL,
+  typedPrice,
   type ItemsTable,
   type ModelDef,
   type ResolvedLookups,
@@ -136,12 +136,9 @@ export function buildQuoteLines(
 
     for (const l of split) {
       // The salesperson's price wins over the split: the grid showed it, so the document carries
-      // it. Absence — not a sentinel — is what "they left it alone" looks like, the same rule an
-      // override on a formula cell follows. It is read off `raw`, because the price is not a
-      // declared column and so never appears in the evaluated row.
-      const typed = l.raw[PRICE_COL];
-      const unitPrice =
-        typeof typed === "number" && Number.isFinite(typed) && typed >= 0 ? typed : l.price / l.quantity;
+      // it. It is read off `raw`, because the price is not a declared column and so never appears
+      // in the evaluated row.
+      const unitPrice = typedPrice(l.raw) ?? l.price / l.quantity;
       const line: Record<string, unknown> = {
         // the configurator's generic item stays the B1 item; the customer-facing code rides along
         // in a mapped UDF, so no article master has to be created per configuration.

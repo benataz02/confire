@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { chartRows, margin, type PricedCandidate } from "./runView.ts";
+import type { Outputs } from "@confire/config-engine";
+import { chartRows, margin, unpricedItems, type Candidate, type PricedCandidate } from "./runView.ts";
 
 const cand = (...prices: number[]): PricedCandidate => ({
   assignment: {},
@@ -25,4 +26,19 @@ describe("margin", () => {
   test("share of the price", () => expect(margin(10, 7.5)).toBeCloseTo(0.25));
   test("negative when cost exceeds price", () => expect(margin(10, 12)).toBeCloseTo(-0.2));
   test("no price, no margin", () => expect(margin(0, 5)).toBeNull());
+});
+
+describe("unpricedItems", () => {
+  const out = (bom: Partial<Outputs["bom"][number]>[]) => ({ bom }) as Outputs;
+  const c = (...perBatch: Outputs[]): Candidate => ({ assignment: {}, perBatch: perBatch.map((outputs, i) => ({ batchQty: i + 1, outputs })) });
+
+  test("every flagged item code once, across candidates and batches", () => {
+    expect(unpricedItems([
+      c(out([{ itemCode: "A", unpriced: true }, { itemCode: "B" }]), out([{ itemCode: "A", unpriced: true }])),
+      c(out([{ itemCode: "C", unpriced: true }])),
+    ])).toEqual(["A", "C"]);
+  });
+  test("all priced → nothing", () => {
+    expect(unpricedItems([c(out([{ itemCode: "A" }]))])).toEqual([]);
+  });
 });

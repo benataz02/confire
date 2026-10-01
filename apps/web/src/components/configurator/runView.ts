@@ -70,3 +70,10 @@ export function chartRows(candidates: PricedCandidate[], selection: Sel[]): numb
 /** Share of the price that is margin; null where there is no price to take a share of. */
 export const margin = (unitPrice: number, unitCost: number): number | null =>
   unitPrice === 0 ? null : (unitPrice - unitCost) / unitPrice;
+
+/** BOM items the engine costed at 0 because the price list had no line for them, each once. Read
+ *  off the stored candidates, so the warning is exactly as current as the prices it is about. */
+export const unpricedItems = (candidates: Candidate[]): string[] => [
+  ...new Set(candidates.flatMap((c) =>
+    c.perBatch.flatMap((b) => b.outputs.bom.filter((l) => l.unpriced).map((l) => l.itemCode)))),
+];

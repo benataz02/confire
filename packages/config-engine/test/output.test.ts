@@ -45,10 +45,17 @@ describe("computeOutputs", () => {
     expect(big.batchTotal).toBeGreaterThan(small.batchTotal);
   });
 
-  test("an item the price list does not carry surfaces as DslError", () => {
+  test("an item the price list does not carry costs 0 and is flagged, not thrown", () => {
     const badLookups = structuredClone(lookups);
     delete badLookups.prices!["COAT-1"];
-    expect(() => computeOutputs(model, badLookups, full, 100)).toThrow(DslError);
+    const priced = computeOutputs(model, lookups, full, 100);
+    const o = computeOutputs(model, badLookups, full, 100);
+    const line = o.bom.find((l) => l.itemCode === "COAT-1")!;
+    expect(line.unitPrice).toBe(0);
+    expect(line.lineTotal).toBe(0);
+    expect(line.unpriced).toBe(true);
+    expect(o.bom.filter((l) => l.unpriced)).toHaveLength(1);
+    expect(o.materialPerUnit).toBeLessThan(priced.materialPerUnit);
   });
 
   test("batchQty must be >= 1", () => {

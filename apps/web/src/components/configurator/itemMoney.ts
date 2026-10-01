@@ -1,6 +1,6 @@
 import {
-  bindings, computeOutputs, itemSplit,
-  type ItemsTable, type ModelDef, type ResolvedLookups, type TableRows,
+  bindings, computeOutputs, itemSplit, typedPrice,
+  type ItemsTable, type ModelDef, type ResolvedLookups, type TableRows, type Val,
 } from "@confire/config-engine";
 import type { Candidate, Sel } from "./runView.ts";
 
@@ -111,4 +111,19 @@ export function itemMoney(args: {
         : undefined;
     }),
   };
+}
+
+/** What the grid ships, costed and priced. Cost is the split's own total, which is the sum of the
+ *  cost lines (splitShares hands out the whole amount). Price honours a typed unit price the way
+ *  buildQuoteLines does, so a margin read off these is the margin on the document. `raw` is the
+ *  stored items rows, the only place a typed price lives. */
+export function moneyTotals(m: ItemMoney, raw: Record<string, Val>[]): { cost: number; price: number } {
+  let cost = 0;
+  let price = 0;
+  m.rows.forEach((r, i) => {
+    if (!r) return;
+    cost += r.unitCost * r.quantity;
+    price += (typedPrice(raw[i]) ?? r.unitPrice) * r.quantity;
+  });
+  return { cost, price };
 }
