@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import {
-  db, configModel, configProject, ListVariantDefZ, member, organization, portalClient, uiVariant, user,
+  db, configModel, configProject, ListQueryZ, member, organization, portalClient, user,
   type ConfigCandidate, type ProjectEvent,
 } from "@confire/db";
 import { EntriesZ, TableRowsZ, type Entries, type ModelDef } from "@confire/config-engine";
@@ -12,8 +12,9 @@ import { adminProcedure, base, baseDomain, clientProcedure, sessionProcedure } f
 import { hashToken } from "../../crypto.ts";
 import { tenantSlugFromHost } from "../../tenant.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
-import { entitySchema } from "../../entity-meta.ts";
-import { compileSpec, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
+import { entitySchema, toConstraints } from "../../entity-meta.ts";
+import { PRINTABLE } from "../../entity-profiles.ts";
+import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { DEFAULT_PAGE } from "../../lookups.ts";
 import { bad, readOne, readRows } from "../../entity-read.ts";
 import { printDocument } from "../../print.ts";
@@ -168,7 +169,8 @@ async function loadOwnProject(id: string, ctx: { tenantId: string; cardCode: str
 // --- The client's own SAP documents ------------------------------------------------------------
 // Four entity sets, read-only, always fenced to the caller's CardCode.
 //
-// The fence is this list, not the seeded variant. A variant is UI; this is the boundary.
+// The fence is this list, not the web's declared portal feature. A feature is UI; this is the
+// boundary.
 export const PORTAL_ENTITIES = new Set(["Quotations", "Orders", "DeliveryNotes", "Invoices"]);
 
 // DocumentLines is on the header list because it is a field of the document; its own columns are
@@ -308,7 +310,7 @@ export const portalRouter = {
         name: CONFIG_FIELDS.name!, modelName: CONFIG_FIELDS.modelName!,
         status: CONFIG_FIELDS.status!, updatedAt: CONFIG_FIELDS.updatedAt!,
       };
-      const { where, orderBy } = compileSpec(fields, input.spec);
+      const { where, orderBy } = compileQuery(fields, input.query);
       const raw = await db
         .select({
           id: configProject.id, name: configProject.name, status: configProject.status,
@@ -432,16 +434,22 @@ export const portalRouter = {
   // clientProcedure + the CardCode fence + the PORTAL_DOC/PORTAL_LINE allowlist; the underlying
   // reads are literally the same functions entities.* uses.
   docs: {
-    /** One entity's fields, already narrowed to what a client may see. Same $metadata cache as
-     *  entities.schema — the filtering happens after the cache, not inside it. */
-    schema: clientProcedure
+    /** One entity's constraints, already narrowed to what a client may see. Same $metadata cache
+     *  as entities.metadata — the filtering happens after the cache, not inside it — and nothing
+     *  is Editable: there is no profile on this side. No copy flows either; printing is the one
+     *  action a client has. */
+    metadata: clientProcedure
       .input(z.object({ entity: PortalEntityZ }))
-      .handler(async ({ input, context }) => (await portalEntity(context.tenantId, input.entity)).schema),
+      .handler(async ({ input, context }) => ({
+        ...toConstraints((await portalEntity(context.tenantId, input.entity)).schema, undefined),
+        printable: PRINTABLE.has(input.entity),
+        flows: [] as { target: string; label: string }[],
+      })),
 
     rows: clientProcedure
       .input(z.object({
         entity: PortalEntityZ,
-        spec: ListVariantDefZ,
+        query: ListQueryZ,
         cursor: z.string().optional(),
         count: z.boolean().optional(),
       }))
@@ -505,39 +513,6 @@ export const portalRouter = {
         ];
       }),
   },
-
-  /** The seeded `portal:` views, read-only. variants.list is userProcedure (it fences clients
-   *  out), so this is the client's door to the same rows: shared ones only, never personal ones,
-   *  and never writable — there is no portal counterpart to variants.save. */
-  variants: clientProcedure
-    .input(z.object({ page: z.enum(["list", "object"]), entity: z.string() }))
-    .handler(async ({ input, context }) => {
-      if (!input.entity.startsWith("portal:"))
-        throw new ORPCError("FORBIDDEN", { message: "Not a portal view" });
-      const rows = await db
-        .select({
-          id: uiVariant.id,
-          name: uiVariant.name,
-          shared: uiVariant.shared,
-          isDefault: uiVariant.isDefault,
-          isStandard: uiVariant.isStandard,
-          definition: uiVariant.definition,
-        })
-        .from(uiVariant)
-        .where(and(
-          eq(uiVariant.tenantId, context.tenantId),
-          eq(uiVariant.page, input.page),
-          eq(uiVariant.entity, input.entity),
-          eq(uiVariant.shared, true),
-        ));
-      // Same field set as variants.list so the web hook's two branches stay one type. userId and
-      // author are blanked rather than joined: the internal user who seeded the view is not the
-      // client's business.
-      return {
-        variants: rows.map((r) => ({ ...r, userId: "", author: "", canManage: false })),
-        isAdmin: false,
-      };
-    }),
 
   // draft → requested. Selection is validated against the stored candidates and saved with
   // the transition; never ack a submit without the guarded UPDATE landing.

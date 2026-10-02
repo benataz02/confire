@@ -4,7 +4,7 @@ import type { Entries, ModelDef, OutputOverrides, Outputs, QuerySource, TableRow
 // Configurator persistence: a mutable model, and one configuration document that carries its own
 // latest calculation. Spec: docs/superpowers/specs/2026-07-03-configurator-design.md.
 
-// The whole model is one jsonb document (ModelDef), loaded/saved whole like ui_variant.definition.
+// The whole model is one jsonb document (ModelDef), loaded/saved whole like ui_view.state.
 export const configModel = pgTable(
   "config_model",
   {

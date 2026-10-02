@@ -14,7 +14,7 @@ const schema = {
   ],
 } as never;
 
-const spec = { select: [], filter: [], orderby: [], filterBar: [] };
+const query = { select: [], filter: [], orderby: [] };
 const internal = { tenantId: "t1", key: "internal" };
 const portal = { tenantId: "t1", key: "portal:C0001" };
 
@@ -37,7 +37,7 @@ const fake = (nextLink?: string) => {
 describe("list paging cursor", () => {
   test("page 1 asks for a page size, never a $top, and seals the nextLink it gets back", async () => {
     const { b1, seen } = fake("Orders?$skip=100");
-    const page = await readRows(b1, schema, "Orders", { spec, pageSize: 100, count: true }, internal);
+    const page = await readRows(b1, schema, "Orders", { query, pageSize: 100, count: true }, internal);
     const q = seen[0]!.query as Record<string, unknown>;
     expect(q.maxPageSize).toBe(100);
     expect(q.top).toBeUndefined(); // $top would suppress @odata.nextLink
@@ -48,40 +48,40 @@ describe("list paging cursor", () => {
 
   test("the last page has no cursor", async () => {
     const { b1 } = fake(undefined);
-    const page = await readRows(b1, schema, "Orders", { spec, pageSize: 100 }, internal);
+    const page = await readRows(b1, schema, "Orders", { query, pageSize: 100 }, internal);
     expect(page.nextCursor).toBeUndefined();
   });
 
   test("a cursor round-trips to readNext, carrying the page size so page 2 isn't 20 rows", async () => {
     const { b1, seen } = fake("Orders?$skip=100");
-    const first = await readRows(b1, schema, "Orders", { spec, pageSize: 100 }, internal);
-    await readRows(b1, schema, "Orders", { spec, pageSize: 100, cursor: first.nextCursor }, internal);
+    const first = await readRows(b1, schema, "Orders", { query, pageSize: 100 }, internal);
+    await readRows(b1, schema, "Orders", { query, pageSize: 100, cursor: first.nextCursor }, internal);
     expect(seen[1]).toEqual({ nextLink: "Orders?$skip=100", maxPageSize: 100 });
   });
 
   test("a portal client cannot replay an internal cursor — that is the CardCode fence", async () => {
     const { b1 } = fake("Orders?$skip=100");
-    const first = await readRows(b1, schema, "Orders", { spec, pageSize: 100 }, internal);
+    const first = await readRows(b1, schema, "Orders", { query, pageSize: 100 }, internal);
     await expect(
-      readRows(b1, schema, "Orders", { spec, pageSize: 100, cursor: first.nextCursor }, portal),
+      readRows(b1, schema, "Orders", { query, pageSize: 100, cursor: first.nextCursor }, portal),
     ).rejects.toThrow("does not belong to this list");
   });
 
   test("a cursor is bound to its entity set and its tenant", async () => {
     const { b1 } = fake("Orders?$skip=100");
-    const first = await readRows(b1, schema, "Orders", { spec, pageSize: 100 }, internal);
+    const first = await readRows(b1, schema, "Orders", { query, pageSize: 100 }, internal);
     await expect(
-      readRows(b1, schema, "Invoices", { spec, pageSize: 100, cursor: first.nextCursor }, internal),
+      readRows(b1, schema, "Invoices", { query, pageSize: 100, cursor: first.nextCursor }, internal),
     ).rejects.toThrow("does not belong to this list");
     await expect(
-      readRows(b1, schema, "Orders", { spec, pageSize: 100, cursor: first.nextCursor }, { tenantId: "t2", key: "internal" }),
+      readRows(b1, schema, "Orders", { query, pageSize: 100, cursor: first.nextCursor }, { tenantId: "t2", key: "internal" }),
     ).rejects.toThrow("does not belong to this list");
   });
 
   test("a forged or tampered cursor fails closed", async () => {
     const { b1 } = fake("Orders?$skip=100");
     await expect(
-      readRows(b1, schema, "Orders", { spec, pageSize: 100, cursor: "Orders?$skip=0" }, internal),
+      readRows(b1, schema, "Orders", { query, pageSize: 100, cursor: "Orders?$skip=0" }, internal),
     ).rejects.toThrow("Invalid page cursor");
   });
 });

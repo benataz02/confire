@@ -10,7 +10,8 @@ import {
 } from "@ui5/webcomponents-react";
 import type { SideNavigationPropTypes, NavigationLayoutDomRef, NavigationLayoutPropTypes } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
-import { meQuery, orpc } from "../orpc.ts";
+import { meQuery } from "../orpc.ts";
+import { B1_FEATURES } from "../features/b1/index.ts";
 import { GlobalSearch, type SearchEntry } from "./GlobalSearch.tsx";
 import { useRef, useState, useEffect, useMemo } from "react";
 import type { MouseEvent } from "react";
@@ -46,26 +47,14 @@ export function AppShell() {
   const user = me.data?.user;
   const isAdmin = me.data?.role === "admin" || me.data?.role === "owner";
   const isClient = me.data?.role === "client";
-  const pins = useQuery({ ...orpc.entities.navPins.queryOptions(), enabled: isAdmin });
   const queryClient = useQueryClient();
-  // After onboarding the four default pins land in the sidenav; warm entity_meta so the first
-  // list open is a Postgres read rather than a $metadata round trip through the agent.
-  useEffect(() => {
-    for (const p of pins.data?.entities ?? []) {
-      void queryClient.prefetchQuery({
-        ...orpc.entities.schema.queryOptions({ input: { entity: p.name } }),
-        staleTime: 24 * 60 * 60_000,
-        retry: false,
-      });
-    }
-  }, [queryClient, pins.data]);
 
   const onSelect: SideNavigationPropTypes["onSelectionChange"] = (e) => {
     const el = e.detail.item as HTMLElement;
     const to = el.dataset.to;
     if (!to) return;
-    const pin = /^\/b1\/([^/]+)$/.exec(to);
-    if (pin) navigate({ to: "/b1/$entity", params: { entity: pin[1]! } });
+    const b1 = /^\/b1\/([^/]+)$/.exec(to);
+    if (b1) navigate({ to: "/b1/$entity", params: { entity: b1[1]! } });
     else navigate({ to: to });
   };
 
@@ -87,13 +76,12 @@ export function AppShell() {
       page("Configurations", "/configs", "sales-quote"),
       ...(isAdmin
         ? [
-            page("Entities", "/b1", "database"),
-            ...(pins.data?.entities ?? []).map((p) => ({
+            ...Object.values(B1_FEATURES).map((f) => ({
               group: "Menus" as const,
-              text: p.label,
-              description: p.name,
-              icon: "document",
-              run: () => navigate({ to: "/b1/$entity", params: { entity: p.name } }),
+              text: f.label,
+              description: "SAP Business One",
+              icon: f.icon,
+              run: () => navigate({ to: "/b1/$entity", params: { entity: f.entity } }),
             })),
             page("Configurator models", "/models", "tree"),
             page("Masterdata", "/masterdata", "table-view"),
@@ -108,7 +96,7 @@ export function AppShell() {
       { group: "Settings", text: "Cozy", description: "Density", icon: "resize-horizontal", run: () => setDensity('cozy') },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, navigate, pins.data]);
+  }, [isAdmin, navigate]);
 
   type Density = 'cozy' | 'compact';
 
@@ -247,12 +235,10 @@ export function AppShell() {
               <SideNavigationItem text="Home" icon="home" data-to="/" selected={pathname === "/"} />
               {isAdmin ? (
                 <SideNavigationGroup text="SAP Business One" expanded>
-                  <SideNavigationItem text="Entities" icon="database" data-to="/b1"
-                    selected={pathname === "/b1"} />
-                  {(pins.data?.entities ?? []).map((p) => (
-                    <SideNavigationItem key={p.name} text={p.label} icon="document"
-                      data-to={`/b1/${p.name}`}
-                      selected={pathname === `/b1/${p.name}` || pathname.startsWith(`/b1/${p.name}/`)} />
+                  {Object.values(B1_FEATURES).map((f) => (
+                    <SideNavigationItem key={f.entity} text={f.label} icon={f.icon}
+                      data-to={`/b1/${f.entity}`}
+                      selected={pathname === `/b1/${f.entity}` || pathname.startsWith(`/b1/${f.entity}/`)} />
                   ))}
                 </SideNavigationGroup>
               ) : null}

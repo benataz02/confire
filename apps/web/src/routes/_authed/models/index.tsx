@@ -1,19 +1,25 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@ui5/webcomponents-react";
 import { orpc } from "../../../orpc.ts";
-import { listQuery, useListSpec, type ListColumn } from "../../../variants.ts";
-import { ListReport } from "../../../components/ListReport.tsx";
+import { ListReport } from "../../../shared/list-report/ListReport.tsx";
+import { useListView } from "../../../shared/useListView.ts";
 import { confirm } from "../../../components/confirm.ts";
 import { toast } from "../../../components/toast.ts";
+import type { ListFeature, ListQuery, Row } from "../../../shared/types.ts";
 
 export const Route = createFileRoute("/_authed/models/")({ component: Models });
 
-const COLUMNS: ListColumn[] = [
-  { name: "name", type: "string", label: "Name" },
-  { name: "updatedAt", type: "date", label: "Last changed" },
-];
+const FEATURE: ListFeature = {
+  tableId: "models",
+  title: "Models",
+  columns: [
+    { key: "name", label: "Name", type: "string" },
+    { key: "updatedAt", label: "Last changed", type: "date" },
+  ],
+  filterFields: [{ key: "name" }],
+};
 
 function Models() {
   const navigate = useNavigate();
@@ -24,19 +30,18 @@ function Models() {
     void qc.invalidateQueries({ queryKey: orpc.models.rows.key() });
   };
 
-  // The saved view IS the query: it compiles to SQL server-side, as it compiles to OData for B1.
-  const listSpec = useListSpec("models");
-  const page = useInfiniteQuery({
-    ...orpc.models.rows.infiniteOptions({
-      input: (skip: number | undefined) => ({ spec: listQuery(listSpec.spec), top: 100, ...(skip ? { skip } : {}) }),
-      initialPageParam: undefined as number | undefined,
-      getNextPageParam: (last) => last.nextSkip,
-    }),
-    enabled: listSpec.ready,
-    retry: false,
-    placeholderData: keepPreviousData,
-  });
-  const rows = useMemo(() => (page.data?.pages ?? []).flatMap((p) => p.rows), [page.data]);
+  const [query, setQuery] = useState<ListQuery | null>(null);
+  const data = useListView(
+    {
+      ...orpc.models.rows.infiniteOptions({
+        input: (skip: number | undefined) => ({ query: query!, top: 100, ...(skip ? { skip } : {}) }),
+        initialPageParam: undefined as number | undefined,
+        getNextPageParam: (last) => last.nextSkip,
+      }),
+      enabled: !!query,
+    },
+    { route: "/models", keyOf: (r) => r.id },
+  );
 
   const remove = useMutation(orpc.models.remove.mutationOptions({ onSuccess: invalidate }));
   const duplicate = useMutation(
@@ -50,7 +55,7 @@ function Models() {
   );
 
   const del = useCallback(
-    async (sel: Record<string, unknown>[], clear: () => void) => {
+    async (sel: Row[], clear: () => void) => {
       const one = sel.length === 1;
       // The server still refuses deleting in-use models; this guards accidental clicks on unused ones.
       const ok = await confirm({
@@ -76,18 +81,12 @@ function Models() {
 
   return (
     <ListReport
-      listSpec={listSpec}
-      title="Models"
-      columns={COLUMNS}
-      keyField="id"
-      rows={rows}
-      total={page.data?.pages[0]?.total ?? rows.length}
-      loading={page.isFetching && !page.isFetchingNextPage}
-      error={page.error ?? remove.error ?? duplicate.error}
-      hasMore={page.hasNextPage}
-      onLoadMore={() => { if (!page.isFetchingNextPage) void page.fetchNextPage(); }}
-      onRowClick={(row) => navigate({ to: "/models/$id", params: { id: String(row.id) } })}
-      actions={({ rows: sel, clear }) => (
+      feature={FEATURE}
+      data={data}
+      onQuery={setQuery}
+      keyOf={(r) => String(r.id)}
+      error={remove.error ?? duplicate.error}
+      toolbarActions={({ rows: sel, clear }) => (
         <>
           <Button design="Transparent" onClick={() => { void navigate({ to: "/models/new" }); }}>New model</Button>
           <Button design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}

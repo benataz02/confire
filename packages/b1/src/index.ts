@@ -6,4 +6,3 @@ export * from "./client.ts";
 export * from "./remote.ts";
 export * from "./paging.ts";
 export * from "./metadata.ts";
-export * from "./categories.ts";

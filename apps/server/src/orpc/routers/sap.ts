@@ -4,7 +4,6 @@ import { eq } from "drizzle-orm";
 import { db, member, organization } from "@confire/db";
 import { sessionProcedure } from "../base.ts";
 import { sapConnectionExists, upsertSapConnection } from "../../seed-agent.ts";
-import { seedDefaultNavPins } from "./entities.ts";
 
 /** Apex onboarding has no tenant Host — the user's one org is the tenant. */
 async function ownedTenant(userId: string): Promise<string> {
@@ -39,7 +38,5 @@ export const sapRouter = {
         accessClientSecret: input.accessClientSecret || null,
         beasEnabled: input.beasEnabled ?? false,
       });
-      // First connect only — a later reconnect must not restore pins the admin removed.
-      await seedDefaultNavPins(tenantId, context.user.id);
     }),
 };

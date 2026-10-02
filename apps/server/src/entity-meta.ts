@@ -1,8 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { db, entityMeta } from "@confire/db";
 import {
-  parseEntityList, parseEntitySchema, type B1EntityRef, type B1EntitySchema, type B1Transport,
+  parseEntityList, parseEntitySchema,
+  type B1EntityRef, type B1EntitySchema, type B1Field, type B1FieldKind, type B1Transport,
 } from "@confire/b1";
+import type { EntityProfile } from "./entity-profiles.ts";
 
 // B1's $metadata, cached. The full EDMX is ~1.7 MB; both reads here use the scoped query the
 // Service Layer already supports, so a schema costs one entity's worth of XML, not the lot.
@@ -42,30 +44,90 @@ export async function assertEntity(tenantId: string, b1: B1Transport, name: stri
   return found;
 }
 
-/** Value helps B1's own $metadata does not declare.
- *
- *  A NavigationProperty's ReferentialConstraint is what normally yields one (see the parser note in
- *  packages/b1/src/metadata.ts). B1 declares none for DocCurrency, so without this the quote page's
- *  currency is a free-text box — and a typo in it reaches SAP.
- *
- *  Keyed by field name rather than by entity on purpose: DocCurrency is the same column on every
- *  B1 marketing document, so one entry covers Quotations, Orders, DeliveryNotes and Invoices. */
-const FIELD_LOOKUPS: Record<string, { entitySet: string; keyField: string }> = {
-  DocCurrency: { entitySet: "Currencies", keyField: "Code" },
+// --- constraints -------------------------------------------------------------------------------
+// The browser's view of an entity, in the shape the Beas client reads from /api/metadata/{Entity}:
+// per-field constraints that a *declared* page config is merged with. Metadata never creates a
+// field, a section or a column here — the feature does — it only says what a declared one is.
+// No value helps: those are declared CFLs on the web side, as in Beas.
+
+export type FieldConstraint = {
+  Type: B1FieldKind;
+  EdmType: string;
+  Label?: string;
+  MaxLength?: number;
+  /** requiredOnCreate */
+  Required?: boolean;
+  /** the write allowlist says a user may change it — the same rule entities.update enforces */
+  Editable?: boolean;
+  Options?: { value: string; label: string }[];
+  /** a tenant's own `U_` field */
+  Udf?: boolean;
+  /** a collection's own fields (document lines) */
+  Fields?: Record<string, FieldConstraint>;
 };
 
-/** Overlay FIELD_LOOKUPS. Applied on *read* rather than before the row is written, so the schemas
- *  already sitting in entity_meta pick it up without a refresh — nothing else would have retired
- *  them, since a stored schema has no TTL. B1's own constraint wins where it declared one, the
- *  same precedence metadata.ts applies. */
-function withFieldLookups(schema: B1EntitySchema): B1EntitySchema {
-  if (!schema.fields.some((f) => !f.lookup && FIELD_LOOKUPS[f.name])) return schema;
+export type EntityConstraints = {
+  name: string;
+  label: string;
+  keys: string[];
+  /** has a curated profile: the page may offer Edit/Create at all */
+  writable: boolean;
+  fields: Record<string, FieldConstraint>;
+};
+
+/** "bost_Open" -> "Open", "cCustomer" -> "Customer": B1's member names carry a lowercase type
+ *  prefix that means nothing to a reader. */
+const memberLabel = (name: string): string => name.replace(/^[a-z]+_?(?=[A-Z0-9])/, "") || name;
+
+function constraintOf(f: B1Field, rule: { editable: boolean; required: boolean; lines: boolean }): FieldConstraint {
   return {
-    ...schema,
-    fields: schema.fields.map((f) => {
-      const extra = f.lookup ? undefined : FIELD_LOOKUPS[f.name];
-      return extra ? { ...f, lookup: extra } : f;
-    }),
+    Type: f.kind,
+    EdmType: f.edmType,
+    ...(f.label ? { Label: f.label } : {}),
+    ...(f.maxLength ? { MaxLength: f.maxLength } : {}),
+    ...(rule.required ? { Required: true } : {}),
+    ...(rule.editable ? { Editable: true } : {}),
+    // B1 carries an enum on the wire as its member NAME — `DocumentStatus eq 'bost_Open'` and
+    // `CardType eq 'cCustomer'` are the forms verified against a live b1s/v2 (dashboard-snapshot.ts,
+    // portal.ts' invite check). The parser keeps the ValidValue code as `value`; that is the
+    // database column's spelling, not the Service Layer's, so the name is what an option sends.
+    ...(f.options ? { Options: f.options.map((o) => ({ value: o.label, label: memberLabel(o.label) })) } : {}),
+    ...(f.isUDF ? { Udf: true } : {}),
+    ...(f.kind === "collection"
+      ? {
+          Fields: Object.fromEntries((f.fields ?? []).map((x) => [
+            x.name,
+            constraintOf(x, { editable: rule.lines, required: false, lines: false }),
+          ])),
+        }
+      : {}),
+  };
+}
+
+/**
+ * One cached schema + the entity's write profile -> what the browser merges into its declared
+ * fields. Applied on read, so the schemas already sitting in entity_meta stay valid: nothing in
+ * here is stored. `profile` absent = read-only (no Editable anywhere, `writable: false`).
+ */
+export function toConstraints(schema: B1EntitySchema, profile: EntityProfile | undefined): EntityConstraints {
+  const editable = new Set(profile?.editable ?? []);
+  const required = new Set(profile?.requiredOnCreate ?? []);
+  const lines = new Set(profile?.editableCollections ?? []);
+  return {
+    name: schema.name,
+    label: schema.label,
+    keys: schema.keys,
+    writable: !!profile,
+    fields: Object.fromEntries(schema.fields.map((f) => [
+      f.name,
+      constraintOf(f, {
+        // pickEditable's rule, restated as data: the profile's fields, a writable entity's own U_
+        // columns, and the collections whose lines it may write.
+        editable: editable.has(f.name) || (!!profile && f.name.startsWith("U_")) || lines.has(f.name),
+        required: required.has(f.name),
+        lines: lines.has(f.name),
+      }),
+    ])),
   };
 }
 
@@ -84,7 +146,7 @@ export async function entitySchema(
     // A hit returns before assertEntity on purpose: the row only exists because the name was
     // checked against the entity list when it was written, so a stored schema costs one Postgres
     // read and no agent call at all — which is the whole point of storing it.
-    if (row && row.fetchedAt.getTime() >= PARSER_EPOCH) return withFieldLookups(row.json);
+    if (row && row.fetchedAt.getTime() >= PARSER_EPOCH) return row.json;
   }
   await assertEntity(tenantId, b1, name);
 
@@ -105,5 +167,5 @@ export async function entitySchema(
       target: [entityMeta.tenantId, entityMeta.entityName],
       set: { json: schema, fetchedAt },
     });
-  return withFieldLookups(schema);
+  return schema;
 }

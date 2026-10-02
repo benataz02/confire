@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { sql, type SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import type { ListVariantDef } from "@confire/db";
+import type { ListQuery } from "@confire/db";
 import { compileList } from "../src/entity-list.ts";
 import { compileListSql, nextSkipOf, type SqlFields } from "../src/list-sql.ts";
 import type { B1EntitySchema } from "@confire/b1";
 import { configProject } from "@confire/db";
 
-// The SQL executor of a saved view. Same spec, same rules as entity-list.ts's OData compilation —
+// The SQL executor of a list query. Same query, same rules as entity-list.ts's OData compilation —
 // these lock in the two that differ from "just drop what you don't recognise": a filter naming a
 // missing field throws (dropping it shows MORE rows than asked), an orderby naming one does not.
 
@@ -21,8 +21,8 @@ const fields: SqlFields = {
   customerName: { col: sql`${configProject.customer}->>'cardName'`, kind: "string" },
 };
 
-const spec = (over: Partial<ListVariantDef> = {}): ListVariantDef =>
-  ({ select: [], filter: [], orderby: [], filterBar: [], ...over });
+const spec = (over: Partial<ListQuery> = {}): ListQuery =>
+  ({ select: [], filter: [], orderby: [], ...over });
 
 describe("compileListSql", () => {
   test("an empty spec compiles to nothing at all", () => {
@@ -88,6 +88,19 @@ describe("compileListSql", () => {
     expect(compileListSql(dateOnly, spec({ search: "x" })).where).toBeUndefined();
   });
 
+  test("searchFields narrows the search, and startswith anchors it — the type-ahead", () => {
+    const q = toSql(compileListSql(fields, spec({ search: "ac", searchFields: ["name"], searchMode: "startswith" })).where)!;
+    expect(q.params).toEqual(["ac%"]);
+    expect(q.sql).not.toContain("cardName");
+  });
+
+  test("a search field that is not a text field is an error, like a filter", () => {
+    expect(() => compileListSql(fields, spec({ search: "x", searchFields: ["status"] })))
+      .toThrow("Search field 'status' is not a text field on this list");
+    expect(() => compileListSql(fields, spec({ search: "x", searchFields: ["nope"] })))
+      .toThrow("Search field 'nope' is not a text field on this list");
+  });
+
   test("orderby is compiled in order, and a missing field is dropped so an old view still opens", () => {
     const { orderBy } = compileListSql(fields, spec({
       orderby: [{ field: "gone", dir: "asc" }, { field: "updatedAt", dir: "desc" }, { field: "name", dir: "asc" }],
@@ -111,6 +124,18 @@ describe("compileList in", () => {
   test("in becomes an OR of eq so B1 does not need an in operator", () => {
     const q = compileList(schema, spec({ filter: [{ field: "Status", op: "in", value: ["A", "B"] }] }), { pageSize: 20 });
     expect(q.filter).toBe("Status eq 'A' or Status eq 'B'");
+  });
+
+  test("the type-ahead is startswith over the named fields only", () => {
+    const q = compileList(schema, spec({ search: "A1", searchFields: ["ItemCode"], searchMode: "startswith" }), { pageSize: 10 });
+    expect(q.filter).toBe("startswith(ItemCode,'A1')");
+    expect(() => compileList(schema, spec({ search: "x", searchFields: ["Status"] }), { pageSize: 10 }))
+      .toThrow("Search field 'Status' is not a text field on this list");
+  });
+
+  test("every sort rule is kept, in order", () => {
+    const q = compileList(schema, spec({ orderby: [{ field: "Status", dir: "desc" }, { field: "ItemCode", dir: "asc" }] }), { pageSize: 10 });
+    expect(q.orderby).toBe("Status desc,ItemCode");
   });
 });
 

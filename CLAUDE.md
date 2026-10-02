@@ -179,9 +179,12 @@ line with its cached options, and a stale cache is a page message instead of a f
 ## Writing to SAP
 
 - **ETag always.** Updates carry `If-Match`; a 412 surfaces as `CONFLICT`. There is no force path.
-- **Curated-only.** `entity-profiles.ts` names ~8 entities and the exact fields on each; the rule
-  is enforced in `orpc/routers/entities.ts`, not by which buttons a page draws. Everything else B1
-  exposes is read-only.
+- **Curated-only.** `entity-profiles.ts` names four entities (Quotations, Orders,
+  BusinessPartners, Items) and the exact fields on each; the rule is enforced in
+  `orpc/routers/entities.ts`, not by which buttons a page draws. Everything else B1 exposes is
+  read-only — DeliveryNotes and Invoices included, which stay copy targets and portal documents.
+  `entities.metadata` hands the same rule to the browser as per-field `Editable`/`Required`
+  (`toConstraints`), so the form and the allowlist cannot drift.
 - **Idempotent quote write-back.** `configDocumentCommandId()` (SHA-256 over
   `tenant|project|canonicalJson(selected assignments)`, keys sorted because Postgres reorders
   jsonb) is written to `U_CF_Key` and checked before create. It hashes the selected
@@ -193,16 +196,46 @@ line with its cached options, and a stale cache is a page message instead of a f
   what makes B1 close the source lines instead of creating an unlinked document. The line field
   list is an allowlist; `BaseLine` is the source `LineNum`, not the array index.
 
-## Saved views (variants)
+## List Report / Object Page
 
-`ListVariantDef` (select/filter/orderby/search) **is** the query. `apps/web/src/listSpec.ts`
-executes it locally over an array (models, configs); `apps/server/src/entity-list.ts` compiles the
-identical spec to OData for B1 entities — same spec, same behaviour, two executors. `ListReport`
-does no client-side processing (`manualSortBy`/`manualFilters`) so both sources match.
+Copied from the Beas client (`LIST-REPORT-OBJECT-PAGE.md`, `VALUE-HELP-AND-KEY-NAVIGATION.md`):
+two shells in `apps/web/src/shared/` driven by **declared** per-entity configs. Metadata never
+generates a page.
 
-One rule worth knowing before editing `compileList`: a **filter** naming a missing field is an
-error (dropping it would show *more* rows than asked for), a **select** or **orderby** naming one
-is silently dropped (a saved view outliving a UDF should still open).
+- **Features are declared.** `features/b1/` (documents, business partners, items; `B1_FEATURES`
+  is the registry — the `/b1/$entity` routes accept nothing else, and the side nav and search list
+  it) and `features/portal/` (the same document builder narrowed to `PORTAL_DOC`/`PORTAL_LINE`).
+  A feature is plain object literals: list columns, filter fields, system views, header, section
+  tree. Local lists (configs, models, masterdata, portal requests) declare theirs in the route file.
+- **Metadata only merges** (`shared/metadata.ts`, Beas `ii`/`rg`): label, type, options and
+  MaxLength fill what a declared field left out; `Required` becomes `required` unless the field
+  declared a function; editability is `isEditMode && Editable && !readonly` (on create, `Required`
+  counts too). The one thing metadata adds: `U_` fields as hidden columns and an auto
+  "User-defined fields" section. Enum options carry B1's member *name* (`bost_Open`) — that is what
+  the Service Layer sends and filters on.
+- **One combined view per list** (`shared/views.ts`): layout + filters in one `ViewState`, Beas'
+  own field names. System views are code (`system:<key>`, Standard first unless a feature declares
+  `default`); personal/shared ones are `ui_view` rows, the active one per user a `ui_user_state`
+  key. Dirty is a canonical-JSON compare — jsonb reorders keys. On first load the URL's filters
+  win (`?CardCode=C1,C2`, `?DocDate=a~b`); Go and view switches rewrite it.
+- **`ListQuery` is the wire query.** `toQuery` turns a state into it (range → ge/lt-next-day, list
+  → `in`, string → `contains`/`eq` for `exact`); `entity-list.ts` compiles it to OData,
+  `list-sql.ts` to SQL. `ListReport` does no client-side processing (`manualSortBy`), so both match.
+- **Value helps are CFLs** (`shared/cfl/`): `cfl-configs.ts` factories, one `fetchPage` over an
+  entity source (`entities.rows`) or a masterdata source (`configs/portal.queryPage`, with an exact
+  `match` for probes). The key is `keyField ?? columns[0]`. A failed existence probe counts as
+  "exists". Type-ahead is `startswith`, the dialog `contains`.
+- **Templates** are props keyed by id (`cellTemplates`, `filterTemplates`, `sectionTemplates`, …);
+  section/group templates get the default `content` so they can wrap rather than replace.
+- Deviations from Beas, on purpose: `Editable`/`writable` come from the server; `resolveColumns`
+  fills grid columns from metadata; `fixedFilters: FilterCond[]` replaces raw `defaultFilter`
+  OData; the value-help dialog persists one layout per user (`cfl:<source>`), not named views;
+  the editable lines grid is the ui5 `Table` (AnalyticalTable re-creates cells under the cursor);
+  lines are editable on a *new* document only.
+
+One rule worth knowing before editing `compileList`: a **filter** — or a **search field** — naming
+a missing field is an error (dropping it would show *more* rows than asked for), a **select** or
+**orderby** naming one is silently dropped (a saved view outliving a UDF should still open).
 
 ## Conventions
 
@@ -212,7 +245,7 @@ is silently dropped (a saved view outliving a UDF should still open).
 - Comments explain *why*, especially when the obvious approach was tried and failed. Several
   carry verified error strings from a live B1 — do not "clean those up".
 - Big configuration objects are one jsonb document loaded and saved whole (`config_model.definition`,
-  `ui_variant.definition`), not modelled tables.
+  `ui_view.state`), not modelled tables.
 - Imports use explicit `.ts` extensions; `verbatimModuleSyntax` is on, so `import type` matters.
 - Workspace packages must be listed as **direct** dependencies — Bun's isolated install does not
   resolve transitives here. Adding an import from a new workspace package means editing that

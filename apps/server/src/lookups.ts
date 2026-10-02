@@ -160,7 +160,10 @@ export function withSearch(query: ODataQuery, cols: string[], q: string): ODataQ
  *  but paging. The read itself is now a SQL page of the cache — see masterdata-sync's rowCache. */
 export function queryPageSource(
   rows: MasterdataRow[],
-  input: { table: string; search?: string; searchCols?: string[]; cursor?: number },
+  input: {
+    table: string; search?: string; searchCols?: string[]; cursor?: number;
+    match?: { col: string; value: string | number };
+  },
 ): { row: MasterdataQueryRow; q: RowQuery } {
   const row = queryRowOf(rows, input.table);
   if (!row) throw new Error(`Unknown query table '${input.table}'`);
@@ -169,13 +172,19 @@ export function queryPageSource(
   // Only enforced when the masterdata declares its columns: an `Items` query declares none on
   // purpose (no $select, so the nested price collection survives), and its fields are whatever
   // B1 returned.
-  const unknownCol = declared.length ? searchCols.find((c) => !declared.includes(c)) : undefined;
+  const unknownCol = declared.length
+    ? [...searchCols, ...(input.match ? [input.match.col] : [])].find((c) => !declared.includes(c))
+    : undefined;
   if (unknownCol) throw new Error(`Search column '${unknownCol}' is not declared by query table '${row.name}'`);
   if (input.cursor !== undefined && (!Number.isInteger(input.cursor) || input.cursor < 0))
     throw new Error("Cursor must be a non-negative row offset");
   return {
     row,
-    q: { skip: input.cursor ?? 0, top: DEFAULT_PAGE, search: input.search, searchCols },
+    q: {
+      skip: input.cursor ?? 0, top: DEFAULT_PAGE, search: input.search, searchCols,
+      // The value help's existence probe: an exact key, which a substring search cannot express.
+      ...(input.match ? { col: input.match.col, values: [input.match.value] } : {}),
+    },
   };
 }
 

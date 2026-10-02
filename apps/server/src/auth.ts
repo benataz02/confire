@@ -3,7 +3,6 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins";
 import { db } from "@confire/db/client";
 import * as schema from "@confire/db/schema";
-import { ensureConfiguratorVariants, ensureEntityVariants, ensurePortalVariants } from "./seed-variants.ts";
 
 const baseDomain = process.env.APP_BASE_DOMAIN ?? "lvh.me";
 
@@ -31,15 +30,8 @@ export const auth = betterAuth({
       // A user belongs to exactly one company — there is no workspace picker anywhere in the
       // app, so a second one would be unreachable. Better Auth returns FORBIDDEN on create.
       organizationLimit: 1,
-      organizationHooks: {
-        // org = tenant. The configurator lists are variant-backed and there is no "enable" event to
-        // seed them from, so a new tenant gets its Standard views here or it lands on a viewless list.
-        afterCreateOrganization: async ({ organization: org, user }) => {
-          await ensureConfiguratorVariants(org.id, user.id);
-          await ensureEntityVariants(org.id, user.id);
-          await ensurePortalVariants(org.id, user.id);
-        },
-      },
+      // No seeding hook: every list's Standard view is declared in code (the web features), so a
+      // new tenant has nothing to be given.
     }),
   ],
   // Off: a signed session_data cookie would keep a deleted/expired row "valid" for maxAge,

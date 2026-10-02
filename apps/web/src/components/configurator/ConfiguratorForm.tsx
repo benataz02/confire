@@ -8,10 +8,11 @@ import {
   displayColumns, domainOf, isTableGroup, placedTables, refKeyCols,
   type DomainOption, type Entries, type Group, type LookupRef, type ModelDef, type Propagation, type ResolvedLookups, type ResolvedTable, type TableDef, type TableRows, type Val,
 } from "@confire/config-engine";
-import { QueryValueHelp, type QuerySource } from "../ValueHelp.tsx";
+import { CflField } from "../../shared/cfl/CflField.tsx";
+import { cfl, type QueryScope } from "../../shared/cfl/cfl-configs.ts";
 import { ConfigTable } from "./ConfigTable.tsx";
 import type { ItemMoney } from "./itemMoney.ts";
-import { displayValue, setEntry } from "./formHelpers.ts";
+import { displayValue, rowTable, setEntry } from "./formHelpers.ts";
 import { addBatch } from "./configProcessState.ts";
 import { paramPrices } from "./costElements.ts";
 import { money } from "../../lib/money.ts";
@@ -112,7 +113,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
    *  Text — the UI5 display-form pattern. Not `disabled`: a pending save still shows inputs. */
   readOnly?: boolean;
   /** where a query field fetches its pages — nothing is fetched until the user opens or types */
-  querySource: QuerySource;
+  querySource: QueryScope;
   /** per-project row data for the model's tables, by table key */
   tables?: TableRows;
   /** omit to render the tables read-only (builder preview) */
@@ -278,11 +279,14 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
 
     if (p.domain?.kind === "options" && p.domain.ref.source === "query") {
       const ref: LookupRef = p.domain.ref;
+      const canonical = lookups.tables[ref.table];
+      // Label mode: the option's label shows, its key is the entry. The picked row is bound
+      // locally (onQueryPick) so its `<param>_<column>` values are there before the recalculate.
       return (
-        <QueryValueHelp source={querySource} canonicalTable={lookups.tables[ref.table]} lookupRef={ref}
-          value={v} onChange={(nv) => set(key, nv)} headerText={p.label}
-          disabled={disabled} required={req}
-          onPick={(t) => onQueryPick(key, ref.table, t)} />
+        <CflField config={{ dialogConfig: cfl.masterdataQuery(querySource, ref, canonical, { title: p.label }) }}
+          value={v ?? null} disabled={disabled} required={req} accessibleName={p.label}
+          onValueChange={(nv) => set(key, nv === null || nv === "" ? undefined : (nv as Val))}
+          onRowSelect={(row) => onQueryPick(key, ref.table, rowTable(row, canonical))} />
       );
     }
 

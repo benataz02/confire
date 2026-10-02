@@ -13,7 +13,8 @@ import { confirm } from "../confirm.ts";
 import { toast } from "../toast.ts";
 import { cleanOverrides, statusUi, toggleSelection, type Sel } from "./runView.ts";
 import { BATCHES_SECTION, ConfiguratorForm, ConsistencyStatus, formSections } from "./ConfiguratorForm.tsx";
-import { EntityValueHelp } from "../ValueHelp.tsx";
+import { CflField } from "../../shared/cfl/CflField.tsx";
+import { cfl } from "../../shared/cfl/cfl-configs.ts";
 import { StepCandidatesReview } from "./StepCandidatesReview.tsx";
 import { InsightsRail } from "./InsightsRail.tsx";
 import { itemMoney } from "./itemMoney.ts";
@@ -22,8 +23,6 @@ import { configMessages } from "./configMessages.ts";
 import { PageMessages } from "../PageMessages.tsx";
 import { useSectionParam } from "../../lib/sectionParam.ts";
 
-// Pinned so the picked row's CardName can be read back off it by name — EntityValueHelp aligns the
-// row with [keyField, ...select minus keyField]. Same pair the portal invite dialog uses.
 /** The calculation's inputs, edited as one unit — see `draft` below. */
 type Draft = { entries: Entries; batches: number[]; tables: TableRows };
 /** What configs.get returns. Mutations return a subset of it — `calculate` omits the model, which
@@ -34,8 +33,8 @@ type Payload = Awaited<ReturnType<typeof client.configs.get>>;
 // memos below.
 const NONE: never[] = [];
 
-const CUSTOMER_SELECT = ["CardCode", "CardName"];
-const CUSTOMER_FILTER = [{ field: "CardType", op: "eq" as const, value: "cCustomer" }];
+/** The customer value help: customers only, with a link to the BP for whoever may open /b1. */
+const CUSTOMER = { dialogConfig: cfl.customers() };
 
 // One scroll: Configure, Candidates, Create quote. Missing run or selection is an empty state.
 // Local overlays (override ?? server) until persist.
@@ -423,19 +422,18 @@ export function ConfigProcessPage({ id }: { id: string }) {
                 {locked ? <Text>{project.customer?.cardName ?? ""}</Text> : (
                 /* Wrapper, not a prop: the id is only a jump target for the message popover. */
                 <div id="cfg-customer" style={{ width: "100%" }}>
-                <EntityValueHelp entitySet="BusinessPartners" keyField="CardCode"
-                  select={CUSTOMER_SELECT} filter={CUSTOMER_FILTER}
-                  value={project.customer?.cardCode}
-                  valueState={project.customer?.cardCode ? "None" : "Negative"}
-                  valueStateMessage="Pick the customer the quote is written for — SAP needs a business partner on the document."
-                  headerText="Select a customer"
-                  onChange={(v, row) => update.mutate({
+                {/* Only a customer SAP knows is saved: the row select — a pick, or a typed code the
+                    existence check found — writes the pair. A keystroke writes nothing; clearing
+                    the field clears the customer. */}
+                <CflField config={CUSTOMER} value={project.customer?.cardCode ?? null} link
+                  disabled={update.isPending}
+                  error={project.customer?.cardCode ? null : "Pick the customer the quote is written for — SAP needs a business partner on the document."}
+                  onValueChange={(v) => {
+                    if ((v === null || v === "") && project.customer) update.mutate({ id, customer: null });
+                  }}
+                  onRowSelect={(row) => update.mutate({
                     id,
-                    customer: v == null || v === "" ? null : {
-                      cardCode: String(v),
-                      // by name, not a literal 1, so reordering CUSTOMER_SELECT can't swap the fields
-                      cardName: String(row?.[CUSTOMER_SELECT.indexOf("CardName")] ?? project.customer?.cardName ?? ""),
-                    },
+                    customer: { cardCode: String(row.CardCode ?? ""), cardName: String(row.CardName ?? "") },
                   })} />
                 </div>
                 )}

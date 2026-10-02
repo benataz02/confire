@@ -6,7 +6,7 @@ import { ODataQueryZ, QuerySourceZ, ValZ, syncTables } from "@confire/config-eng
 import { adminProcedure } from "../base.ts";
 import { bumpMasterdata, DEFAULT_PAGE, fetchQueryTable, queryRowOf, withSearch, type MasterdataRow } from "../../lookups.ts";
 import { syncNow } from "../../masterdata-sync.ts";
-import { compileSpec, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
+import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { runnerFor, tenantConnector } from "../../b1.ts";
 import { copyName } from "../../copy-name.ts";
 
@@ -96,7 +96,7 @@ export const masterdataRouter = {
    *  on: `list` returns whole rows including the `rows` jsonb, which MasterdataEditor and
    *  useDraftModel need and a list page must never drag down the wire. */
   rows: adminProcedure.input(ListPageZ).handler(async ({ input, context }) => {
-    const { where, orderBy } = compileSpec(MASTERDATA_FIELDS, input.spec);
+    const { where, orderBy } = compileQuery(MASTERDATA_FIELDS, input.query);
     const raw = await db
       .select({
         id: configMasterdata.id, name: configMasterdata.name, kind: KIND, source: SOURCE,

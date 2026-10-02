@@ -4,7 +4,10 @@ import {
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import type { Issue, ModelDef } from "@confire/config-engine";
-import { EntityValueHelp } from "../ValueHelp.tsx";
+import { CflField } from "../../shared/cfl/CflField.tsx";
+import { cfl } from "../../shared/cfl/cfl-configs.ts";
+
+const ITEM = { dialogConfig: cfl.items() };
 import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
@@ -92,15 +95,11 @@ export function useItemStructureTab({ draft, update, issues, tables }: Props) {
               <TableCell>{counter(i)}</TableCell>
               <TableCell>
                 {/* Picking fills the description too, and both stay editable afterwards. */}
-                <EntityValueHelp entitySet="Items" keyField="ItemCode" select={["ItemCode", "ItemName"]}
-                  showValue headerText="Select an item"
-                  value={asCode(l.itemCode) ?? (l.itemCode.trim() || undefined)}
-                  valueState={l.itemCode.trim() ? "None" : "Negative"}
-                  valueStateMessage="Pick the item this line consumes — its unit price comes from the model's price list."
-                  onChange={(v, row) => setBom(i, {
-                    itemCode: v == null ? '' : JSON.stringify(String(v)),
-                    ...(row?.[1] == null ? {} : { desc: String(row[1]) }),
-                  })} />
+                <CflField config={ITEM} accessibleName="Item"
+                  value={asCode(l.itemCode) ?? (l.itemCode.trim() || null)}
+                  error={l.itemCode.trim() ? null : "Pick the item this line consumes — its unit price comes from the model's price list."}
+                  onValueChange={(v) => setBom(i, { itemCode: v === null || v === "" ? "" : JSON.stringify(String(v)) })}
+                  onRowSelect={(row) => { if (row.ItemName != null) setBom(i, { desc: String(row.ItemName) }); }} />
               </TableCell>
               <TableCell>
                 {/* Plain text, not an expression: the item's name as B1 spells it, editable. */}

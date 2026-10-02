@@ -7,12 +7,12 @@ import {
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoEntries.js";
 import { orpc } from "../../../orpc.ts";
-import { EntityValueHelp } from "../../../components/ValueHelp.tsx";
+import { CflField } from "../../../shared/cfl/CflField.tsx";
+import { cfl } from "../../../shared/cfl/cfl-configs.ts";
 
 export const Route = createFileRoute("/_authed/configs/new")({ component: NewConfig });
 
-const CUSTOMER_SELECT = ["CardCode", "CardName"];
-const CUSTOMER_FILTER = [{ field: "CardType", op: "eq" as const, value: "cCustomer" }];
+const CUSTOMER = { dialogConfig: cfl.customers() };
 
 function NewConfig() {
   const navigate = useNavigate();
@@ -21,6 +21,8 @@ function NewConfig() {
   const [name, setName] = useState("");
   const [modelId, setModelId] = useState("");
   const [customer, setCustomer] = useState<{ cardCode: string; cardName: string } | null>(null);
+  // A typed code the value help found missing: Create would store a customer SAP does not have.
+  const [customerError, setCustomerError] = useState<string | null>(null);
   // An untouched form is not an error yet — Create is what turns the empty name red.
   const [tried, setTried] = useState(false);
 
@@ -56,7 +58,7 @@ function NewConfig() {
       footerArea={
         <Bar design="FloatingFooter" endContent={
           <>
-            <Button design="Emphasized" disabled={create.isPending}
+            <Button design="Emphasized" disabled={create.isPending || !!customerError}
               onClick={() => (name.trim() && modelId
                 ? create.mutate({ modelId, name: name.trim(), customer })
                 : setTried(true))}>
@@ -90,16 +92,12 @@ function NewConfig() {
               </Select>
             </FormItem>
             <FormItem labelContent={<Label>Customer</Label>}>
-              <EntityValueHelp entitySet="BusinessPartners" keyField="CardCode"
-                select={CUSTOMER_SELECT} filter={CUSTOMER_FILTER}
-                value={customer?.cardCode}
-                headerText="Select a customer"
-                onChange={(v, row) => setCustomer(
-                  v == null || v === "" ? null : {
-                    cardCode: String(v),
-                    cardName: String(row?.[CUSTOMER_SELECT.indexOf("CardName")] ?? ""),
-                  },
-                )} />
+              {/* The code follows the keystrokes; the row select — a pick, or a typed code the
+                  existence check found — brings the name with it. */}
+              <CflField config={CUSTOMER} value={customer?.cardCode ?? null} link
+                onExistenceError={setCustomerError}
+                onValueChange={(v) => setCustomer(v === null || v === "" ? null : { cardCode: String(v), cardName: "" })}
+                onRowSelect={(row) => setCustomer({ cardCode: String(row.CardCode ?? ""), cardName: String(row.CardName ?? "") })} />
             </FormItem>
           </FormGroup>
         </Form>

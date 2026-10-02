@@ -1,79 +1,102 @@
-import { useMemo } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { BusyIndicator, MessageStrip } from "@ui5/webcomponents-react";
-import { orpc } from "../../../orpc.ts";
-import { listQuery, schemaColumns, useListSpec } from "../../../variants.ts";
-import { ListReport } from "../../../components/ListReport.tsx";
+import { useMemo, useState } from "react";
+import { createFileRoute, redirect, useLocation, useNavigate } from "@tanstack/react-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { BusyIndicator, Toolbar, ToolbarButton } from "@ui5/webcomponents-react";
+import { client, orpc } from "../../../orpc.ts";
+import { b1Feature } from "../../../features/b1/index.ts";
+import { ListReport } from "../../../shared/list-report/ListReport.tsx";
+import { ObjectPage } from "../../../shared/object-page/ObjectPage.tsx";
+import { ObjectPageSkeleton, PageError } from "../../../shared/object-page/ObjectPageSkeleton.tsx";
+import { useFieldConstraints } from "../../../shared/metadata.ts";
+import { useListView } from "../../../shared/useListView.ts";
+import { useDetailView } from "../../../shared/useDetailView.ts";
 import { PrintActions } from "../../../components/b1/PrintActions.tsx";
+import type { EntityFeature, ListQuery, Row } from "../../../shared/types.ts";
 
-export const Route = createFileRoute("/_authed/b1/$entity")({ component: EntityList });
+// One declared B1 entity's list — or, with the `#create` fragment, its object page in create mode
+// (Beas' createModeMatch: `/items#create` is the detail component, `/items` the list). Only the
+// declared features have a page; any other entity set name goes home.
 
-// Any B1 entity set as a list report. The saved view IS the query: the server compiles the same
-// ListVariantDef into OData, so a variant behaves here exactly as it does on a local list.
-// The columns come from the cached $metadata — nothing about the entity is hand-written.
-function EntityList() {
+export const Route = createFileRoute("/_authed/b1/$entity")({
+  beforeLoad: ({ params }) => {
+    if (!b1Feature(params.entity)) throw redirect({ to: "/" });
+  },
+  component: EntityPage,
+});
+
+function EntityPage() {
   const { entity } = Route.useParams();
-  const navigate = useNavigate();
-  const schema = useQuery({
-    ...orpc.entities.schema.queryOptions({ input: { entity } }),
-    retry: false,
-    // The server answers this from entity_meta in Postgres and never re-reads $metadata on its
-    // own, so a day in the browser cache costs nothing: the Refresh button writes through with
-    // setQueryData, and a reload falls back to the row.
-    staleTime: 24 * 60 * 60_000,
+  const hash = useLocation({ select: (l) => l.hash });
+  const feature = b1Feature(entity)!;
+  return hash === "create" ? <EntityCreate key={entity} feature={feature} /> : <EntityList key={entity} feature={feature} />;
+}
+
+const NO_QUERY: ListQuery = { select: [], filter: [], orderby: [] };
+
+function EntityList({ feature }: { feature: EntityFeature }) {
+  const { entity } = feature;
+  const qc = useQueryClient();
+  const meta = useFieldConstraints(entity);
+  const [query, setQuery] = useState<ListQuery | null>(null);
+  // The cursor is B1's own @odata.nextLink, sealed server-side; page 1 also asks for the count.
+  const data = useListView(
+    {
+      ...orpc.entities.rows.infiniteOptions({
+        input: (cursor: string | undefined) => ({ entity, query: query ?? NO_QUERY, ...(cursor ? { cursor } : { count: true }) }),
+        initialPageParam: undefined as string | undefined,
+        getNextPageParam: (last) => last.nextCursor,
+      }),
+      enabled: !!query && !!meta.data,
+    },
+    { route: `/b1/${entity}`, keyOf: (r) => r[feature.keyField], create: true },
+  );
+  // The server never re-reads $metadata on its own (a UDF added in B1 waits for this button).
+  const refresh = useMutation({
+    mutationFn: () => client.entities.metadata({ entity, refresh: true }),
+    onSuccess: (fresh) => qc.setQueryData(orpc.entities.metadata.queryOptions({ input: { entity } }).queryKey, fresh),
   });
-  const listSpec = useListSpec(`b1:${entity}`);
-  const columns = useMemo(() => schemaColumns(schema.data?.fields ?? []), [schema.data]);
 
-  // Two things worth knowing about this input:
-  //  - listQuery, not the spec itself: widths and labels live in the same document and the whole
-  //    document is the infinite-query key, so sending them raw made a column resize refetch page 1.
-  //  - the cursor is B1's own @odata.nextLink, sealed server-side. The browser never computes an
-  //    offset and never sees a Service Layer URL; page size is B1_PAGE_SIZE, not ours to pick.
-  const pageInput = (cursor: string | undefined) =>
-    ({ entity, spec: listQuery(listSpec.spec), ...(cursor ? { cursor } : { count: true }) });
-  const page = useInfiniteQuery({
-    ...orpc.entities.rows.infiniteOptions({
-      input: pageInput,
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (last) => last.nextCursor,
-    }),
-    // Both gates matter: no schema means no column names to compile against, and an unapplied
-    // view would fire one render's worth of requests carrying the previous entity's fields.
-    enabled: !!schema.data && listSpec.ready,
-    retry: false,
-    placeholderData: keepPreviousData,
-  });
-  const rows = useMemo(() => (page.data?.pages ?? []).flatMap((p) => p.rows), [page.data]);
+  if (meta.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
+  if (meta.error) return <PageError error={meta.error} />;
+  const printable = meta.data.printable;
 
-  if (schema.isPending) return <BusyIndicator active delay={0} />;
-  if (schema.error) return <MessageStrip design="Negative" hideCloseButton>{schema.error.message}</MessageStrip>;
-
-  const keys = schema.data!.keys;
   return (
     <ListReport
-      listSpec={listSpec}
-      title={schema.data!.label}
-      columns={columns}
-      keyField={keys[0] ?? ""}
-      rows={rows}
-      total={page.data?.pages[0]?.total ?? rows.length}
-      loading={page.isFetching && !page.isFetchingNextPage}
-      error={page.error}
-      hasMore={page.hasNextPage}
-      onLoadMore={() => { if (!page.isFetchingNextPage) void page.fetchNextPage(); }}
-      onRowClick={(row) => {
-        // A composite key travels as JSON so one route param can carry both halves.
-        const key = keys.length === 1 ? String(row[keys[0]!] ?? "") : JSON.stringify(Object.fromEntries(keys.map((k) => [k, row[k]])));
-        if (!key) return;
-        void navigate({ to: "/b1/$entity/$key", params: { entity, key } });
-      }}
-      actions={({ rows: sel }) => (
-        /* Unmounts with the selection, which closes any open preview — the blob URL is released
-           by PrintActions' own cleanup, so there is nothing to tear down here. */
-        sel.length === 1 ? <PrintActions entity={entity} docEntry={Number(sel[0]!.DocEntry)} /> : null
-      )}
+      feature={feature.list}
+      constraints={meta.data.fields}
+      data={data}
+      onQuery={setQuery}
+      keyOf={(r) => String(r[feature.keyField] ?? "")}
+      readOnly={!meta.data.writable}
+      error={refresh.error}
+      headerActions={
+        <Toolbar design="Transparent">
+          <ToolbarButton design="Transparent" icon="refresh" tooltip="Refresh SAP fields" accessibleName="Refresh SAP fields"
+            disabled={refresh.isPending} onClick={() => refresh.mutate()} />
+        </Toolbar>
+      }
+      toolbarActions={printable ? ({ rows }) => (
+        // Unmounts with the selection, which closes any open preview — PrintActions releases the
+        // blob URL in its own cleanup.
+        rows.length === 1 ? <PrintActions entity={entity} docEntry={Number((rows[0] as Row).DocEntry)} /> : null
+      ) : undefined}
     />
+  );
+}
+
+function EntityCreate({ feature }: { feature: EntityFeature }) {
+  const navigate = useNavigate();
+  const route = `/b1/${feature.entity}`;
+  const d = useDetailView({ entity: feature.entity, route, isNew: true });
+  // Fresh per "Create and new": the epoch is what makes a new, empty record.
+  const seed = useMemo(() => feature.detail.createDefaults?.() ?? {}, [feature, d.createEpoch]);
+
+  if (d.loading) return <ObjectPageSkeleton />;
+  if (d.error || !d.constraints) return <PageError error={d.error ?? new Error("No metadata")} />;
+  if (!d.constraints.writable) return <PageError error={new Error(`${d.constraints.label} is read-only in Confire.`)} />;
+  return (
+    <ObjectPage key={d.createEpoch} isNew entity={feature.entity} constraints={d.constraints} data={seed}
+      sections={feature.detail.sections} header={feature.detail.header}
+      onSave={d.save} onCancelCreate={() => void navigate({ href: route })} />
   );
 }

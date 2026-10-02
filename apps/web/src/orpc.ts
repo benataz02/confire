@@ -7,9 +7,11 @@ import type { AppRouter } from "@confire/server/router";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { apexUrl, hardRedirect } from "./lib/tenant.ts";
 
-// Same-origin (dev proxy / prod static) → cookies ride along automatically.
+// Same-origin (dev proxy / prod static) → cookies ride along automatically. A function, so the
+// module never touches `window` at import time: the pure helpers that sit next to a hook (views.ts,
+// metadata.ts, the CFL modules) stay importable from `bun test`.
 const link = new RPCLink({
-  url: `${window.location.origin}/rpc`,
+  url: () => `${window.location.origin}/rpc`,
   interceptors: [
     onError((error) => {
       if ((error as { code?: string }).code !== "UNAUTHORIZED") return;

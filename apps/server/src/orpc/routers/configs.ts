@@ -18,7 +18,7 @@ import {
   type MasterdataRow, type RowCache,
 } from "../../lookups.ts";
 import { ensureFresh, pageRows, rowCache, syncNow } from "../../masterdata-sync.ts";
-import { compileSpec, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
+import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { scoreRows } from "../../similarity.ts";
 import { copyName } from "../../copy-name.ts";
 import {
@@ -109,6 +109,8 @@ export const QueryPageZ = z.object({
   search: z.string().optional(),
   searchCols: z.array(z.string()).optional(),
   cursor: z.number().int().min(0).optional(),
+  /** exact key: the value help's existence probe and label lookup */
+  match: z.object({ col: z.string(), value: z.union([z.string(), z.number()]) }).optional(),
 });
 
 /** `scopeTo` bounds the read to the tables a model names. The portal passes it: masterdata is
@@ -465,7 +467,7 @@ export const configsRouter = {
    *  flattened out of the `customer` jsonb here rather than in the browser: it has to be sortable
    *  and filterable server-side now that the page only ever holds one page. */
   rows: userProcedure.input(ListPageZ).handler(async ({ input, context }) => {
-    const { where, orderBy } = compileSpec(CONFIG_FIELDS, input.spec);
+    const { where, orderBy } = compileQuery(CONFIG_FIELDS, input.query);
     const raw = await db
       .select({
         id: configProject.id, name: configProject.name, status: configProject.status,

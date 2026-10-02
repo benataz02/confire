@@ -4,7 +4,6 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { BusyIndicator, Button, List, ListItemCustom, MessageStrip, Tag, Text } from "@ui5/webcomponents-react";
 import type { Entries, ModelDef, Val } from "@confire/config-engine";
 import { money } from "../../lib/money.ts";
-import { formatCell } from "../../listSpec.ts";
 import { orpc } from "../../orpc.ts";
 
 // "Similar configurations": the process page's fuzzy help, ranking the model's cached history
@@ -19,7 +18,7 @@ import { orpc } from "../../orpc.ts";
 const ROW: CSSProperties = { display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" };
 const MAIN: CSSProperties = { flex: 1, minWidth: 0 };
 const MUTED: CSSProperties = { opacity: 0.7, fontSize: "0.875rem" };
-/** Same one-line clamp ValueHelp's CELL uses — without it a long CardName reflows the row. */
+/** One line, clamped — without it a long CardName reflows the row. */
 const CLIP: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 /** tabular-nums so the decimal points line up down the column, which is what the table was for. */
 const FIGURE: CSSProperties = { fontWeight: 600, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };

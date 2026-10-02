@@ -4,12 +4,14 @@
 // Hand-written on purpose. Inferring "which fields are safe to edit" from $metadata is a rules
 // engine nobody asked for, and it would guess wrong on precisely the fields (posting dates,
 // account codes, calculated totals) where guessing wrong costs money.
+//
+// Only the WRITE rule lives here. How a page looks — title, sections, columns — is the declared
+// feature config in apps/web/src/features; entities.metadata hands this rule to the browser as
+// `Editable`/`Required`, so the form and the allowlist read one rule and cannot drift.
+// DeliveryNotes and Invoices are deliberately absent: they are read-only (copy targets and portal
+// documents), and absence here is what makes them so.
 
 export type EntityProfile = {
-  /** the field shown as the object page's title */
-  titleField: string;
-  /** the identifying line under it */
-  subtitleFields: string[];
   /** header fields a user may change. NOT a display list — this is the write allowlist. */
   editable: string[];
   /** must be present in a create payload */
@@ -20,60 +22,23 @@ export type EntityProfile = {
 
 export const ENTITY_PROFILES: Record<string, EntityProfile> = {
   Quotations: {
-    titleField: "DocNum",
-    subtitleFields: ["CardName", "DocDate"],
     editable: ["CardCode", "DocDate", "DocDueDate", "Comments", "SalesPersonCode", "DocCurrency", "NumAtCard"],
     requiredOnCreate: ["CardCode", "DocumentLines"],
     editableCollections: ["DocumentLines"],
   },
   Orders: {
-    titleField: "DocNum",
-    subtitleFields: ["CardName", "DocDate"],
     editable: ["CardCode", "DocDate", "DocDueDate", "Comments", "SalesPersonCode", "DocCurrency", "NumAtCard"],
     requiredOnCreate: ["CardCode", "DocumentLines"],
     editableCollections: ["DocumentLines"],
   },
-  DeliveryNotes: {
-    titleField: "DocNum",
-    subtitleFields: ["CardName", "DocDate"],
-    editable: ["Comments", "NumAtCard"],
-    requiredOnCreate: ["CardCode", "DocumentLines"],
-    editableCollections: [],
-  },
-  Invoices: {
-    titleField: "DocNum",
-    subtitleFields: ["CardName", "DocDate"],
-    // An issued invoice is an accounting document: only the free-text fields are ours to touch.
-    editable: ["Comments", "NumAtCard"],
-    requiredOnCreate: ["CardCode", "DocumentLines"],
-    editableCollections: [],
-  },
-  PurchaseOrders: {
-    titleField: "DocNum",
-    subtitleFields: ["CardName", "DocDate"],
-    editable: ["CardCode", "DocDate", "DocDueDate", "Comments", "NumAtCard"],
-    requiredOnCreate: ["CardCode", "DocumentLines"],
-    editableCollections: ["DocumentLines"],
-  },
   BusinessPartners: {
-    titleField: "CardName",
-    subtitleFields: ["CardCode", "CardType"],
     editable: ["CardName", "Phone1", "Cellular", "EmailAddress", "Notes", "FreeText", "SalesPersonCode", "Currency"],
     requiredOnCreate: ["CardCode", "CardName", "CardType"],
     editableCollections: [],
   },
   Items: {
-    titleField: "ItemName",
-    subtitleFields: ["ItemCode", "ItemsGroupCode"],
     editable: ["ItemName", "ForeignName", "BarCode", "User_Text", "SalesUnit", "InventoryUOM", "PurchaseUnit"],
     requiredOnCreate: ["ItemCode", "ItemName"],
-    editableCollections: [],
-  },
-  BusinessPartnerGroups: {
-    titleField: "Name",
-    subtitleFields: ["Code", "Type"],
-    editable: ["Name"],
-    requiredOnCreate: ["Name", "Type"],
     editableCollections: [],
   },
 };

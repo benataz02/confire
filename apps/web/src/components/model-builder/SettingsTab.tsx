@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { Form, FormGroup, FormItem, Input, Label, MessageStrip, Switch } from "@ui5/webcomponents-react";
 import type { Issue, ModelDef } from "@confire/config-engine";
-import { EntityValueHelp } from "../ValueHelp.tsx";
+import { CflField } from "../../shared/cfl/CflField.tsx";
+import { cfl } from "../../shared/cfl/cfl-configs.ts";
+
+/** Label mode: the price list's name shows, its number is what the model stores. */
+const PRICE_LIST = { dialogConfig: cfl.priceLists() };
+const ITEM = { dialogConfig: cfl.items() };
 import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
@@ -55,17 +60,16 @@ export function SettingsTab({ draft, update, issues, tables, tried, portalMeta, 
           {/* Mandatory: BOM lines carry no price of their own — this list is where every material's
               unit price is read from, live, on each calculation. */}
           <FormItem labelContent={<Label required>BOM price list</Label>}>
-            {/* Wrapper, not a prop on EntityValueHelp: the id is only a jump target for the
-                message popover, and `field-<issue path>` is the convention for one. */}
+            {/* Wrapper, not a prop on the field: the id is only a jump target for the message
+                popover, and `field-<issue path>` is the convention for one. */}
             <div id="field-pricing.priceList" style={{ width: "100%" }}>
-            <EntityValueHelp entitySet="PriceLists" keyField="PriceListNo" select={["PriceListNo", "PriceListName"]}
-              value={draft.pricing.priceList ?? undefined}
-              valueState={bad(!draft.pricing.priceList)}
-              valueStateMessage="Pick the B1 price list every BOM material's unit price is read from. Without it the model cannot cost anything."
-              headerText="Select a price list"
-              onChange={(v) => update((d) => ({
+            <CflField config={PRICE_LIST} value={draft.pricing.priceList ?? null} accessibleName="BOM price list"
+              error={bad(!draft.pricing.priceList) === "Negative"
+                ? "Pick the B1 price list every BOM material's unit price is read from. Without it the model cannot cost anything."
+                : null}
+              onValueChange={(v) => update((d) => ({
                 ...d,
-                pricing: { ...d.pricing, priceList: v == null || v === "" ? undefined : Number(v) },
+                pricing: { ...d.pricing, priceList: v === null || v === "" ? undefined : Number(v) },
               }))} />
             </div>
           </FormItem>
@@ -86,12 +90,11 @@ export function SettingsTab({ draft, update, issues, tables, tried, portalMeta, 
               onChange={(v) => update((d) => ({ ...d, pricing: { ...d.pricing, priceExpr: v ?? "" } }))} />
           </FormItem>
           <FormItem labelContent={<Label required>Quote item code</Label>}>
-            <EntityValueHelp entitySet="Items" keyField="ItemCode" select={["ItemCode", "ItemName"]}
-              value={draft.pricing.quoteItemCode || undefined}
-              valueState={bad(!draft.pricing.quoteItemCode)}
-              valueStateMessage="Pick the B1 item the quote line is written against — the configured product itself, not a material."
-              headerText="Select an item"
-              onChange={(v) => update((d) => ({ ...d, pricing: { ...d.pricing, quoteItemCode: v == null ? "" : String(v) } }))} />
+            <CflField config={ITEM} value={draft.pricing.quoteItemCode || null} accessibleName="Quote item code" link
+              error={bad(!draft.pricing.quoteItemCode) === "Negative"
+                ? "Pick the B1 item the quote line is written against — the configured product itself, not a material."
+                : null}
+              onValueChange={(v) => update((d) => ({ ...d, pricing: { ...d.pricing, quoteItemCode: v === null ? "" : String(v) } }))} />
           </FormItem>
         </FormGroup>
         <FormGroup headerText="Client portal">

@@ -4,8 +4,8 @@
  *
  *   bun run seed:dev [slug] [email] [password]
  *
- * Standard views come from auth.ts's afterCreateOrganization hook, so no seed:standard
- * needed after this. Idempotent: re-running skips whatever already exists.
+ * Standard views are declared in code (apps/web/src/features), so there is nothing to seed for
+ * them. Idempotent: re-running skips whatever already exists.
  */
 import { eq } from "drizzle-orm";
 import { db, pool, organization, user as userTable } from "@confire/db";
@@ -39,7 +39,7 @@ async function main(): Promise<void> {
     await auth.api.createOrganization({
       body: { name: slug, slug, userId },
     });
-    console.log(`org   ${slug} (created, Standard views seeded)`);
+    console.log(`org   ${slug} (created)`);
   }
 
   console.log(`\nsign in: http://lvh.me:5173  ->  http://${slug}.lvh.me:5173`);

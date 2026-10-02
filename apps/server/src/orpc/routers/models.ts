@@ -7,7 +7,7 @@ import { adminProcedure } from "../base.ts";
 import { resolveLookups } from "../../lookups.ts";
 import { knownTables, masterdataRows } from "./masterdata.ts";
 import { ensureFresh, rowCache } from "../../masterdata-sync.ts";
-import { compileSpec, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
+import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { copyName } from "../../copy-name.ts";
 
 // Admin-only configurator model builder API. save is the gate: a model that passes
@@ -22,7 +22,7 @@ export const modelsRouter = {
   /** One page of the models list for a saved view. `list` stays: GlobalSearch still needs the
    *  whole array to search it in the browser. */
   rows: adminProcedure.input(ListPageZ).handler(async ({ input, context }) => {
-    const { where, orderBy } = compileSpec(MODEL_FIELDS, input.spec);
+    const { where, orderBy } = compileQuery(MODEL_FIELDS, input.query);
     const raw = await db
       .select({ id: configModel.id, name: configModel.name, updatedAt: configModel.updatedAt, _total: TOTAL })
       .from(configModel)

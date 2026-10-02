@@ -1,67 +1,56 @@
-import { useMemo } from "react";
+import { useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { Button, ObjectStatus, Text } from "@ui5/webcomponents-react";
 import { orpc } from "../../../orpc.ts";
-import { listQuery, useListSpec, type ListColumn } from "../../../variants.ts";
-import { ListReport } from "../../../components/ListReport.tsx";
+import { ListReport } from "../../../shared/list-report/ListReport.tsx";
+import { useListView } from "../../../shared/useListView.ts";
 import { portalStatusUi, type PortalStatus } from "../../../components/portal/portalUi.ts";
+import type { ListFeature, ListQuery, Row } from "../../../shared/types.ts";
 
 export const Route = createFileRoute("/_authed/portal/")({ component: MyRequests });
 
-// Read the value off `cell`, not the documented top-level `value` prop: AnalyticalTable's
-// CellInstance Omit<>s over an index signature, which erases the flattened props from the type.
-const StatusCell = ({ cell }: { cell: { value?: unknown } }) => {
-  const ui = portalStatusUi[cell.value as PortalStatus];
-  return ui ? <ObjectStatus state={ui.state}>{ui.text}</ObjectStatus> : <Text>{String(cell.value ?? "")}</Text>;
+const FEATURE: ListFeature = {
+  tableId: "portal:projects",
+  title: "My requests",
+  columns: [
+    { key: "name", label: "Name", type: "string" },
+    { key: "modelName", label: "Product", type: "string" },
+    {
+      key: "status", label: "Status", type: "enum",
+      options: Object.entries(portalStatusUi).map(([value, ui]) => ({ value, label: ui.text })),
+    },
+    { key: "updatedAt", label: "Updated", type: "date" },
+  ],
+  filterFields: [{ key: "name" }, { key: "status" }],
 };
 
-const COLUMNS: ListColumn[] = [
-  { name: "name", type: "string", label: "Name" },
-  { name: "modelName", type: "string", label: "Product" },
-  {
-    name: "status",
-    type: "enum",
-    label: "Status",
-    options: Object.entries(portalStatusUi).map(([value, ui]) => ({ value, text: ui.text })),
-    Cell: StatusCell,
+const CELLS = {
+  status: (row: Row) => {
+    const ui = portalStatusUi[row.status as PortalStatus];
+    return ui ? <ObjectStatus state={ui.state}>{ui.text}</ObjectStatus> : <Text>{String(row.status ?? "")}</Text>;
   },
-  { name: "updatedAt", type: "date", label: "Updated" },
-];
+};
 
 function MyRequests() {
   const navigate = useNavigate();
-  // `portal:` keys are read-only views (variants.ts) — a portal client cannot save one, so the
-  // page gets the ListReport chrome without a variant switcher. This key is deliberately not
-  // seeded: an empty spec means every column, which is exactly the four below.
-  const listSpec = useListSpec("portal:projects");
-  const page = useInfiniteQuery({
-    ...orpc.portal.projects.rows.infiniteOptions({
-      input: (skip: number | undefined) => ({ spec: listQuery(listSpec.spec), top: 100, ...(skip ? { skip } : {}) }),
-      initialPageParam: undefined as number | undefined,
-      getNextPageParam: (last) => last.nextSkip,
-    }),
-    enabled: listSpec.ready,
-    retry: false,
-    placeholderData: keepPreviousData,
-  });
-  const rows = useMemo(() => (page.data?.pages ?? []).flatMap((p) => p.rows), [page.data]);
+  const [query, setQuery] = useState<ListQuery | null>(null);
+  const data = useListView(
+    {
+      ...orpc.portal.projects.rows.infiniteOptions({
+        input: (skip: number | undefined) => ({ query: query!, top: 100, ...(skip ? { skip } : {}) }),
+        initialPageParam: undefined as number | undefined,
+        getNextPageParam: (last) => last.nextSkip,
+      }),
+      enabled: !!query,
+    },
+    { route: "/portal", keyOf: (r) => r.id },
+  );
 
+  // Views are declared only: a portal client has no saved views, so no server calls either.
   return (
-    <ListReport
-      listSpec={listSpec}
-      title="My requests"
-      columns={COLUMNS}
-      keyField="id"
-      rows={rows}
-      total={page.data?.pages[0]?.total ?? rows.length}
-      loading={page.isFetching && !page.isFetchingNextPage}
-      error={page.error}
-      hasMore={page.hasNextPage}
-      onLoadMore={() => { if (!page.isFetchingNextPage) void page.fetchNextPage(); }}
-      onRowClick={(row) => navigate({ to: "/portal/$id", params: { id: String(row.id) } })}
-      /* "New request" left the nav in favour of five document items; it lives here now. */
-      actions={() => <Button design="Emphasized" onClick={() => navigate({ to: "/portal/new" })}>New request</Button>}
-    />
+    <ListReport feature={FEATURE} data={data} onQuery={setQuery} keyOf={(r) => String(r.id)} localViews
+      cellTemplates={CELLS}
+      /* "New request" left the nav in favour of the document items; it lives here. */
+      toolbarActions={() => <Button design="Emphasized" onClick={() => navigate({ to: "/portal/new" })}>New request</Button>} />
   );
 }

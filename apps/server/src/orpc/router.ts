@@ -1,4 +1,4 @@
-import { variantsRouter } from "./routers/variants.ts";
+import { viewsRouter } from "./routers/views.ts";
 import { modelsRouter } from "./routers/models.ts";
 import { masterdataRouter } from "./routers/masterdata.ts";
 import { configsRouter } from "./routers/configs.ts";
@@ -23,7 +23,7 @@ export const router = {
     const membership = await membershipFromHost(context.headers, context.user.id);
     return { ...membership, user: context.user, currency: await tenantCurrency(membership.tenantId) };
   }),
-  variants: variantsRouter,
+  views: viewsRouter,
   models: modelsRouter,
   masterdata: masterdataRouter,
   configs: configsRouter,

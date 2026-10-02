@@ -54,12 +54,11 @@ export function setEntry(entries: Entries, key: string, v: Val | undefined): Ent
   return { ...entries, [key]: v };
 }
 
-/** Rows -> value-help options, index-aligned with `t.rows` — the value helps rely on that
- *  alignment to recover a picked row's label. A blank label cell falls back to the key. */
-export function optionsOf(t: ResolvedTable, valueCol: string, labelCol?: string): DomainOption[] {
-  const vi = t.columns.indexOf(valueCol);
-  const li = labelCol ? t.columns.indexOf(labelCol) : vi;
-  return vi < 0 ? [] : t.rows.map((r) => ({ value: r[vi] ?? null, label: String(r[li] ?? r[vi] ?? "") }));
+/** A picked value-help row as the one-row ResolvedTable a query pick binds: the masterdata table's
+ *  own columns, or the row's when the table declares none (an Items query, stored raw). */
+export function rowTable(row: Record<string, unknown>, canonical: ResolvedTable | undefined): ResolvedTable {
+  const columns = canonical?.columns.length ? canonical.columns : Object.keys(row);
+  return { columns, rows: [columns.map((c) => (row[c] ?? null) as Val)] };
 }
 
 /** Display-mode string for a field: option label when the domain has one, else the raw value. */
@@ -67,15 +66,4 @@ export function displayValue(v: Val | undefined, dom: DomainOption[]): string {
   if (v === undefined || v === null) return "";
   if (Array.isArray(v)) return v.map((x) => displayValue(x, dom)).join(", ");
   return dom.find((o) => o.value === v)?.label ?? String(v);
-}
-
-export type EntryResolution = { kind: "clear" } | { kind: "set"; value: Val; index: number } | { kind: "reject" };
-
-/** Map free text typed into a value-help input to a domain option. "reject" = not in the list. */
-export function resolveEntry(dom: DomainOption[], raw: string): EntryResolution {
-  if (raw.trim() === "") return { kind: "clear" };
-  const l = raw.trim().toLowerCase();
-  let index = dom.findIndex((o) => o.label.toLowerCase() === l);
-  if (index < 0) index = dom.findIndex((o) => String(o.value ?? "").toLowerCase() === l);
-  return index < 0 ? { kind: "reject" } : { kind: "set", value: dom[index]!.value, index };
 }

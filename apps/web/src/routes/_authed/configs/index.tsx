@@ -1,41 +1,46 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Button, ObjectStatus, Text,
-} from "@ui5/webcomponents-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button, ObjectStatus, Text } from "@ui5/webcomponents-react";
 import { orpc } from "../../../orpc.ts";
-import { listQuery, useListSpec, type ListColumn } from "../../../variants.ts";
-import { ListReport } from "../../../components/ListReport.tsx";
+import { ListReport } from "../../../shared/list-report/ListReport.tsx";
+import { useListView } from "../../../shared/useListView.ts";
 import { statusUi } from "../../../components/configurator/runView.ts";
 import { confirm } from "../../../components/confirm.ts";
 import { toast } from "../../../components/toast.ts";
+import type { ListFeature, ListQuery, Row } from "../../../shared/types.ts";
 
 export const Route = createFileRoute("/_authed/configs/")({ component: Configs });
 
-// Read the value off `cell`, not the documented top-level `value` prop: AnalyticalTable's
-// CellInstance Omit<>s over an index signature, which erases the flattened props from the type.
-// Both exist at runtime; only this one type-checks.
-const StatusCell = ({ cell }: { cell: { value?: unknown } }) => {
-  const ui = statusUi[cell.value as keyof typeof statusUi];
-  return ui ? <ObjectStatus inverted state={ui.state}>{ui.text}</ObjectStatus> : <Text>{String(cell.value ?? "")}</Text>;
+// `customer` is jsonb; the server flattens it to customerName so it filters, sorts and searches
+// like any other column. The old Requested/In-progress toggle is the declared "Requested" view.
+const FEATURE: ListFeature = {
+  tableId: "configs",
+  title: "Configurations",
+  columns: [
+    { key: "name", label: "Name", type: "string" },
+    { key: "modelName", label: "Model", type: "string", groupable: true },
+    { key: "customerName", label: "Customer", type: "string", groupable: true },
+    {
+      key: "status", label: "Status", type: "enum", groupable: true,
+      options: Object.entries(statusUi).map(([value, ui]) => ({ value, label: ui.text })),
+    },
+    { key: "updatedAt", label: "Last changed", type: "date" },
+  ],
+  filterFields: [{ key: "name" }, { key: "customerName" }, { key: "status" }],
+  systemViews: [
+    {
+      key: "requested", name: "Requested",
+      state: { filterValues: { status: ["requested"] }, sortBy: [{ field: "updatedAt", direction: "desc" }] },
+    },
+  ],
 };
 
-// `customer` is jsonb; the server flattens it to customerName so it can be filtered/sorted/searched
-// like any other column instead of needing its own cell renderer.
-const COLUMNS: ListColumn[] = [
-  { name: "name", type: "string", label: "Name" },
-  { name: "modelName", type: "string", label: "Model" },
-  { name: "customerName", type: "string", label: "Customer" },
-  {
-    name: "status",
-    type: "enum",
-    label: "Status",
-    options: Object.entries(statusUi).map(([value, ui]) => ({ value, text: ui.text })),
-    Cell: StatusCell,
-  },
-  { name: "updatedAt", type: "date", label: "Last changed" },
-];
+const statusCell = (row: Row) => {
+  const ui = statusUi[row.status as keyof typeof statusUi];
+  return ui ? <ObjectStatus inverted state={ui.state}>{ui.text}</ObjectStatus> : <Text>{String(row.status ?? "")}</Text>;
+};
+const CELLS = { status: statusCell };
 
 function Configs() {
   const navigate = useNavigate();
@@ -47,20 +52,18 @@ function Configs() {
     void qc.invalidateQueries({ queryKey: orpc.configs.rows.key() });
   };
 
-  // The saved view IS the query: it compiles to SQL server-side, exactly as it compiles to OData for
-  // a B1 entity list. The old Requested/In-progress SegmentedButton is the seeded shared "Requested" view.
-  const listSpec = useListSpec("configs");
-  const page = useInfiniteQuery({
-    ...orpc.configs.rows.infiniteOptions({
-      input: (skip: number | undefined) => ({ spec: listQuery(listSpec.spec), top: 100, ...(skip ? { skip } : {}) }),
-      initialPageParam: undefined as number | undefined,
-      getNextPageParam: (last) => last.nextSkip,
-    }),
-    enabled: listSpec.ready,
-    retry: false,
-    placeholderData: keepPreviousData,
-  });
-  const rows = useMemo(() => (page.data?.pages ?? []).flatMap((p) => p.rows), [page.data]);
+  const [query, setQuery] = useState<ListQuery | null>(null);
+  const data = useListView(
+    {
+      ...orpc.configs.rows.infiniteOptions({
+        input: (skip: number | undefined) => ({ query: query!, top: 100, ...(skip ? { skip } : {}) }),
+        initialPageParam: undefined as number | undefined,
+        getNextPageParam: (last) => last.nextSkip,
+      }),
+      enabled: !!query,
+    },
+    { route: "/configs", keyOf: (r) => r.id },
+  );
 
   const remove = useMutation(orpc.configs.remove.mutationOptions({ onSuccess: invalidate }));
   // Slower than the other two duplicates: the server recalculates the copy against live SAP before
@@ -76,7 +79,7 @@ function Configs() {
   );
 
   const del = useCallback(
-    async (sel: Record<string, unknown>[], clear: () => void) => {
+    async (sel: Row[], clear: () => void) => {
       const one = sel.length === 1;
       const ok = await confirm({
         title: one ? "Delete configuration" : "Delete configurations",
@@ -102,27 +105,19 @@ function Configs() {
 
   return (
     <ListReport
-      listSpec={listSpec}
-      title="Configurations"
-      columns={COLUMNS}
-      keyField="id"
-      rows={rows}
-      total={page.data?.pages[0]?.total ?? rows.length}
-      loading={page.isFetching && !page.isFetchingNextPage}
-      error={page.error ?? remove.error ?? duplicate.error}
-      hasMore={page.hasNextPage}
-      onLoadMore={() => { if (!page.isFetchingNextPage) void page.fetchNextPage(); }}
-      onRowClick={(row) => navigate({ to: "/configs/$id", params: { id: String(row.id) } })}
-      actions={({ rows: sel, clear }) => {
+      feature={FEATURE}
+      data={data}
+      onQuery={setQuery}
+      keyOf={(r) => String(r.id)}
+      cellTemplates={CELLS}
+      error={remove.error ?? duplicate.error}
+      toolbarActions={({ rows: sel, clear }) => {
         const quotedSel = sel.some((r) => r.status === "quoted");
         return (
           <>
-            <Button
-              design="Transparent"
-              disabled={!first}
+            <Button design="Transparent" disabled={!first}
               tooltip={first ? undefined : "No configurator models yet — an admin creates those first."}
-              onClick={() => { void navigate({ to: "/configs/new" }); }}
-            >
+              onClick={() => { void navigate({ to: "/configs/new" }); }}>
               New configuration
             </Button>
             <Button design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}

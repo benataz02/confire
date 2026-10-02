@@ -1,25 +1,26 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
-import { db, b1NavPin, ListVariantDefZ, type B1NavPin } from "@confire/db";
-import { categoriesOf, categoryNames, coerceKey, type Key } from "@confire/b1";
+import { ListQueryZ } from "@confire/db";
+import { coerceKey, rowsOf, type Key } from "@confire/b1";
 import { adminProcedure, userProcedure } from "../base.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
-import { assertEntity, entityList, entitySchema } from "../../entity-meta.ts";
-import { missingRequired, pickEditable, profileOf } from "../../entity-profiles.ts";
+import { assertEntity, entitySchema, toConstraints } from "../../entity-meta.ts";
+import { compileList } from "../../entity-list.ts";
+import { missingRequired, pickEditable, profileOf, PRINTABLE } from "../../entity-profiles.ts";
 import { buildCopy, COPY_SELECT, findFlow, flowsFrom } from "../../doc-copy.ts";
 import { printDocument } from "../../print.ts";
 import { bad, readOne, readRows } from "../../entity-read.ts";
 import { DEFAULT_PAGE } from "../../lookups.ts";
 
-// The B1 entity surface: list what B1 exposes, read a schema, page rows, open one row — for any
-// entity set. Writing is different: update/create/copy work only on the curated entities in
-// entity-profiles.ts, and only on the fields those profiles name. That rule lives in `curated()`
-// below, not in whether a page happened to draw a button.
+// The B1 entity surface: read an entity's constraints, page rows, open one row — for any entity
+// set. Which entities a user can *browse* is the web's declared feature registry; this router does
+// not enumerate B1 for them any more. Writing is different: update/create/copy work only on the
+// curated entities in entity-profiles.ts, and only on the fields those profiles name. That rule
+// lives in `curated()` below, not in whether a page happened to draw a button.
 //
-// adminProcedure: the catalog, pins, row reads and every write are admin/owner only. `rows`,
-// `schema` and `profile` are the exceptions — see the notes on them. What they have in common is
-// that none of them reaches SAP for business data on its own behalf.
+// adminProcedure: row reads and every write are admin/owner only. `rows` and `metadata` are the
+// exceptions — see the notes on them. What they have in common is that neither reaches SAP for
+// business data on its own behalf.
 
 const EntityZ = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "must be an entity set name");
 const KeyZ = z.union([z.string(), z.number(), z.record(z.string(), z.union([z.string(), z.number()]))]);
@@ -33,74 +34,38 @@ const curated = (entity: string) => {
   return p;
 };
 
-const PIN_CAP = 20;
-
-/** Seeded on first connect and on the first pin read if no row exists yet. */
-export const DEFAULT_NAV_PINS: B1NavPin[] = [
-  { name: "Quotations", label: "Quotations" },
-  { name: "Orders", label: "Orders" },
-  { name: "BusinessPartners", label: "Business Partners" },
-  { name: "Items", label: "Items" },
-];
-
-export async function seedDefaultNavPins(tenantId: string, userId: string): Promise<void> {
-  await db.insert(b1NavPin).values({
-    tenantId, userId, entities: DEFAULT_NAV_PINS, updatedAt: new Date(),
-  }).onConflictDoNothing();
-}
-
-const pinsRow = async (tenantId: string, userId: string): Promise<B1NavPin[] | undefined> => {
-  const [row] = await db
-    .select({ entities: b1NavPin.entities })
-    .from(b1NavPin)
-    .where(and(eq(b1NavPin.tenantId, tenantId), eq(b1NavPin.userId, userId)))
-    .limit(1);
-  return row?.entities;
-};
-
-const pinsOf = async (tenantId: string, userId: string): Promise<B1NavPin[]> =>
-  (await pinsRow(tenantId, userId)) ?? [];
-
 export const entitiesRouter = {
-  /** Every entity set B1 exposes, with its business categories for navigation. */
-  list: adminProcedure
-    .input(z.object({ category: z.string().optional(), search: z.string().optional(), refresh: z.boolean().optional() }).optional())
-    .handler(async ({ input, context }) => {
-      const b1 = await b1Of(context.tenantId);
-      const all = await viaB1(() => entityList(context.tenantId, b1, input?.refresh));
-      const q = input?.search?.trim().toLowerCase();
-      const entities = all
-        .map((e) => ({ ...e, categories: categoriesOf.get(e.name) ?? [e.entityClass === "standard" ? "other" : `user-defined-${e.entityClass === "udt" ? "table" : "object"}`] }))
-        .filter((e) => !input?.category || e.categories.includes(input.category))
-        .filter((e) => !q || e.name.toLowerCase().includes(q) || e.label.toLowerCase().includes(q) || e.table.toLowerCase().includes(q))
-        .sort((a, b) => a.label.localeCompare(b.label));
-      return { entities, categories: categoryNames() };
-    }),
-
-  /** One entity's fields, keys and lookups. Cached with a TTL; `refresh` re-reads $metadata.
+  /** One entity's field constraints (Beas' /api/metadata/{Entity}), the write rule folded in as
+   *  Editable/Required. Cached with the schema; `refresh` re-reads $metadata.
    *
-   *  userProcedure, not adminProcedure: this is field *shape*, read from entity_meta in Postgres,
-   *  and the configurator's quote page needs it to render a Quotations draft. No row ever comes
-   *  back through here — `one` is still admin. */
-  schema: userProcedure
+   *  userProcedure, not adminProcedure: this is field *shape* read from entity_meta in Postgres.
+   *  The configurator's quote page renders a Quotations draft with it, and every value-help dialog
+   *  over a B1 entity adds that entity's undeclared fields as hidden columns from it. No row ever
+   *  comes back through here — `one` is still admin. */
+  metadata: userProcedure
     .input(z.object({ entity: EntityZ, refresh: z.boolean().optional() }))
     .handler(async ({ input, context }) => {
       const b1 = await b1Of(context.tenantId);
-      return viaB1(() => entitySchema(context.tenantId, b1, input.entity, input.refresh)).catch(bad);
+      const schema = await viaB1(() => entitySchema(context.tenantId, b1, input.entity, input.refresh)).catch(bad);
+      return {
+        ...toConstraints(schema, profileOf(input.entity)),
+        printable: PRINTABLE.has(input.entity),
+        flows: flowsFrom(input.entity).map((f) => ({ target: f.target, label: f.label })),
+      };
     }),
 
-  /** One page of rows for a saved list view. The spec is compiled to OData here — the browser
-   *  never sends a filter string.
+  /** One page of rows for a list query. The query is compiled to OData here — the browser never
+   *  sends a filter string.
    *
-   *  userProcedure, not adminProcedure: the configurator's customer value help (EntityValueHelp
-   *  over BusinessPartners, in ConfigProcessPage) is used by every internal member, not just
-   *  admins. EntityZ is any entity set name, so this is a read over everything B1 exposes — still
-   *  tenant-scoped through b1Of(context.tenantId), and `schema`/`one`/`profile`/`update` stay
-   *  admin. ponytail: one open reader; narrow to an entity allowlist if the read surface matters. */
+   *  userProcedure, not adminProcedure: the configurator's customer value help (BusinessPartners,
+   *  in ConfigProcessPage) is used by every internal member, not just admins. EntityZ is any
+   *  entity set name, so this is a read over everything B1 exposes — still tenant-scoped through
+   *  b1Of(context.tenantId), and `one`/`update` stay admin.
+   *  ponytail: one open reader; narrow to an entity allowlist if the read surface matters. */
   rows: userProcedure
     .input(z.object({
       entity: EntityZ,
-      spec: ListVariantDefZ,
+      query: ListQueryZ,
       /** sealed @odata.nextLink from the previous page; absent = first page. There is no
        *  page-size input: B1_PAGE_SIZE is the one knob, so a client cannot ask for a page the
        *  Service Layer would silently truncate. */
@@ -115,7 +80,7 @@ export const entitiesRouter = {
         { tenantId: context.tenantId, key: "internal" });
     }),
 
-  /** One row, with its ETag — which is what makes a curated edit safe in Phase 3. */
+  /** One row, with its ETag — which is what makes a curated edit safe. */
   one: adminProcedure
     .input(z.object({ entity: EntityZ, key: KeyZ }))
     .handler(async ({ input, context }) => {
@@ -124,16 +89,34 @@ export const entitiesRouter = {
       return readOne(b1, schema, input.entity, input.key);
     }),
 
-  /** What a user may change here, if anything. Absent = a read-only generic entity.
-   *
-   *  userProcedure for the same reason as `schema`: it returns a hand-written allowlist, not data,
-   *  and the quote page reads it to decide which header fields become inputs. */
-  profile: userProcedure
-    .input(z.object({ entity: EntityZ }))
-    .handler(({ input }) => ({
-      profile: profileOf(input.entity) ?? null,
-      flows: flowsFrom(input.entity),
-    })),
+  /** First/previous/next/last record, walking the single key field the way Beas' record navigation
+   *  does: `gt`/`lt` the current key, ordered by it, one row. A composite-key entity has no single
+   *  order to walk, so it answers null. `key` is absent for first/last. */
+  neighbor: adminProcedure
+    .input(z.object({ entity: EntityZ, key: KeyZ.optional(), dir: z.enum(["first", "prev", "next", "last"]) }))
+    .handler(async ({ input, context }) => {
+      const b1 = await b1Of(context.tenantId);
+      const schema = await viaB1(() => entitySchema(context.tenantId, b1, input.entity)).catch(bad);
+      const [field] = schema.keys;
+      if (!field || schema.keys.length !== 1) return { key: null };
+      const back = input.dir === "prev" || input.dir === "last";
+      const from = input.dir === "prev" || input.dir === "next";
+      if (from && (input.key === undefined || typeof input.key === "object"))
+        throw new ORPCError("BAD_REQUEST", { message: "prev/next needs the current key" });
+      let q;
+      try {
+        q = compileList(schema, {
+          select: [field],
+          filter: from ? [{ field, op: back ? "lt" : "gt", value: input.key as string | number }] : [],
+          orderby: [{ field, dir: back ? "desc" : "asc" }],
+        }, { pageSize: 1 });
+      } catch (e) {
+        return bad(e);
+      }
+      const res = await viaB1(() => b1.readEntitySet(input.entity, { ...q, top: 1 }));
+      const hit = rowsOf(res.data)[0]?.[field];
+      return { key: hit === undefined || hit === null ? null : (hit as string | number) };
+    }),
 
   /** Curated update. Requires the ETag read back with the row: without If-Match a concurrent
    *  edit is a silent overwrite, and B1 answers a stale one with 412 -> CONFLICT. */
@@ -214,44 +197,4 @@ export const entitiesRouter = {
   print: adminProcedure
     .input(z.object({ entity: EntityZ, docEntry: z.number().int() }))
     .handler(({ input, context }) => printDocument(context.tenantId, input.entity, input.docEntry)),
-
-  /** Entity sets this admin pinned onto the SAP sidenav group. */
-  navPins: adminProcedure.handler(async ({ context }) => {
-    const { tenantId, userId } = context;
-    let entities = await pinsRow(tenantId, userId);
-    if (entities === undefined) {
-      // Onboarded before connect seeded pins, or another admin: seed once.
-      // A stored empty list is a choice and must not come back.
-      await seedDefaultNavPins(tenantId, userId);
-      entities = DEFAULT_NAV_PINS;
-    }
-    return { entities };
-  }),
-
-  /** Add or remove one pin. Names only — labels are a snapshot from the catalog at pin time. */
-  setNavPin: adminProcedure
-    .input(z.object({ name: EntityZ, label: z.string().min(1).max(200), pinned: z.boolean() }))
-    .handler(async ({ input, context }) => {
-      let entities = await pinsOf(context.tenantId, context.userId);
-      const i = entities.findIndex((e) => e.name === input.name);
-      if (input.pinned) {
-        const next = { name: input.name, label: input.label };
-        if (i >= 0) entities = entities.map((e, j) => (j === i ? next : e));
-        else {
-          if (entities.length >= PIN_CAP)
-            throw new ORPCError("BAD_REQUEST", { message: `At most ${PIN_CAP} entities on the menu` });
-          entities = [...entities, next];
-        }
-      } else if (i >= 0) {
-        entities = entities.filter((e) => e.name !== input.name);
-      }
-      await db
-        .insert(b1NavPin)
-        .values({ tenantId: context.tenantId, userId: context.userId, entities, updatedAt: new Date() })
-        .onConflictDoUpdate({
-          target: [b1NavPin.tenantId, b1NavPin.userId],
-          set: { entities, updatedAt: new Date() },
-        });
-      return { entities };
-    }),
 };

@@ -5,7 +5,7 @@ import { auth } from "../src/auth.ts";
 import { decryptSecret } from "../src/crypto.ts";
 import { upsertSapConnection } from "../src/seed-agent.ts";
 import { router } from "../src/orpc/router.ts";
-import { call, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
+import { call, makeTenant, makeUser } from "./harness.ts";
 
 const code = (p: Promise<unknown>) => p.then(() => "OK", (e) => (e as { code?: string }).code ?? "ERR");
 const apex = (cookie: string) => ({ context: { headers: new Headers({ cookie }) } });
@@ -87,48 +87,6 @@ describe.skipIf(!process.env.DATABASE_URL)("sap.connect / sap.connection", () =>
     expect(await code(call(router.sap.connection, undefined, apex(client.cookie)))).toBe("FORBIDDEN");
     expect(await code(call(router.sap.connect, body, apex(stranger.cookie)))).toBe("FORBIDDEN");
     expect(await code(call(router.sap.connection, undefined, apex(stranger.cookie)))).toBe("FORBIDDEN");
-  });
-
-  test("connect pins Quotations, Orders, BusinessPartners and Items", async () => {
-    const { tenantId, slug } = await makeTenant();
-    const owner = await makeUser("owner", tenantId);
-    await call(router.sap.connect, { agentUrl: "http://localhost:4000", secret: "s" }, apex(owner.cookie));
-    const pins = await call(router.entities.navPins, undefined, {
-      context: { headers: tenantHeaders(slug, owner.cookie) },
-    });
-    expect(pins.entities.map((e) => e.name)).toEqual(["Quotations", "Orders", "BusinessPartners", "Items"]);
-  });
-
-  test("a later connect does not restore pins the owner removed", async () => {
-    const { tenantId, slug } = await makeTenant();
-    const owner = await makeUser("owner", tenantId);
-    const apexCtx = apex(owner.cookie);
-    const tenantCtx = { context: { headers: tenantHeaders(slug, owner.cookie) } };
-    await call(router.sap.connect, { agentUrl: "http://localhost:4000", secret: "s1" }, apexCtx);
-    await call(router.entities.setNavPin, { name: "Quotations", label: "Quotations", pinned: false }, tenantCtx);
-    await call(router.sap.connect, { agentUrl: "https://agent.example", secret: "s2" }, apexCtx);
-    const pins = await call(router.entities.navPins, undefined, tenantCtx);
-    expect(pins.entities.map((e) => e.name)).toEqual(["Orders", "BusinessPartners", "Items"]);
-  });
-
-  test("navPins seeds the same defaults when no pin row exists", async () => {
-    const { tenantId, slug } = await makeTenant();
-    const owner = await makeUser("owner", tenantId);
-    const pins = await call(router.entities.navPins, undefined, {
-      context: { headers: tenantHeaders(slug, owner.cookie) },
-    });
-    expect(pins.entities.map((e) => e.name)).toEqual(["Quotations", "Orders", "BusinessPartners", "Items"]);
-  });
-
-  test("unpinning every default pin stays empty", async () => {
-    const { tenantId, slug } = await makeTenant();
-    const owner = await makeUser("owner", tenantId);
-    const tenantCtx = { context: { headers: tenantHeaders(slug, owner.cookie) } };
-    await call(router.sap.connect, { agentUrl: "http://localhost:4000", secret: "s" }, apex(owner.cookie));
-    for (const name of ["Quotations", "Orders", "BusinessPartners", "Items"]) {
-      await call(router.entities.setNavPin, { name, label: name, pinned: false }, tenantCtx);
-    }
-    expect((await call(router.entities.navPins, undefined, tenantCtx)).entities).toEqual([]);
   });
 
   test("createOrganization does not insert sap_connection", async () => {

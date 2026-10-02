@@ -7,12 +7,12 @@ import {
   Text, Toast,
 } from "@ui5/webcomponents-react";
 import { orpc } from "../../orpc.ts";
-import { EntityValueHelp } from "../../components/ValueHelp.tsx";
+import { CflField } from "../../shared/cfl/CflField.tsx";
+import { cfl } from "../../shared/cfl/cfl-configs.ts";
 
 export const Route = createFileRoute("/_authed/settings")({ component: Settings });
 
-const CUSTOMER_SELECT = ["CardCode", "CardName"];
-const CUSTOMER_FILTER = [{ field: "CardType", op: "eq" as const, value: "cCustomer" }];
+const CUSTOMER = { dialogConfig: cfl.customers() };
 
 function Settings() {
   const qc = useQueryClient();
@@ -107,15 +107,9 @@ function Settings() {
             <Label required>Client email</Label>
             <Input type="Email" value={invEmail} onInput={(e) => setInvEmail(e.target.value)} />
             <Label required>Customer</Label>
-            <EntityValueHelp
-              entitySet="BusinessPartners"
-              keyField="CardCode"
-              select={CUSTOMER_SELECT}
-              filter={CUSTOMER_FILTER}
-              value={invCardCode}
-              onChange={(v) => setInvCardCode(v == null ? "" : String(v))}
-              headerText="Select a customer"
-            />
+            {/* The server validates the binding against SAP again on invite; this only helps pick. */}
+            <CflField config={CUSTOMER} value={invCardCode} accessibleName="Customer"
+              onValueChange={(v) => setInvCardCode(v === null || v === undefined ? "" : String(v))} />
           </FlexBox>
         )}
       </Dialog>

@@ -1,9 +1,9 @@
 import { andFilter, encodeBool, escapeLiteral, isYesNo, type B1Field, type B1EntitySchema, type QueryOptions } from "@confire/b1";
-import type { FilterCond, ListVariantDef } from "@confire/db";
+import type { FilterCond, ListQuery } from "@confire/db";
+import { searchTargets } from "./list-sql.ts";
 
-// Compile a saved list view (ListVariantDef) into a B1 read. The browser-side counterpart is
-// listSpec.ts's applySpec, which does the same thing over an in-memory array — same spec, same
-// result, one executed by B1 and one locally.
+// Compile a list query (ListQuery) into a B1 read. list-sql.ts compiles the same query to SQL for
+// Confire's own tables — same query, same rules, one executed by B1 and one by Postgres.
 //
 // Pure: no db, no transport. The router hands it a cached schema and gets QueryOptions back.
 
@@ -50,45 +50,52 @@ const condition = (cond: FilterCond, f: B1Field): string => {
 };
 
 /**
- * `spec` -> `QueryOptions`. Rules:
+ * `query` -> `QueryOptions`. Rules:
  *  - $select is the key fields plus the visible columns, so a row can always be opened.
  *  - paging is server-driven (Prefer: odata.maxpagesize) and continued via @odata.nextLink.
  *  - a filter naming a field the entity does not have is an error: silently dropping it would
  *    show MORE rows than were asked for.
  *  - a *select* naming a missing field is not: a saved view outliving a UDF should still open.
- *  - free-text search becomes contains() over string fields only, which is all B1 accepts.
+ *  - free-text search becomes contains() — or startswith(), for the value help's type-ahead — over
+ *    string fields only, which is all B1 accepts. `searchFields` narrows it; naming a non-string
+ *    field there is an error, like a filter.
  */
 export function compileList(
   schema: B1EntitySchema,
-  spec: ListVariantDef,
+  query: ListQuery,
   opts: { pageSize: number; count?: boolean },
 ): QueryOptions {
   const fields = scalarFields(schema);
   const byName = new Map(fields.map((f) => [f.name, f]));
 
-  const visible = spec.select.length ? spec.select : fields.map((f) => f.name);
+  const visible = query.select.length ? query.select : fields.map((f) => f.name);
   const select = [...new Set([...schema.keys, ...visible])].filter((n) => byName.has(n));
 
   let filter: string | undefined;
-  for (const cond of spec.filter) {
+  for (const cond of query.filter) {
     const f = byName.get(cond.field);
     if (!f) throw new Error(`Filter field '${cond.field}' is not on ${schema.name}`);
     filter = andFilter(filter, condition(cond, f));
   }
 
-  const q = spec.search?.trim();
+  const q = query.search?.trim();
   if (q) {
-    const ors = fields
-      .filter((f) => f.kind === "string" && (!spec.select.length || select.includes(f.name)))
-      .map((f) => `contains(${f.name},'${escapeLiteral(q)}')`);
+    const fn = query.searchMode === "startswith" ? "startswith" : "contains";
+    // Without searchFields: the visible string columns, so a search cannot match on a field the
+    // user cannot see.
+    const candidates = query.searchFields?.length
+      ? fields
+      : fields.filter((f) => !query.select.length || select.includes(f.name));
+    const ors = searchTargets(candidates.map((f) => [f.name, f] as [string, B1Field]), (f) => f.kind === "string", query.searchFields)
+      .map((f) => `${fn}(${f.name},'${escapeLiteral(q)}')`);
     if (ors.length) filter = andFilter(filter, ors.join(" or "));
   }
 
-  const ord = spec.orderby.find((o) => byName.has(o.field));
+  const ord = query.orderby.filter((o) => byName.has(o.field));
   return {
     select,
     ...(filter ? { filter } : {}),
-    ...(ord ? { orderby: `${ord.field}${ord.dir === "desc" ? " desc" : ""}` } : {}),
+    ...(ord.length ? { orderby: ord.map((o) => `${o.field}${o.dir === "desc" ? " desc" : ""}`).join(",") } : {}),
     // The page size is `Prefer: odata.maxpagesize`, never `$top`. `$top` bounds the whole result
     // set, so once it is exhausted B1 stops emitting `@odata.nextLink` — a list paged with `$top`
     // reads its first page and then cannot tell "there is more" from "that was everything".

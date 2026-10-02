@@ -1,12 +1,11 @@
 import { and, asc, desc, eq, gt, gte, ilike, lt, lte, ne, or, sql, type Column, type SQL } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { ListVariantDefZ, type FilterCond, type ListVariantDef } from "@confire/db";
+import { ListQueryZ, type FilterCond, type ListQuery } from "@confire/db";
 
-// Compile a saved list view (ListVariantDef) into a Postgres WHERE + ORDER BY. This is the third
-// executor of the same spec: apps/web/src/listSpec.ts used to run it over an in-memory array,
-// entity-list.ts compiles it to OData for B1, and this one compiles it to SQL for the tenant's own
-// tables (configs, models, masterdata, portal requests). Same spec, same behaviour, three backends.
+// Compile a list query (ListQuery) into a Postgres WHERE + ORDER BY. entity-list.ts compiles the
+// same query to OData for B1; this one compiles it to SQL for the tenant's own tables (configs,
+// models, masterdata, portal requests). Same query, same rules, two backends.
 //
 // Pure: no db handle, no transport. Each router hands it a field map and gets clauses back, then
 // writes its own .where(...).orderBy(...).limit(...).offset(...) — Drizzle's builder types don't
@@ -54,38 +53,49 @@ const condition = (cond: FilterCond, f: SqlField): SQL => {
   }
 };
 
+/** The string fields a search touches: `searchFields` when given — one that is not a string field
+ *  is an error, the same rule as a filter — else every string field. Shared with entity-list.ts. */
+export const searchTargets = <F>(all: [string, F][], isString: (f: F) => boolean, named?: string[]): F[] => {
+  if (!named?.length) return all.filter(([, f]) => isString(f)).map(([, f]) => f);
+  return named.map((n) => {
+    const hit = all.find(([k]) => k === n);
+    if (!hit || !isString(hit[1])) throw new Error(`Search field '${n}' is not a text field on this list`);
+    return hit[1];
+  });
+};
+
 /**
- * `spec` -> `{ where, orderBy }`. Rules are compileList's, deliberately:
+ * `query` -> `{ where, orderBy }`. Rules are compileList's, deliberately:
  *  - a filter naming a field the list does not have is an error: silently dropping it would show
  *    MORE rows than were asked for.
  *  - an *orderby* naming a missing field is not: a saved view outliving a column should still open.
  *  - free-text search becomes ILIKE over string fields only — the same rule OData forces on B1
- *    (contains() is string-only) and the one applySpec applied locally.
+ *    (contains() is string-only). `searchMode: "startswith"` anchors it, for the type-ahead.
  *  - `select` is ignored: projection is fixed by the query builder here, and column order/visibility
  *    is presentation that ListReport applies itself.
  */
 export function compileListSql(
   fields: SqlFields,
-  spec: ListVariantDef,
+  query: ListQuery,
 ): { where: SQL | undefined; orderBy: SQL[] } {
   const clauses: SQL[] = [];
 
-  for (const cond of spec.filter) {
+  for (const cond of query.filter) {
     const f = fields[cond.field];
     if (!f) throw new Error(`Filter field '${cond.field}' is not on this list`);
     clauses.push(condition(cond, f));
   }
 
-  const q = spec.search?.trim();
+  const q = query.search?.trim();
   if (q) {
-    const ors = Object.values(fields)
-      .filter((f) => f.kind === "string")
-      .map((f) => ilike(expr(f), `%${q}%`));
+    const pattern = query.searchMode === "startswith" ? `${q}%` : `%${q}%`;
+    const ors = searchTargets(Object.entries(fields), (f) => f.kind === "string", query.searchFields)
+      .map((f) => ilike(expr(f), pattern));
     // An OR of nothing is TRUE, not FALSE — only add the group if there is a string column to search.
     if (ors.length) clauses.push(or(...ors)!);
   }
 
-  const orderBy = spec.orderby
+  const orderBy = query.orderby
     .filter((o) => fields[o.field])
     .map((o) => (o.dir === "desc" ? desc(expr(fields[o.field]!)) : asc(expr(fields[o.field]!))));
 
@@ -101,9 +111,9 @@ export const nextSkipOf = (rowCount: number, top: number, skip?: number): number
 /** compileListSql behind an ORPCError. An unknown filter field means the client sent a saved view
  *  naming a column this list no longer has — a bad request, not a broken server. Routers call this;
  *  the compiler itself stays pure so the test can import it without oRPC. */
-export function compileSpec(fields: SqlFields, spec: ListVariantDef) {
+export function compileQuery(fields: SqlFields, query: ListQuery) {
   try {
-    return compileListSql(fields, spec);
+    return compileListSql(fields, query);
   } catch (e) {
     throw new ORPCError("BAD_REQUEST", { message: e instanceof Error ? e.message : String(e) });
   }
@@ -112,7 +122,7 @@ export function compileSpec(fields: SqlFields, spec: ListVariantDef) {
 /** Wire shape for a paged list, matching `entities.rows` so ListReport's contract is identical at
  *  every call site. No `count` flag: unlike B1, Postgres hands us the total for free (see TOTAL). */
 export const ListPageZ = z.object({
-  spec: ListVariantDefZ,
+  query: ListQueryZ,
   top: z.number().int().min(1).max(500).default(100),
   skip: z.number().int().min(0).optional(),
 });

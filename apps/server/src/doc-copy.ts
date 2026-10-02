@@ -1,4 +1,4 @@
-// Document copy: Quotation -> Order -> Delivery -> Invoice, and the purchase equivalents.
+// Document copy: Quotation -> Order -> Delivery -> Invoice.
 // Ported from b1-mcp-server's b1-document-service.ts (MIT): the flow table, the object-type codes
 // and the line allowlist. B1 does the actual linking — a target line carrying
 // {BaseType, BaseEntry, BaseLine} is what closes the source line and keeps the document flow
@@ -18,8 +18,6 @@ export const DOCUMENT_FLOWS: DocumentFlow[] = [
   { source: "Orders", target: "DeliveryNotes", baseType: 17, label: "Sales Order to Delivery" },
   { source: "Orders", target: "Invoices", baseType: 17, label: "Sales Order to Invoice" },
   { source: "DeliveryNotes", target: "Invoices", baseType: 15, label: "Delivery to A/R Invoice" },
-  { source: "PurchaseOrders", target: "PurchaseDeliveryNotes", baseType: 22, label: "Purchase Order to Goods Receipt" },
-  { source: "PurchaseDeliveryNotes", target: "PurchaseInvoices", baseType: 20, label: "Goods Receipt to A/P Invoice" },
 ];
 
 export const flowsFrom = (source: string): DocumentFlow[] => DOCUMENT_FLOWS.filter((f) => f.source === source);

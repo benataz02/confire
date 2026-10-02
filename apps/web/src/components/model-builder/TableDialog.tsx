@@ -1,13 +1,10 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import {
-  Bar, Button, Dialog, Form, FormGroup, FormItem, Input, MessageStrip, ObjectStatus, Option, Select,
+  Bar, Button, ComboBox, ComboBoxItem, Dialog, Form, FormGroup, FormItem, Input, MessageStrip, ObjectStatus, Option, Select,
   StepInput, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text,
 } from "@ui5/webcomponents-react";
-import { checkModel, ITEM_COL, QTY_COL, RESERVED_LINE_FIELDS, type LookupRef, type ModelDef, type TableColumn, type TableDef, type Val } from "@confire/config-engine";
-import type { B1EntitySchema, B1Field } from "@confire/b1";
-import { orpc } from "../../orpc.ts";
-import { ValueHelp } from "../ValueHelp.tsx";
+import { checkModel, ITEM_COL, QTY_COL, RESERVED_LINE_FIELDS, type LookupRef, type ModelDef, type TableColumn, type TableDef } from "@confire/config-engine";
+import { useFieldConstraints, type EntityConstraints } from "../../shared/metadata.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { NONE, PAIRS, W, lbl, optValue } from "./ParamDialog.tsx";
 import { masterdataRef, modelWithTable, rowVars, sourceBadge, type TableCols } from "./exprHelpers.ts";
@@ -70,14 +67,10 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
 
   // Only the column mapping depends on SAP. It failing must not block model authoring, so the map
   // cell falls back to a free-text field rather than this dialog refusing to render.
-  // The same cached Quotations schema the B1 pages read: it is served from entity_meta in Postgres
-  // and only re-read from $metadata on an explicit Refresh, so a day in the browser costs nothing
-  // and a UDF added in B1 shows up as soon as that row is refreshed.
-  const schema = useQuery({
-    ...orpc.entities.schema.queryOptions({ input: { entity: "Quotations" } }),
-    retry: false,
-    staleTime: 24 * 60 * 60_000,
-  });
+  // The same cached Quotations metadata the B1 pages read: it is served from entity_meta in
+  // Postgres and only re-read from $metadata on an explicit Refresh, so a day in the browser costs
+  // nothing and a UDF added in B1 shows up as soon as that row is refreshed.
+  const schema = useFieldConstraints("Quotations");
   const lineFields = useMemo(() => (schema.data ? lineFieldsOf(schema.data) : null), [schema.data]);
 
   // Validate against the draft with this buffered table spliced in, so a cell formula reading
@@ -295,46 +288,27 @@ function OptionsCell({ lookup, type, tables, onChange }: {
   );
 }
 
+type LineField = { name: string; label?: string; type: string; udf: boolean };
+
 /** Every DocumentLine field the tenant's own B1 exposes and a user may set, from the cached
- *  Quotations schema. Not a curated list: the only ones held back are the collections (a cell is
+ *  Quotations metadata. Not a curated list: the only ones held back are the collections (a cell is
  *  one value) and the four the price split owns — everything else on that customer's line, UDF or
- *  standard, is theirs to map. */
-const lineFieldsOf = (schema: B1EntitySchema): B1Field[] =>
-  (schema.fields.find((f) => f.name === "DocumentLines")?.fields ?? [])
-    .filter((f) => f.kind !== "collection" && !RESERVED_LINE_FIELDS.has(f.name))
-    .sort((a, b) => Number(!!b.isUDF) - Number(!!a.isUDF) || a.name.localeCompare(b.name));
+ *  standard, is theirs to map. UDFs first. */
+const lineFieldsOf = (c: EntityConstraints): LineField[] =>
+  Object.entries(c.fields.DocumentLines?.Fields ?? {})
+    .filter(([name, f]) => f.Type !== "collection" && !RESERVED_LINE_FIELDS.has(name))
+    .map(([name, f]) => ({ name, label: f.Label, type: f.Type, udf: !!f.Udf }))
+    .sort((a, b) => Number(b.udf) - Number(a.udf) || a.name.localeCompare(b.name));
 
-const FIELD_LABELS = { name: "Field", label: "Description", type: "Type" };
-
-/** The tenant's own DocumentLine fields as a value help, a free-text field when SAP is unreachable.
- *  A value help rather than a Select because there are hundreds of them: typing filters, and the
- *  F4 dialog shows the description and type next to the name. Search is local — the whole list is
- *  already in memory, so "the server already searched" does not apply here. */
+/** The tenant's own DocumentLine fields as a ComboBox — a local list, not an entity, so no value
+ *  help: typing filters it, the description and type ride along as additional text. A free-text
+ *  field when SAP is unreachable. */
 function LineFieldHelp({ value, fields, loading, onChange }: {
   value: string;
-  fields: B1Field[] | null;
+  fields: LineField[] | null;
   loading: boolean;
   onChange: (field: string) => void;
 }) {
-  const [search, setSearch] = useState<string | null>(null);
-
-  const shown = useMemo(() => {
-    const q = (search ?? "").trim().toLowerCase();
-    const all = fields ?? [];
-    return q ? all.filter((f) => `${f.name} ${f.label ?? ""}`.toLowerCase().includes(q)) : all;
-  }, [fields, search]);
-  const table = useMemo(
-    () => ({
-      columns: ["name", "label", "type"],
-      rows: shown.map((f) => [f.name, f.label ?? f.name, f.isUDF ? `${f.kind} · UDF` : f.kind] as Val[]),
-    }),
-    [shown],
-  );
-  const options = useMemo(
-    () => shown.map((f) => ({ value: f.name as Val, label: f.label && f.label !== f.name ? `${f.label} (${f.name})` : f.name })),
-    [shown],
-  );
-
   if (!fields)
     return (
       <Input style={W} value={value} disabled={loading}
@@ -346,14 +320,16 @@ function LineFieldHelp({ value, fields, loading, onChange }: {
   // a 400 from B1 at the moment the quote is posted.
   const missing = !!value && !fields.some((f) => f.name === value);
   return (
-    <ValueHelp
-      options={options} value={value || undefined} headerText="DocumentLine field"
-      table={table} valueCol="name" columns={["label", "type"]} columnLabels={FIELD_LABELS}
-      valueState={missing ? "Critical" : undefined}
+    <ComboBox style={W} value={value} filter="Contains" accessibleName="DocumentLine field"
+      valueState={missing ? "Critical" : "None"}
       valueStateMessage={missing
-        ? `${value} does not exist on this tenant's DocumentLines — create the UDF in B1, or map the column to another field.`
+        ? <div>{`${value} does not exist on this tenant's DocumentLines — create the UDF in B1, or map the column to another field.`}</div>
         : undefined}
-      onChange={(v) => onChange(v === undefined || v === null ? "" : String(v))}
-      onSearch={setSearch} onOpen={() => setSearch("")} />
+      onChange={(e) => onChange((e.target.value ?? "").trim())}>
+      {fields.map((f) => (
+        <ComboBoxItem key={f.name} text={f.name}
+          additionalText={[f.label && f.label !== f.name ? f.label : "", f.udf ? `${f.type} · UDF` : f.type].filter(Boolean).join(" · ")} />
+      ))}
+    </ComboBox>
   );
 }

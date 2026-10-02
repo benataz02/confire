@@ -7,8 +7,9 @@ import {
   columnOptions, evalTableRows, PRICE_COL,
   type ResolvedLookups, type ResolvedTable, type TableColumn, type TableDef, type Val,
 } from "@confire/config-engine";
-import { QueryValueHelp, type QuerySource } from "../ValueHelp.tsx";
-import { displayValue } from "./formHelpers.ts";
+import { CflField } from "../../shared/cfl/CflField.tsx";
+import { cfl, type QueryScope } from "../../shared/cfl/cfl-configs.ts";
+import { displayValue, rowTable } from "./formHelpers.ts";
 import { addRow, pasteRows, removeRow, setCell, type Row } from "./configTableOps.ts";
 import { money as fmtMoney } from "../../lib/money.ts";
 import { useCurrency } from "../../orpc.ts";
@@ -45,7 +46,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
   disabled?: boolean;
   /** quoted/locked: cells are Text, add/delete are gone. See ConfiguratorForm. */
   readOnly?: boolean;
-  querySource: QuerySource;
+  querySource: QueryScope;
   /** Derived cost/price per row for an `items` grid. Absent = no money columns at all, which is how
    *  the portal stays free of cost data: PortalRequestPage simply does not pass it. */
   money?: ItemMoney | null;
@@ -137,14 +138,16 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
     if (c.cell.kind === "options" && c.cell.ref.source === "query") {
       const ref = c.cell.ref;
       const pickKey = `${def.key}.${c.key}.${ri}`;
+      const canonical = lookups.tables[ref.table];
+      // An items grid shows the code (plain mode): the stored code is what rides to SAP.
       return (
-        <QueryValueHelp source={querySource} canonicalTable={lookups.tables[ref.table]} lookupRef={ref}
-          value={stored ?? undefined} headerText={header(c)} disabled={disabled}
-          showValue={def.role === "items"}
-          onPick={(t) => onQueryPick?.(pickKey, ref.table, t)}
-          onChange={(nv) => {
-            if (nv === undefined || nv === null) onQueryPick?.(pickKey, ref.table, undefined);
-            set(nv ?? null);
+        <CflField
+          config={{ dialogConfig: cfl.masterdataQuery(querySource, ref, canonical, { title: header(c), showValue: def.role === "items" }) }}
+          value={stored ?? null} disabled={disabled} accessibleName={header(c)}
+          onRowSelect={(row) => onQueryPick?.(pickKey, ref.table, rowTable(row, canonical))}
+          onValueChange={(nv) => {
+            if (nv === undefined || nv === null || nv === "") onQueryPick?.(pickKey, ref.table, undefined);
+            set(nv === undefined || nv === "" ? null : (nv as Val));
           }} />
       );
     }

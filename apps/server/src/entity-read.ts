@@ -3,7 +3,7 @@ import {
   andFilter, coerceKey, countOf, nextLinkOf, rowsOf,
   type B1EntitySchema, type B1Transport, type Key,
 } from "@confire/b1";
-import type { ListVariantDef } from "@confire/db";
+import type { ListQuery } from "@confire/db";
 import { compileList } from "./entity-list.ts";
 import { decryptSecret, encryptSecret } from "./crypto.ts";
 import { viaB1 } from "./b1.ts";
@@ -48,7 +48,7 @@ const openCursor = (entity: string, f: CursorFence, cursor: string): string => {
 };
 
 export type RowsArgs = {
-  spec: ListVariantDef;
+  query: ListQuery;
   /** rows per page — `Prefer: odata.maxpagesize`, from B1_PAGE_SIZE */
   pageSize: number;
   /** sealed `@odata.nextLink` from the previous page; absent = first page */
@@ -57,12 +57,12 @@ export type RowsArgs = {
 };
 
 /**
- * One page of rows for a saved list view. The spec is compiled to OData here — the browser never
+ * One page of rows for a list query. The query is compiled to OData here — the browser never
  * sends a filter string.
  *
- * `extraFilter` is ANDed onto the *compiled* filter, not onto the spec. That is deliberate: a
+ * `extraFilter` is ANDed onto the *compiled* filter, not onto the query. That is deliberate: a
  * scope clause added after compilation names a field the caller's schema may not even contain,
- * so the caller cannot express, override or observe it through their own spec.
+ * so the caller cannot express, override or observe it through their own query.
  */
 export async function readRows(
   b1: B1Transport,
@@ -79,14 +79,14 @@ export async function readRows(
     const link = openCursor(entity, fence, a.cursor);
     res = await viaB1(() => b1.readNext(link, a.pageSize));
   } else {
-    let query;
+    let q;
     try {
-      query = compileList(schema, a.spec, { pageSize: a.pageSize, count: a.count });
+      q = compileList(schema, a.query, { pageSize: a.pageSize, count: a.count });
     } catch (e) {
       return bad(e);
     }
-    if (extraFilter) query.filter = andFilter(query.filter, extraFilter);
-    res = await viaB1(() => b1.readEntitySet(entity, query));
+    if (extraFilter) q.filter = andFilter(q.filter, extraFilter);
+    res = await viaB1(() => b1.readEntitySet(entity, q));
   }
 
   const rows = rowsOf(res.data);

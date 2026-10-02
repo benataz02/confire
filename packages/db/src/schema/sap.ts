@@ -39,18 +39,3 @@ export const entityMeta = pgTable(
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.entityName] })],
 );
-
-export type B1NavPin = { name: string; label: string };
-
-// Per admin, per tenant: which entity sets show as sibling items under the SAP sidenav group.
-// ponytail: jsonb array; a join table only if pins need per-row metadata.
-export const b1NavPin = pgTable(
-  "b1_nav_pin",
-  {
-    tenantId: text("tenant_id").notNull(),
-    userId: text("user_id").notNull(),
-    entities: jsonb("entities").$type<B1NavPin[]>().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [primaryKey({ columns: [t.tenantId, t.userId] })],
-);
