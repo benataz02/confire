@@ -11,6 +11,8 @@ export type BomResult = {
   totalQty: number;
   unitPrice: number;
   lineTotal: number;
+  /** the price list has no line for this item, so it was costed at 0 — the page warns about it */
+  unpriced?: true;
 };
 export type OpResult = {
   id: string;
@@ -30,61 +32,11 @@ export type Outputs = {
   batchTotal: number;
 };
 
-// Step-4 review edits: per-line numeric overrides + add/remove, applied inside the same
-// computation so unitCost/unitPrice/priceExpr stay consistent. Server and browser share this.
-export const OutputOverridesZ = z.object({
-  bom: z
-    .array(
-      z.object({
-        id: z.string(),
-        qtyPerUnit: z.number().min(0).optional(), // replaces the qty expr result, BEFORE scrap
-        unitPrice: z.number().min(0).optional(),
-        remove: z.boolean().optional(),
-      }),
-    )
-    .optional(),
-  ops: z
-    .array(
-      z.object({
-        id: z.string(),
-        setupMin: z.number().min(0).optional(),
-        runMinPerUnit: z.number().min(0).optional(),
-        ratePerHour: z.number().min(0).optional(),
-        remove: z.boolean().optional(),
-      }),
-    )
-    .optional(),
-  addBom: z
-    .array(
-      z.object({
-        id: z.string(),
-        itemCode: z.string(),
-        desc: z.string().optional(),
-        qtyPerUnit: z.number().min(0),
-        unitPrice: z.number().min(0),
-      }),
-    )
-    .optional(),
-  addOps: z
-    .array(
-      z.object({
-        id: z.string(),
-        resource: z.string(),
-        setupMin: z.number().min(0),
-        runMinPerUnit: z.number().min(0),
-        ratePerHour: z.number().min(0),
-      }),
-    )
-    .optional(),
-});
-export type OutputOverrides = z.infer<typeof OutputOverridesZ>;
-
 export function computeOutputs(
   model: ModelDef,
   lookups: ResolvedLookups,
   assignment: Entries,
   batchQty: number,
-  overrides?: OutputOverrides,
   tableRows?: TableRows,
 ): Outputs {
   if (batchQty < 1) throw new RangeError(`batchQty must be >= 1, got ${batchQty}`);
@@ -96,41 +48,26 @@ export function computeOutputs(
     return v;
   };
   const included = (condition: string | undefined) => condition === undefined || evaluate(condition, scope) === true;
-  const bomOv = new Map((overrides?.bom ?? []).map((o) => [o.id, o]));
-  const opOv = new Map((overrides?.ops ?? []).map((o) => [o.id, o]));
 
   const bom: BomResult[] = [];
   let materialPerUnit = 0;
   for (const l of model.bom) {
-    const ov = bomOv.get(l.id);
-    if (ov?.remove || !included(l.condition)) continue;
-    const qtyPerUnit = ov?.qtyPerUnit ?? numeric(l.qty, `bom '${l.id}' qty`);
+    if (!included(l.condition)) continue;
+    const qtyPerUnit = numeric(l.qty, `bom '${l.id}' qty`);
     const itemCode = String(evaluate(l.itemCode, scope) ?? "");
-    // No stored price to fall back on: an item whose code the resolve could not price (not in the
-    // price list, or a code only decidable here) stops the calculation rather than costing zero.
+    // An item the resolve could not price (not in the price list, not synced yet, or a code only
+    // decidable here) costs 0 and is flagged rather than stopping the calculation — so a cache
+    // missing one price still quotes, and the process page names the item in its messages.
     const listed = lookups.prices?.[itemCode];
-    const unitPrice = ov?.unitPrice ?? listed;
-    if (unitPrice === undefined)
-      throw new DslError(
-        model.pricing.priceList
-          ? `bom '${l.id}': item '${itemCode}' has no price in price list ${model.pricing.priceList}`
-          : `bom '${l.id}': the model has no price list, so '${itemCode}' cannot be priced`,
-        0, 0,
-      );
+    const unitPrice = listed ?? 0;
     const desc = l.desc ?? "";
     const totalQty = qtyPerUnit * batchQty;
-    bom.push({ id: l.id, itemCode, desc, qtyPerUnit, totalQty, unitPrice, lineTotal: totalQty * unitPrice });
+    bom.push({
+      id: l.id, itemCode, desc, qtyPerUnit, totalQty, unitPrice, lineTotal: totalQty * unitPrice,
+      ...(listed === undefined ? { unpriced: true as const } : {}),
+    });
     materialPerUnit += qtyPerUnit * unitPrice;
   }
-  for (const a of overrides?.addBom ?? []) {
-    const totalQty = a.qtyPerUnit * batchQty; // added lines carry their own price, and no condition
-    bom.push({
-      id: a.id, itemCode: a.itemCode, desc: a.desc ?? "",
-      qtyPerUnit: a.qtyPerUnit, totalQty, unitPrice: a.unitPrice, lineTotal: totalQty * a.unitPrice,
-    });
-    materialPerUnit += a.qtyPerUnit * a.unitPrice;
-  }
-
   const ops: OpResult[] = [];
   let laborPerUnit = 0;
   const pushOp = (id: string, resource: string, setupMin: number, runMinPerUnit: number, rate: number) => {
@@ -139,17 +76,15 @@ export function computeOutputs(
     laborPerUnit += ((setupMin / batchQty + runMinPerUnit) / 60) * rate;
   };
   for (const o of model.routing) {
-    const ov = opOv.get(o.id);
-    if (ov?.remove || !included(o.condition)) continue;
+    if (!included(o.condition)) continue;
     pushOp(
       o.id,
       o.resource,
-      ov?.setupMin ?? numeric(o.setupMin, `routing '${o.id}' setupMin`),
-      ov?.runMinPerUnit ?? numeric(o.runMinPerUnit, `routing '${o.id}' runMinPerUnit`),
-      ov?.ratePerHour ?? numeric(o.ratePerHour, `routing '${o.id}' ratePerHour`),
+      numeric(o.setupMin, `routing '${o.id}' setupMin`),
+      numeric(o.runMinPerUnit, `routing '${o.id}' runMinPerUnit`),
+      numeric(o.ratePerHour, `routing '${o.id}' ratePerHour`),
     );
   }
-  for (const a of overrides?.addOps ?? []) pushOp(a.id, a.resource, a.setupMin, a.runMinPerUnit, a.ratePerHour);
 
   const unitCost = materialPerUnit + laborPerUnit;
   const priceScope: Scope = { vars: { ...scope.vars, unitCost }, tables: lookups.tables };

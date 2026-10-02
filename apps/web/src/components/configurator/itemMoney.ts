@@ -1,6 +1,6 @@
 import {
-  bindings, computeOutputs, itemSplit,
-  type ItemsTable, type ModelDef, type ResolvedLookups, type TableRows,
+  bindings, computeOutputs, itemSplit, typedPrice,
+  type ItemsTable, type ModelDef, type ResolvedLookups, type TableRows, type Val,
 } from "@confire/config-engine";
 import type { Candidate, Sel } from "./runView.ts";
 
@@ -14,8 +14,9 @@ import type { Candidate, Sel } from "./runView.ts";
 //
 // The split is `itemSplit`, the same function buildQuoteLines calls, against the same scope, so
 // what the salesperson reads here is what the server posts. `computeOutputs` runs rather than
-// `candidate.perBatch[].outputs` being read off the row: a selection may carry BOM/routing
-// overrides, and the engine is the only thing that knows what they do to the cost.
+// `candidate.perBatch[].outputs` being read off the row: the server re-prices against the live
+// cache and the current table rows when it posts (nothing is snapshotted), so the stored figures
+// could show a price the quotation will not carry.
 
 export type RowMoney = {
   unitCost: number;
@@ -80,7 +81,7 @@ export function itemMoney(args: {
     if (!cand) continue;
     let out;
     try {
-      out = computeOutputs(model, lookups, cand.assignment, s.batchQty, s.overrides, tables);
+      out = computeOutputs(model, lookups, cand.assignment, s.batchQty, tables);
     } catch {
       continue; // undecidable while an input is open — same silence the price badges give
     }
@@ -110,4 +111,19 @@ export function itemMoney(args: {
         : undefined;
     }),
   };
+}
+
+/** What the grid ships, costed and priced. Cost is the split's own total, which is the sum of the
+ *  cost lines (splitShares hands out the whole amount). Price honours a typed unit price the way
+ *  buildQuoteLines does, so a margin read off these is the margin on the document. `raw` is the
+ *  stored items rows, the only place a typed price lives. */
+export function moneyTotals(m: ItemMoney, raw: Record<string, Val>[]): { cost: number; price: number } {
+  let cost = 0;
+  let price = 0;
+  m.rows.forEach((r, i) => {
+    if (!r) return;
+    cost += r.unitCost * r.quantity;
+    price += (typedPrice(raw[i]) ?? r.unitPrice) * r.quantity;
+  });
+  return { cost, price };
 }

@@ -4,7 +4,7 @@ import {
   TableHeaderRow, TableRow, TableRowAction, Text, Toolbar, ToolbarButton,
 } from "@ui5/webcomponents-react";
 import {
-  columnOptions, evalTableRows, PRICE_COL,
+  columnOptions, evalTableRows, PRICE_COL, typedPrice,
   type ResolvedLookups, type ResolvedTable, type TableColumn, type TableDef, type Val,
 } from "@confire/config-engine";
 import { CflField } from "../../shared/cfl/CflField.tsx";
@@ -84,12 +84,12 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
   );
 
   const priceCell = (ri: number) => {
-    const stored = rows[ri]?.[PRICE_COL];
-    // Same contract a formula cell's override follows: the split until someone types, absence (not
-    // a sentinel) is what "left alone" looks like, and the clear icon hands it back. The test is
-    // the one buildQuoteLines applies, so the cell cannot show a number the quotation will reject.
-    const overridden = typeof stored === "number" && Number.isFinite(stored) && stored >= 0;
-    const value = overridden ? stored : money?.rows[ri]?.unitPrice;
+    // Same contract a formula cell's override follows: the split until someone types, and the
+    // clear icon hands it back. typedPrice is the test buildQuoteLines applies, so the cell cannot
+    // show a number the quotation will reject.
+    const typed = typedPrice(rows[ri]);
+    const overridden = typed !== undefined;
+    const value = typed ?? money?.rows[ri]?.unitPrice;
     if (readOnly) return <Text>{moneyText(value)}</Text>;
     return (
       <Input style={{ width: "100%" }} type="Number" accessibleName={priceHeader}

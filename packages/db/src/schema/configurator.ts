@@ -1,5 +1,5 @@
 import { boolean, index, jsonb, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-import type { Entries, ModelDef, OutputOverrides, Outputs, QuerySource, TableRows, Val } from "@confire/config-engine";
+import type { Entries, ModelDef, Outputs, QuerySource, TableRows, Val } from "@confire/config-engine";
 
 // Configurator persistence: a mutable model, and one configuration document that carries its own
 // latest calculation. Spec: docs/superpowers/specs/2026-07-03-configurator-design.md.
@@ -76,7 +76,7 @@ export type ProjectEvent = {
 
 // One enumerated configuration, priced per batch quantity, and the user's pick of one.
 export type ConfigCandidate = { assignment: Entries; perBatch: { batchQty: number; outputs: Outputs }[] };
-export type ConfigSelection = { candidateIdx: number; batchQty: number; overrides?: OutputOverrides };
+export type ConfigSelection = { candidateIdx: number; batchQty: number };
 
 // The "Configurations" document: customer + model + entries + batches, plus the single calculation
 // those entries produced. There is no run history and no id but this one — a recalculate overwrites

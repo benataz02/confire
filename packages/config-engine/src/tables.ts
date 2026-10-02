@@ -4,6 +4,7 @@ import {
   derivedColumns,
   derivedKey,
   refKeyCols,
+  PRICE_COL,
   QTY_COL,
   type ItemsTable,
   type LookupRef,
@@ -183,6 +184,15 @@ export function splitShares(weights: number[], total: number): number[] {
   }
   return share.map((c) => c / 100);
 }
+
+/** The unit price a salesperson typed over the split on an items row, or undefined when they left
+ *  it alone. Absence, not a sentinel, is what "left alone" looks like — the rule an override on a
+ *  formula cell follows. One test for the grid, the rail and the quotation, so none of them can
+ *  honour a price another rejects. */
+export const typedPrice = (raw: Record<string, Val> | undefined): number | undefined => {
+  const v = raw?.[PRICE_COL];
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
+};
 
 /** One item row's share of a configuration. `raw` is the stored row, which is where a hand-typed
  *  `PRICE_COL` lives — `row` (the evaluated one) cannot carry it, because the price is not a

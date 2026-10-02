@@ -6,7 +6,7 @@ import {
   type ConfigCandidate, type ConfigSelection, type ProjectEvent,
 } from "@confire/db";
 import {
-  computeOutputs, DslError, enumerate, EntriesZ, OutputOverridesZ, propagate, referencedTables, syncTables, TableRowsZ,
+  computeOutputs, DslError, enumerate, EntriesZ, propagate, referencedTables, syncTables, TableRowsZ,
   type Entries, type ModelDef, type Outputs, type ResolvedLookups, type TableRows, type Val,
 } from "@confire/config-engine";
 import { userProcedure } from "../base.ts";
@@ -199,7 +199,7 @@ export async function calculateProject(
     const candidates: ConfigCandidate[] = en.candidates.map((assignment) => ({
       assignment,
       perBatch: batches.map((batchQty) => ({
-        batchQty, outputs: computeOutputs(model.definition, lookups, assignment, batchQty, undefined, tableRows),
+        batchQty, outputs: computeOutputs(model.definition, lookups, assignment, batchQty, tableRows),
       })),
     }));
 
@@ -371,7 +371,7 @@ export function applySelection(
     const cand = candidates[s.candidateIdx];
     if (!cand) throw new ORPCError("BAD_REQUEST", { message: `No candidate at index ${s.candidateIdx}` });
     try {
-      const outputs = computeOutputs(model, lookups, cand.assignment, s.batchQty, s.overrides, tableRows);
+      const outputs = computeOutputs(model, lookups, cand.assignment, s.batchQty, tableRows);
       return { candidateIdx: s.candidateIdx, batchQty: s.batchQty, outputs };
     } catch (e) {
       if (e instanceof DslError || e instanceof RangeError) throw new ORPCError("BAD_REQUEST", { message: e.message });
@@ -387,7 +387,6 @@ export const pushEvent = (kind: ProjectEvent["kind"], note?: string) =>
 const SelectionZ = z.object({
   candidateIdx: z.number().int().min(0),
   batchQty: z.number().int().min(1),
-  overrides: OutputOverridesZ.optional(),
 });
 
 /** `customer` is jsonb; the list reads the name out of it so a saved view can sort and filter on
@@ -737,8 +736,9 @@ export const configsRouter = {
         await assertConfigMutable(context.tenantId, input.projectId, tx);
         validateSelectionPairs(project.candidates, input.selection);
         // Pricing gate, result discarded: validateSelectionPairs proves the candidate/batch pairs
-        // exist, but only computeOutputs proves the user's *overrides* can be priced at all. Let a
-        // DslError through here and it resurfaces at quoteDraft, against a locked project.
+        // exist, but only computeOutputs proves they still price against today's cache — a price
+        // line can vanish since the calculation. Let a DslError through here and it resurfaces at
+        // quoteDraft, against a locked project.
         applySelection(model.definition, lookups, project.candidates, input.selection, project.tables);
         await tx
           .update(configProject)

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DslError } from "../src/dsl";
-import { computeOutputs, OutputOverridesZ } from "../src/output";
+import { computeOutputs } from "../src/output";
 import { lookups, model } from "./fixture";
 
 const full = { material: "steel", section: 16, coated: true, color: "black" };
@@ -45,10 +45,17 @@ describe("computeOutputs", () => {
     expect(big.batchTotal).toBeGreaterThan(small.batchTotal);
   });
 
-  test("an item the price list does not carry surfaces as DslError", () => {
+  test("an item the price list does not carry costs 0 and is flagged, not thrown", () => {
     const badLookups = structuredClone(lookups);
     delete badLookups.prices!["COAT-1"];
-    expect(() => computeOutputs(model, badLookups, full, 100)).toThrow(DslError);
+    const priced = computeOutputs(model, lookups, full, 100);
+    const o = computeOutputs(model, badLookups, full, 100);
+    const line = o.bom.find((l) => l.itemCode === "COAT-1")!;
+    expect(line.unitPrice).toBe(0);
+    expect(line.lineTotal).toBe(0);
+    expect(line.unpriced).toBe(true);
+    expect(o.bom.filter((l) => l.unpriced)).toHaveLength(1);
+    expect(o.materialPerUnit).toBeLessThan(priced.materialPerUnit);
   });
 
   test("batchQty must be >= 1", () => {
@@ -59,67 +66,5 @@ describe("computeOutputs", () => {
     const bad = structuredClone(model);
     bad.bom[0]!.qty = '"5"';
     expect(() => computeOutputs(bad, lookups, full, 100)).toThrow(DslError);
-  });
-});
-
-describe("computeOutputs overrides", () => {
-  // Base (coated steel 16mm², batch 100): materialPerUnit 1.28, laborPerUnit 4.1,
-  // unitCost 5.38, unitPrice 7.532 — from the hand-computed test above.
-
-  test("price override + op removal recompute the chain", () => {
-    const o = computeOutputs(model, lookups, full, 100, {
-      bom: [{ id: "coating", unitPrice: 1 }],
-      ops: [{ id: "coat", remove: true }],
-    });
-    // coating: 1 * 1.0 = 1.0 (the override beats the price list); conductor unchanged 0.48
-    expect(o.materialPerUnit).toBeCloseTo(1.48);
-    expect(o.ops.map((op) => op.id)).toEqual(["cut"]);
-    expect(o.laborPerUnit).toBeCloseTo(0.6);
-    expect(o.unitCost).toBeCloseTo(2.08);
-    expect(o.unitPrice).toBeCloseTo(2.912); // priceExpr (×1.4) re-applied
-  });
-
-  test("qty override replaces the expr result", () => {
-    const o = computeOutputs(model, lookups, full, 100, {
-      bom: [{ id: "coating", qtyPerUnit: 2 }],
-    });
-    const coat = o.bom.find((l) => l.id === "coating")!;
-    expect(coat.qtyPerUnit).toBeCloseTo(2);
-    expect(coat.totalQty).toBeCloseTo(200);
-    expect(o.materialPerUnit).toBeCloseTo(0.48 + 2 * 0.8);
-  });
-
-  test("added BOM line and added op join the totals", () => {
-    const o = computeOutputs(model, lookups, full, 100, {
-      addBom: [{ id: "pack", itemCode: "PACK-1", qtyPerUnit: 0.1, unitPrice: 2 }],
-      addOps: [{ id: "qa", resource: "QA", setupMin: 0, runMinPerUnit: 0.6, ratePerHour: 60 }],
-    });
-    expect(o.bom.map((l) => l.id)).toEqual(["conductor", "coating", "pack"]);
-    expect(o.bom[2]!.lineTotal).toBeCloseTo(20); // 0.1 * 100 * 2
-    expect(o.materialPerUnit).toBeCloseTo(1.48);
-    expect(o.ops.map((op) => op.id)).toEqual(["cut", "coat", "qa"]);
-    expect(o.laborPerUnit).toBeCloseTo(4.7); // +0.6/min at 60/h = +0.6
-    expect(o.unitCost).toBeCloseTo(6.18);
-  });
-
-  test("removing a BOM line", () => {
-    const o = computeOutputs(model, lookups, full, 100, { bom: [{ id: "coating", remove: true }] });
-    expect(o.bom.map((l) => l.id)).toEqual(["conductor"]);
-    expect(o.materialPerUnit).toBeCloseTo(0.48);
-  });
-
-  test("no overrides object → identical to base", () => {
-    const base = computeOutputs(model, lookups, full, 100);
-    const same = computeOutputs(model, lookups, full, 100, {});
-    expect(same).toEqual(base);
-  });
-
-  test("OutputOverridesZ accepts the shapes above", () => {
-    expect(
-      OutputOverridesZ.safeParse({
-        bom: [{ id: "x", qtyPerUnit: 1, remove: false }],
-        addOps: [{ id: "y", resource: "R", setupMin: 0, runMinPerUnit: 1, ratePerHour: 60 }],
-      }).success,
-    ).toBe(true);
   });
 });

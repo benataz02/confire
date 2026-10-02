@@ -30,6 +30,8 @@ export function configMessages(a: {
   sync?: { table: string; syncedAt: string | Date | null; syncError: string | null; rowCount: number }[];
   /** a sync the user asked for, that failed */
   syncError?: Error | null;
+  /** BOM item codes the calculation costed at 0 — see unpricedItems */
+  unpriced?: string[];
   /** update / calculate / duplicate / delete — whichever failed last */
   configError?: Error | null;
   selectError?: Error | null;
@@ -108,6 +110,16 @@ export function configMessages(a: {
       detail: a.widest
         ? `${labelOf(a.model, a.widest.key)} is widest with ${a.widest.size} options`
         : undefined,
+      ...CANDIDATES,
+    });
+  // Critical, not Negative: the calculation went through, it just priced these materials at 0 —
+  // every figure on the page is understated by them until the item gets a price and a sync.
+  const list = a.model?.pricing?.priceList;
+  for (const code of a.unpriced ?? [])
+    out.push({
+      id: `unpriced:${code}`, type: "Critical",
+      text: `No price for ${code} in ${list ? `price list ${list}` : "the price list"}`,
+      detail: "Its material is costed at 0 until the item has a price and the data is synced.",
       ...CANDIDATES,
     });
   if (a.selectError)

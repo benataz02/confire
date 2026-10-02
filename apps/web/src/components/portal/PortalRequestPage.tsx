@@ -9,12 +9,11 @@ import { propagate, type Entries, type TableRows } from "@confire/config-engine"
 import { orpc } from "../../orpc.ts";
 import { StepConfigure } from "../configurator/StepConfigure.tsx";
 import { BATCHES_SECTION, ConfiguratorForm } from "../configurator/ConfiguratorForm.tsx";
-import { StepCandidates } from "../configurator/StepCandidates.tsx";
+import { PriceAnalysis } from "../configurator/PriceAnalysis.tsx";
 import { candidateLabel, fmt, openKeys, toggleSelection, type Sel } from "../configurator/runView.ts";
 import { money } from "../../lib/money.ts";
 import { useCurrency } from "../../orpc.ts";
 import { portalStatusUi, type PortalStatus } from "./portalUi.ts";
-import { PortalCandidateDetail } from "./PortalCandidateDetail.tsx";
 import { PortalRequestSummary } from "./PortalRequestSummary.tsx";
 import { sameEntries, sameTables } from "../configurator/configProcessState.ts";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "../configurator/formHelpers.ts";
@@ -162,15 +161,18 @@ export function PortalRequestPage({ id }: { id: string }) {
         </WizardStep>
         <WizardStep titleText="Prices" icon="grid" data-idx="2" selected={step === 2} disabled={!runReady}>
           {runReady ? (
-            <StepCandidates model={model.definition} entries={project.entries}
-              candidates={project.candidates} selection={selection}
-              onToggle={(i, b) => setSel(toggleSelection(selection, i, b))}
-              onNext={() => goto(3)} nextLabel="Review request"
-              capped={runMeta?.capped ?? project.candidates.length >= 200} widest={runMeta?.widest}
-              renderDetail={(i, label) => (
-                <PortalCandidateDetail label={label} model={model.definition}
-                  candidate={project.candidates[i]!} candidateIdx={i} selection={selection} />
-              )} />
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+              <Title level="H5">Prices</Title>
+              <PriceAnalysis model={model.definition} entries={project.entries}
+                candidates={project.candidates} selection={selection}
+                onToggle={(i, b) => setSel(toggleSelection(selection, i, b))}
+                capped={runMeta?.capped ?? project.candidates.length >= 200} widest={runMeta?.widest} />
+              <Bar design="FloatingFooter" endContent={
+                <Button design="Emphasized" disabled={selection.length === 0} onClick={() => goto(3)}>
+                  Review request ({selection.length})
+                </Button>
+              } />
+            </div>
           ) : null}
         </WizardStep>
         <WizardStep titleText="Submit" icon="paper-plane" data-idx="3" selected={step === 3}

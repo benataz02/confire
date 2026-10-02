@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { computeOutputs, type ModelDef, type ResolvedLookups, type TableRows } from "@confire/config-engine";
-import { itemMoney } from "./itemMoney.ts";
+import { itemMoney, moneyTotals } from "./itemMoney.ts";
 import type { Candidate } from "./runView.ts";
 
 // unitCost = 10 (one sheet at 10, no routing), unitPrice = unitCost * 2 = 20.
@@ -40,7 +40,7 @@ const tables: TableRows = {
 };
 const batchOf = (n: number) => ({
   batchQty: n,
-  outputs: computeOutputs(model, lookups, { thickness: 3 }, n, undefined, tables),
+  outputs: computeOutputs(model, lookups, { thickness: 3 }, n, tables),
 });
 const candidates: Candidate[] = [{ assignment: { thickness: 3 }, perBatch: [batchOf(3), batchOf(6)] }];
 const call = (selection: Parameters<typeof itemMoney>[0]["selection"], batches = [3]) =>
@@ -110,6 +110,16 @@ describe("itemMoney", () => {
   test("an unnamed BOM line falls back to its item code, and repeats merge", () => {
     const m = call([{ candidateIdx: 0, batchQty: 3 }, { candidateIdx: 0, batchQty: 6 }]);
     expect(m!.lines).toEqual([{ kind: "material", label: "SHEET", amount: 90 }]); // 3 + 6 sheets
+  });
+
+  test("totals take a typed unit price over the split, the way the quotation does", () => {
+    const m = call([{ candidateIdx: 0, batchQty: 3 }])!;
+    // cost 30 either way; price 40 (split) + 3 pieces typed at 5 = 55 instead of 40 + 20
+    const typed = [tables.parts![0]!, { ...tables.parts![1]!, unitprice: 5 }];
+    expect(moneyTotals(m, tables.parts!).price).toBeCloseTo(60, 8);
+    const t = moneyTotals(m, typed);
+    expect(t.cost).toBeCloseTo(30, 8);
+    expect(t.price).toBeCloseTo(55, 8);
   });
 
   test("no candidates yet means no money at all, not a zero", () => {
