@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { isFieldEditable, resolveField, resolveSections, udfColumns, udfSection, type Constraints } from "./metadata.ts";
+import { formatValue } from "./format.ts";
+import { isFieldEditable, resolveColumns, resolveField, resolveSections, udfColumns, udfSection, type Constraints } from "./metadata.ts";
 import type { FormField } from "./types.ts";
 
 const C: Constraints = {
@@ -35,6 +36,14 @@ test("a declared required function wins over metadata's Required", () => {
 test("an unknown field comes back untouched (same object)", () => {
   const f: FormField = { key: "Nope" };
   expect(resolveField(f, C)).toBe(f);
+});
+
+test("an Edm integer (DocNum) is shown without digit grouping, an Edm.Double is grouped", () => {
+  const c: Constraints = { ...C, DocNum: { Type: "number", EdmType: "Edm.Int32" } };
+  const [docNum, total] = resolveColumns([{ key: "DocNum" }, { key: "DocTotal" }], c);
+  expect(formatValue(123456, docNum!.type, docNum!.options, docNum!.integer)).toBe("123456");
+  expect(formatValue(123456, total!.type, total!.options, total!.integer)).toBe((123456).toLocaleString());
+  expect(resolveField({ key: "DocNum" }, c).integer).toBe(true);
 });
 
 test("BoYesNoEnum is flagged so the checkbox writes tYES/tNO", () => {

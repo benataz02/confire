@@ -109,20 +109,20 @@ export default function CflDialog({ config, initialSearch, multiSelect, onSelect
 
   const rowId = (r: Row) => String(r[key] ?? "");
   const [picked, setPicked] = useState<Row[]>([]);
-  const highlighted = picked[0];
   const choose = (rows: Row[]) => { if (rows.length) onSelect(rows); };
 
-  const gridState: GridState = { columns: state.columns, labels: {}, sortBy, groupBy: [], columnWidths: state.columnWidths };
+  const gridState: GridState = { columns: state.columns, sortBy, groupBy: [], columnWidths: state.columnWidths };
 
   return (
-    <Dialog open onClose={onClose} headerText={config.title} stretch={isPhone()}
+    <Dialog open onClose={onClose} headerText={config.title} stretch={isPhone()} className="confire-flush"
       style={{ width: "min(1600px, 95vw)", height: "min(900px, 90vh)" }}
       footer={
         <Bar design="Footer" endContent={
           <>
-            {config.readOnly ? null : (
+            {/* single select has no Select: a row click is the pick */}
+            {config.readOnly || !multiSelect ? null : (
               <Button design="Emphasized" disabled={!picked.length} onClick={() => choose(picked)}>
-                {multiSelect ? `Select (${picked.length})` : "Select"}
+                {picked.length ? `Select (${picked.length})` : "Select"}
               </Button>
             )}
             <Button design="Transparent" onClick={onClose}>{config.readOnly ? "Close" : "Cancel"}</Button>
@@ -130,25 +130,25 @@ export default function CflDialog({ config, initialSearch, multiSelect, onSelect
         } />
       }>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: "0.5rem" }}>
-        <FilterHeader pool={pool} showAdaptFilters={showAdapt}
-          state={{ adaptFilterKeys: state.adaptFilterKeys, filterValues: filters.filterValues, searchTerm: filters.searchTerm }}
-          onApply={(next) => {
-            setFilters({ filterValues: next.filterValues, searchTerm: next.searchTerm });
-            if (next.adaptFilterKeys !== state.adaptFilterKeys) setLayout({ ...layout, adaptFilterKeys: next.adaptFilterKeys });
-          }} />
+        <div className="confire-inset">
+          <FilterHeader pool={pool} showAdaptFilters={showAdapt}
+            state={{ adaptFilterKeys: state.adaptFilterKeys, filterValues: filters.filterValues, searchTerm: filters.searchTerm }}
+            onApply={(next) => {
+              setFilters({ filterValues: next.filterValues, searchTerm: next.searchTerm });
+              if (next.adaptFilterKeys !== state.adaptFilterKeys) setLayout({ ...layout, adaptFilterKeys: next.adaptFilterKeys });
+            }} />
+        </div>
         <div style={{ flex: 1, minHeight: 0 }}>
           <Grid title={config.title} columns={columns} state={gridState} keyOf={rowId}
             rows={list.rows} total={list.total} loading={list.loading} hasMore={list.hasMore} onLoadMore={list.onLoadMore}
             selectionMode={multiSelect ? "Multiple" : config.readOnly && !config.onRowNavigate ? "None" : "Single"}
-            selectedIds={multiSelect ? undefined : highlighted ? { [rowId(highlighted)]: true } : {}}
             onSelectionChange={multiSelect ? setPicked : undefined}
             onRowClick={multiSelect ? undefined : (row) => {
-              // First click highlights; clicking the highlighted row again selects it — or, with
-              // onRowNavigate, closes the dialog and opens the record.
-              if (highlighted && rowId(highlighted) === rowId(row)) {
-                if (config.onRowNavigate) { onClose(); config.onRowNavigate(row); }
-                else if (!config.readOnly) choose([row]);
-              } else setPicked([row]);
+              // Single select acts on the first click (Enter/Space reach here too) — or, with
+              // onRowNavigate, closes the dialog and opens the record. Deviation from Beas, which
+              // highlighted first and acted on a second click of the same row.
+              if (config.onRowNavigate) { onClose(); config.onRowNavigate(row); }
+              else if (!config.readOnly) choose([row]);
             }}
             onStateChange={(patch) => {
               if (patch.sortBy) setSortBy(patch.sortBy);

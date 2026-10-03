@@ -30,8 +30,9 @@ export function optionLabel(v: unknown, options: Option[] | undefined): string |
 
 /** One value as text: option label, then by type — ✓/– for booleans, the local date for dates
  *  (the time half of a B1 date is always midnight and never meaningful), grouped digits for
- *  numbers. */
-export function formatValue(v: unknown, type?: FieldType, options?: Option[]): string {
+ *  numbers — except an `integer` one: in B1 that is a key, a document number or a code, and
+ *  DocNum "1,234" reads as a quantity. */
+export function formatValue(v: unknown, type?: FieldType, options?: Option[], integer?: boolean): string {
   if (v === null || v === undefined || v === "") return "";
   const label = optionLabel(v, options);
   if (label !== undefined) return label;
@@ -43,7 +44,7 @@ export function formatValue(v: unknown, type?: FieldType, options?: Option[]): s
       return d ? d.toLocaleDateString() : String(v);
     }
     case "number":
-      return typeof v === "number" ? v.toLocaleString(undefined, { maximumFractionDigits: 6 }) : String(v);
+      return typeof v === "number" && !integer ? v.toLocaleString(undefined, { maximumFractionDigits: 6 }) : String(v);
     default:
       return typeof v === "object" ? JSON.stringify(v) : String(v);
   }

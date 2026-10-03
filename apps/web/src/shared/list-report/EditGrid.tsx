@@ -28,6 +28,7 @@ const asField = (c: ListColumn): Field => ({
   ...(c.cflConfig ? { cfl: { dialogConfig: c.cflConfig } } : {}),
   ...(c.linkConfig ? { link: c.linkConfig } : {}),
   ...(c.yesNo ? { yesNo: true } : {}),
+  ...(c.integer ? { integer: true } : {}),
 });
 
 /** A cell is editable when the collection is writable and the column itself is (metadata Editable,

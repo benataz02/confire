@@ -78,9 +78,12 @@ function revealActionsHeader(el: TableHeaderRowDomRef | null) {
   sr.appendChild(style);
 }
 
-export function ParamsTab({ modelId, draft, update, issues, tables, lookups, lookupsFailed, onRetryLookups }: {
+/** Where the live preview sits relative to the structure tree; picked in the page's title bar. */
+export type PreviewAt = "left" | "top" | "bottom" | "right" | "hidden";
+
+export function ParamsTab({ modelId, draft, update, issues, tables, lookups, lookupsFailed, onRetryLookups, previewAt }: {
   modelId: string; draft: ModelDef; update: Update; issues: Issue[]; tables: Tables;
-  lookups?: ResolvedLookups; lookupsFailed?: boolean; onRetryLookups: () => void;
+  lookups?: ResolvedLookups; lookupsFailed?: boolean; onRetryLookups: () => void; previewAt: PreviewAt;
 }) {
   const [editing, setEditing] = useState<{ param: Param; isNew: boolean; place?: { s: number; g: number } } | null>(null);
   // Table being edited in the dialog, by key — the dialog buffers its own copy.
@@ -250,13 +253,30 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       </>
     );
 
-  // ponytail: no responsive drop-below — SplitterLayout is desktop-only, which the model builder
-  // is. Wrap it in a DynamicSideContent again if a tablet ever has to open this tab.
+  // ponytail: no responsive drop-below — the preview goes where the title-bar picker says, which
+  // suits the desktop-only model builder. Wrap it in a DynamicSideContent if a tablet ever needs it.
   // Both panes scroll themselves: SplitterLayout clips (overflow:hidden), so the tree can no
   // longer lean on the ObjectPage's scroller.
+  // Keyed, so moving the preview to the other side moves the pane instead of remounting it — the
+  // values typed into it survive the switch.
+  // A size of its own, not "auto": an auto pane measures itself once and freezes at that px, and
+  // straight after a reset that measure can land before the layout settles — the preview then
+  // stops short of the edge until a drag rewrites it. Two percentages always add up to the width.
+  const preview = (
+    <SplitterElement key="preview" size="50%" minSize={280}>
+      <PreviewPane modelId={modelId} draft={draft} issues={issues} lookups={lookups}
+        lookupsFailed={lookupsFailed} onRetryLookups={onRetryLookups} />
+    </SplitterElement>
+  );
+  const previewFirst = previewAt === "left" || previewAt === "top";
   return (
-    <SplitterLayout style={{ height: "100%", minHeight: "28rem" }}>
-      <SplitterElement size="50%" minSize={280}>
+    // flex:1 + minHeight:0 is fitContent's contract (see the params section): fill the page height.
+    // A drag writes px straight onto the panes, so a new arrangement — or a resized page, where
+    // those px would leave a gap — resets to the declared sizes.
+    <SplitterLayout vertical={previewAt === "top" || previewAt === "bottom"}
+      style={{ flex: 1, minHeight: 0 }} options={{ resetOnCustomDepsChange: [previewAt], resetOnSizeChange: true }}>
+      {previewFirst ? preview : null}
+      <SplitterElement key="tree" size={previewAt === "hidden" ? "100%" : "50%"} minSize={280}>
     <div style={{
       display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1rem",
       flex: "1 1 auto", minInlineSize: 0, overflowY: "auto",
@@ -430,10 +450,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       ) : null}
     </div>
       </SplitterElement>
-      <SplitterElement minSize={280}>
-        <PreviewPane modelId={modelId} draft={draft} issues={issues} lookups={lookups}
-          lookupsFailed={lookupsFailed} onRetryLookups={onRetryLookups} />
-      </SplitterElement>
+      {previewFirst || previewAt === "hidden" ? null : preview}
     </SplitterLayout>
   );
 }

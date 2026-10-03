@@ -87,13 +87,6 @@ export function ListReport({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlJson]);
 
-  // Grouping is client-side, so a grouped view first loads everything (up to the cap).
-  const grouped = !!state?.groupBy.length;
-  useEffect(() => {
-    if (grouped && data.hasMore) void data.loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [grouped, data.hasMore]);
-
   const setGrid = useCallback((patch: Partial<GridState>) => views.setState((s) => ({ ...s, ...patch })), [views.setState]);
   const applyFilters = useCallback(
     (next: Pick<ViewState, "adaptFilterKeys" | "filterValues" | "searchTerm">) => views.setState((s) => ({ ...s, ...next })),

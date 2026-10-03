@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import {
   AnalyticalTable, AnalyticalTableHooks, Bar, Button, IllustratedMessage, Title,
   type AnalyticalTableCellInstance, type AnalyticalTableColumnDefinition, type AnalyticalTablePropTypes,
@@ -12,11 +13,11 @@ import { GridSettingsDialog } from "./GridSettingsDialog.tsx";
 import type { ListColumn, Row, ViewState } from "../types.ts";
 
 // beas-grid, read mode (LIST-REPORT-OBJECT-PAGE.md §3.4) over AnalyticalTable: the view decides
-// which columns show, in what order, with which labels and widths, sorted and grouped how. Sorting
-// and paging are the server's (manualSortBy, infinite scroll); grouping is client-side over rows
-// the caller loaded in full first.
+// which columns show, in what order, at which widths, sorted and grouped how. Sorting
+// and paging are the server's (manualSortBy, infinite scroll); grouping is client-side over the
+// rows loaded so far, and each page scrolled in joins its groups or opens new ones.
 
-export type GridState = Pick<ViewState, "columns" | "labels" | "sortBy" | "groupBy" | "columnWidths">;
+export type GridState = Pick<ViewState, "columns" | "sortBy" | "groupBy" | "columnWidths">;
 export type Selection = { rows: Row[]; clear: () => void };
 export type CellTemplate = (row: Row, column: ListColumn) => ReactNode;
 
@@ -29,12 +30,30 @@ const tableStyle: CSSProperties = {
   borderRadius: "var(--sapElement_BorderCornerRadius)",
 };
 
+// Full screen is the page, not the browser's. AutoWithEmptyRows counts rows from the table's
+// parentElement, so the parent is ours: on the page it passes the slot's height through, full page
+// it is what fills the viewport. `position: fixed` alone stays inside DynamicPage (its root is
+// `container-type: inline-size`, which contains fixed descendants), so it goes into the top layer as
+// a manual popover — the escape ui5's own popups use. Same elements, so scroll, loaded pages and open
+// groups survive; popups opened later stack above it.
+const slotStyle: CSSProperties = { height: "100%" };
+// undoes the UA [popover] box: fit-content, margin, border, padding, Canvas colors
+const fullPageStyle: CSSProperties = {
+  width: "100%",
+  height: "100%",
+  margin: 0,
+  border: 0,
+  padding: 0,
+  color: "inherit",
+  background: "var(--sapBackgroundColor)",
+};
+
 /** A link cell (§3 linkConfig): only for a plain string column — no template, no options, no
  *  other type — with a non-empty value. Anything typed is formatted instead, as in Beas. */
 const isLinkCell = (c: ListColumn) => !!c.linkConfig && !c.options && (!c.type || c.type === "string");
 
 /** The .xlsx export (ExcelExportService): the visible columns, typed cells, option labels. */
-async function exportXlsx(title: string, columns: ListColumn[], labels: Record<string, string> | undefined, rows: Row[]) {
+async function exportXlsx(title: string, columns: ListColumn[], rows: Row[]) {
   const { default: writeXlsxFile } = await import("write-excel-file/browser");
   const cell = (v: unknown, c: ListColumn) => {
     if (v === null || v === undefined || v === "") return null;
@@ -48,7 +67,7 @@ async function exportXlsx(title: string, columns: ListColumn[], labels: Record<s
     }
     return { type: String, value: typeof v === "object" ? JSON.stringify(v) : String(v) };
   };
-  const header = columns.map((c) => ({ value: labels?.[c.key] ?? c.label ?? c.key, fontWeight: "bold" as const }));
+  const header = columns.map((c) => ({ value: c.label ?? c.key, fontWeight: "bold" as const }));
   await writeXlsxFile(
     [header, ...rows.map((r) => columns.map((c) => cell(r[c.key], c)))],
     { columns: columns.map((c) => ({ width: Math.max(10, Math.round((c.width ?? 140) / 7)) })) },
@@ -70,7 +89,7 @@ export function Grid({
   loading?: boolean;
   hasMore?: boolean;
   onLoadMore?: () => void;
-  /** the whole result (capped) — export and grouping need every row, not the loaded page */
+  /** the whole result (capped) — export needs every row, not the loaded page */
   loadAll?: () => Promise<Row[]>;
   keyOf?: (row: Row) => string;
   selectionMode?: "None" | "Single" | "Multiple";
@@ -94,6 +113,22 @@ export function Grid({
   const [selected, setSelected] = useState(NO_SELECTION);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const slotRef = useRef<HTMLDivElement>(null);
+  const [maximized, setMaximized] = useState(false);
+  // Dropping the `popover` attribute hides it again, so only opening needs a call.
+  useLayoutEffect(() => {
+    if (maximized) slotRef.current?.showPopover();
+  }, [maximized]);
+  // A view transition morphs the table between its slot and the page (timing in global.css).
+  // flushSync: the new state is captured when the callback returns. The name is set only while it
+  // runs, because two grids can be on screen (a list under its value help) and names must be unique.
+  const toggleMaximized = () => {
+    const el = slotRef.current;
+    const flip = () => flushSync(() => setMaximized((m) => !m));
+    if (!el || !document.startViewTransition) return flip();
+    el.style.viewTransitionName = "confire-grid";
+    document.startViewTransition(flip).finished.finally(() => { el.style.viewTransitionName = ""; });
+  };
 
   const byKey = useMemo(() => new Map(columns.map((c) => [c.key, c])), [columns]);
   const visible = useMemo(
@@ -107,7 +142,9 @@ export function Grid({
     () =>
       visible.map((c) => {
         const template = cellTemplates?.[c.key];
-        const Cell = ({ cell }: AnalyticalTableCellInstance) => {
+        const Cell = ({ cell, row }: AnalyticalTableCellInstance) => {
+          // A group header row has no `original`, only the grouped value (react-table useGroupBy).
+          if (cell.isGrouped) return <span>{formatValue(cell.value, c.type, c.options, c.integer)} ({row.subRows.length})</span>;
           const r = ((cell.row as { original?: Row }).original ?? {}) as Row;
           const v = r[c.key];
           if (template) return <>{template(r, c)}</>;
@@ -122,12 +159,12 @@ export function Grid({
                 </EntityLink>
               );
           }
-          return <span>{formatValue(v, c.type, c.options)}</span>;
+          return <span>{formatValue(v, c.type, c.options, c.integer)}</span>;
         };
         return {
           id: c.key,
           accessor: (row: Row) => row[c.key],
-          Header: state.labels?.[c.key] ?? c.label ?? c.key,
+          Header: c.label ?? c.key,
           ...(state.columnWidths?.[c.key] ?? c.width ? { width: state.columnWidths?.[c.key] ?? c.width } : {}),
           ...(endAligned(c.type) ? { hAlign: "End" as const } : {}),
           disableSortBy: c.sortable === false,
@@ -135,7 +172,7 @@ export function Grid({
           Cell,
         };
       }),
-    [visible, state.labels, state.columnWidths, cellTemplates, canOpen],
+    [visible, state.columnWidths, cellTemplates, canOpen],
   );
 
   // Sort and group are the view's, not the table's: the controlled state shows the view's rules in
@@ -146,6 +183,8 @@ export function Grid({
     () => ({
       autoResetSortBy: false, autoResetFilters: false, autoResetSelectedRows: false,
       autoResetPage: false, autoResetHiddenColumns: false, autoResetResize: false, autoResetGroupBy: false,
+      // a page appended under a grouped view must not collapse the groups the user opened
+      autoResetExpanded: false,
       manualSortBy: true, manualFilters: true, manualGlobalFilter: true,
       useControlledState: (s: Record<string, unknown>) => ({ ...s, sortBy, groupBy: state.groupBy }),
       // Row ids from the record's key, not its index: a selection then survives a page append,
@@ -157,14 +196,18 @@ export function Grid({
 
   // Widths are committed when a resize ends (useOnColumnResize watches state.columnResizing), not
   // on every pixel. The plugin captures its callback once, so it reads the latest through a ref.
+  // The commit must be a no-op when the width is already ours: the plugin (ui5 2.26) never clears
+  // its last-resized column, so after one resize it re-fires on every `columns` change — and a
+  // commit rebuilds `columns`, which was "Maximum update depth exceeded".
   const latest = useRef({ onStateChange, widths: state.columnWidths });
   latest.current = { onStateChange, widths: state.columnWidths };
   const tableHooks = useMemo(
     () => [
       AnalyticalTableHooks.useOnColumnResize(({ columnWidth, header }) => {
         const { onStateChange: change, widths } = latest.current;
-        if (header?.id && Number.isFinite(columnWidth))
-          change?.({ columnWidths: { ...widths, [header.id]: Math.round(columnWidth) } });
+        const width = Math.round(columnWidth);
+        if (header?.id && Number.isFinite(width) && widths?.[header.id] !== width)
+          change?.({ columnWidths: { ...widths, [header.id]: width } });
       }),
     ],
     [],
@@ -204,29 +247,41 @@ export function Grid({
     [title, noDataText],
   );
 
-  const grouped = state.groupBy.length > 0;
+  const fullScreenLabel = maximized ? "Exit full screen" : "Full screen";
   const toolbar = (
     <Bar
       startContent={title ? (
         <Title level="H5">
-          {title} ({selectionMode === "Multiple" ? `${selected.rows.length}/` : ""}{total ?? rows.length})
+          {title} ({selectionMode === "Multiple" && selected.rows.length ? `${selected.rows.length}/` : ""}{total ?? rows.length})
         </Title>
       ) : undefined}
       endContent={
         <>
-          {toolbarActions?.({ rows: selected.rows, clear: () => setSelected(NO_SELECTION) })}
+          {/* The caller's actions ride in an element of ours, as ObjectPageHeader's ToolbarItem does.
+              ui5 hands `slot` to each slot child, and a component child (PrintActions) drops it: its
+              buttons fell into the Bar's middle, and its closed Dialog became a slotted child that the
+              Bar's `::slotted(*) { display: inline-block }` overrode `[popover] { display: none }` on —
+              a stretched blank sheet over the page for as long as one row was selected. The gap
+              replaces the `::slotted([ui5-button])` margins the buttons no longer get. */}
+          {toolbarActions ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              {toolbarActions({ rows: selected.rows, clear: () => setSelected(NO_SELECTION) })}
+            </div>
+          ) : null}
           {exportName ? (
             <Button icon="excel-attachment" design="Transparent" tooltip="Export to Excel" accessibleName="Export to Excel"
               disabled={exporting || !rows.length}
               onClick={async () => {
                 setExporting(true);
                 try {
-                  await exportXlsx(exportName, visible, state.labels, loadAll ? await loadAll() : rows);
+                  await exportXlsx(exportName, visible, loadAll ? await loadAll() : rows);
                 } finally {
                   setExporting(false);
                 }
               }} />
           ) : null}
+          <Button icon={maximized ? "exit-full-screen" : "full-screen"} design="Transparent"
+            tooltip={fullScreenLabel} accessibleName={fullScreenLabel} onClick={toggleMaximized} />
           {showSettings && onStateChange ? (
             <Button icon="action-settings" design="Transparent" tooltip="View settings" accessibleName="View settings"
               onClick={() => setSettingsOpen(true)} />
@@ -238,45 +293,49 @@ export function Grid({
 
   return (
     <>
-      <AnalyticalTable
-        key={epoch}
-        columns={tableColumns}
-        data={rows}
-        reactTableOptions={reactTableOptions}
-        tableHooks={tableHooks}
-        style={tableStyle}
-        extension={toolbar}
-        loading={loading}
-        minRows={1}
-        visibleRowCountMode={fill ? "AutoWithEmptyRows" : "Fixed"}
-        visibleRows={fill ? undefined : Math.min(Math.max(rows.length, 3), 15)}
-        // onLoadMore only fires off a scroll of the table body, and a page that fits has nothing
-        // to scroll — so while there is more, a few phantom rows keep the body scrollable. Grouped
-        // views have every row already (loadAll), so no infinite scroll there.
-        infiniteScroll={!!onLoadMore && !grouped}
-        additionalEmptyRowsCount={hasMore && !grouped ? 5 : 0}
-        infiniteScrollThreshold={40}
-        onLoadMore={onLoadMore}
-        NoDataComponent={NoData}
-        sortable
-        groupable={columns.some((c) => c.groupable)}
-        onSort={handleSort}
-        onGroup={handleGroup}
-        onColumnsReorder={handleReorder}
-        selectionMode={selectionMode}
-        selectionBehavior={selectionMode === "Single" ? "Row" : "RowSelector"}
-        selectedRowIds={selectedIds ?? selected.ids}
-        onRowSelect={handleRowSelect}
-        withNavigationHighlight={!!onRowClick && selectionMode !== "Single"}
-        onRowClick={(e) => {
-          const target = e.target as HTMLElement | null;
-          // The checkbox cell and a link inside a cell are not the row: one selects, the other
-          // opens the referenced record.
-          if (target?.closest?.('[data-selection-cell="true"], ui5-link')) return;
-          const original = e.detail.row.original as Row | undefined;
-          if (original) onRowClick?.(original);
-        }}
-      />
+      <div ref={slotRef} popover={maximized ? "manual" : undefined} style={maximized ? fullPageStyle : slotStyle}>
+        <AnalyticalTable
+          key={epoch}
+          columns={tableColumns}
+          data={rows}
+          reactTableOptions={reactTableOptions}
+          tableHooks={tableHooks}
+          style={tableStyle}
+          extension={toolbar}
+          loading={loading}
+          minRows={1}
+          visibleRowCountMode={fill || maximized ? "AutoWithEmptyRows" : "Fixed"}
+          visibleRows={fill || maximized ? undefined : Math.min(Math.max(rows.length, 3), 15)}
+          // onLoadMore only fires off a scroll of the table body, and a page that fits has nothing
+          // to scroll — so while there is more, a few phantom rows keep the body scrollable. Grouped,
+          // the table fires on every scroll to the bottom: a page may only grow existing groups.
+          infiniteScroll={!!onLoadMore}
+          additionalEmptyRowsCount={hasMore ? 5 : 0}
+          infiniteScrollThreshold={40}
+          onLoadMore={onLoadMore}
+          NoDataComponent={NoData}
+          sortable
+          groupable={columns.some((c) => c.groupable)}
+          onSort={handleSort}
+          onGroup={handleGroup}
+          onColumnsReorder={handleReorder}
+          // The table hovers only rows a click selects (Single/Multiple, never RowSelector), so a
+          // clickable list runs as Single/RowOnly — no selector column — and Multiple as Row.
+          selectionMode={selectionMode === "None" && onRowClick ? "Single" : selectionMode}
+          selectionBehavior={selectionMode === "None" ? "RowOnly" : "Row"}
+          selectedRowIds={selectedIds ?? selected.ids}
+          onRowSelect={handleRowSelect}
+          withNavigationHighlight={!!onRowClick && selectionMode !== "Single"}
+          onRowClick={(e) => {
+            const target = e.target as HTMLElement | null;
+            // The checkbox cell and a link inside a cell are not the row: one selects, the other
+            // opens the referenced record.
+            if (target?.closest?.('[data-selection-cell="true"], ui5-link')) return;
+            const original = e.detail.row.original as Row | undefined;
+            if (original) onRowClick?.(original);
+          }}
+        />
+      </div>
       {settingsOpen ? (
         <GridSettingsDialog columns={columns} state={state}
           onConfirm={(patch) => { onStateChange?.(patch); setSettingsOpen(false); }}

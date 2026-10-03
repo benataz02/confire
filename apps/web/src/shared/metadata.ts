@@ -44,6 +44,8 @@ export function findConstraint(key: string, c: Constraints | undefined): [string
 }
 
 const isYesNoType = (edm: string) => /BoYesNoEnum$/.test(edm);
+/** B1's integers are keys, document numbers and codes; its amounts and quantities are Edm.Double. */
+export const isIntegerType = (edm: string | undefined) => /^Edm\.(Int\d+|S?Byte)$/.test(edm ?? "");
 
 // --- ii/Zo: one field ---------------------------------------------------------------------------
 /**
@@ -70,6 +72,7 @@ export function resolveField(field: FormField, c: Constraints | undefined): Form
     metaRequired: !!m.Required,
     ...(m.Udf ? { udf: true } : {}),
     ...(isYesNoType(m.EdmType) ? { yesNo: true } : {}),
+    ...(isIntegerType(m.EdmType) ? { integer: true } : {}),
     ...(children ? { fields: children } : {}),
   };
 }
@@ -104,6 +107,7 @@ export function resolveColumns(columns: ListColumn[], c: Constraints | undefined
       metaEditable: !!m.Editable,
       ...(m.Udf ? { udf: true } : {}),
       ...(isYesNoType(m.EdmType) ? { yesNo: true } : {}),
+      ...(isIntegerType(m.EdmType) ? { integer: true } : {}),
     };
   });
 }
@@ -164,7 +168,10 @@ const udfEntries = (c: Constraints | undefined) =>
 export const udfColumns = (c: Constraints | undefined, declared: string[] = []): ListColumn[] =>
   udfEntries(c)
     .filter(([key]) => !declared.includes(key))
-    .map(([key, m]) => ({ key, label: m.Label ?? key, type: m.Type, ...(m.Options ? { options: m.Options } : {}), hidden: true, udf: true }));
+    .map(([key, m]) => ({
+      key, label: m.Label ?? key, type: m.Type, ...(m.Options ? { options: m.Options } : {}), hidden: true, udf: true,
+      ...(isIntegerType(m.EdmType) ? { integer: true } : {}),
+    }));
 
 /** The auto "User-defined fields" section, or null when the entity has none left undeclared. */
 export function udfSection(c: Constraints | undefined, declaredKeys: string[]): Section | null {

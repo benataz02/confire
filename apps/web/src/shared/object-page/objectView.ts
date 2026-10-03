@@ -1,8 +1,8 @@
 import { sectionFields } from "../metadata.ts";
 import type { FormField, ListColumn, ObjectViewState, Section } from "../types.ts";
 
-// Object views: personalization over the DECLARED sections and fields — which show, in what order,
-// under which label. A view can only narrow and reorder what the feature declares; it never adds.
+// Object views: personalization over the DECLARED sections and fields — which show, and in what
+// order. A view can only narrow and reorder what the feature declares; it never adds.
 
 /** The keys a section's layout lists: its form fields, or its table's columns. */
 const keysOf = (s: Section): string[] =>
@@ -46,17 +46,12 @@ export function applyObjectView(sections: Section[], state: ObjectViewState, mus
     if (!v.visible && !sectionFields(s).some(mustShow)) return [];
     const at = new Map(v.fields.map((f, i) => [f.key, { ...f, i }]));
     const rank = (k: string) => at.get(k)?.i ?? Number.MAX_SAFE_INTEGER;
-    const relabel = <T extends { key: string; label?: string }>(x: T): T => {
-      const l = at.get(x.key)?.label;
-      return l ? { ...x, label: l } : x;
-    };
     const fields = (fs: FormField[] | undefined) =>
       fs
         ?.filter((f) => f.controlType === "fieldGroup" || at.get(f.key)?.visible !== false || mustShow(f))
-        .map(relabel)
         .sort((a, b) => rank(a.key) - rank(b.key));
     const columns = (cs: ListColumn[]) =>
-      cs.map((c) => (at.get(c.key)?.visible === false ? { ...c, hidden: true } : relabel(c))).sort((a, b) => rank(a.key) - rank(b.key));
+      cs.map((c) => (at.get(c.key)?.visible === false ? { ...c, hidden: true } : c)).sort((a, b) => rank(a.key) - rank(b.key));
     return [{
       ...s,
       ...(s.fields ? { fields: fields(s.fields) } : {}),

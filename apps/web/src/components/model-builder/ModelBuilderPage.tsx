@@ -1,9 +1,10 @@
+import { useState } from "react";
 import { useBlocker, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Bar, Button, BusyIndicator, MessageStrip,
-  ObjectPage, ObjectPageSection, ObjectPageTitle,
-  Text, Title, Toolbar,
+  Bar, Button, BusyIndicator, Icon, Label, MessageStrip,
+  ObjectPage, ObjectPageSection, ObjectPageTitle, SegmentedButton, SegmentedButtonItem,
+  Text, Title, Toolbar, ToolbarItem,
 } from "@ui5/webcomponents-react";
 import type { Issue, ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
@@ -14,7 +15,7 @@ import { builderMessages, SECTION_TITLE } from "./builderMessages.ts";
 import { confirm } from "../confirm.ts";
 import { toast } from "../toast.ts";
 import { SettingsTab } from "./SettingsTab.tsx";
-import { ParamsTab } from "./ParamsTab.tsx";
+import { ParamsTab, type PreviewAt } from "./ParamsTab.tsx";
 import { useRulesTab } from "./RulesTab.tsx";
 import { useItemStructureTab } from "./ItemStructureTabs.tsx";
 import { useHistoryTab } from "./HistoryTab.tsx";
@@ -27,11 +28,24 @@ const EMPTY_MODEL: ModelDef = {
   bom: [], routing: [], pricing: { priceExpr: "0", quoteItemCode: "X" }, batchDefaults: [1],
 };
 
+const PREVIEW_AT: { key: PreviewAt; icon: string; tooltip: string }[] = [
+  { key: "left", icon: "arrow-left", tooltip: "Preview on the left" },
+  { key: "top", icon: "arrow-top", tooltip: "Preview above" },
+  { key: "bottom", icon: "arrow-bottom", tooltip: "Preview below" },
+  { key: "right", icon: "arrow-right", tooltip: "Preview on the right" },
+  { key: "hidden", icon: "hide", tooltip: "Hide preview" },
+];
+const PREVIEW_AT_KEY = "modelBuilder.previewAt";
+
 export function ModelBuilderPage({ id }: { id?: string }) {
   const m = useDraftModel(id);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const sectionParam = useSectionParam();
+  // A layout preference, so per browser like density/theme in AppShell rather than per model.
+  const [previewAt, setPreviewAt] = useState<PreviewAt>(
+    () => (localStorage.getItem(PREVIEW_AT_KEY) as PreviewAt | null) ?? "right",
+  );
   // Both keys: `list` backs GlobalSearch, `rows` backs the paged list page.
   const invalidateLists = () => {
     void qc.invalidateQueries({ queryKey: orpc.models.list.queryOptions().queryKey });
@@ -117,6 +131,27 @@ export function ModelBuilderPage({ id }: { id?: string }) {
               </Title>
             }
             subHeader={draft.description ? <Text>{draft.description}</Text> : undefined}
+            // Only the Parameters tab has a preview to place, so the picker isn't drawn dead elsewhere.
+            navigationBar={sectionParam.props.selectedSectionId === "params" ? (
+              <Toolbar design="Transparent">
+                <ToolbarItem overflowPriority="NeverOverflow">
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <Icon name="show" />
+                    <Label>Preview</Label>
+                    <SegmentedButton accessibleName="Preview position" itemsFitContent
+                      onSelectionChange={(e) => {
+                        const key = (e.detail.selectedItems[0] as HTMLElement | undefined)?.dataset.key as PreviewAt | undefined;
+                        if (key) { setPreviewAt(key); localStorage.setItem(PREVIEW_AT_KEY, key); }
+                      }}>
+                      {PREVIEW_AT.map((p) => (
+                        <SegmentedButtonItem key={p.key} data-key={p.key} icon={p.icon} tooltip={p.tooltip}
+                          accessibleName={p.tooltip} selected={previewAt === p.key} />
+                      ))}
+                    </SegmentedButton>
+                  </div>
+                </ToolbarItem>
+              </Toolbar>
+            ) : undefined}
             actionsBar={
               <Toolbar design="Transparent">
                 {/* Every error, warning and blocker on the page, grouped by the tab it belongs to —
@@ -170,9 +205,12 @@ export function ModelBuilderPage({ id }: { id?: string }) {
           <SettingsTab draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
             tried={m.tried} portalMeta={portalMeta} setPortalMeta={m.setPortalMeta} />
         </ObjectPageSection>
-        <ObjectPageSection id="params" titleText={secTitle("params")}>
+        {/* fitContent: the section fills what the title and tab bar leave instead of growing with the
+            tree, which is the only way the splitter's panes get a height to split and scroll. */}
+        <ObjectPageSection id="params" titleText={secTitle("params")} fitContent>
           <ParamsTab modelId={id ?? ""} draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
-            lookups={lookups.data} lookupsFailed={!!lookups.error} onRetryLookups={() => void lookups.refetch()} />
+            lookups={lookups.data} lookupsFailed={!!lookups.error} onRetryLookups={() => void lookups.refetch()}
+            previewAt={previewAt} />
         </ObjectPageSection>
         <ObjectPageSection id="rules" titleText={secTitle("rules")}>
           {rulesSubSections}

@@ -46,19 +46,18 @@ export const ViewStateZ = z.object({
   sortBy: z.array(z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) })),
   groupBy: z.array(z.string()),
   columnWidths: z.record(z.string(), z.number()).optional(),
-  labels: z.record(z.string(), z.string()).optional(),
   adaptFilterKeys: z.array(z.string()), // visible filters, in order
   filterValues: z.record(z.string(), FilterValueZ),
   searchTerm: z.string(),
 });
 export type ViewState = z.infer<typeof ViewStateZ>;
 
-/** An object page's layout: which declared sections and fields show, in what order, renamed how. */
+/** An object page's layout: which declared sections and fields show, and in what order. */
 export const ObjectViewStateZ = z.object({
   sections: z.array(z.object({
     id: z.string(),
     visible: z.boolean(),
-    fields: z.array(z.object({ key: z.string(), visible: z.boolean(), label: z.string().optional() })),
+    fields: z.array(z.object({ key: z.string(), visible: z.boolean() })),
   })),
 });
 export type ObjectViewState = z.infer<typeof ObjectViewStateZ>;

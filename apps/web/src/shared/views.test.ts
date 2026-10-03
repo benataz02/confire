@@ -88,7 +88,7 @@ test("resolveListState: a partial system view overrides only what it names", () 
 });
 
 test("sameState ignores jsonb key order and empty objects, not array order", () => {
-  const written = { sortBy: [{ field: "DocNum", direction: "desc" }], labels: {} };
+  const written = { sortBy: [{ field: "DocNum", direction: "desc" }], columnWidths: {} };
   const fromPostgres = JSON.parse('{"sortBy": [{"direction": "desc", "field": "DocNum"}]}');
   expect(JSON.stringify(written)).not.toBe(JSON.stringify(fromPostgres));
   expect(sameState(written, fromPostgres)).toBe(true);

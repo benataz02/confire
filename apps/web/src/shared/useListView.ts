@@ -11,8 +11,7 @@ import type { Row } from "./types.ts";
 // row-click and create navigation every list repeats. One hook instead of the infinite-query
 // boilerplate each list page used to carry.
 
-/** ponytail: grouped views and the .xlsx export load at most 5 000 rows; server-side aggregation
- *  if a tenant outgrows it. */
+/** ponytail: the .xlsx export loads at most 5 000 rows; a server-side export if a tenant outgrows it. */
 export const LOAD_ALL_CAP = 5_000;
 
 type Page = { rows: Row[]; total?: number };
@@ -24,7 +23,7 @@ export type ListData = {
   error: Error | null;
   hasMore: boolean;
   onLoadMore: () => void;
-  /** every page up to the cap — grouping and export need the whole result, not what scrolled in */
+  /** every page up to the cap — export needs the whole result, not what scrolled in */
   loadAll: () => Promise<Row[]>;
   onRowClick?: (row: Row) => void;
   onCreate?: () => void;
@@ -42,6 +41,8 @@ export function useListView(options: object, nav?: { route: string; keyOf: (row:
   const page = useInfiniteQuery({
     retry: false,
     placeholderData: keepPreviousData,
+    // An infinite refetch re-reads every page scrolled in, in sequence, through the agent.
+    refetchOnWindowFocus: false,
     ...options,
   } as never) as UseInfiniteQueryResult<InfiniteData<Page>, Error>;
   const rows = useMemo(() => flatten(page.data), [page.data]);
@@ -55,12 +56,15 @@ export function useListView(options: object, nav?: { route: string; keyOf: (row:
   return {
     rows,
     total: page.data?.pages[0]?.total ?? rows.length,
-    loading: page.isFetching && !page.isFetchingNextPage,
+    // Busy only while a new query replaces the rows: AnalyticalTable dims loaded rows under its
+    // overlay, so a background refetch (remount, invalidate) swaps them in silently instead.
+    loading: page.isLoading || page.isPlaceholderData,
     error: page.error,
     hasMore: page.hasNextPage,
     // Passed straight through: the table records the row count it fired at whether or not we act,
     // so a swallowed call would disarm the trigger for good — re-entry is guarded here instead.
-    onLoadMore: () => { if (!page.isFetchingNextPage) void page.fetchNextPage(); },
+    // A grouped table fires on every scroll event at the bottom, hence the hasNextPage check too.
+    onLoadMore: () => { if (page.hasNextPage && !page.isFetchingNextPage) void page.fetchNextPage(); },
     loadAll,
     ...(nav
       ? {

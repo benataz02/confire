@@ -3,6 +3,23 @@
   border-bottom: none;
 }
 
+/* ObjectPageTitle draws its actions|navigation separator with no margin and zeroes both toolbars'
+   padding, so the line touches the buttons on either side (the native ui5-dynamic-page-title
+   gives it 0.5rem; we want more air). Unlayered, so it beats the library's @layer. */
+[data-component-name="ObjectPageTitleActionsSeparator"] {
+  margin-inline: 1rem;
+}
+
+/* SplitterLayout's bar calls focus() on mousedown and styles :focus, not :focus-visible, so every
+   drag leaves it outlined as if selected. Re-pointing its focus variables at the resting look keeps
+   the highlight for keyboard focus (arrow keys resize) and per-theme borders (HC draws a resting one).
+   ponytail: private --_ui5wcr_ vars; recheck on a webcomponents-react upgrade. */
+[role="separator"][data-splitter-vertical]:not(:focus-visible) {
+  --_ui5wcr_Splitter_BarBorderFocus: var(--_ui5wcr_Splitter_BarBorderStyle);
+  --_ui5wcr_Splitter_BarBorderHighContrastFix: none;
+  --_ui5wcr_Splitter_BarOutline: none;
+}
+
 /* The insights rail's slide. DynamicSideContent hides its side column with a hard display:none and
    ships no transition of its own, so the movement lives on the slotted element instead. */
 .confire-rail { animation: confire-rail-in 200ms ease }
@@ -11,6 +28,18 @@
 @keyframes confire-rail-out { to { transform: translateX(100%); opacity: 0 } }
 @media (prefers-reduced-motion: reduce) {
   .confire-rail, .confire-rail-out { animation: none }
+}
+
+/* View transitions — today only Grid's full-page toggle, which morphs the table between its slot and
+   the page. Short because it answers a click; the root has nothing to crossfade and just ends with it. */
+::view-transition-group(*),
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: 100ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none }
 }
 
 /* ObjectPage loading skeleton. Bars are AnalyticalTable's TablePlaceholder cells
@@ -70,3 +99,13 @@
 /* MessageView brings its own list padding and needs a fixed height; the popover's padding would
    double the first and its own scroller would fight the second. */
 .confire-msgpop::part(content) { padding: 0 }
+
+/* Dialogs whose content is a table run edge to edge, as the p13n panel does: the dialog's (and a
+   tab container's) own content padding would box the table in. */
+.confire-flush::part(content) { padding: 0 }
+/* …and what is not the table gets that padding back: the dialog's own (PopupsCommon.css), per the
+   media range it reflects on its host, so a filter bar lines up with the header title.
+   ponytail: private theme vars, as in ListReport's titleStyle — revisit if they get renamed. */
+.confire-flush .confire-inset { padding: 1rem var(--_ui5_popup_content_padding_m_l) 0 }
+.confire-flush[media-range="S"] .confire-inset { padding-inline: var(--_ui5_popup_content_padding_s) }
+.confire-flush[media-range="XL"] .confire-inset { padding-inline: var(--_ui5_popup_content_padding_xl) }

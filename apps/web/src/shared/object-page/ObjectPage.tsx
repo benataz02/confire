@@ -420,11 +420,12 @@ function LayoutDialog({ sections, state, mustShow, onConfirm, onClose }: {
 
   const sectionItems: ColumnItem[] = draft.sections.map((v) => {
     const s = byId.get(v.id);
-    return { key: v.id, label: s?.label ?? v.id, defaultLabel: s?.label ?? v.id, visible: v.visible };
+    return { key: v.id, label: s?.label ?? v.id, visible: v.visible };
   });
 
   return (
-    <Dialog open onClose={onClose} headerText="Adapt layout" style={{ width: "min(40rem, 95vw)" }}
+    <Dialog open onClose={onClose} headerText="Adapt layout" resizable className="confire-flush"
+      style={{ width: "min(56rem, 95vw)", height: "min(40rem, 85vh)" }}
       footer={
         <Bar design="Footer" endContent={
           <>
@@ -433,9 +434,9 @@ function LayoutDialog({ sections, state, mustShow, onConfirm, onClose }: {
           </>
         } />
       }>
-      <TabContainer>
+      <TabContainer className="confire-flush" style={{ height: "100%" }}>
         <Tab text="Sections" selected>
-          <ColumnsTab fixedLabels items={sectionItems}
+          <ColumnsTab items={sectionItems}
             onChange={(items) => setDraft((d) => ({
               sections: items.map((it) => ({ ...d.sections.find((x) => x.id === it.key)!, visible: it.visible })),
             }))} />
@@ -445,8 +446,7 @@ function LayoutDialog({ sections, state, mustShow, onConfirm, onClose }: {
           if (!s) return null;
           const items: ColumnItem[] = v.fields.map((f) => {
             const field = fieldOf(s, f.key);
-            const def = labelOf(s, f.key);
-            return { key: f.key, label: f.label ?? def, defaultLabel: def, visible: f.visible, locked: field ? mustShow(field) : false };
+            return { key: f.key, label: labelOf(s, f.key), visible: f.visible, locked: field ? mustShow(field) : false };
           });
           return (
             <Tab key={v.id} text={s.label}>
@@ -454,10 +454,7 @@ function LayoutDialog({ sections, state, mustShow, onConfirm, onClose }: {
                 onChange={(next) => setDraft((d) => ({
                   sections: d.sections.map((x) => (x.id !== v.id ? x : {
                     ...x,
-                    fields: next.map((it) => ({
-                      key: it.key, visible: it.visible,
-                      ...(it.label.trim() && it.label !== it.defaultLabel ? { label: it.label } : {}),
-                    })),
+                    fields: next.map((it) => ({ key: it.key, visible: it.visible })),
                   })),
                 }))} />
             </Tab>

@@ -34,6 +34,6 @@
     "test:web": "bun test apps/web",
     "kill": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/kill-dev.ps1",
     "seed:agent": "bun --env-file=.env scripts/seed-agent.ts",
-    "dev:agent": "bun --cwd apps/agent dev",
+    "dev:agent": "bun --cwd apps/agent dev"
   }
 }

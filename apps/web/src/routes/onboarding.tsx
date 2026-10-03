@@ -8,6 +8,7 @@ import { orpc, sapGate } from "../orpc.ts";
 import {
   apexUrl, BASE_DOMAIN, hardRedirect, isApex, isReserved, SLUG_RE, toSlug, tenantUrl,
 } from "../lib/tenant.ts";
+import { copyInput, generateAgentSecret } from "../lib/agent-secret.ts";
 
 export const Route = createFileRoute("/onboarding")({
   // Auth lives on the apex. A user with a company and an agent row belongs *in* the tenant;
@@ -29,28 +30,6 @@ type Invite = { id: string; organizationId: string; organizationName: string };
 
 const DEFAULT_AGENT_URL = "http://localhost:4000";
 const sanitizeSlug = (v: string) => v.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 31);
-
-function generateAgentSecret(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-}
-
-/** Visible native input: select it, then copy. Clipboard API is gone on http://lvh.me. */
-function copySecret(): boolean {
-  const input = document.querySelector<HTMLInputElement>(".auth-secret");
-  if (input) {
-    input.focus();
-    input.select();
-    if (document.execCommand("copy")) return true;
-  }
-  if (window.isSecureContext && navigator.clipboard?.writeText && input) {
-    void navigator.clipboard.writeText(input.value);
-    return true;
-  }
-  return false;
-}
 
 function Onboarding() {
   const { agentSetupSlug } = Route.useRouteContext();
@@ -154,7 +133,7 @@ function Onboarding() {
             onChange={(e) => setSecret(e.target.value)}
           />
           <div className="auth-inline">
-            <button type="button" className="auth-textbtn" onClick={() => { if (copySecret()) setCopied(true); }}>
+            <button type="button" className="auth-textbtn" onClick={() => { if (copyInput(document.querySelector<HTMLInputElement>(".auth-secret"))) setCopied(true); }}>
               Copy
             </button>
             <button type="button" className="auth-textbtn" onClick={() => { setSecret(generateAgentSecret()); setCopied(false); }}>

@@ -49,7 +49,7 @@ export function FormField({
     const target = field.link && field.link !== true
       ? showLink({ link: field.link, value, row: formData, canOpen })
       : null;
-    const text = formatValue(value, field.type, field.options);
+    const text = formatValue(value, field.type, field.options, field.integer);
     if (target)
       return (
         <EntityLink route={target.route} target={target.target} value={value}

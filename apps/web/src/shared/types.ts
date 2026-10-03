@@ -55,6 +55,8 @@ export type ListColumn = {
   udf?: boolean;
   /** BoYesNoEnum: the value travels as tYES/tNO */
   yesNo?: boolean;
+  /** an Edm integer (a key, document number or code): shown without digit grouping */
+  integer?: boolean;
 };
 
 /** §9.2 filter field. `key` is the property the filter compiles against. */
@@ -91,7 +93,7 @@ export type CflDialogConfig = {
   displayColumns?: string[];
   /** detail route of the entity — what `link: true` opens */
   route?: string;
-  /** in the dialog, clicking a highlighted row again navigates instead of selecting */
+  /** in the dialog, clicking a row navigates instead of selecting */
   onRowNavigate?: (row: Row) => void;
   /** browse only: no Select */
   readOnly?: boolean;
@@ -146,6 +148,7 @@ export type FormField = {
   // --- filled from metadata ---
   udf?: boolean;
   yesNo?: boolean;
+  integer?: boolean;
   metaEditable?: boolean;
   metaRequired?: boolean;
 };

@@ -4,7 +4,7 @@ import {
   type ObjectPageHeaderPropTypes, type ObjectPageTitlePropTypes,
 } from "@ui5/webcomponents-react";
 import { formatValue } from "../format.ts";
-import type { FieldConstraint } from "../metadata.ts";
+import { isIntegerType, type FieldConstraint } from "../metadata.ts";
 import type { Facet, HeaderActionContext, HeaderConfig, Row } from "../types.ts";
 
 // app-object-page-header (LIST-REPORT-OBJECT-PAGE.md §4.3), from the declared header config and
@@ -13,7 +13,10 @@ import type { Facet, HeaderActionContext, HeaderConfig, Row } from "../types.ts"
 
 export type RecordNavigation = { first: () => void; prev: () => void; next: () => void; last: () => void; busy?: boolean };
 
-const fieldMeta = (fields: Record<string, FieldConstraint> | undefined, key: string) => fields?.[key];
+const formatField = (formData: Row, fields: Record<string, FieldConstraint> | undefined, key: string) => {
+  const m = fields?.[key];
+  return formatValue(formData[key], m?.Type, m?.Options, isIntegerType(m?.EdmType));
+};
 
 /** Title: the create title, or the record's title field. Subtitle: the subtitle fields, formatted
  *  by their metadata type. */
@@ -33,9 +36,9 @@ export function objectPageTitle(o: {
   const fields = ctx.constraints?.fields;
   const title = ctx.isNew
     ? header.createTitle ?? `New ${o.label}`
-    : formatValue(formData[header.titleField], fieldMeta(fields, header.titleField)?.Type, fieldMeta(fields, header.titleField)?.Options);
+    : formatField(formData, fields, header.titleField);
   const subtitle = ctx.isNew ? "" : (header.subtitleFields ?? [])
-    .map((k) => formatValue(formData[k], fieldMeta(fields, k)?.Type, fieldMeta(fields, k)?.Options))
+    .map((k) => formatField(formData, fields, k))
     .filter(Boolean)
     .join(" · ");
   const actions = header.actions?.(ctx);
@@ -73,7 +76,7 @@ function FacetValue({ facet, formData, meta }: { facet: Facet; formData: Row; me
   const v = formData[facet.field];
   if (facet.type === "status") {
     const m = facet.statusMapping?.[String(v)];
-    return <ObjectStatus state={m?.state ?? "None"}>{m?.text ?? formatValue(v, meta?.Type, meta?.Options)}</ObjectStatus>;
+    return <ObjectStatus state={m?.state ?? "None"}>{m?.text ?? formatValue(v, meta?.Type, meta?.Options, isIntegerType(meta?.EdmType))}</ObjectStatus>;
   }
   if (facet.type === "date") return <Text>{formatValue(v, "date")}</Text>;
   const unit = facet.unitField ? formData[facet.unitField] : undefined;

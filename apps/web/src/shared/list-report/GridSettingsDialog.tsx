@@ -1,16 +1,17 @@
 import { useState, type ReactNode } from "react";
 import {
-  Bar, Button, CheckBox, Dialog, Input, Option, Select, Tab, TabContainer, Table, TableCell,
-  TableHeaderCell, TableHeaderRow, TableRow, TableRowAction,
+  Bar, Button, Dialog, Icon, Input, Option, Select, Tab, TabContainer, Table, TableCell, TableHeaderCell,
+  TableHeaderRow, TableRow, TableRowAction, TableSelectionMulti, ToggleButton,
 } from "@ui5/webcomponents-react";
 import type { GridState } from "./Grid.tsx";
+import { sameState } from "../views.ts";
 import type { ListColumn } from "../types.ts";
 
-// GridSettingsDialog (§3.4): the view's columns (visible, order, label), its sort rules and its
-// grouping, as a draft that only Confirm writes back. Sort and group offer only columns that allow
-// it (`sortable !== false`, `groupable === true`), as in Beas.
+// GridSettingsDialog (§3.4): the view's columns (visible, order), its sort rules and its grouping,
+// as a draft that only Confirm writes back. Sort and group offer only columns that allow it
+// (`sortable !== false`, `groupable === true`), as in Beas.
 
-export type ColumnItem = { key: string; label: string; visible: boolean; defaultLabel: string; locked?: boolean };
+export type ColumnItem = { key: string; label: string; visible: boolean; locked?: boolean };
 
 const move = <T extends { key: string }>(list: T[], src: string, dst: string, after: boolean): T[] => {
   const next = [...list];
@@ -24,46 +25,89 @@ const move = <T extends { key: string }>(list: T[], src: string, dst: string, af
   return next;
 };
 
-/** Movable rows of {visible, label}. `locked` rows cannot be hidden (the object page keeps its
- *  editable and required fields); `fixedLabels` shows the labels without letting them change. */
-export function ColumnsTab({ items, onChange, fixedLabels }: {
+const rowKeyOf = (el: unknown) => (el as { rowKey?: string } | null)?.rowKey;
+
+/** The p13n selection panel: selected rows are the visible ones, the move buttons act on the last
+ *  clicked row, drag works too. `locked` rows cannot be hidden (the object page keeps its editable
+ *  and required fields). `selected` is a space-separated key list, so a key must hold no space —
+ *  field names and section ids don't. */
+export function ColumnsTab({ items, onChange }: {
   items: ColumnItem[];
   onChange: (items: ColumnItem[]) => void;
-  fixedLabels?: boolean;
 }) {
+  const [search, setSearch] = useState("");
+  const [onlySelected, setOnlySelected] = useState(false);
+  const [active, setActive] = useState<string>();
+  const shows = (d: ColumnItem) => d.visible || !!d.locked;
+  const q = search.trim().toLowerCase();
+  const shown = items.filter((d) => (!onlySelected || shows(d)) && (!q || d.label.toLowerCase().includes(q)));
+  const at = shown.findIndex((d) => d.key === active);
+  const last = shown.length - 1;
+  // Past the neighbour on screen, not in the full list: under a search, every press visibly moves.
+  const moveTo = (dst: ColumnItem | undefined, after: boolean) => {
+    if (active && dst) onChange(move(items, active, dst.key, after));
+  };
+  const selected = items.filter(shows);
+
   return (
-    <Table
-      headerRow={
-        <TableHeaderRow>
-          <TableHeaderCell width="6rem"><span>Visible</span></TableHeaderCell>
-          <TableHeaderCell><span>{fixedLabels ? "Name" : "Label"}</span></TableHeaderCell>
-        </TableHeaderRow>
-      }
-      onMoveOver={(e) => e.preventDefault()}
-      onMove={(e) => {
-        const src = (e.detail.source.element as unknown as { rowKey?: string } | null)?.rowKey;
-        const dst = (e.detail.destination.element as unknown as { rowKey?: string } | null)?.rowKey;
-        if (src && dst) onChange(move(items, src, dst, e.detail.destination.placement === "After"));
-      }}
-    >
-      {items.map((d) => (
-        <TableRow key={d.key} rowKey={d.key} movable>
-          <TableCell>
-            <CheckBox checked={d.visible || !!d.locked} disabled={d.locked} accessibleName={`Show ${d.label}`}
-              onChange={() => onChange(items.map((x) => (x.key === d.key ? { ...x, visible: !x.visible } : x)))} />
-          </TableCell>
-          <TableCell>
-            {fixedLabels ? <span>{d.label}</span> : (
-              <Input value={d.label} placeholder={d.defaultLabel} style={{ width: "100%" }}
-                onInput={(e) => {
-                  const v = e.target.value;
-                  onChange(items.map((x) => (x.key === d.key ? { ...x, label: v } : x)));
-                }} />
-            )}
-          </TableCell>
-        </TableRow>
-      ))}
-    </Table>
+    // The toolbar stays put; the table takes the rest of the dialog and scrolls under its header.
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <Bar
+        startContent={
+          <Input value={search} placeholder="Search" showClearIcon icon={<Icon name="search" />}
+            accessibleName="Search columns" style={{ width: "16rem" }}
+            onInput={(e) => setSearch(e.target.value)} />
+        }
+        endContent={
+          <>
+            {/* The label names what a press will show, as in the Fiori p13n selection panel. A fixed
+                width so the toolbar does not shift: "Show selected" measures 90px in 72 at 14px,
+                ~110px with the cozy padding. */}
+            <ToggleButton pressed={onlySelected} onClick={() => setOnlySelected((v) => !v)} style={{ width: "7.5rem" }}>
+              {onlySelected ? "Show all" : "Show selected"}
+            </ToggleButton>
+            <Button icon="collapse-group" design="Transparent" tooltip="Move to top" accessibleName="Move to top"
+              disabled={at <= 0} onClick={() => moveTo(shown[0], false)} />
+            <Button icon="navigation-up-arrow" design="Transparent" tooltip="Move up" accessibleName="Move up"
+              disabled={at <= 0} onClick={() => moveTo(shown[at - 1], false)} />
+            <Button icon="navigation-down-arrow" design="Transparent" tooltip="Move down" accessibleName="Move down"
+              disabled={at < 0 || at === last} onClick={() => moveTo(shown[at + 1], true)} />
+            <Button icon="expand-group" design="Transparent" tooltip="Move to bottom" accessibleName="Move to bottom"
+              disabled={at < 0 || at === last} onClick={() => moveTo(shown[last], true)} />
+          </>
+        } />
+      <Table style={{ flex: 1, minHeight: 0 }} noDataText="No columns."
+        features={
+          <TableSelectionMulti selected={selected.map((d) => d.key).join(" ")}
+            onChange={(e) => {
+              const set = e.target.getSelectedAsSet();
+              // An unticked locked row goes straight back: the element keeps its own selection, and a
+              // re-render with an unchanged `selected` would leave it unticked.
+              items.forEach((d) => { if (d.locked) set.add(d.key); });
+              e.target.setSelectedAsSet(set);
+              onChange(items.map((x) => ({ ...x, visible: x.locked ? x.visible : set.has(x.key) })));
+            }} />
+        }
+        headerRow={
+          <TableHeaderRow sticky>
+            <TableHeaderCell><span style={{ fontWeight: "bold" }}>Select all ({selected.length}/{items.length})</span></TableHeaderCell>
+          </TableHeaderRow>
+        }
+        onRowClick={(e) => setActive(rowKeyOf(e.detail.row))}
+        onMoveOver={(e) => e.preventDefault()}
+        onMove={(e) => {
+          const src = rowKeyOf(e.detail.source.element);
+          const dst = rowKeyOf(e.detail.destination.element);
+          if (src && dst) onChange(move(items, src, dst, e.detail.destination.placement === "After"));
+        }}
+      >
+        {shown.map((d) => (
+          <TableRow key={d.key} rowKey={d.key} movable interactive navigated={d.key === active}>
+            <TableCell><span>{d.label}</span></TableCell>
+          </TableRow>
+        ))}
+      </Table>
+    </div>
   );
 }
 
@@ -78,7 +122,7 @@ function RulesTab<R extends { field: string }>({ rules, fields, render, add, onC
 }) {
   const free = fields.filter((f) => !rules.some((r) => r.field === f.key));
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.5rem 0" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", paddingBottom: "0.5rem" }}>
       <Table rowActionCount={1} noDataText="None."
         onRowActionClick={(e) => {
           const i = Number((e.detail.row as unknown as HTMLElement).dataset.idx);
@@ -104,7 +148,7 @@ function RulesTab<R extends { field: string }>({ rules, fields, render, add, onC
           </TableRow>
         ))}
       </Table>
-      <div>
+      <div style={{ paddingInline: "0.5rem" }}>
         <Button icon="add" disabled={!free.length} onClick={() => onChange([...rules, add(free[0]!.key)])}>{addText}</Button>
       </div>
     </div>
@@ -117,41 +161,41 @@ export function GridSettingsDialog({ columns, state, onConfirm, onClose }: {
   onConfirm: (patch: Partial<GridState>) => void;
   onClose: () => void;
 }) {
-  const label = (c: ListColumn) => c.label ?? c.key;
-  // A snapshot taken when the dialog opened, not a live mirror of the view.
-  const [items, setItems] = useState<ColumnItem[]>(() => {
-    const shown = state.columns.map((k) => columns.find((c) => c.key === k)).filter((c): c is ListColumn => !!c);
-    const hidden = columns.filter((c) => !state.columns.includes(c.key));
+  const toItems = (visible: string[]): ColumnItem[] => {
+    const shown = visible.map((k) => columns.find((c) => c.key === k)).filter((c): c is ListColumn => !!c);
+    const hidden = columns.filter((c) => !visible.includes(c.key));
     return [...shown, ...hidden].map((c) => ({
-      key: c.key, defaultLabel: label(c), label: state.labels?.[c.key] ?? label(c), visible: state.columns.includes(c.key),
+      key: c.key, label: c.label ?? c.key, visible: visible.includes(c.key),
     }));
-  });
+  };
+  // A snapshot taken when the dialog opened, not a live mirror of the view.
+  const [items, setItems] = useState(() => toItems(state.columns));
   const [sortBy, setSortBy] = useState(state.sortBy);
   const [groupBy, setGroupBy] = useState(state.groupBy.map((field) => ({ field })));
 
-  const confirm = () => {
-    const renamed = Object.fromEntries(items.filter((d) => d.label.trim() && d.label !== d.defaultLabel).map((d) => [d.key, d.label]));
-    onConfirm({
-      columns: items.filter((d) => d.visible).map((d) => d.key),
-      labels: renamed,
-      sortBy,
-      groupBy: groupBy.map((g) => g.field),
-    });
-  };
+  const visibleKeys = items.filter((d) => d.visible).map((d) => d.key);
+  // The declared defaults (`defaultState`), restored into the draft: OK still has to write them.
+  const defaults = columns.filter((c) => !c.hidden).map((c) => c.key);
+  const atDefault = sameState(visibleKeys, defaults) && !sortBy.length && !groupBy.length;
+  const restore = () => { setItems(toItems(defaults)); setSortBy([]); setGroupBy([]); };
+
+  const confirm = () => onConfirm({ columns: visibleKeys, sortBy, groupBy: groupBy.map((g) => g.field) });
 
   return (
-    <Dialog open onClose={onClose} headerText="View settings" style={{ width: "min(40rem, 95vw)" }}
+    // A fixed size, so filtering the list or switching tabs does not make the dialog jump.
+    <Dialog open onClose={onClose} headerText="View settings" resizable className="confire-flush"
+      style={{ width: "min(56rem, 95vw)", height: "min(40rem, 85vh)" }}
       footer={
         <Bar design="Footer"
-          startContent={<Button design="Transparent" onClick={() => onConfirm({ columnWidths: {} })}>Reset widths</Button>}
           endContent={
             <>
               <Button design="Emphasized" onClick={confirm}>OK</Button>
               <Button design="Transparent" onClick={onClose}>Cancel</Button>
+              <Button design="Transparent" disabled={atDefault} onClick={restore}>Restore</Button>
             </>
           } />
       }>
-      <TabContainer>
+      <TabContainer className="confire-flush" style={{ height: "100%" }}>
         <Tab text="Columns" selected>
           <ColumnsTab items={items} onChange={setItems} />
         </Tab>

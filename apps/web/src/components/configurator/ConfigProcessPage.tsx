@@ -16,8 +16,6 @@ import { statusUi, toggleSelection, toPriced, unpricedItems, type Sel } from "./
 import { BATCHES_SECTION, ConfiguratorForm, ConsistencyStatus, formSections } from "./ConfiguratorForm.tsx";
 import { CflField } from "../../shared/cfl/CflField.tsx";
 import { cfl } from "../../shared/cfl/cfl-configs.ts";
-import { StepCandidatesReview } from "./StepCandidatesReview.tsx";
-import { EntityValueHelp } from "../ValueHelp.tsx";
 import { PriceAnalysis } from "./PriceAnalysis.tsx";
 import { InsightsRail } from "./InsightsRail.tsx";
 import { itemMoney } from "./itemMoney.ts";
