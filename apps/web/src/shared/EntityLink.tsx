@@ -1,7 +1,7 @@
 import { useCallback, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Icon, Link } from "@ui5/webcomponents-react";
+import { Link } from "@ui5/webcomponents-react";
 import { meQuery } from "../orpc.ts";
 import { canOpenRoute, entityPath } from "./navigation.ts";
 
@@ -40,10 +40,9 @@ export function EntityLink({ route, target, action, value, children }: {
     else if (route) go(route, target);
   };
   return (
-    <Link onClick={open} onKeyDown={(e) => { if (e.key === "Enter") open(e); }}
-      style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", maxWidth: "100%" }}>
-      <Icon name="navigation-right-arrow" style={{ width: "0.875rem", height: "0.875rem", flex: "none" }} />
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{children}</span>
+    <Link icon="navigation-right-arrow" wrappingType="None" className="confire-entity-link"
+      onClick={open} onKeyDown={(e) => { if (e.key === "Enter") open(e); }}>
+      {children}
     </Link>
   );
 }

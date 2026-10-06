@@ -16,9 +16,9 @@ import { confirm } from "../confirm.ts";
 import { toast } from "../toast.ts";
 import { SettingsTab } from "./SettingsTab.tsx";
 import { ParamsTab, type PreviewAt } from "./ParamsTab.tsx";
-import { useRulesTab } from "./RulesTab.tsx";
-import { useItemStructureTab } from "./ItemStructureTabs.tsx";
-import { useHistoryTab } from "./HistoryTab.tsx";
+import { RulesTab } from "./RulesTab.tsx";
+import { ItemStructureTab } from "./ItemStructureTabs.tsx";
+import { HistoryTab } from "./HistoryTab.tsx";
 import { usePreviewLookups } from "./usePreviewLookups.ts";
 
 // Stable placeholder so usePreviewLookups runs unconditionally (rules of hooks) before the
@@ -80,18 +80,6 @@ export function ModelBuilderPage({ id }: { id?: string }) {
   // tenant masterdata, so nothing about the unsaved draft affects them.
   const lookups = usePreviewLookups(m.draft ?? EMPTY_MODEL, { enabled: !!m.draft });
   const allIssues: Issue[] = [...m.issues, ...m.serverIssues];
-  // Rules, History and BOM/Routing hand back ObjectPageSubSection elements so the anchor bar can
-  // find them (a component in between hides them from ObjectPage). They own state, so like
-  // usePreviewLookups they have to be called unconditionally, above the loading return.
-  const rulesSubSections = useRulesTab({
-    draft: m.draft ?? EMPTY_MODEL, update: m.update, issues: allIssues,
-    lookups: lookups.data, tables: m.tableCols,
-  });
-  const history = useHistoryTab({ draft: m.draft ?? EMPTY_MODEL, update: m.update, issues: allIssues });
-  const linesSubSections = useItemStructureTab({
-    draft: m.draft ?? EMPTY_MODEL, update: m.update, issues: allIssues, tables: m.tableCols,
-  });
-
   if (m.loading || !m.draft || !m.portalMeta) {
     return m.loadError
       ? <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{m.loadError.message}</MessageStrip>
@@ -213,13 +201,13 @@ export function ModelBuilderPage({ id }: { id?: string }) {
             previewAt={previewAt} />
         </ObjectPageSection>
         <ObjectPageSection id="rules" titleText={secTitle("rules")}>
-          {rulesSubSections}
+          <RulesTab draft={draft} update={m.update} issues={allIssues} lookups={lookups.data} tables={m.tableCols} />
         </ObjectPageSection>
         <ObjectPageSection id="outputs" titleText={secTitle("outputs")}>
-          {linesSubSections}
+          <ItemStructureTab draft={draft} update={m.update} issues={allIssues} tables={m.tableCols} />
         </ObjectPageSection>
         <ObjectPageSection id="history" titleText={secTitle("history")}>
-          {history.subSections}
+          <HistoryTab draft={draft} update={m.update} issues={allIssues} />
         </ObjectPageSection>
       </ObjectPage>
     </div>

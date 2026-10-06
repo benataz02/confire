@@ -93,6 +93,12 @@
 /* Dialogs whose content is a table run edge to edge, as the p13n panel does: the dialog's (and a
    tab container's) own content padding would box the table in. */
 .confire-flush::part(content) { padding: 0 }
+
+/* EntityLink: Link's own icon floats to the line top, which only lines up when the line height
+   happens to equal the icon's; a flex root centres it. The arrow is light green, as in the B1
+   web client. `.ui5-link-text` keeps its own ellipsis (overflow hidden ⇒ min-width 0 in flex). */
+.confire-entity-link::part(root) { display: flex; align-items: center; gap: 0.25rem }
+.confire-entity-link::part(icon) { margin: 0; width: 0.875rem; height: 0.875rem; color: #5cb85c }
 /* …and what is not the table gets that padding back: the dialog's own (PopupsCommon.css), per the
    media range it reflects on its host, so a filter bar lines up with the header title.
    ponytail: private theme vars, as in ListReport's titleStyle — revisit if they get renamed. */

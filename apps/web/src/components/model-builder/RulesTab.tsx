@@ -1,14 +1,15 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Bar, Button, Dialog, Form, FormGroup, FormItem, IllustratedMessage, Input, Label,
-  MultiComboBox, MultiComboBoxItem, ObjectPageSubSection, Option, Select, Table, TableCell,
-  TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, Toolbar, ToolbarButton,
+  Bar, Button, Dialog, Form, FormGroup, FormItem, Input, Label,
+  MultiComboBox, MultiComboBoxItem, Option, Select, Text,
 } from "@ui5/webcomponents-react";
-import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import type { Constraint, Issue, ModelDef, ResolvedLookups, Val } from "@confire/config-engine";
+import { Grid } from "../../shared/list-report/Grid.tsx";
+import type { ListColumn } from "../../shared/types.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
+import { GridForm, positionOf, positions, useEditGrid } from "./useEditGrid.tsx";
 import { confirm } from "../confirm.ts";
 
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
@@ -16,124 +17,130 @@ type TableConstraint = Extract<Constraint, { kind: "table" }>;
 // Combination-table cells are scalar (no string[] multicombo values), unlike the full Val union.
 type Cell = Exclude<Val, string[]>;
 
-const FIELD_FORM = { accessibleMode: "Edit", layout: "S1 M2 L2 XL2", labelSpan: "S12 M12 L12 XL12", headerLevel: "H5" } as const;
+const FORM = { accessibleMode: "Edit", layout: "S1 M2 L2 XL2", labelSpan: "S12 M12 L12 XL12", headerLevel: "H5" } as const;
+
+const EXPR_COLUMNS: ListColumn[] = [
+  { key: "when", label: "When (optional)" },
+  { key: "assert", label: "Must hold" },
+  { key: "message", label: "Message" },
+];
+const TABLE_COLUMNS: ListColumn[] = [
+  { key: "params", label: "Parameters" },
+  { key: "mode", label: "Mode" },
+  { key: "rows", label: "Rows" },
+];
 
 // "true"/"false" -> boolean, numeric -> number, "" -> null, else string.
 export const parseLit = (s: string): Cell =>
   s === "" ? null : s === "true" ? true : s === "false" ? false : !Number.isNaN(Number(s)) ? Number(s) : s;
 
-const titled = (label: string, n: number) => (n ? `${label} (${n})` : label);
-
-// A hook, not a component: ObjectPage builds the anchor bar's sub-tabs by scanning
-// section.props.children for ObjectPageSubSection *elements*, so a component in between hides
-// them. ModelBuilderPage calls this and drops the result straight into its ObjectPageSection,
-// which also means the caller has to obey hook rules (it is called above the loading return).
-export function useRulesTab({ draft, update, issues, lookups, tables = [] }: {
+// Each table in a Form of its own (GridForm); the Grid toolbar names it, with its row count.
+export function RulesTab({ draft, update, issues, lookups, tables = [] }: {
   draft: ModelDef; update: Update; issues: Issue[]; lookups?: ResolvedLookups; tables?: TableCols[];
 }) {
   const [editingTable, setEditingTable] = useState<number | null>(null);
   const setC = (i: number, c: Constraint) =>
     update((d) => ({ ...d, constraints: d.constraints.map((x, j) => (j === i ? c : x)) }));
-  const removeC = (i: number) => update((d) => ({ ...d, constraints: d.constraints.filter((_, j) => j !== i) }));
-  // Combination tables can hold a lot of hand-entered rows — confirm before discarding a non-empty one.
-  // Expression rows are a single line, so they delete without a prompt.
-  const removeTableC = async (i: number) => {
-    const c = draft.constraints[i];
-    const rows = c?.kind === "table" ? c.rows.length : 0;
-    if (rows === 0 || await confirm({ title: "Delete combination table", message: `Delete this combination table and its ${rows} row${rows === 1 ? "" : "s"}?`, actionText: "Delete", destructive: true }))
-      removeC(i);
-  };
+  const removeCs = (gone: Set<number>) =>
+    update((d) => ({ ...d, constraints: d.constraints.filter((_, j) => !gone.has(j)) }));
 
-  const exprs = draft.constraints.map((c, i) => [c, i] as const).filter(([c]) => c.kind === "expr");
-  const tablesC = draft.constraints.map((c, i) => [c, i] as const).filter(([c]) => c.kind === "table");
+  // Each kind with its index into draft.constraints, which is what every edit addresses.
+  const exprs = useMemo(
+    () => draft.constraints.flatMap((c, i) => (c.kind === "expr" ? [{ c, i }] : [])),
+    [draft.constraints],
+  );
+  const tablesC = useMemo(
+    () => draft.constraints.flatMap((c, i) => (c.kind === "table" ? [{ c, i }] : [])),
+    [draft.constraints],
+  );
 
-  // An array, not a fragment: React.Children flattens arrays but counts a fragment as one child.
-  return [
-    <ObjectPageSubSection key="expr-constraints" id="expr-constraints" titleText={titled("Expression constraints", exprs.length)}
-      actions={
-        <Button icon="add" design="Transparent"
-          onClick={() => update((d) => ({ ...d, constraints: [...d.constraints, { kind: "expr", assert: "", message: "" }] }))}>
-          Add constraint
-        </Button>
-      }>
-      <Table accessibleName="Expression constraints" overflowMode="Popin" rowActionCount={1}
-        noData={<IllustratedMessage name="NoData" design="Dot" titleText="No expression constraints"
-          subtitleText='Add rules like coating != "none" that must hold across the configuration.' />}
-        onRowActionClick={(e) => removeC(Number(((e.detail.row as unknown) as HTMLElement).dataset.idx))}
-        headerRow={
-          <TableHeaderRow>
-            <TableHeaderCell minWidth="12rem" width="28%">When (optional)</TableHeaderCell>
-            <TableHeaderCell minWidth="16rem" width="36%">Must hold</TableHeaderCell>
-            <TableHeaderCell minWidth="10rem">Message</TableHeaderCell>
-          </TableHeaderRow>
-        }>
-        {exprs.map(([c, i]) => c.kind === "expr" ? (
-          <TableRow key={i} rowKey={`ec-${i}`} data-idx={String(i)} actions={<TableRowAction icon="delete" text="Delete" />}>
-            <TableCell>
-              <ExprInput optional value={c.when} model={draft} tables={tables} fieldId={`expr-constraints[${i}].when`}
-                issue={issueFor(issues, `constraints[${i}].when`)}
-                onChange={(v) => setC(i, { ...c, when: v })} />
-            </TableCell>
-            <TableCell>
-              <ExprInput value={c.assert} model={draft} tables={tables} fieldId={`expr-constraints[${i}].assert`}
-                issue={issueFor(issues, `constraints[${i}].assert`)} placeholder='e.g. coating != "none" || material == "steel"'
-                onChange={(v) => setC(i, { ...c, assert: v ?? "" })} />
-            </TableCell>
-            <TableCell>
-              <Input value={c.message} placeholder="Shown when violated"
-                onInput={(e) => setC(i, { ...c, message: e.target.value })} />
-            </TableCell>
-          </TableRow>
-        ) : null)}
-      </Table>
-    </ObjectPageSubSection>,
+  const exprGrid = useEditGrid(exprs, EXPR_COLUMNS, {
+    when: ({ c, i }) => (
+      <ExprInput optional value={c.when} model={draft} tables={tables} fieldId={`expr-constraints[${i}].when`}
+        issue={issueFor(issues, `constraints[${i}].when`)}
+        onChange={(v) => setC(i, { ...c, when: v })} />
+    ),
+    assert: ({ c, i }) => (
+      <ExprInput value={c.assert} model={draft} tables={tables} fieldId={`expr-constraints[${i}].assert`}
+        issue={issueFor(issues, `constraints[${i}].assert`)} placeholder='e.g. coating != "none" || material == "steel"'
+        onChange={(v) => setC(i, { ...c, assert: v ?? "" })} />
+    ),
+    message: ({ c, i }) => (
+      <Input style={{ width: "100%" }} value={c.message} placeholder="Shown when violated"
+        onInput={(e) => setC(i, { ...c, message: e.target.value })} />
+    ),
+  });
 
-    <ObjectPageSubSection key="combination-tables" id="combination-tables" titleText={titled("Combination tables", tablesC.length)}
-      actions={
-        <Button icon="add" design="Transparent"
-          onClick={() => {
-            update((d) => ({ ...d, constraints: [...d.constraints, { kind: "table", params: [], rows: [], mode: "forbid" }] }));
-            setEditingTable(draft.constraints.length);
-          }}>
-          Add combination table
-        </Button>
-      }>
-      <Table accessibleName="Combination tables" overflowMode="Popin" rowActionCount={2}
-        noData={<IllustratedMessage name="NoData" design="Dot" titleText="No combination tables"
-          subtitleText="Add a table to allow or forbid specific combinations of parameter values." />}
-        onRowActionClick={(e) => {
-          const i = Number(((e.detail.row as unknown) as HTMLElement).dataset.idx);
-          const icon = ((e.detail.action as unknown) as HTMLElement).getAttribute("icon");
-          if (icon === "delete") void removeTableC(i);
-          else setEditingTable(i);
-        }}
-        headerRow={
-          <TableHeaderRow>
-            <TableHeaderCell minWidth="12rem">Parameters</TableHeaderCell>
-            <TableHeaderCell minWidth="8rem">Mode</TableHeaderCell>
-            <TableHeaderCell minWidth="6rem">Rows</TableHeaderCell>
-          </TableHeaderRow>
-        }>
-        {tablesC.map(([c, i]) => c.kind === "table" ? (
-          <TableRow key={i} rowKey={`tc-${i}`} data-idx={String(i)}
-            actions={<><TableRowAction icon="edit" text="Edit" /><TableRowAction icon="delete" text="Delete" /></>}>
-            <TableCell><Text>{c.params.join(" × ") || "—"}</Text></TableCell>
-            <TableCell><Text>{c.mode}</Text></TableCell>
-            <TableCell><Text>{String(c.rows.length)}</Text></TableCell>
-          </TableRow>
-        ) : null)}
-      </Table>
-    </ObjectPageSubSection>,
+  const tableGrid = useEditGrid(tablesC, TABLE_COLUMNS, {
+    params: ({ c }) => c.params.join(" × ") || "—",
+    mode: ({ c }) => c.mode,
+    rows: ({ c }) => c.rows.length,
+  });
 
-    editingTable !== null && draft.constraints[editingTable]?.kind === "table" ? (
-      <ComboTableDialog key="combo-dialog"
-        draft={draft} lookups={lookups}
-        value={draft.constraints[editingTable] as TableConstraint}
-        onOk={(c) => { setC(editingTable, c); setEditingTable(null); }}
-        onCancel={() => setEditingTable(null)}
-      />
-    ) : null,
-  ];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <GridForm name="Expression constraints">
+        <Grid {...exprGrid} title="Expression constraints" fill={false} selectionMode="Multiple"
+          noDataText='No expression constraints. Add rules like coating != "none" that must hold across the configuration.'
+          toolbarActions={(sel) => (
+            <>
+              <Button icon="add" design="Transparent"
+                onClick={() => update((d) => ({ ...d, constraints: [...d.constraints, { kind: "expr", assert: "", message: "" }] }))}>
+                Add constraint
+              </Button>
+              {/* Expression rows are a single line, so they delete without a prompt. */}
+              <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
+                onClick={() => {
+                  const gone = new Set([...positions(sel.rows)].map((p) => exprs[p]!.i));
+                  sel.clear();
+                  removeCs(gone);
+                }}>
+                Delete
+              </Button>
+            </>
+          )} />
+      </GridForm>
+      <GridForm name="Combination tables">
+        <Grid {...tableGrid} title="Combination tables" fill={false} selectionMode="Multiple"
+          noDataText="No combination tables. Add one to allow or forbid specific combinations of parameter values."
+          onRowClick={(row) => setEditingTable(tablesC[positionOf(row)]!.i)}
+          toolbarActions={(sel) => (
+            <>
+              <Button icon="add" design="Transparent"
+                onClick={() => {
+                  update((d) => ({ ...d, constraints: [...d.constraints, { kind: "table", params: [], rows: [], mode: "forbid" }] }));
+                  setEditingTable(draft.constraints.length);
+                }}>
+                Add combination table
+              </Button>
+              {/* Combination tables can hold a lot of hand-entered rows — confirm before discarding them. */}
+              <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
+                onClick={async () => {
+                  const picked = [...positions(sel.rows)].map((p) => tablesC[p]!);
+                  const rows = picked.reduce((n, t) => n + t.c.rows.length, 0);
+                  if (rows && !await confirm({
+                    title: "Delete combination tables",
+                    message: `Delete ${picked.length === 1 ? "this combination table" : `${picked.length} combination tables`} and ${rows} row${rows === 1 ? "" : "s"}?`,
+                    actionText: "Delete", destructive: true,
+                  })) return;
+                  sel.clear();
+                  removeCs(new Set(picked.map((t) => t.i)));
+                }}>
+                Delete
+              </Button>
+            </>
+          )} />
+      </GridForm>
+      {editingTable !== null && draft.constraints[editingTable]?.kind === "table" ? (
+        <ComboTableDialog
+          draft={draft} lookups={lookups}
+          value={draft.constraints[editingTable] as TableConstraint}
+          onOk={(c) => { setC(editingTable, c); setEditingTable(null); }}
+          onCancel={() => setEditingTable(null)}
+        />
+      ) : null}
+    </div>
+  );
 }
 
 function ComboTableDialog({ draft, lookups, value, onOk, onCancel }: {
@@ -160,6 +167,24 @@ function ComboTableDialog({ draft, lookups, value, onOk, onCancel }: {
       rows: x.rows.map((r) => params.map((k) => r[x.params.indexOf(k)] ?? null)),
     }));
 
+  const columns = useMemo<ListColumn[]>(() => c.params.map((k) => ({ key: k, label: k })), [c.params]);
+  const setCell = (ri: number, ci: number, v: Cell) =>
+    setCLocal((x) => ({ ...x, rows: x.rows.map((r, j) => (j === ri ? r.map((cell, cj) => (cj === ci ? v : cell)) : r)) }));
+  const grid = useEditGrid(c.rows, columns, Object.fromEntries(c.params.map((k, ci) => {
+    const opts = optionsFor(k);
+    return [k, (row: TableConstraint["rows"][number], ri: number) => opts ? (
+      <Select style={{ width: "100%" }} value={JSON.stringify(row[ci] ?? null)}
+        onChange={(e) => setCell(ri, ci, JSON.parse((e.detail.selectedOption as HTMLElement).dataset.j!))}>
+        <Option value="null" data-j="null">—</Option>
+        {opts.map((v, oi) => (
+          <Option key={oi} value={JSON.stringify(v)} data-j={JSON.stringify(v)}>{String(v)}</Option>
+        ))}
+      </Select>
+    ) : (
+      <Input style={{ width: "100%" }} value={String(row[ci] ?? "")} onInput={(e) => setCell(ri, ci, parseLit(e.target.value))} />
+    )];
+  })));
+
   return (
     <Dialog open headerText="Combination table" onClose={onCancel} style={{ width: "min(52rem, 92vw)" }}
       footer={
@@ -170,7 +195,7 @@ function ComboTableDialog({ draft, lookups, value, onOk, onCancel }: {
           </>
         } />
       }>
-      <Form {...FIELD_FORM} headerText="Definition">
+      <Form {...FORM} headerText="Definition">
         <FormGroup accessibleName="Definition">
           <FormItem labelContent={<Label required>Parameters (2+)</Label>}>
             <MultiComboBox style={{ width: "100%" }}
@@ -190,47 +215,25 @@ function ComboTableDialog({ draft, lookups, value, onOk, onCancel }: {
         </FormGroup>
       </Form>
       {c.params.length >= 2 ? (
-        <>
-          <Toolbar design="Transparent" accessibleName="Combination row actions">
-            <ToolbarButton icon="add" design="Transparent" text="Add row"
-              onClick={() => setCLocal((x) => ({ ...x, rows: [...x.rows, x.params.map(() => null)] }))} />
-          </Toolbar>
-          <Table accessibleName={titled("Combination rows", c.rows.length)} noDataText="No rows yet." rowActionCount={1}
-            onRowActionClick={(e) => {
-              const r = Number(((e.detail.row as unknown) as HTMLElement).dataset.idx);
-              setCLocal((x) => ({ ...x, rows: x.rows.filter((_, j) => j !== r) }));
-            }}
-            headerRow={
-              <TableHeaderRow>
-                {c.params.map((k) => <TableHeaderCell key={k} minWidth="8rem">{k}</TableHeaderCell>)}
-              </TableHeaderRow>
-            }>
-            {c.rows.map((row, ri) => (
-              <TableRow key={ri} rowKey={`r-${ri}`} data-idx={String(ri)} actions={<TableRowAction icon="delete" text="Delete" />}>
-                {c.params.map((k, ci) => {
-                  const opts = optionsFor(k);
-                  const setCell = (v: Cell) =>
-                    setCLocal((x) => ({ ...x, rows: x.rows.map((r, j) => (j === ri ? r.map((cell, cj) => (cj === ci ? v : cell)) : r)) }));
-                  return (
-                    <TableCell key={k}>
-                      {opts ? (
-                        <Select value={JSON.stringify(row[ci] ?? null)}
-                          onChange={(e) => setCell(JSON.parse((e.detail.selectedOption as HTMLElement).dataset.j!))}>
-                          <Option value="null" data-j="null">—</Option>
-                          {opts.map((v, oi) => (
-                            <Option key={oi} value={JSON.stringify(v)} data-j={JSON.stringify(v)}>{String(v)}</Option>
-                          ))}
-                        </Select>
-                      ) : (
-                        <Input value={String(row[ci] ?? "")} onInput={(e) => setCell(parseLit(e.target.value))} />
-                      )}
-                    </TableCell>
-                  );
-                })}
-              </TableRow>
-            ))}
-          </Table>
-        </>
+        <GridForm name="Combination rows">
+          <Grid {...grid} title="Combination rows" fill={false} selectionMode="Multiple" noDataText="No rows yet."
+            toolbarActions={(sel) => (
+              <>
+                <Button icon="add" design="Transparent"
+                  onClick={() => setCLocal((x) => ({ ...x, rows: [...x.rows, x.params.map(() => null)] }))}>
+                  Add row
+                </Button>
+                <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
+                  onClick={() => {
+                    const gone = positions(sel.rows);
+                    sel.clear();
+                    setCLocal((x) => ({ ...x, rows: x.rows.filter((_, j) => !gone.has(j)) }));
+                  }}>
+                  Delete
+                </Button>
+              </>
+            )} />
+        </GridForm>
       ) : <Text>Pick at least two parameters, then add rows.</Text>}
     </Dialog>
   );
