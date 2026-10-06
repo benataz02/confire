@@ -1,7 +1,7 @@
-import { useMemo, useRef, type ComponentProps } from "react";
+import { useMemo, useRef } from "react";
 import {
   Button, CheckBox, Form, FormGroup, FormItem, Icon, Input, Label, MultiComboBox, MultiComboBoxItem,
-  ObjectStatus, Option, RadioButton, Select, StepInput, Text, Token, Tokenizer,
+  ObjectStatus, Option, RadioButton, SegmentedButton, SegmentedButtonItem, Select, StepInput, Text, Title, Token, Tokenizer,
   type StepInputDomRef,
 } from "@ui5/webcomponents-react";
 import {
@@ -54,14 +54,13 @@ export const BATCHES_SECTION = "__batches";
 
 /** The sections the form renders: the model's own, plus a trailing one holding any table the
  *  author forgot to place. A table nobody can reach is a table whose sums are permanently zero —
- *  and for an items table it would be the quotation's lines going missing. ConfigProcessPage
- *  renders one section at a time, so it needs the same list this does. */
-export function formSections(model: ModelDef): { key: string; title: string; tables: string[] }[] {
+ *  and for an items table it would be the quotation's lines going missing. */
+function formSections(model: ModelDef): { key: string; title: string; icon?: string; tables: string[] }[] {
   const placed = new Set(placedTables(model));
   const orphans = (model.tables ?? []).filter((t) => !placed.has(t.key));
   // A placed table renders inside its group, in the group's own order, so a section's own list
   // only ever holds orphans.
-  const own = model.structure.sections.map((s) => ({ key: s.key, title: s.title, tables: [] as string[] }));
+  const own = model.structure.sections.map((s) => ({ key: s.key, title: s.title, icon: s.icon, tables: [] as string[] }));
   if (!orphans.length) return own;
   const title = orphans.length === 1 ? orphans[0]!.title : "Tables";
   return [...own, { key: UNPLACED_TABLES_SECTION, title, tables: orphans.map((t) => t.key) }];
@@ -74,8 +73,8 @@ const FORM_PROPS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2", head
 // group's items with `column-count: <the group's colSpan>`, so the group spans the whole Form
 // (colSpan mirrors FORM_PROPS.layout) and the item breaks out of that column flow with the native
 // `column-span: all`. FormItem's own `columnSpan` is deprecated since UI5 2.23 and does nothing,
-// so the CSS is the only lever. The label part is hidden: the FormGroup header names the table,
-// and ConfigTable draws the Add-row toolbar.
+// so the CSS is the only lever. The label part is hidden: ConfigTable's Grid toolbar names the
+// table (with its row count) and carries Add/Delete.
 if (typeof document !== "undefined" && !document.getElementById("confire-table-item")) {
   const el = document.createElement("style");
   el.id = "confire-table-item";
@@ -83,20 +82,7 @@ if (typeof document !== "undefined" && !document.getElementById("confire-table-i
   document.head.appendChild(el);
 }
 
-/** One table, one FormGroup — keyed and titled from its own TableDef, so a rename in TableDialog
- *  cannot leave a stale heading behind. Shared by placed tables and by the orphans the catch-all
- *  section collects, so a table is named the same way wherever it ends up. */
-function TableGroup(props: ComponentProps<typeof ConfigTable>) {
-  return (
-    <FormGroup headerText={props.def.title || props.def.key} colSpan={FORM_PROPS.layout}>
-      <FormItem className="confire-table-item">
-        <ConfigTable {...props} />
-      </FormItem>
-    </FormGroup>
-  );
-}
-
-export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, section, disabled, readOnly, querySource, tables, onTablesChange, batches, onBatchesChange, itemMoney }: {
+export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, section, disabled, readOnly, querySource, tables, onTablesChange, batches, onBatchesChange, itemMoney, itemBatch, onItemBatchChange }: {
   model: ModelDef;
   /** Canonical first-page snapshot — seeds query value help. */
   lookups: ResolvedLookups;
@@ -106,7 +92,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   entries: Entries;
   onChange: (next: Entries) => void;
   onQueryPick: (paramKey: string, table: string, selected: ResolvedTable | undefined) => void;
-  /** render only this section, without its own Form header — the caller shows the title (e.g. an ObjectPageSection) */
+  /** render only this section; its Form header still carries the title */
   section?: string;
   disabled?: boolean;
   /** Locked (a quoted configuration). Form goes accessibleMode="Display" and fields render as
@@ -118,13 +104,16 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   tables?: TableRows;
   /** omit to render the tables read-only (builder preview) */
   onTablesChange?: (next: TableRows) => void;
-  /** batch quantities, rendered only for section === BATCHES_SECTION */
+  /** batch quantities: the field for section === BATCHES_SECTION, the items grid's batch picker otherwise */
   batches?: number[];
   /** omit to leave batch quantities out entirely (builder preview, portal Configure step) */
   onBatchesChange?: (next: number[]) => void;
   /** derived cost/price per items row; omit and the grid shows no money columns at all — which is
    *  how the builder preview and the client portal stay free of cost data */
   itemMoney?: ItemMoney | null;
+  /** the batch quantity `itemMoney` is priced at; omit onItemBatchChange and there is no picker */
+  itemBatch?: number;
+  onItemBatchChange?: (qty: number) => void;
 }) {
   const currency = useCurrency();
   // Same source the rail's Costs card reads, so a badge and the card can never disagree.
@@ -150,9 +139,9 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     const bs = batches ?? [];
     if (readOnly) {
       return (
-        <Form {...FORM_PROPS} {...formMode}>
+        <Form headerText="Batch quantities" {...FORM_PROPS} {...formMode}>
           <FormGroup>
-            <FormItem labelContent={<Label>Batch quantities</Label>}>
+            <FormItem labelContent={<Label>Quantities</Label>}>
               <Text>{bs.join(", ")}</Text>
             </FormItem>
           </FormGroup>
@@ -165,9 +154,9 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     // precedes click) — so the ref holds the committed number by the time we read it.
     const add = () => onBatchesChange(addBatch(bs, String(qty.current?.value ?? "")));
     return (
-      <Form {...FORM_PROPS} {...formMode}>
+      <Form headerText="Batch quantities" {...FORM_PROPS} {...formMode}>
         <FormGroup>
-          <FormItem labelContent={<Label required>Batch quantities</Label>}>
+          <FormItem labelContent={<Label required>Quantities</Label>}>
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
                 {/* value is set once on mount (React only writes a prop that changed), so the field
@@ -326,12 +315,14 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
 
   // One Form per model section. UI5's Form is the layout container and supports exactly one level
   // of grouping (Form > FormGroup), so section→Form / group→FormGroup is the only mapping that keeps
-  // both titles; a single Form for everything would flatten sections away. In the ObjectPage each
-  // section already gets its own ObjectPageSubSection (which supplies the title and the anchor), so
-  // headerText is only needed when we stack the whole model ourselves (builder preview, portal wizard).
+  // both titles; a single Form for everything would flatten sections away. The Form header is the
+  // section's one title everywhere, and a section's only group drops its own header, which would
+  // just repeat it.
   //
-  // A section's groups are of two kinds: a table group renders as one full-width FormGroup titled
-  // from its TableDef, a field group as the ordinary label-and-field group.
+  // A section's groups are of two kinds: a table group renders as one full-width, headerless
+  // FormGroup — the Grid's toolbar titles it from its TableDef (so a rename in TableDialog cannot
+  // leave a stale heading), and a group header would only say it twice — a field group as the
+  // ordinary label-and-field group.
   const byKey = new Map(model.structure.sections.map((s) => [s.key, s]));
   const defOf = (k: string) => (model.tables ?? []).find((t) => t.key === k);
   const shown = formSections(model).filter((s) => !section || s.key === section);
@@ -344,24 +335,56 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       {shown.map((sec, si) => {
       // The catch-all section owns no structure: its orphans become table groups here, so they go
       // through the very same Form/FormGroup path a placed table does.
-      const groups: Group[] = byKey.get(sec.key)?.groups ?? sec.tables.map((table) => ({ table }));
+      // A group left behind by a deleted table is dropped (placedTables() already does), so it is
+      // neither an empty titleless FormGroup nor counted as a second group.
+      const groups: Group[] = (byKey.get(sec.key)?.groups ?? sec.tables.map((table) => ({ table })))
+        .filter((g) => !isTableGroup(g) || defOf(g.table));
+      const head = (t: string) => (groups.length === 1 ? undefined : t);
+      // The items grid prices one batch quantity at a time (one cost and one price column), so the
+      // section holding it says which, and lets the user switch. One quantity has nothing to pick.
+      const bs = batches ?? [];
+      const batchPick = onItemBatchChange && bs.length > 1
+        && groups.some((g) => isTableGroup(g) && defOf(g.table)?.role === "items") ? (
+          <SegmentedButton accessibleName="Batch quantity the items are priced at" itemsFitContent
+            style={{ marginInlineStart: "auto" }}
+            onSelectionChange={(e) => {
+              const q = Number((e.detail.selectedItems[0] as HTMLElement | undefined)?.dataset.qty);
+              if (q) onItemBatchChange(q);
+            }}>
+            {bs.map((b) => (
+              <SegmentedButtonItem key={b} data-qty={b} selected={b === itemBatch}>{`Qty ${b}`}</SegmentedButtonItem>
+            ))}
+          </SegmentedButton>
+        ) : null;
       return (
-        <Form key={`${sec.key}:${si}`} headerText={section ? undefined : sec.title} {...FORM_PROPS} {...formMode}>
+        // A custom header takes the Form's aria name with it, hence accessibleName.
+        <Form key={`${sec.key}:${si}`} headerText={sec.title} accessibleName={sec.title} {...FORM_PROPS} {...formMode}
+          header={sec.icon || batchPick ? (
+            // flex: 1 — the header slot sits in a flex row, and the picker needs the room to sit right.
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flex: 1 }}>
+              {sec.icon ? <Icon name={sec.icon} /> : null}
+              <Title level={FORM_PROPS.headerLevel}>{sec.title}</Title>
+              {batchPick}
+            </div>
+          ) : undefined}>
           {groups.map((g, gi) => {
           if (isTableGroup(g)) {
-            const def = defOf(g.table);
-            // A group left behind by a deleted table: placedTables() already drops it, so drawing
-            // an empty titleless FormGroup here would be the only trace of it.
-            if (!def) return null;
-            return <TableGroup key={`${g.table}:${gi}`} def={def} rows={tableRows[g.table] ?? []}
-              scopeVars={prop.values} lookups={lk} querySource={querySource}
-              disabled={disabled || !onTablesChange} readOnly={readOnly}
-              money={def.role === "items" ? itemMoney : undefined}
-              onQueryPick={onQueryPick} onChange={(rows) => setRows(g.table, rows)} />;
+            const def = defOf(g.table)!;
+            return (
+              <FormGroup key={`${g.table}:${gi}`} colSpan={FORM_PROPS.layout}>
+                <FormItem className="confire-table-item">
+                  <ConfigTable def={def} rows={tableRows[g.table] ?? []}
+                    scopeVars={prop.values} lookups={lk} querySource={querySource}
+                    disabled={disabled || !onTablesChange} readOnly={readOnly}
+                    money={def.role === "items" ? itemMoney : undefined}
+                    onQueryPick={onQueryPick} onChange={(rows) => setRows(g.table, rows)} />
+                </FormItem>
+              </FormGroup>
+            );
           }
           const content = g.params.filter((k) => prop.visible[k]);
           return (
-            <FormGroup key={`${g.key}:${gi}`} headerText={g.title}>
+            <FormGroup key={`${g.key}:${gi}`} headerText={head(g.title)}>
               {content.map((k) => {
                 const p = model.parameters.find((x) => x.key === k);
                 if (!p) return null;

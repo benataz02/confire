@@ -268,6 +268,24 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
       .where(eq(configModel.id, modelId));
     expect((await calculateProject(tenantId, id, fakeFetch)).reused).toBe(false);
   });
+
+  test("a recalculation drops the selection — its indices point into the replaced list", async () => {
+    await seedQueryTable("items", ["ItemCode"]);
+    await seedQueryTable("catalog", []);
+    const id = await seed("reselect", model, {}, [10]);
+    await calculateProject(tenantId, id, fakeFetch);
+    await db.update(configProject).set({ selection: [{ candidateIdx: 0, batchQty: 10 }] })
+      .where(eq(configProject.id, id));
+    // A reuse replaces nothing, so the pick survives it.
+    expect((await calculateProject(tenantId, id, fakeFetch)).reused).toBe(true);
+    expect((await load(id)).selection).toHaveLength(1);
+
+    const { modelId } = await load(id);
+    await db.update(configModel).set({ updatedAt: new Date(Date.now() + 1000) })
+      .where(eq(configModel.id, modelId));
+    await calculateProject(tenantId, id, fakeFetch);
+    expect((await load(id)).selection).toBeNull();
+  });
 });
 
 // The merge-production path end to end: rows persist, feed the model's formulas, and become n

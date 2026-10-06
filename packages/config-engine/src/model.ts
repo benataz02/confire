@@ -234,6 +234,8 @@ export const ModelDefZ = z.object({
       z.object({
         key: KeyZ,
         title: z.string(),
+        /** SAP icon name drawn before the title in the section's Form header. */
+        icon: z.string().optional(),
         groups: z.array(GroupZ),
       }),
     ),

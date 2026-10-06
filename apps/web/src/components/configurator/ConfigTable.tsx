@@ -1,22 +1,29 @@
-import { useMemo } from "react";
+import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { Button, CheckBox, Input, Option, Select, Text } from "@ui5/webcomponents-react";
 import {
-  CheckBox, Input, Option, Select, Table, TableCell, TableHeaderCell,
-  TableHeaderRow, TableRow, TableRowAction, Text, Toolbar, ToolbarButton,
-} from "@ui5/webcomponents-react";
-import {
-  columnOptions, evalTableRows, PRICE_COL, typedPrice,
+  columnOptions, evalTableRows, COST_COL, PRICE_COL, typedPrice,
   type ResolvedLookups, type ResolvedTable, type TableColumn, type TableDef, type Val,
 } from "@confire/config-engine";
 import { CflField } from "../../shared/cfl/CflField.tsx";
 import { cfl, type QueryScope } from "../../shared/cfl/cfl-configs.ts";
+import { Grid, type CellTemplate, type GridState } from "../../shared/list-report/Grid.tsx";
+import type { ListColumn } from "../../shared/types.ts";
 import { displayValue, rowTable } from "./formHelpers.ts";
-import { addRow, pasteRows, removeRow, setCell, type Row } from "./configTableOps.ts";
+import { addRow, pasteRows, removeRows, setCell, type Row } from "./configTableOps.ts";
 import { money as fmtMoney } from "../../lib/money.ts";
 import { useCurrency } from "../../orpc.ts";
 import { qtyLabel, type ItemMoney } from "./itemMoney.ts";
-import { colMinWidth } from "./tableWidths.ts";
 
-const rowIndex = (row: unknown) => Number((row as { rowKey: string }).rowKey.split("-")[1]);
+/** The stored row's position, carried on the grid row: Grid hands back row objects (a cell, the
+ *  selection), and both have to name the stored row they mean. Not an identifier, so no column
+ *  key can collide with it. */
+const IDX = "#i";
+
+/** An editor owns its keys. AnalyticalTable's keyboard navigation takes Arrow/Home/End off any
+ *  focused cell — caret moves and the value help's type-ahead included — and Enter selects the
+ *  row. Grid has no useF2CellEdit (the hook that turns that off while editing), so a cell stops
+ *  them before they reach the table. */
+const ownKeys = (e: KeyboardEvent) => e.stopPropagation();
 
 /** Formula results are raw floats; trim the noise without pretending to a currency. */
 const show = (v: Val): string =>
@@ -47,8 +54,9 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
   /** quoted/locked: cells are Text, add/delete are gone. See ConfiguratorForm. */
   readOnly?: boolean;
   querySource: QueryScope;
-  /** Derived cost/price per row for an `items` grid. Absent = no money columns at all, which is how
-   *  the portal stays free of cost data: PortalRequestPage simply does not pass it. */
+  /** Derived cost/price per row for an `items` grid; null = the columns with nothing in them yet.
+   *  Absent = no money columns at all, which is how the portal stays free of cost data:
+   *  PortalRequestPage simply does not pass it. */
   money?: ItemMoney | null;
 }) {
   // Off `me`, not off a prop: the currency is the tenant's, identical for every table on the page,
@@ -59,29 +67,22 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
     () => evalTableRows(def, rows, scopeVars, lookups.tables),
     [def, rows, scopeVars, lookups],
   );
-  // colMinWidth measures positionally, so hand it the grid rather than the keyed rows.
-  const grid = useMemo(() => evaluated.map((r) => def.columns.map((c) => r[c.key])), [evaluated, def]);
-
   // An items grid is never capped and never empty: its rows are the quotation's lines.
   const maxRows = def.role === "calc" ? def.maxRows : undefined;
   const atMax = maxRows !== undefined && rows.length >= maxRows;
-  const atMin = rows.length <= (def.role === "calc" ? (def.minRows ?? 0) : 1);
+  const minRows = def.role === "calc" ? (def.minRows ?? 0) : 1;
 
   // Two runtime columns on an items grid: what the row costs and what it sells for, per unit, so
   // margin is readable without arithmetic. Neither is a declared column — the cost is never stored
-  // and the price is stored only once someone types over it.
-  const showMoney = def.role === "items" && !!money;
+  // and the price is stored only once someone types over it. Shown while `money` is null too (as
+  // "—"): a column appearing when the first calculation lands would rebuild every Grid cell, and
+  // take the focus out of whatever input the salesperson is typing in.
+  const showMoney = def.role === "items" && money !== undefined;
   // The quantity the two figures were priced at — see qtyLabel.
   const at = qtyLabel(money?.batchQty);
   const costHeader = `Unit cost${at}`;
   const priceHeader = `Unit price${at}`;
-  const moneyHeaders = [costHeader, priceHeader];
   const moneyText = (n: number | undefined) => (n === undefined ? "—" : fmtMoney(n, currency));
-  // Same positional sizing every other column gets, over the text these two actually render.
-  const moneyGrid = useMemo(
-    () => (money?.rows ?? []).map((m) => [moneyText(m?.unitCost), moneyText(m?.unitPrice)]),
-    [money, currency],
-  );
 
   const priceCell = (ri: number) => {
     // Same contract a formula cell's override follows: the split until someone types, and the
@@ -185,60 +186,74 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
     );
   };
 
+  // The declared columns, then the two money ones. Not sortable: row order is the quotation's line
+  // order, and Grid's sort is a server's job it would only ask the view to do.
+  // ponytail: no widths — AnalyticalTable shares the row evenly (the user can drag a column wider).
+  // A width off the cell text would change per keystroke and rebuild every cell; size from the
+  // headers if narrow columns become a complaint.
+  const columns = useMemo<ListColumn[]>(() => [
+    ...def.columns.map((c) => ({ key: c.key, label: header(c), type: c.type, sortable: false })),
+    ...(showMoney ? [
+      { key: COST_COL, label: costHeader, type: "number" as const, sortable: false },
+      { key: PRICE_COL, label: priceHeader, type: "number" as const, sortable: false },
+    ] : []),
+  ], [def, showMoney, costHeader, priceHeader]);
+  const state = useMemo<GridState>(() => ({ columns: columns.map((c) => c.key), sortBy: [], groupBy: [] }), [columns]);
+  const data = useMemo(() => rows.map((r, i) => ({ ...r, [IDX]: i })), [rows]);
+
+  // Grid builds one Cell component per column off `cellTemplates`, so a new template is a new
+  // component type to React and remounts the input under the cursor. The templates therefore live
+  // as long as the column set does and read this render's cells through the ref.
+  const render = useRef<(ri: number, key: string) => ReactNode>(null);
+  render.current = (ri, key) =>
+    key === COST_COL ? <Text>{moneyText(money?.rows[ri]?.unitCost)}</Text>
+    : key === PRICE_COL ? priceCell(ri)
+    : cell(ri, def.columns.find((c) => c.key === key)!);
+  const cellTemplates = useMemo(
+    () => Object.fromEntries(columns.map((c): [string, CellTemplate] => [c.key, (row) => (
+      <div style={{ width: "100%" }} onKeyDown={ownKeys}>{render.current?.(row[IDX] as number, c.key)}</div>
+    )])),
+    [columns],
+  );
+
+  const editable = !readOnly && !disabled;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-      {readOnly ? null : (
-      <Toolbar design="Transparent" accessibleName={`${def.title} actions`}>
-        <ToolbarButton icon="add" design="Transparent" text="Add row" disabled={disabled || atMax}
-          onClick={() => onChange(addRow(rows))} />
-      </Toolbar>
-      )}
-      <div
-        onPaste={(e) => {
-          const text = e.clipboardData.getData("text");
-          // Only a grid becomes new rows; a single value belongs in the cell being pasted into.
-          if (!/[\t\n]/.test(text) || disabled || readOnly) return;
-          e.preventDefault();
-          onChange(pasteRows(rows, def, text, maxRows));
-        }}>
-        <Table
-          // noDataText, not an IllustratedMessage: the illustration needs its own side-effect
-          // import to register a loader, and this is a small inline grid, not an empty page.
-          noDataText="No rows yet. Add one, or paste a block of cells straight from a spreadsheet."
-          rowActionCount={disabled || readOnly || atMin ? 0 : 1}
-          onRowActionClick={(e) => onChange(removeRow(rows, rowIndex(e.detail.row)))}
-          headerRow={
-            <TableHeaderRow>
-              {def.columns.map((c, i) => (
-                <TableHeaderCell key={c.key} minWidth={colMinWidth(header(c), grid, i)}>
-                  <span>{header(c)}</span>
-                </TableHeaderCell>
-              ))}
-              {showMoney
-                ? moneyHeaders.map((h, i) => (
-                    <TableHeaderCell key={h} minWidth={colMinWidth(h, moneyGrid, i)}>
-                      <span>{h}</span>
-                    </TableHeaderCell>
-                  ))
-                : null}
-            </TableHeaderRow>
-          }>
-          {rows.map((_, ri) => (
-            <TableRow key={ri} rowKey={`row-${ri}`}
-              actions={disabled || readOnly || atMin ? undefined : <TableRowAction icon="delete" text="Delete" />}>
-              {def.columns.map((c) => (
-                <TableCell key={c.key}>{cell(ri, c)}</TableCell>
-              ))}
-              {/* an array, not a fragment: every other cell list here is one, and nothing has to
-                  wonder whether the row component walks its children */}
-              {showMoney ? [
-                <TableCell key="cost"><Text>{moneyText(money?.rows[ri]?.unitCost)}</Text></TableCell>,
-                <TableCell key="price">{priceCell(ri)}</TableCell>,
-              ] : null}
-            </TableRow>
-          ))}
-        </Table>
-      </div>
+    <div
+      onPaste={(e) => {
+        const text = e.clipboardData.getData("text");
+        // Only a grid becomes new rows; a single value belongs in the cell being pasted into.
+        if (!/[\t\n]/.test(text) || disabled || readOnly) return;
+        e.preventDefault();
+        onChange(pasteRows(rows, def, text, maxRows));
+      }}>
+      <Grid title={def.title || def.key} columns={columns} state={state} rows={data} fill={false}
+        cellTemplates={cellTemplates}
+        noDataText="No rows yet. Add one, or paste a block of cells straight from a spreadsheet."
+        // Delete works on the selection — the Grid idiom — so a read-only grid has none to make.
+        selectionMode={editable ? "Multiple" : "None"}
+        toolbarActions={readOnly ? undefined : (sel) => (
+          <>
+            <Button icon="add" design="Transparent" disabled={disabled || atMax}
+              onClick={() => onChange(addRow(rows))}>Add row</Button>
+            {/* Copies land at the end, like a new row: positions above stay put, so the selection
+                still names the rows it did. Stored cells only — a formula cell nobody typed over
+                stays absent and the copy follows the formula too. */}
+            <Button icon="copy" design="Transparent"
+              disabled={!editable || !sel.rows.length || (maxRows !== undefined && rows.length + sel.rows.length > maxRows)}
+              onClick={() => {
+                const picked = sel.rows.map((r) => r[IDX] as number).sort((a, b) => a - b);
+                onChange([...rows, ...picked.map((i) => ({ ...rows[i] }))]);
+              }}>Duplicate</Button>
+            <Button icon="delete" design="Transparent"
+              disabled={!editable || !sel.rows.length || rows.length - sel.rows.length < minRows}
+              onClick={() => {
+                const gone = new Set(sel.rows.map((r) => r[IDX] as number));
+                // row ids are positions, so a kept selection would land on the rows that moved up
+                sel.clear();
+                onChange(removeRows(rows, gone));
+              }}>Delete</Button>
+          </>
+        )} />
     </div>
   );
 }

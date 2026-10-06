@@ -28,8 +28,8 @@ export type RowMoney = {
  *  its resource. Batch totals, so these add up to the same money `rows` splits over the grid. */
 export type CostLine = { kind: "material" | "operation"; label: string; amount: number };
 export type ItemMoney = {
-  /** the quantity the figures are priced at — null when several batches are selected at once */
-  batchQty: number | null;
+  /** the batch quantity the figures are priced at — the one picked in the items section's header */
+  batchQty: number;
   /** indexed by position in the unfiltered grid; a row that ships nothing has no share */
   rows: (RowMoney | undefined)[];
   /** where the cost comes from, as opposed to where `rows` lands it — same total, other axis */
@@ -37,12 +37,12 @@ export type ItemMoney = {
 };
 
 /** Setup cost is spread across the run, so a unit figure means nothing without the quantity it was
- *  priced at. Empty when several batches are selected and there is no single answer. */
-export const qtyLabel = (batchQty: number | null | undefined) =>
+ *  priced at. Empty before there is any money to label. */
+export const qtyLabel = (batchQty: number | undefined) =>
   batchQty ? ` (Quantity ${batchQty})` : "";
 
-/** The same description twice — two BOM lines of the same part, or one line across two selected
- *  batches — is one row: this reads as a cost breakdown, not a line dump. */
+/** The same description twice — two BOM lines of the same part, or one line across two candidates
+ *  selected at the viewed batch — is one row: this reads as a cost breakdown, not a line dump. */
 function addLine(m: Map<string, CostLine>, kind: CostLine["kind"], label: string, amount: number) {
   const cur = m.get(`${kind}|${label}`);
   if (cur) cur.amount += amount;
@@ -59,19 +59,19 @@ export function itemMoney(args: {
   tables: TableRows;
   candidates: Candidate[];
   selection: Sel[];
-  batches: number[];
+  /** the batch quantity to price at — one at a time, the grid has one price column */
+  batchQty: number;
 }): ItemMoney | null {
-  const { model, lookups, items, tables, candidates, selection, batches } = args;
+  const { model, lookups, items, tables, candidates, selection, batchQty } = args;
   const rows = tables[items.key] ?? [];
   if (!candidates.length || !rows.length) return null;
 
-  // What is actually being quoted, or — before anything is picked — the first candidate at the
-  // first batch quantity, so the grid shows money while the form is still being filled in. The
-  // header names the quantity, because setup cost spread over a batch makes "the price" meaningless
-  // without one.
-  const pairs: Sel[] = selection.length
-    ? selection
-    : [{ candidateIdx: 0, batchQty: batches[0] ?? candidates[0]!.perBatch[0]?.batchQty ?? 1 }];
+  // What is actually being quoted at this quantity, or — when nothing is picked there — the picked
+  // configuration (else the first candidate) priced at it, so the grid shows money while the form
+  // is still being filled in. The header names the quantity, because setup cost spread over a
+  // batch makes "the price" meaningless without one.
+  const at = selection.filter((s) => s.batchQty === batchQty);
+  const pairs: Sel[] = at.length ? at : [{ candidateIdx: selection[0]?.candidateIdx ?? 0, batchQty }];
 
   const acc = new Map<number, Acc>();
   const lines = new Map<string, CostLine>();
@@ -99,13 +99,13 @@ export function itemMoney(args: {
   }
   if (!any) return null;
 
-  const qtys = new Set(pairs.map((s) => s.batchQty));
   return {
-    batchQty: qtys.size === 1 ? [...qtys][0]! : null,
+    batchQty,
     lines: [...lines.values()],
     rows: rows.map((_, i) => {
       const a = acc.get(i);
-      // several pairs -> a quantity-weighted per-unit figure, which is what the document averages to
+      // several candidates at this quantity -> a quantity-weighted per-unit figure, which is what
+      // the document averages to
       return a && a.quantity > 0
         ? { unitCost: a.cost / a.quantity, unitPrice: a.price / a.quantity, quantity: a.quantity }
         : undefined;

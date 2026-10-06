@@ -1,73 +1,14 @@
-import { IllustratedMessage, ObjectStatus, Panel, Text, Title } from "@ui5/webcomponents-react";
-import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
-import { evalTableRows, ITEM_COL } from "@confire/config-engine";
-import type { Entries, ModelDef, Propagation, ResolvedLookups, TableRows, Val } from "@confire/config-engine";
-import { paramPrices, type CostElement } from "./costElements.ts";
+import { ObjectStatus, Text, Title } from "@ui5/webcomponents-react";
+import { ITEM_COL, type Val } from "@confire/config-engine";
+import type { CostElement } from "./costElements.ts";
 import { money } from "../../lib/money.ts";
-import { useCurrency } from "../../orpc.ts";
-import { moneyTotals, qtyLabel, type CostLine, type ItemMoney } from "./itemMoney.ts";
+import { qtyLabel, type CostLine, type ItemMoney } from "./itemMoney.ts";
 import { margin } from "./runView.ts";
 import { percent } from "../dashboard/dashboardView.ts";
-import { SimilarConfigs } from "./SimilarConfigs.tsx";
 
-// The process page's persistent right-hand rail: cost elements and similar past configurations.
-// Panels rather than cards — collapsing is native. Uncontrolled on purpose: the rail sits in
-// DynamicSideContent's side slot, outside the ObjectPage, and is only ever hidden, never unmounted,
-// so each Panel's own `collapsed` outlives tab switches without the page holding it.
-export function InsightsRail({ projectId, model, lk, prop, entries, tables, itemMoney, onCopy, slot, className }: {
-  projectId: string;
-  model: ModelDef;
-  lk?: ResolvedLookups;
-  prop?: Propagation | null;
-  entries: Entries;
-  /** the configuration's table rows — the items grid in here drives the per-item cost split */
-  tables: TableRows;
-  /** derived cost/price per items row; null until there is an item row and a calculation */
-  itemMoney?: ItemMoney | null;
-  onCopy: (values: Record<string, Val>) => void;
-  /** DynamicSideContent's `sideContent` is a web-component slot: the wrapper passes `slot` down and
-   *  the outermost DOM element must carry it, or the content lands in the default (main) slot. */
-  slot?: string;
-  /** the caller's slide animation — same element as `slot`, so no extra DOM node */
-  className?: string;
-}) {
-  const cur = useCurrency();
-  // Evaluated rows, not the raw cells, so a computed item code counts — the same evalTableRows the
-  // grid and the quotation's lines are drawn from. The raw rows are where a typed price lives.
-  const items = (model.tables ?? []).find((t) => t.role === "items");
-  const raw = items ? tables[items.key] ?? [] : [];
-  const itemRows = items ? evalTableRows(items, raw, prop?.values ?? {}, lk?.tables) : [];
-  const totals = itemMoney ? moneyTotals(itemMoney, raw) : null;
-  // Same paramPrices() the per-field badges read, so the two cannot disagree.
-  const options = lk && prop ? paramPrices(model, prop, lk.tables) : [];
+// The insights rail's cost blocks. The rail itself is ConfigProcessPage's DynamicSideContent side
+// content; these are what its "Cost elements" panel draws.
 
-  return (
-    // no height/overflow here: the side area (.ui5-dsc-side) brings its own scrollbar.
-    <div slot={slot} className={className}
-      style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.5rem" }}>
-      {/* The total rides in headerText rather than a `header` slot: a custom header is only
-          toggled by its arrow, this one by the whole bar — and the figure survives collapsing. */}
-      <Panel headerText={totals ? `Cost elements · ${money(totals.cost, cur)}` : "Cost elements"}>
-        <div style={BODY}>
-          {itemMoney && totals ? (
-            <CostBody rows={itemRows} money={itemMoney} totals={totals} cur={cur} />
-          ) : (
-            <IllustratedMessage name="NoData" design="ExtraSmall" titleText="No costs yet"
-              subtitleText="Add at least one item with a quantity — the calculation fills this in." />
-          )}
-          {options.length ? <OptionPrices rows={options} cur={cur} /> : null}
-        </div>
-      </Panel>
-      <Panel headerText="Similar configurations" collapsed>
-        <div style={BODY}>
-          <SimilarConfigs projectId={projectId} model={model} entries={entries} onCopy={onCopy} />
-        </div>
-      </Panel>
-    </div>
-  );
-}
-
-const BODY = { display: "flex", flexDirection: "column", gap: "0.75rem", padding: "0 0.25rem 0.5rem" } as const;
 const SECTION = { display: "flex", flexDirection: "column", gap: "0.25rem" } as const;
 /** tabular-nums inherits through UI5's shadow roots, so the decimals line up down the column. */
 const LINE = { display: "flex", justifyContent: "space-between", gap: "1rem", fontVariantNumeric: "tabular-nums" } as const;
@@ -92,7 +33,7 @@ function MoneyRow({ label, amount, cur, total }: { label: string; amount: number
  *  block. Materials and Operations are batch totals from the same computeOutputs call the items
  *  split divides, so they add up to Total cost; Cost by item is that same total on the other axis,
  *  in line totals because a cost element is an amount (the grid shows the same money per unit). */
-function CostBody({ rows, money: m, totals, cur }: {
+export function CostBody({ rows, money: m, totals, cur }: {
   rows: Record<string, Val>[];
   money: ItemMoney;
   totals: { cost: number; price: number };
@@ -139,7 +80,7 @@ function CostBody({ rows, money: m, totals, cur }: {
 
 /** The per-field price badges, summed. Informational: the calculated price comes from BOM and
  *  routing and never reads these (see costElements.ts), so they keep their own total. */
-function OptionPrices({ rows, cur }: { rows: CostElement[]; cur?: string }) {
+export function OptionPrices({ rows, cur }: { rows: CostElement[]; cur?: string }) {
   return (
     <div style={SECTION}>
       <Title level="H6">Option prices</Title>

@@ -20,16 +20,6 @@
   --_ui5wcr_Splitter_BarOutline: none;
 }
 
-/* The insights rail's slide. DynamicSideContent hides its side column with a hard display:none and
-   ships no transition of its own, so the movement lives on the slotted element instead. */
-.confire-rail { animation: confire-rail-in 200ms ease }
-.confire-rail-out { animation: confire-rail-out 200ms ease forwards }
-@keyframes confire-rail-in { from { transform: translateX(100%); opacity: 0 } }
-@keyframes confire-rail-out { to { transform: translateX(100%); opacity: 0 } }
-@media (prefers-reduced-motion: reduce) {
-  .confire-rail, .confire-rail-out { animation: none }
-}
-
 /* View transitions — today only Grid's full-page toggle, which morphs the table between its slot and
    the page. Short because it answers a click; the root has nothing to crossfade and just ends with it. */
 ::view-transition-group(*),

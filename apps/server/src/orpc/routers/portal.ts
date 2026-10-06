@@ -404,6 +404,7 @@ export const portalRouter = {
         // pairing is the invariant, in place of a `calculated` status flag restating it.
         if (input.entries !== undefined || input.batches !== undefined || input.tables !== undefined) {
           fields.candidates = [];
+          fields.selection = null;
           fields.calculatedAt = null;
         }
         const updated = await db

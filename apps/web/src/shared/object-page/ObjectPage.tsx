@@ -344,7 +344,6 @@ export function ObjectPage(p: Templates & {
   return (
     <>
       <Ui5ObjectPage
-        mode="IconTabBar"
         hidePinButton
         titleArea={objectPageTitle({
           header: p.header, formData, label: constraints.label,

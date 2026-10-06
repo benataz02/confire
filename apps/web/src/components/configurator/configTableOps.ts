@@ -14,7 +14,7 @@ export const typedCell = (type: TableColumn["type"], raw: string): Val =>
 export const inputColumns = (def: TableDef): TableColumn[] => def.columns.filter((c) => c.cell.kind !== "formula");
 
 export const addRow = (rows: Row[]): Row[] => [...rows, {}];
-export const removeRow = (rows: Row[], i: number): Row[] => rows.filter((_, j) => j !== i);
+export const removeRows = (rows: Row[], gone: Set<number>): Row[] => rows.filter((_, j) => !gone.has(j));
 export const setCell = (rows: Row[], i: number, key: string, v: Val): Row[] =>
   rows.map((r, j) => (j === i ? { ...r, [key]: v } : r));
 

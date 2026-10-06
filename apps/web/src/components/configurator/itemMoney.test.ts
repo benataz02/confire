@@ -43,11 +43,11 @@ const batchOf = (n: number) => ({
   outputs: computeOutputs(model, lookups, { thickness: 3 }, n, tables),
 });
 const candidates: Candidate[] = [{ assignment: { thickness: 3 }, perBatch: [batchOf(3), batchOf(6)] }];
-const call = (selection: Parameters<typeof itemMoney>[0]["selection"], batches = [3]) =>
-  itemMoney({ model, lookups, items, tables, candidates, selection, batches });
+const call = (selection: Parameters<typeof itemMoney>[0]["selection"], batchQty = 3) =>
+  itemMoney({ model, lookups, items, tables, candidates, selection, batchQty });
 
 describe("itemMoney", () => {
-  test("previews the first candidate at the first batch before anything is selected", () => {
+  test("previews the first candidate at the viewed batch before anything is selected", () => {
     const m = call([]);
     // total price 20 * 3 = 60, split 2:1 -> 40 and 20, over 3 pieces each
     expect(m!.batchQty).toBe(3);
@@ -65,13 +65,12 @@ describe("itemMoney", () => {
     expect(m!.rows.map((r) => r!.quantity)).toEqual([3, 3]);
   });
 
-  test("several selected batches average per unit and drop the header's quantity", () => {
-    const m = call([{ candidateIdx: 0, batchQty: 3 }, { candidateIdx: 0, batchQty: 6 }]);
-    // no single quantity the figures are priced at, so the column header stops claiming one
-    expect(m!.batchQty).toBeNull();
-    expect(m!.rows[0]!.quantity).toBe(9); // 1 * 3 + 1 * 6
-    // unit price is unchanged here (no setup cost to spread), but the weighting must still hold
-    expect(m!.rows[0]!.unitPrice).toBeCloseTo(40 / 3, 8);
+  test("only the viewed batch is priced, even with several selected", () => {
+    const m = call([{ candidateIdx: 0, batchQty: 3 }, { candidateIdx: 0, batchQty: 6 }], 6);
+    expect(m!.batchQty).toBe(6);
+    expect(m!.rows[0]!.quantity).toBe(6); // the 3-piece pick is another column's business
+    // a pick at another quantity still names the configuration to preview this one with
+    expect(call([{ candidateIdx: 0, batchQty: 3 }], 6)!.rows[0]!.quantity).toBe(6);
   });
 
   test("a row that ships nothing gets no figures, and the rest still add up", () => {
@@ -80,7 +79,7 @@ describe("itemMoney", () => {
     };
     const m = itemMoney({
       model, lookups, items, tables: withBlank, candidates,
-      selection: [{ candidateIdx: 0, batchQty: 3 }], batches: [3],
+      selection: [{ candidateIdx: 0, batchQty: 3 }], batchQty: 3,
     });
     expect(m!.rows[1]).toBeUndefined();
     expect(m!.rows.filter(Boolean).reduce((a, r) => a + r!.unitPrice * r!.quantity, 0)).toBeCloseTo(60, 8);
@@ -96,7 +95,7 @@ describe("itemMoney", () => {
     };
     const m = itemMoney({
       model: withOps, lookups, items, tables, candidates,
-      selection: [{ candidateIdx: 0, batchQty: 3 }], batches: [3],
+      selection: [{ candidateIdx: 0, batchQty: 3 }], batchQty: 3,
     });
     expect(m!.lines).toEqual([
       { kind: "material", label: "Steel sheet", amount: 30 },
@@ -108,8 +107,12 @@ describe("itemMoney", () => {
   });
 
   test("an unnamed BOM line falls back to its item code, and repeats merge", () => {
-    const m = call([{ candidateIdx: 0, batchQty: 3 }, { candidateIdx: 0, batchQty: 6 }]);
-    expect(m!.lines).toEqual([{ kind: "material", label: "SHEET", amount: 90 }]); // 3 + 6 sheets
+    const twice: ModelDef = {
+      ...model,
+      bom: [{ id: "a", itemCode: '"SHEET"', qty: "1" }, { id: "b", itemCode: '"SHEET"', qty: "2" }],
+    };
+    const m = itemMoney({ model: twice, lookups, items, tables, candidates, selection: [], batchQty: 3 });
+    expect(m!.lines).toEqual([{ kind: "material", label: "SHEET", amount: 90 }]); // (1 + 2) x 3 sheets
   });
 
   test("totals take a typed unit price over the split, the way the quotation does", () => {
@@ -123,6 +126,6 @@ describe("itemMoney", () => {
   });
 
   test("no candidates yet means no money at all, not a zero", () => {
-    expect(itemMoney({ model, lookups, items, tables, candidates: [], selection: [], batches: [3] })).toBeNull();
+    expect(itemMoney({ model, lookups, items, tables, candidates: [], selection: [], batchQty: 3 })).toBeNull();
   });
 });

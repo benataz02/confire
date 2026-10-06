@@ -12,6 +12,7 @@ import { confirm } from "../confirm.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { ParamDialog } from "./ParamDialog.tsx";
 import { TableDialog, newCalcTable } from "./TableDialog.tsx";
+import { TitleDialog, type TitleIcon } from "./TitleDialog.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { ConfiguratorForm } from "../configurator/ConfiguratorForm.tsx";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "../configurator/formHelpers.ts";
@@ -91,8 +92,8 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   // Formula row switched to its live editors; every other row shows read-only text, which is the
   // whole reason the rows are the same height.
   const [fEdit, setFEdit] = useState<number | null>(null);
-  // Inline title edit: keep the original so Escape can revert (edits apply live per keystroke).
-  const [titleEdit, setTitleEdit] = useState<{ key: string; original: string } | null>(null);
+  // Section/group whose heading is open in TitleDialog, with the values it opens on.
+  const [titleEdit, setTitleEdit] = useState<{ ref: RowRef; initial: TitleIcon } | null>(null);
   // Keyed by stable section/group/param key (not row index) so collapse survives drag-reordering.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
@@ -183,12 +184,12 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       update((d) => deleteNode(d, ref));
   };
 
-  const setTitle = (ref: RowRef, title: string) =>
+  const saveTitle = (ref: RowRef, { title, icon }: TitleIcon) =>
     update((d) => ({
       ...d,
       structure: {
         sections: d.structure.sections.map((s, si) => {
-          if (ref.kind === "section") return si === ref.s ? { ...s, title } : s;
+          if (ref.kind === "section") return si === ref.s ? { ...s, title, icon } : s;
           if (ref.kind === "group") return si === ref.s ? { ...s, groups: s.groups.map((g, gi) => (gi === ref.g && !isTableGroup(g) ? { ...g, title } : g)) } : s;
           return s;
         }),
@@ -341,10 +342,13 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
             const p = draft.parameters.find((x) => x.key === ref.key);
             if (p) setEditing({ param: structuredClone(p), isNew: false });
           } else {
-            const grp = ref.kind === "group" ? draft.structure.sections[ref.s]?.groups[ref.g] : undefined;
-            const title = ref.kind === "section" ? draft.structure.sections[ref.s]?.title ?? ""
-              : grp && !isTableGroup(grp) ? grp.title : "";
-            setTitleEdit({ key: rowKeyOf(ref), original: title });
+            const sec = draft.structure.sections[ref.s];
+            const grp = ref.kind === "group" ? sec?.groups[ref.g] : undefined;
+            setTitleEdit({
+              ref,
+              initial: ref.kind === "section" ? { title: sec?.title ?? "", icon: sec?.icon }
+                : { title: grp && !isTableGroup(grp) ? grp.title : "" },
+            });
           }
         }}
         headerRow={
@@ -394,22 +398,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
                   {r.ref.kind === "table" ? (
                     <span style={{ color: "var(--sapContent_LabelColor)", flex: "0 0 auto" }} aria-hidden>▦</span>
                   ) : null}
-                  {titleEdit?.key === r.key && (r.ref.kind === "section" || r.ref.kind === "group") ? (
-                    <Input
-                      accessibleName="Title"
-                      value={r.label}
-                      autoFocus
-                      onBlur={() => setTitleEdit(null)}
-                      // Enter commits (edits already applied live); Escape reverts to the original title.
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") setTitleEdit(null);
-                        else if (e.key === "Escape") { setTitle(r.ref, titleEdit.original); setTitleEdit(null); }
-                      }}
-                      onInput={(e) => setTitle(r.ref, e.target.value)}
-                    />
-                  ) : (
-                    <Text style={{ fontWeight: r.depth === 0 ? "bold" : "normal" }}>{r.label}</Text>
-                  )}
+                  <Text style={{ fontWeight: r.depth === 0 ? "bold" : "normal" }}>{r.label}</Text>
                 </Gutter>
               </TableCell>
               <TableCell><Text>{r.detail}</Text></TableCell>
@@ -439,6 +428,12 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
             setTableEdit(null);
           }}
         />
+      ) : null}
+
+      {titleEdit ? (
+        <TitleDialog initial={titleEdit.initial} withIcon={titleEdit.ref.kind === "section"}
+          onCancel={() => setTitleEdit(null)}
+          onOk={(v) => { saveTitle(titleEdit.ref, v); setTitleEdit(null); }} />
       ) : null}
 
       {editing ? (

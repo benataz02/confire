@@ -12,7 +12,7 @@ export const B1_FEATURES: Record<string, EntityFeature> = Object.fromEntries(
     documentFeature("Quotations", { label: "Sales quotations", one: "sales quotation", icon: "sales-quote" }),
     documentFeature("Orders", { label: "Sales orders", one: "sales order", icon: "sales-order" }),
     documentFeature("DeliveryNotes", { label: "Deliveries", one: "delivery", icon: "shipping-status" }),
-    documentFeature("Invoices", { label: "A/R invoices", one: "A/R invoice", icon: "monitor-payments" }),
+    //documentFeature("Invoices", { label: "A/R invoices", one: "A/R invoice", icon: "monitor-payments" }),
     businessPartners,
     items,
   ].map((f) => [f.entity, f]),

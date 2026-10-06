@@ -132,7 +132,6 @@ export function PortalRequestPage({ id }: { id: string }) {
           {/* Same ConfiguratorForm the Configure step renders, asked for its batch section — the
               quantity field has one implementation, shared with the internal ObjectPage. */}
           <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-            <Title level="H5">Batch quantities</Title>
             <Text>Each quantity gets its own price column — setup cost is spread across the batch.</Text>
             {project.candidates.length > 0 && (status === "draft" || entriesDirty || batchesDirty || tablesDirty) ? (
               <MessageStrip design="Critical" hideCloseButton>

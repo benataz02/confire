@@ -2,23 +2,26 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Bar, Button, BusyIndicator, Dialog, DynamicSideContent, Form, FormGroup, FormItem, Input, Label,
-  MessageStrip, ObjectPage, ObjectPageSection, ObjectPageSubSection, ObjectPageTitle, ObjectStatus,
-  Option, Select, Tag, Text, TextArea, Title, ToggleButton, Toolbar,
+  Bar, Button, BusyIndicator, Dialog, DynamicSideContent, Form, FormGroup, FormItem, IllustratedMessage,
+  Input, Label, MessageStrip, ObjectPage, ObjectPageSection, ObjectPageTitle, ObjectStatus,
+  Option, Panel, Select, Tag, Text, TextArea, Title, ToggleButton, Toolbar, ToolbarButton, ToolbarItem,
 } from "@ui5/webcomponents-react";
-import { propagate, type Entries, type ItemsTable, type TableRows, type Val } from "@confire/config-engine";
+import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
+import { evalTableRows, propagate, type Entries, type ItemsTable, type TableRows, type Val } from "@confire/config-engine";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts";
 import { client, meQuery, orpc, useCurrency } from "../../orpc.ts";
 import { money as formatMoney } from "../../lib/money.ts";
 import { confirm } from "../confirm.ts";
 import { toast } from "../toast.ts";
 import { statusUi, toggleSelection, toPriced, unpricedItems, type Sel } from "./runView.ts";
-import { BATCHES_SECTION, ConfiguratorForm, ConsistencyStatus, formSections } from "./ConfiguratorForm.tsx";
+import { BATCHES_SECTION, ConfiguratorForm, ConsistencyStatus } from "./ConfiguratorForm.tsx";
 import { CflField } from "../../shared/cfl/CflField.tsx";
 import { cfl } from "../../shared/cfl/cfl-configs.ts";
 import { PriceAnalysis } from "./PriceAnalysis.tsx";
-import { InsightsRail } from "./InsightsRail.tsx";
-import { itemMoney } from "./itemMoney.ts";
+import { CostBody, OptionPrices } from "./InsightsRail.tsx";
+import { SimilarConfigs } from "./SimilarConfigs.tsx";
+import { paramPrices } from "./costElements.ts";
+import { itemMoney, moneyTotals } from "./itemMoney.ts";
 import { needsCalculation } from "./configProcessState.ts";
 import { configMessages } from "./configMessages.ts";
 import { PageMessages } from "../PageMessages.tsx";
@@ -36,6 +39,9 @@ const NONE: never[] = [];
 
 /** The customer value help: customers only, with a link to the BP for whoever may open /b1. */
 const CUSTOMER = { dialogConfig: cfl.customers() };
+
+/** One insights panel's content column. */
+const PANEL_BODY = { display: "flex", flexDirection: "column", gap: "0.75rem", padding: "0 0.25rem 0.5rem" } as const;
 
 // One scroll: Configure, Candidates, Create quote. Missing run or selection is an empty state.
 // Local overlays (override ?? server) until persist.
@@ -67,12 +73,12 @@ export function ConfigProcessPage({ id }: { id: string }) {
   // server row, and configs.calculate clears it by returning the saved project.
   const [draft, setDraft] = useState<Draft | null>(null);
   const [selOverride, setSel] = useState<Sel[] | null>(null);
+  // The batch quantity the items grid is priced at. Read through `batches` below, so a deleted
+  // quantity falls back to the first rather than pricing at a batch that no longer exists.
+  const [viewQty, setViewQty] = useState<number | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [note, setNote] = useState("");
-  // Rail visibility. Two flags, not one: DynamicSideContent hides its side column with a hard
-  // display:none, so the exit animation has to finish before the column goes.
   const [railOpen, setRailOpen] = useState(true);
-  const [railMounted, setRailMounted] = useState(true);
   // Every mutation returns the part of configs.get's payload it could have changed, so the
   // response IS the refetch — no invalidate, no second round trip per edit.
   const setProject = (patch: Partial<Payload>) =>
@@ -84,16 +90,17 @@ export function ConfigProcessPage({ id }: { id: string }) {
   }));
   const calc = useMutation(orpc.configs.calculate.mutationOptions({
     onSuccess: (data) => {
-      setDraft(null);  // the server now holds what the draft held
-      setSel([]);      // a new calculation invalidates any previous candidate picks
+      setDraft(null); // the server now holds what the draft held
+      setSel(null);   // and dropped the selection along with the candidates it indexed
       setProject(data);
     },
   }));
+  // Saved by the effect below. The overlay clears only if no click landed while this save was in
+  // flight — otherwise it holds the newer picks, and the effect sends those next.
   const select = useMutation(orpc.configs.select.mutationOptions({
-    onSuccess: (data) => {
-      setSel(null); // use persisted selection after save
+    onSuccess: (data, vars) => {
+      setSel((cur) => (cur === vars.selection ? null : cur));
       setProject(data);
-      toast("Selection saved");
     },
   }));
   // The two actions that leave this page. Neither can use setProject: duplicate answers with a
@@ -141,16 +148,17 @@ export function ConfigProcessPage({ id }: { id: string }) {
   const conflicted = !!prop && prop.conflicts.length > 0;
   // The items grid's cost and price, derived on every render and stored nowhere — see itemMoney.ts.
   // Same itemSplit the server posts with, so the grid cannot show a price the quotation will not
-  // carry. Before anything is selected it previews the first candidate at the first batch quantity.
+  // carry. One batch quantity at a time, picked in the items section's header.
   const itemsDef = (model?.definition.tables ?? NONE).find((t): t is ItemsTable => t.role === "items");
+  const itemQty = batches.find((b) => b === viewQty) ?? batches[0];
   const money = useMemo(
-    () => (model && lk && itemsDef
+    () => (model && lk && itemsDef && itemQty !== undefined
       ? itemMoney({
           model: model.definition, lookups: lk, items: itemsDef,
-          tables, candidates, selection, batches,
+          tables, candidates, selection, batchQty: itemQty,
         })
       : null),
-    [model, lk, itemsDef, tables, candidates, selection, batches],
+    [model, lk, itemsDef, tables, candidates, selection, itemQty],
   );
   // calc.reset() reopens the effect's isError gate — the same reason select.reset() runs on a
   // candidate edit below. Without it one failing calculation retries every second forever.
@@ -183,15 +191,16 @@ export function ConfigProcessPage({ id }: { id: string }) {
     return () => clearTimeout(t);
   }, [shouldCalc, calcBusy, calc.isError, draft, id]);
 
-  // A quoted configuration has nothing to configure, so the rail starts collapsed and stays that
-  // way. ponytail: one timer matched to the keyframe, not an animationend listener — if the two
-  // durations ever drift apart, swap this for onAnimationEnd on the rail.
-  const railShown = railOpen && !locked;
+  // Picks save themselves, like the inputs: `selOverride !== null` is their dirty flag. One save at
+  // a time, so the server applies them in click order; `select.isError` stops a refused pick
+  // retrying forever, and the next click's select.reset() reopens it.
   useEffect(() => {
-    if (railShown) { setRailMounted(true); return; }
-    const t = setTimeout(() => setRailMounted(false), 200);
-    return () => clearTimeout(t);
-  }, [railShown]);
+    if (selOverride === null || select.isPending || select.isError) return;
+    select.mutate({ projectId: id, selection: selOverride });
+  }, [selOverride, select.isPending, select.isError, id]);
+
+  // A quoted configuration has nothing to configure, so the rail starts collapsed and stays that way.
+  const railShown = railOpen && !locked;
 
   // Fills only empty params; page-level propagate() takes it from here. Nothing to fill is not an
   // edit: a draft equal to the saved inputs would still cost a calculation.
@@ -206,14 +215,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
     toast(n ? `Filled ${n} field${n === 1 ? "" : "s"}` : "Those fields already have values");
   };
 
-  const saveSelection = () => {
-    if (!candidates.length || selection.length === 0) return;
-    select.mutate({
-      projectId: id,
-      selection: selection.map((s) => ({ candidateIdx: s.candidateIdx, batchQty: s.batchQty })),
-    });
-  };
-
   if (q.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
   if (q.error)
     return <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{q.error.message}</MessageStrip>;
@@ -223,6 +224,14 @@ export function ConfigProcessPage({ id }: { id: string }) {
   // grid and the quotation, not this figure, are what the customer is charged.
   const selectedTotal = selection.reduce((n, s) =>
     n + (candidates[s.candidateIdx]?.perBatch.find((b) => b.batchQty === s.batchQty)?.outputs.batchTotal ?? 0), 0);
+  // The rail's figures. Evaluated rows, not the raw cells, so a computed item code counts — the
+  // same evalTableRows the grid and the quotation's lines are drawn from. The raw rows are where a
+  // typed price lives.
+  const rawItems = itemsDef ? tables[itemsDef.key] ?? NONE : NONE;
+  const itemRows = itemsDef ? evalTableRows(itemsDef, rawItems, prop?.values ?? {}, lk?.tables) : NONE;
+  const totals = money ? moneyTotals(money, rawItems) : null;
+  // Same paramPrices() the per-field badges read, so the two cannot disagree.
+  const optionPrices = lk && prop ? paramPrices(model.definition, prop, lk.tables) : NONE;
 
   const footer = (
     <Bar design="FloatingFooter"
@@ -230,30 +239,28 @@ export function ConfigProcessPage({ id }: { id: string }) {
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           {prop ? <ConsistencyStatus prop={prop} /> : null}
           {missing.length ? <ObjectStatus state="Critical">{missing.join(" and ")} required</ObjectStatus> : null}
-          {shouldCalc || calcBusy ? <BusyIndicator active delay={0} size="S" /> : null}
-          {candidates.length > 0 ? (
-            <Text>
-              {selection.length} quotation line{selection.length === 1 ? "" : "s"} selected
-              {selection.length ? ` · ${formatMoney(selectedTotal, currency)}` : ""}
-            </Text>
-          ) : null}
+          {shouldCalc || calcBusy || select.isPending ? <BusyIndicator active delay={0} size="S" /> : null}
+          {selection.length ? <Text>Selected: {formatMoney(selectedTotal, currency)}</Text> : null}
         </div>
       }
       endContent={
         <>
-          <Button disabled={locked || select.isPending || selection.length === 0} onClick={saveSelection}>
-            {select.isPending ? "Saving…" : "Save selection"}
-          </Button>
           {/* The finalizing action, and the only Emphasized one on the page — the Fiori rule.
-              configs.quoteDraft builds from the *saved* selection, so an unsaved pick or a pending
-              edit has nothing to quote yet. */}
+              configs.quoteDraft builds from the *saved* selection, so a pick still saving or a
+              pending edit has nothing to quote yet. */}
           <Button design="Emphasized"
-            disabled={locked || draft !== null || !project.selection?.length}
+            disabled={locked || draft !== null || selOverride !== null || !project.selection?.length}
             tooltip={draft !== null ? "Calculate first"
-              : !project.selection?.length ? "Save a candidate selection first" : "Create the quotation in SAP"}
+              : selOverride !== null ? (select.isError ? "The selection was not saved — see messages" : "Saving the selection…")
+              : !project.selection?.length ? "Pick at least one price under Candidates" : "Create the quotation in SAP"}
             onClick={() => navigate({ to: "/configs/$id/quote", params: { id } })}>
             Create quote
           </Button>
+          {/* Answering a portal request is finalizing too, so it sits with Create quote, not in the
+              title's object actions. */}
+          {project.status === "requested" ? (
+            <Button design="Negative" onClick={() => setRejectOpen(true)}>Reject</Button>
+          ) : null}
         </>
       } />
   );
@@ -277,22 +284,8 @@ export function ConfigProcessPage({ id }: { id: string }) {
     locked,
   });
 
-  // The rail sits OUTSIDE the ObjectPage: ObjectPage collects sub-tabs from direct children only,
-  // so wrapping the subsections would silently drop Configure's sub-anchor tabs.
-  // DynamicSideContent handles the responsive drop-below itself — no media queries. Its own
-  // show/hide is a hard display:none though, so the slide lives on the rail (.confire-rail).
   return (
     <>
-    <DynamicSideContent
-      sideContentVisibility="AlwaysShow"
-      accessibilityAttributes={{ sideContent: { ariaLabel: "Insights" } }}
-      hideSideContent={!railShown && !railMounted}
-      sideContent={
-        <InsightsRail projectId={id} model={model.definition} lk={lk} prop={prop} entries={entries}
-          tables={tables} itemMoney={money} onCopy={copyValues}
-          className={railShown ? "confire-rail" : "confire-rail confire-rail-out"} />
-      }>
-
     <ObjectPage
       mode="IconTabBar"
       hidePinButton
@@ -308,25 +301,43 @@ export function ConfigProcessPage({ id }: { id: string }) {
               ) : null}
             </div>
           }
+          navigationBar={
+            <Toolbar design="Transparent">
+              {/* A Toolbar only measures — and overflows — its own item types: the two plain
+                  controls are wrapped, everything else is a ToolbarButton. */}
+              <ToolbarItem overflowPriority="NeverOverflow">
+                <PageMessages messages={messages} okText="No issues — everything checks out."
+                  onSection={sectionParam.go} />
+              </ToolbarItem>
+              {/* A toggle, so the pressed state is announced — Fiori's trigger for side content. */}
+              <ToolbarItem overflowPriority="NeverOverflow">
+                <ToggleButton design="Transparent" disabled={locked} pressed={railShown}
+                  icon={railShown ? "close-command-field" : "open-command-field"}
+                  tooltip={locked ? "A quoted configuration has nothing left to configure"
+                    : railShown ? "Hide insights" : "Show insights"}
+                  onClick={() => setRailOpen((o) => !o)} />
+              </ToolbarItem>
+              <ToolbarButton icon="synchronize" design="Transparent" disabled={sync.isPending}
+                tooltip="Refresh the SAP data this model reads"
+                onClick={() => sync.mutate({ id })} />
+              {project.b1DocEntry !== null && (me.data?.role === "admin" || me.data?.role === "owner") ? (
+                <ToolbarButton icon="document-text" design="Transparent" text="Open quotation"
+                  onClick={() => navigate({
+                    to: "/b1/$entity/$key",
+                    params: { entity: "Quotations", key: String(project.b1DocEntry) },
+                  })} />
+              ) : null}
+            </Toolbar>
+          }
           actionsBar={
             <Toolbar design="Transparent">
-              <PageMessages messages={messages} okText="No issues — everything checks out."
-                onSection={sectionParam.go} />
-              {/* A toggle, so the pressed state is announced — Fiori's trigger for side content. */}
-              <ToggleButton design="Transparent" disabled={locked} pressed={railShown}
-                icon={railShown ? "close-command-field" : "open-command-field"}
-                tooltip={locked ? "A quoted configuration has nothing left to configure"
-                  : railShown ? "Hide insights" : "Show insights"}
-                onClick={() => setRailOpen((o) => !o)} />
-              {/* Duplicate copies what is stored and recalculates it, so an unsaved draft would
-                  not be in the copy — disabled until the pending edits have been calculated. */}
-              <Button icon="copy" design="Transparent" disabled={draft !== null || duplicate.isPending}
+              <ToolbarButton icon="copy" design="Transparent" disabled={draft !== null || duplicate.isPending}
                 tooltip={draft !== null ? "Calculate first" : "Duplicate configuration"}
-                onClick={() => duplicate.mutate({ id })}>
-                {duplicate.isPending ? "Duplicating…" : "Duplicate"}
-              </Button>
-              <Button icon="delete" design="Transparent" disabled={locked || remove.isPending}
+                text={duplicate.isPending ? "Duplicating…" : "Duplicate"}
+                onClick={() => duplicate.mutate({ id })} />
+              <ToolbarButton icon="delete" design="Transparent" disabled={locked || remove.isPending}
                 tooltip={locked ? "A quoted configuration cannot be deleted" : "Delete configuration"}
+                text="Delete"
                 onClick={async () => {
                   if (await confirm({
                     title: "Delete configuration",
@@ -334,30 +345,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
                     message: `Delete "${project.name.trim() || "New configuration"}"? This can't be undone.`,
                     actionText: "Delete", destructive: true,
                   })) remove.mutate({ ids: [id] });
-                }}>
-                Delete
-              </Button>
-              {/* The data the form is drawn from is cached, so there has to be a way to ask for it
-                  again without waiting for the frequency to come round. */}
-              <Button icon="synchronize" design="Transparent" disabled={sync.isPending}
-                tooltip="Refresh the SAP data this model reads"
-                onClick={() => sync.mutate({ id })}>
-                {sync.isPending ? "Syncing…" : "Sync data"}
-              </Button>
-              {project.status === "requested" ? (
-                <Button design="Negative" onClick={() => setRejectOpen(true)}>Reject</Button>
-              ) : null}
-              {/* The quoted state's only remaining surface, now that the Create quote section is
-                  gone. Admin/owner only, because /b1 is. */}
-              {project.b1DocEntry !== null && (me.data?.role === "admin" || me.data?.role === "owner") ? (
-                <Button icon="document-text" design="Transparent"
-                  onClick={() => navigate({
-                    to: "/b1/$entity/$key",
-                    params: { entity: "Quotations", key: String(project.b1DocEntry) },
-                  })}>
-                  Open quotation
-                </Button>
-              ) : null}
+                }} />
             </Toolbar>
           }>
           <Tag design={st.state === "None" ? "Neutral" : st.state} style={{ alignSelf: "center" }}>
@@ -367,116 +355,135 @@ export function ConfigProcessPage({ id }: { id: string }) {
       }
       footerArea={!locked ? footer : undefined}
     >
-      <ObjectPageSection id="configure" titleText="Configure">
-        <ObjectPageSubSection id="general" titleText="General">
-          {/* The configuration's own attributes. No draft state: each control commits on change
-              (UI5 fires that on blur/Enter) against the server value, and `required` + a negative
-              valueState on the empty case is the Fiori way to say the same thing the footer does.
-              Display mode is Text, matching ConfiguratorForm — accessibleMode only announces it. */}
-          <Form labelSpan="S12 M12 L12 XL12" layout="S1 M2 L3 XL3"
-            accessibleMode={locked ? "Display" : "Edit"} itemSpacing={locked ? "Large" : "Normal"}>
-            <FormGroup>
-              <FormItem labelContent={<Label for={locked ? undefined : "cfg-name"} required>Name</Label>}>
-                {locked ? <Text>{project.name}</Text> : (
-                <Input id="cfg-name" value={project.name} style={{ width: "100%" }}
-                  disabled={update.isPending}
-                  valueState={project.name.trim() ? "None" : "Negative"}
-                  valueStateMessage={<div>The configuration needs a name before it can be quoted.</div>}
-                  onChange={(e) => {
-                    const v = (e.target.value ?? "").trim();
-                    if (v && v !== project.name) update.mutate({ id, name: v });
-                  }} />
-                )}
-              </FormItem>
-              <FormItem labelContent={<Label required>Model</Label>}>
-                {locked ? (
-                  <Text>{(models.data ?? []).find((m) => m.id === project.modelId)?.name ?? ""}</Text>
-                ) : (
-                /* Switching the model wipes every entry, batch and table row, because a param key
-                    only means something inside its own model. Rather than warn about that, the
-                    field simply stops being editable once there is anything to lose — which is
-                    also why configs.calculate does not bother returning the model definition. */
-                <Select value={project.modelId} style={{ width: "100%" }}
-                  disabled={update.isPending || modelLocked}
-                  onChange={(e) => {
-                    const v = e.detail.selectedOption.value ?? "";
-                    if (!v || v === project.modelId) return;
-                    // A model switch wipes entries/batches/tables server-side; drop the local
-                    // overlays too, or the old model's values are re-applied on top of the new form.
-                    setDraft(null); setSel(null); setPicks({});
-                    update.mutate({ id, modelId: v });
-                  }}>
-                  {(models.data ?? []).map((m) => (
-                    <Option key={m.id} value={m.id}>{m.name}</Option>
-                  ))}
-                </Select>
-                )}
-              </FormItem>
-              <FormItem labelContent={<Label required>Customer</Label>}>
-                {locked ? <Text>{project.customer?.cardName ?? ""}</Text> : (
-                /* Wrapper, not a prop: the id is only a jump target for the message popover. */
-                <div id="cfg-customer" style={{ width: "100%" }}>
-                {/* Only a customer SAP knows is saved: the row select — a pick, or a typed code the
-                    existence check found — writes the pair. A keystroke writes nothing; clearing
-                    the field clears the customer. */}
-                <CflField config={CUSTOMER} value={project.customer?.cardCode ?? null} link
-                  disabled={update.isPending}
-                  error={project.customer?.cardCode ? null : "Pick the customer the quote is written for — SAP needs a business partner on the document."}
-                  onValueChange={(v) => {
-                    if ((v === null || v === "") && project.customer) update.mutate({ id, customer: null });
-                  }}
-                  onRowSelect={(row) => update.mutate({
-                    id,
-                    customer: { cardCode: String(row.CardCode ?? ""), cardName: String(row.CardName ?? "") },
-                  })} />
+      <ObjectPageSection id="configure" titleText="Configure" fitContent>
+        <DynamicSideContent style={{ flex: 1, minHeight: 0 }} sideContentVisibility="AlwaysShow"
+          hideSideContent={!railShown} accessibilityAttributes={{ sideContent: { ariaLabel: "Insights" } }}
+          sideContent={
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.5rem" }}>
+              {/* The total rides in headerText rather than a `header` slot: a custom header is only
+                  toggled by its arrow, this one by the whole bar — and the figure survives collapsing. */}
+              <Panel accessibleRole="Region" headerLevel="H5"
+                headerText={totals ? `Cost elements · ${formatMoney(totals.cost, currency)}` : "Cost elements"}>
+                <div style={PANEL_BODY}>
+                  {money && totals ? (
+                    <CostBody rows={itemRows} money={money} totals={totals} cur={currency} />
+                  ) : (
+                    <IllustratedMessage name="NoData" design="ExtraSmall" titleText="No costs yet"
+                      subtitleText="Add at least one item with a quantity — the calculation fills this in." />
+                  )}
+                  {optionPrices.length ? <OptionPrices rows={optionPrices} cur={currency} /> : null}
                 </div>
-                )}
-              </FormItem>
-            </FormGroup>
-          </Form>
-        </ObjectPageSubSection>
-        <ObjectPageSubSection id="batches" titleText="Batch quantities">
-          {lookups.data && lk && prop ? (
-            <ConfiguratorForm section={BATCHES_SECTION} model={model.definition} lookups={lookups.data}
-              lk={lk} prop={prop} entries={entries} onChange={(next) => edit({ entries: next })}
-              onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
-              querySource={{ kind: "project", modelId: project.modelId }} readOnly={locked}
-              batches={batches} onBatchesChange={(next) => edit({ batches: next })} />
-          ) : lookups.error ? (
-            /* Why the options are missing is a page message; the retry it needs is not something a
-               message can carry, so the button stays here — once, on the first section that wanted
-               them, not under every one. */
-            <Button icon="refresh" onClick={() => void lookups.refetch()}>Retry loading options</Button>
-          ) : <BusyIndicator active delay={0} />}
-        </ObjectPageSubSection>
-        {/* formSections, not structure.sections: a table the author never placed gets a trailing
-            subsection of its own, and the anchor bar has to show it. */}
-        {formSections(model.definition).map((s) => (
-          <ObjectPageSubSection key={s.key} id={s.key} titleText={s.title}>
+              </Panel>
+              <Panel accessibleRole="Region" headerLevel="H5" headerText="Similar configurations" collapsed>
+                <div style={PANEL_BODY}>
+                  <SimilarConfigs projectId={id} model={model.definition} entries={entries} onCopy={copyValues} />
+                </div>
+              </Panel>
+            </div>
+          }>
+          <div style={{ display: "flex", flexDirection: "column", gap: "1rem", paddingBlockEnd: "1rem" }}>
+            {/* The configuration's own attributes. No draft state: each control commits on change
+                (UI5 fires that on blur/Enter) against the server value, and `required` + a negative
+                valueState on the empty case is the Fiori way to say the same thing the footer does.
+                Display mode is Text, matching ConfiguratorForm — accessibleMode only announces it. */}
+            <Form headerText="General" headerLevel="H5" labelSpan="S12 M12 L12 XL12" layout="S1 M2 L3 XL3"
+              accessibleMode={locked ? "Display" : "Edit"} itemSpacing={locked ? "Large" : "Normal"}>
+              <FormGroup>
+                <FormItem labelContent={<Label for={locked ? undefined : "cfg-name"} required>Name</Label>}>
+                  {locked ? <Text>{project.name}</Text> : (
+                  <Input id="cfg-name" value={project.name} style={{ width: "100%" }}
+                    disabled={update.isPending}
+                    valueState={project.name.trim() ? "None" : "Negative"}
+                    valueStateMessage={<div>The configuration needs a name before it can be quoted.</div>}
+                    onChange={(e) => {
+                      const v = (e.target.value ?? "").trim();
+                      if (v && v !== project.name) update.mutate({ id, name: v });
+                    }} />
+                  )}
+                </FormItem>
+                <FormItem labelContent={<Label required>Model</Label>}>
+                  {locked ? (
+                    <Text>{(models.data ?? []).find((m) => m.id === project.modelId)?.name ?? ""}</Text>
+                  ) : (
+                  /* Switching the model wipes every entry, batch and table row, because a param key
+                      only means something inside its own model. Rather than warn about that, the
+                      field simply stops being editable once there is anything to lose — which is
+                      also why configs.calculate does not bother returning the model definition. */
+                  <Select value={project.modelId} style={{ width: "100%" }}
+                    disabled={update.isPending || modelLocked}
+                    onChange={(e) => {
+                      const v = e.detail.selectedOption.value ?? "";
+                      if (!v || v === project.modelId) return;
+                      // A model switch wipes entries/batches/tables server-side; drop the local
+                      // overlays too, or the old model's values are re-applied on top of the new form.
+                      setDraft(null); setSel(null); setPicks({});
+                      update.mutate({ id, modelId: v });
+                    }}>
+                    {(models.data ?? []).map((m) => (
+                      <Option key={m.id} value={m.id}>{m.name}</Option>
+                    ))}
+                  </Select>
+                  )}
+                </FormItem>
+                <FormItem labelContent={<Label required>Customer</Label>}>
+                  {locked ? <Text>{project.customer?.cardName ?? ""}</Text> : (
+                  /* Wrapper, not a prop: the id is only a jump target for the message popover. */
+                  <div id="cfg-customer" style={{ width: "100%" }}>
+                  {/* Only a customer SAP knows is saved: the row select — a pick, or a typed code the
+                      existence check found — writes the pair. A keystroke writes nothing; clearing
+                      the field clears the customer. */}
+                  <CflField config={CUSTOMER} value={project.customer?.cardCode ?? null} link
+                    disabled={update.isPending}
+                    error={project.customer?.cardCode ? null : "Pick the customer the quote is written for — SAP needs a business partner on the document."}
+                    onValueChange={(v) => {
+                      if ((v === null || v === "") && project.customer) update.mutate({ id, customer: null });
+                    }}
+                    onRowSelect={(row) => update.mutate({
+                      id,
+                      customer: { cardCode: String(row.CardCode ?? ""), cardName: String(row.CardName ?? "") },
+                    })} />
+                  </div>
+                  )}
+                </FormItem>
+              </FormGroup>
+            </Form>
             {lookups.data && lk && prop ? (
-              <ConfiguratorForm section={s.key} model={model.definition} lookups={lookups.data} lk={lk} prop={prop} entries={entries}
-                onChange={(next) => edit({ entries: next })}
-                onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
-                querySource={{ kind: "project", modelId: project.modelId }} readOnly={locked}
-                tables={tables} onTablesChange={(next) => edit({ tables: next })} itemMoney={money} />
-            ) : lookups.error ? null : <BusyIndicator active delay={0} />}
-          </ObjectPageSubSection>
-        ))}
+              <>
+                <ConfiguratorForm section={BATCHES_SECTION} model={model.definition} lookups={lookups.data}
+                  lk={lk} prop={prop} entries={entries} onChange={(next) => edit({ entries: next })}
+                  onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
+                  querySource={{ kind: "project", modelId: project.modelId }} readOnly={locked}
+                  batches={batches} onBatchesChange={(next) => edit({ batches: next })} />
+                <ConfiguratorForm model={model.definition} lookups={lookups.data} lk={lk} prop={prop} entries={entries}
+                  onChange={(next) => edit({ entries: next })}
+                  onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
+                  querySource={{ kind: "project", modelId: project.modelId }} readOnly={locked}
+                  tables={tables} onTablesChange={(next) => edit({ tables: next })} itemMoney={money}
+                  batches={batches} itemBatch={itemQty} onItemBatchChange={setViewQty} />
+              </>
+            ) : lookups.error ? (
+              /* Why the options are missing is a page message; the retry it needs is not something
+                 a message can carry, so the button stays here. */
+              <Button icon="refresh" onClick={() => void lookups.refetch()}>Retry loading options</Button>
+            ) : <BusyIndicator active delay={0} />}
+          </div>
+        </DynamicSideContent>
       </ObjectPageSection>
       <ObjectPageSection id="candidates" titleText="Candidates">
         {/* capped/widest are not passed: this page reports them in its message popover. No lookups
-            needed either — the prices are the calculation's own, so they render with the agent off. */}
+            needed either — the prices are the calculation's own, so they render with the agent off.
+            A pending edit is about to replace these candidates, so they stop taking picks. */}
         {candidates.length > 0 ? (
           <PriceAnalysis model={model.definition} entries={project.entries}
             candidates={candidates.map(toPriced)} selection={selection}
             onToggle={(i, b) => { select.reset(); setSel(toggleSelection(selection, i, b)); }}
-            disabled={locked} />
+            disabled={locked || draft !== null} />
         ) : (
-          <Text>No candidates yet.</Text>
+          <IllustratedMessage name="NoData" design="Medium" titleText="No candidates yet"
+            subtitleText="They appear here once the configuration is complete and has calculated." />
         )}
       </ObjectPageSection>
     </ObjectPage>
-    </DynamicSideContent>
 
     <Dialog open={rejectOpen} headerText="Reject request" onClose={() => setRejectOpen(false)}
       footer={
@@ -500,3 +507,4 @@ export function ConfigProcessPage({ id }: { id: string }) {
     </>
   );
 }
+

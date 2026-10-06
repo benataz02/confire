@@ -49,13 +49,15 @@ export function objectPageTitle(o: {
       subHeader={subtitle ? <Text>{subtitle}</Text> : undefined}
       navigationBar={o.navigation && !ctx.isNew ? (
         <Toolbar design="Transparent">
-          <ToolbarButton design="Transparent" icon="media-rewind" tooltip="First" accessibleName="First"
+          {/* Same overflowGroup: the four moves stay together. A bar that cannot fit all of them
+              puts every one in the overflow menu, rather than leaving First visible and Last hidden. */}
+          <ToolbarButton overflowGroup="record" design="Transparent" icon="media-rewind" tooltip="First" accessibleName="First"
             disabled={o.navigation.busy} onClick={o.navigation.first} />
-          <ToolbarButton design="Transparent" icon="navigation-left-arrow" tooltip="Previous" accessibleName="Previous"
+          <ToolbarButton overflowGroup="record" design="Transparent" icon="navigation-left-arrow" tooltip="Previous" accessibleName="Previous"
             disabled={o.navigation.busy} onClick={o.navigation.prev} />
-          <ToolbarButton design="Transparent" icon="navigation-right-arrow" tooltip="Next" accessibleName="Next"
+          <ToolbarButton overflowGroup="record" design="Transparent" icon="navigation-right-arrow" tooltip="Next" accessibleName="Next"
             disabled={o.navigation.busy} onClick={o.navigation.next} />
-          <ToolbarButton design="Transparent" icon="media-forward" tooltip="Last" accessibleName="Last"
+          <ToolbarButton overflowGroup="record" design="Transparent" icon="media-forward" tooltip="Last" accessibleName="Last"
             disabled={o.navigation.busy} onClick={o.navigation.last} />
         </Toolbar>
       ) : undefined}

@@ -9,7 +9,7 @@ import { money } from "../../lib/money.ts";
 import { orpc } from "../../orpc.ts";
 
 // "Similar configurations": the process page's fuzzy help, ranking the model's cached history
-// rows against the entries filled so far. A panel in the insights rail (see InsightsRail.tsx).
+// rows against the entries filled so far. A panel in the insights rail (see ConfigProcessPage.tsx).
 //
 // A List, not a Table. The rail is ~21rem wide and a responsive table needs its widest column to
 // fit, so Popin fires on nearly every one and each row renders as a stacked label/value blob.

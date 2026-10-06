@@ -205,9 +205,10 @@ export async function calculateProject(
 
     // One row, overwritten in place: entries and candidates move together. calculatedAt going
     // non-null here is the only claim that they match — there is no status flag restating it.
+    // The selection goes too: it is indices into the list being replaced.
     const now = new Date();
     const updated = await db.update(configProject)
-      .set({ entries, batches, candidates, calculatedAt: now, updatedAt: now })
+      .set({ entries, batches, candidates, selection: null, calculatedAt: now, updatedAt: now })
       .where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId)))
       .returning({ id: configProject.id });
     if (!updated.length) throw new ORPCError("NOT_FOUND");
@@ -588,6 +589,7 @@ export const configsRouter = {
           // Candidates go with the inputs that produced them, or the page renders the old model's
           // assignments against the new definition.
           fields.candidates = [];
+          fields.selection = null;
           fields.calculatedAt = null;
         }
       }
@@ -698,7 +700,7 @@ export const configsRouter = {
       if (Object.keys(edits).length) {
         const written = await db
           .update(configProject)
-          .set({ ...edits, candidates: [], calculatedAt: null, updatedAt: new Date() })
+          .set({ ...edits, candidates: [], selection: null, calculatedAt: null, updatedAt: new Date() })
           .where(and(eq(configProject.id, id), eq(configProject.tenantId, context.tenantId)))
           .returning({ id: configProject.id });
         if (!written.length) throw new ORPCError("NOT_FOUND");
@@ -713,7 +715,8 @@ export const configsRouter = {
   select: userProcedure
     .input(z.object({
       projectId: z.uuid(),
-      selection: z.array(SelectionZ).min(1),
+      // Empty is a save too (unpicking the last cell); buildQuoteSeed is what refuses to quote it.
+      selection: z.array(SelectionZ),
     }))
     .handler(async ({ input, context }) => {
       // Lookups resolve outside the transaction: they can involve a round trip to the customer's

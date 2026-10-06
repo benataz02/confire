@@ -39,7 +39,7 @@ export const optValue = (e: { detail: { selectedOption: { value?: string } } }) 
 export const NONE = "(none)";
 
 // Every dialog pads its own content column, so the part's default padding is off for all of them.
-// Shared with TableDialog and FormulaDialog — both wear `confire-pd` too.
+// Shared with TableDialog and TitleDialog — both wear `confire-pd` too.
 if (typeof document !== "undefined") {
   let el = document.getElementById("confire-pd-style");
   if (!el) { el = document.createElement("style"); el.id = "confire-pd-style"; document.head.appendChild(el); }

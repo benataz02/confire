@@ -11,9 +11,9 @@ import { eq } from "drizzle-orm";
 import { db, pool, organization, user as userTable } from "@confire/db";
 import { auth } from "../apps/server/src/auth.ts";
 
-const slug = process.argv[2] ?? process.env.SLUG ?? "alumigraf";
-const email = process.argv[3] ?? `dev@${slug}.test`;
-const password = process.argv[4] ?? "dev1234";
+const slug = process.env.SLUG ?? "alumigraf";
+const email = process.env.EMAIL ?? `dev@${slug}.test`;
+const password = process.env.PASSWORD ?? "dev1234";
 
 async function main(): Promise<void> {
   const [existingUser] = await db
