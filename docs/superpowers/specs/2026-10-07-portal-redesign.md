@@ -37,6 +37,14 @@ Internal users accept requests and quote them, send them back for changes, or de
 | D10 | Internal outcomes | Accept (in review), Quote, Send back for changes, Decline (final). The quotation and its linked orders, deliveries and invoices, with their PDFs, appear on the timeline. |
 | D11 | Internal edits | Internal users may change entries and batches before quoting. The timeline records each change **with a diff**, and the client sees it. |
 | D12 | Timeline extras | Comments both ways (with internal-only notes), file attachments, email notifications. |
+| D13 | Mail | One transactional provider (Resend or Postmark) behind a `Mailer` seam. Sender `notify@mail.<domain>`, the tenant's name as display name, the tenant's sales address as `Reply-To`. |
+| D14 | Files | Attachments in **Postgres `bytea`** (`project_file`), with a per-file size cap. Upload and download are plain Hono routes on the portal and internal servers, not oRPC: the RPC body cap is 2 MB. `ponytail:` move to S3-compatible storage (Bun's `S3Client`) when DB size or backups hurt. |
+| D15 | Prices | **Per published model**: `portalPricing = "indicative"` (unit price and total per batch after calculate) or `"request"` (no numbers until quoted). The server omits the numbers, not the page. |
+| D16 | Lead CardCode | A **B1 numbering series**: an admin picks the BP `Series` in portal settings, and the create payload sends `Series` and omits `CardCode`. |
+| D17 | Onboarding form | Admin-picked `BusinessPartners` header fields from metadata (UDFs included, each required or optional), plus **addresses** (bill-to and ship-to → `BPAddresses`) and a **contact person** (the applicant → `ContactEmployees`). |
+| D18 | UI code | **Extract `packages/ui`**: ListReport, ObjectPage, CFL, views and metadata merge, shared by `apps/web` and `apps/portal`. The portal declares its own external-user features. |
+| D19 | Doc fields | **Admin-configurable** per entity (header and line fields, UDFs included), stored per tenant and enforced server-side as the schema (the `portalSchema` mechanism). A **hard denylist** (cost, gross profit, margins, internal remarks) that no setting can expose. |
+| D20 | v1 scope | Portal home overview; online quote acceptance (accept or decline the B1 quotation: a timeline event plus an internal notification, and internal staff create the order); tenant branding (logo, name, accent colour on the portal and in emails). **Not in v1:** multiple languages. |
 
 ## 3. Hosts, cookies, processes
 
@@ -192,11 +200,7 @@ portal reads; (2) a per-tenant document mirror in Postgres, the same pattern as 
 
 ## 10. Open questions
 
-- Q-mail: which transactional email provider, and what sender identity.
-- Q-files: where attachments are stored.
-- Q-prices: whether external users see engine prices before an internal quote.
-- Q-cardcode: how a new lead's CardCode is numbered.
-- Q-form: what the onboarding form covers (header fields, addresses, contact person) and how admins define it.
-- Q-ui: whether the List Report / Object Page shells are extracted into a shared package or copied into `apps/portal`.
-- Q-docs: a fixed field allowlist for portal documents, or one admins configure.
-- Q-scope: portal home page, online quote acceptance, branding, languages, which models each company may configure.
+- Q-models: which published models each company may configure.
+- Q-notify: who internally is notified of new requests and comments.
+- Q-data: whether any current portal data has to be migrated.
+- Q-colleagues: whether a company owner may invite any email, or only the company's domains.
