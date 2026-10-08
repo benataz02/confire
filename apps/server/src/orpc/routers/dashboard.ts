@@ -10,7 +10,7 @@ async function loadProjects(tenantId: string): Promise<ProjectRow[]> {
   const rows = await db
     .select({
       id: configProject.id, name: configProject.name, status: configProject.status,
-      source: configProject.source, createdBy: configProject.createdBy,
+      createdBy: configProject.createdBy,
       createdAt: configProject.createdAt, customer: configProject.customer,
       quotedAt: configProject.quotedAt, b1DocEntry: configProject.b1DocEntry,
       quotedValue: configProject.quotedValue, quotedCost: configProject.quotedCost,
@@ -18,7 +18,7 @@ async function loadProjects(tenantId: string): Promise<ProjectRow[]> {
     .from(configProject)
     .where(eq(configProject.tenantId, tenantId));
   return rows.map((r) => ({
-    id: r.id, name: r.name, status: r.status, source: r.source,
+    id: r.id, name: r.name, status: r.status,
     createdBy: r.createdBy, createdAt: r.createdAt,
     customerName: r.customer?.cardName ?? null,
     quotedAt: r.quotedAt, b1DocEntry: r.b1DocEntry,

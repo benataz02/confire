@@ -478,7 +478,7 @@ function PreviewPane({ modelId, draft, issues, lookups, lookupsFailed, onRetryLo
         {lookups && lk && prop ? (
           <ConfiguratorForm model={previewModel} lookups={lookups} lk={lk} prop={prop} entries={entries} onChange={setEntries}
             onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
-            querySource={{ kind: "project", modelId }}
+            querySource={{ modelId }}
             tables={tables} onTablesChange={setTables} />
         ) : lookupsFailed ? null : <BusyIndicator active delay={0} />}
       </div>

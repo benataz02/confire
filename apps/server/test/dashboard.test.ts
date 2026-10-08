@@ -11,7 +11,7 @@ const emptySnapshot: B1Snapshot = {
 };
 
 const project = (over: Partial<ProjectRow>): ProjectRow => ({
-  id: "p1", name: "Pump", status: "draft", source: "internal", createdBy: "u1",
+  id: "p1", name: "Pump", status: "draft", createdBy: "u1",
   createdAt: new Date(NOW.getTime() - 3 * day), customerName: "Acme",
   quotedAt: null, b1DocEntry: null, quotedValue: null, quotedCost: null, ...over,
 });
@@ -29,13 +29,12 @@ describe("buildOverview funnel", () => {
       projects: [
         project({ id: "a", status: "draft" }),
         project({ id: "b", status: "draft" }),
-        project({ id: "c", status: "requested" }),
         project({ id: "d", status: "quoted", quotedAt: NOW, b1DocEntry: 10 }),
         project({ id: "e", status: "quoted", quotedAt: NOW, b1DocEntry: 11 }),
       ],
     });
     expect(out.funnel).toEqual([
-      { stage: "Draft", count: 3 },
+      { stage: "Draft", count: 2 },
       { stage: "Quoted", count: 2 },
       { stage: "Ordered", count: 2 },
     ]);

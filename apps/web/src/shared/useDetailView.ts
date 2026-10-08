@@ -11,26 +11,23 @@ import type { Row } from "./types.ts";
 
 // BaseDetailView (LIST-REPORT-OBJECT-PAGE.md §2): one B1 record by its route key, with its ETag;
 // update and create through the curated endpoints; first/prev/next/last; where a create goes next.
-// The portal reads through portal.docs.* and never writes.
 
 /** The key a route param names, typed the way the entity's metadata says (a digit-looking ItemCode
  *  is a string; DocEntry is a number). */
 export const keyOf = (constraints: EntityConstraints, raw: string): Key =>
   coerceKey({ keys: constraints.keys, fields: Object.entries(constraints.fields).map(([name, m]) => ({ name, kind: m.Type })) }, parseKeyParam(raw));
 
-export function useDetailView({ entity, routeKey, route, scope = "internal", isNew = false }: {
+export function useDetailView({ entity, routeKey, route, isNew = false }: {
   entity: string;
   /** the `$key` route param; absent in create mode */
   routeKey?: string;
   /** the list route a record path is built on, e.g. `/b1/Quotations` */
   route: string;
-  scope?: "internal" | "portal";
   isNew?: boolean;
 }) {
-  const portal = scope === "portal";
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const meta = useFieldConstraints(entity, scope);
+  const meta = useFieldConstraints(entity);
   const constraints = meta.data;
 
   const key = useMemo(() => {
@@ -42,9 +39,7 @@ export function useDetailView({ entity, routeKey, route, scope = "internal", isN
     }
   }, [constraints, isNew, routeKey]);
 
-  const oneOpts = portal
-    ? orpc.portal.docs.one.queryOptions({ input: { entity, key: key as string | number } })
-    : orpc.entities.one.queryOptions({ input: { entity, key: key as Key } });
+  const oneOpts = orpc.entities.one.queryOptions({ input: { entity, key: key as Key } });
   const one = useQuery({
     ...oneOpts,
     enabled: key !== undefined,
@@ -64,7 +59,7 @@ export function useDetailView({ entity, routeKey, route, scope = "internal", isN
     qc.setQueryData(orpc.entities.one.queryOptions({ input: { entity, key: k } }).queryKey, { row, etag });
 
   const save = async (diff: Row, { createAction }: { createAction: CreateAction }) => {
-    if (portal || !constraints) throw new Error("This record is read-only");
+    if (!constraints) throw new Error("This record is read-only");
     if (isNew) {
       const r = await create.mutateAsync({ entity, data: diff });
       const field = constraints.keys[0]!;
@@ -104,8 +99,7 @@ export function useDetailView({ entity, routeKey, route, scope = "internal", isN
     error: meta.error ?? (isNew ? null : one.error) ?? (constraints && !isNew && key === undefined ? new Error("Invalid record key") : null),
     save,
     createEpoch,
-    // ponytail: portal has no record nav; add with cardFence if asked.
-    navigation: portal || isNew ? undefined : {
+    navigation: isNew ? undefined : {
       first: () => void go("first"), prev: () => void go("prev"), next: () => void go("next"), last: () => void go("last"),
       busy: navBusy,
     },

@@ -39,7 +39,7 @@ export function ListReport({
   headerActions?: ReactElement;
   /** hides Create */
   readOnly?: boolean;
-  /** system views only, no server calls (the portal) */
+  /** system views only, no server calls */
   localViews?: boolean;
   showSearch?: boolean;
   cellTemplates?: Record<string, CellTemplate>;

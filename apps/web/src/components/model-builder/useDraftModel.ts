@@ -35,18 +35,10 @@ export function useDraftModel(id?: string) {
   // A *saved* model starts validated: it passed checkModel to get into the database, so anything
   // wrong with it is something this session just introduced, and saying so at once is the point.
   const [tried, setTried] = useState(!!id);
-  const [portalMeta, setPortalMetaState] = useState<{ portal: boolean; portalDescription: string } | null>(
-    () => (id ? null : { portal: false, portalDescription: "" }),
-  );
 
   useEffect(() => {
     if (rec.data && draft === null) setDraft(rec.data.definition);
   }, [rec.data, draft]);
-
-  useEffect(() => {
-    if (rec.data && portalMeta === null)
-      setPortalMetaState({ portal: rec.data.portal, portalDescription: rec.data.portalDescription ?? "" });
-  }, [rec.data, portalMeta]);
 
   const tables = tablesQ.data ?? [];
   // Masterdata is one namespace: a model references a maintained table and a live query the same
@@ -104,22 +96,13 @@ export function useDraftModel(id?: string) {
     tried,
     /** Clear the unsaved-changes blocker before navigating away deliberately (Delete). */
     setDirty,
-    portalMeta,
-    setPortalMeta: (p: { portal: boolean; portalDescription: string }) => {
-      setPortalMetaState(p);
-      setDirty(true);
-    },
     // Save stays enabled and the first click on an invalid model reveals the errors instead of
     // saving, so the button never greys out without saying why (same deal as ParamDialog).
     save: () => {
-      if (!draft || !portalMeta) return;
+      if (!draft) return;
       setTried(true);
       if (modelIssues.length > 0 || !draft.name.trim()) return;
-      saveMut.mutate({
-        ...(id ? { id } : {}),
-        definition: draft,
-        portal: portalMeta.portal, portalDescription: portalMeta.portalDescription || null,
-      });
+      saveMut.mutate({ ...(id ? { id } : {}), definition: draft });
     },
     saving: saveMut.isPending,
     saveError: saveMut.error as Error | null,

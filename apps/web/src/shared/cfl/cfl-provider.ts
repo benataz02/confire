@@ -49,11 +49,11 @@ export async function fetchPage(source: CflSource, req: CflRequest): Promise<Cfl
     ...(typeof req.cursor === "number" ? { cursor: req.cursor } : {}),
     ...(eq ? { match: { col: eq.field, value: eq.value as string | number } } : {}),
   };
-  const page = await (source.scope === "portal" ? client.portal.queryPage(input) : client.configs.queryPage(input));
+  const page = await client.configs.queryPage(input);
   return { rows: toRows(page.columns, page.rows), next: page.nextSkip, columns: page.columns };
 }
 
 /** A stable cache identity for a source — the user-state key of its dialog (`cfl:<source>`) and the
  *  head of every query key a value help mints. */
 export const sourceKey = (s: CflSource): string =>
-  s.kind === "entity" ? s.entitySet : `${s.scope}:${s.modelId}:${s.table}`;
+  s.kind === "entity" ? s.entitySet : `${s.modelId}:${s.table}`;

@@ -5,8 +5,7 @@ import type { Entries, ModelDef, Outputs } from "@confire/config-engine";
 export type Candidate = { assignment: Entries; perBatch: { batchQty: number; outputs: Outputs }[] };
 export type Sel = { candidateIdx: number; batchQty: number };
 
-// What the price analysis needs — exactly the portal's sanitized payload, plus `unitCost` when the
-// internal page maps full Candidates down with toPriced(). Absent cost = no margin row.
+// What the price analysis needs. Absent `unitCost` means no margin row.
 export type PricedCandidate = {
   assignment: Entries;
   perBatch: { batchQty: number; unitPrice: number; total: number; unitCost?: number }[];
@@ -24,8 +23,6 @@ export const fmt = (n: number): string => n.toLocaleString(undefined, { maximumF
 export const statusUi = {
   draft: { state: "None", text: "Draft" },
   quoted: { state: "Positive", text: "Quoted" },
-  requested: { state: "Critical", text: "Requested" },
-  rejected: { state: "Negative", text: "Rejected" },
 } as const;
 
 // Params the calculation left open (assigned per candidate, not fixed in the project's entries),

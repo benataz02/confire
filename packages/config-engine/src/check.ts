@@ -371,8 +371,7 @@ export function referencedTables(model: ModelDef): Set<string> {
 
 /** Every masterdata query a SYNC has to keep fresh for this model: the live lookups above, plus
  *  the two cache sources `referencedTables` deliberately leaves out — the history query and the
- *  item/price query. Kept separate from `referencedTables` because that one also fences the
- *  portal's value-help paging, where a cache source is not a table the client may page.
+ *  item/price query. Kept separate because those two are cache sources the form never pages.
  *
  *  This is the one place that knows the full set, which is what lets `masterdata.remove` stop
  *  guessing: before it, the delete guard had to re-add `history.table` by hand. */

@@ -35,7 +35,7 @@ export function ObjectPage(p: Templates & {
   /** the record, or a create seed. Must be a stable object: a new one resets the form. */
   data: Row;
   isNew?: boolean;
-  /** no Edit at all (the portal, a read-only entity) */
+  /** no Edit at all (a read-only entity) */
   readonly?: boolean;
   /** Edit is offered but disabled — no ETag came with the row */
   editDisabled?: boolean;

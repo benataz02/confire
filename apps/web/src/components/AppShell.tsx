@@ -1,13 +1,14 @@
 import { useNavigate, useRouter, useRouterState, Outlet } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Avatar, Button,
+  Avatar, Button, IllustratedMessage,
   NavigationLayout, ShellBar, ShellBarBranding, SideNavigation, SideNavigationGroup, SideNavigationItem,
   ToggleButton,
   UserMenu,
   UserMenuAccount,
   UserMenuItem,
 } from "@ui5/webcomponents-react";
+import "@ui5/webcomponents-fiori/dist/illustrations/ErrorScreen.js";
 import type { SideNavigationPropTypes, NavigationLayoutDomRef, NavigationLayoutPropTypes } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
 import { meQuery } from "../orpc.ts";
@@ -126,6 +127,20 @@ export function AppShell() {
     navigate({ to: "/login" });
   };
 
+  // A leftover portal membership has no app left. The server already refuses its calls;
+  // this keeps the shell from rendering pages that would only answer FORBIDDEN.
+  if (isClient) {
+    return (
+      <IllustratedMessage
+        name="ErrorScreen"
+        titleText="This account no longer has access"
+        subtitleText="The client portal has been removed. Sign out, or ask an administrator for a workspace account."
+      >
+        <Button onClick={() => void signOut()}>Sign out</Button>
+      </IllustratedMessage>
+    );
+  }
+
   return (
     <NavigationLayout
       ref={navLayoutRef}
@@ -154,7 +169,7 @@ export function AppShell() {
                 Confire
               </ShellBarBranding>
             }
-            content={isClient ? undefined : <GlobalSearch entries={searchEntries} isAdmin={isAdmin} />}
+            content={<GlobalSearch entries={searchEntries} isAdmin={isAdmin} />}
             profile={<Avatar id="user-menu-opener" initials='BA' />}
             onProfileClick={() => setUserMenuOpen((open) => !open)}
             showNotifications
@@ -216,23 +231,7 @@ export function AppShell() {
               selected={pathname === "/settings"} />
           ) : undefined}
         >
-          {isClient ? (
-            <>
-              {/* "New request" leaves the nav — it is a button on the Projects page now. */}
-              <SideNavigationItem text="My requests" icon="sales-order" data-to="/portal"
-                selected={pathname === "/portal" || pathname === "/portal/new" || (pathname.startsWith("/portal/") && !pathname.startsWith("/portal/docs"))} />
-              <SideNavigationItem text="Quotations" icon="sales-quote" data-to="/portal/docs/Quotations"
-                selected={pathname.startsWith("/portal/docs/Quotations")} />
-              <SideNavigationItem text="Sales orders" icon="sales-order-item" data-to="/portal/docs/Orders"
-                selected={pathname.startsWith("/portal/docs/Orders")} />
-              <SideNavigationItem text="Deliveries" icon="shipping-status" data-to="/portal/docs/DeliveryNotes"
-                selected={pathname.startsWith("/portal/docs/DeliveryNotes")} />
-              <SideNavigationItem text="Invoices" icon="monitor-payments" data-to="/portal/docs/Invoices"
-                selected={pathname.startsWith("/portal/docs/Invoices")} />
-            </>
-          ) : (
-            <>
-              <SideNavigationItem text="Home" icon="home" data-to="/" selected={pathname === "/"} />
+          <SideNavigationItem text="Home" icon="home" data-to="/" selected={pathname === "/"} />
               {isAdmin ? (
                 <SideNavigationGroup text="SAP Business One" expanded>
                   {Object.values(B1_FEATURES).map((f) => (
@@ -266,8 +265,6 @@ export function AppShell() {
                   </>
                 ) : null}
               </SideNavigationGroup>
-            </>
-          )}
         </SideNavigation>
       }
     >

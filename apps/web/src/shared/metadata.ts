@@ -15,11 +15,9 @@ export type Constraints = Record<string, FieldConstraint>;
 
 /** One entity's constraints. A day in the browser cache costs nothing: the server reads them from
  *  entity_meta in Postgres and only re-reads $metadata on an explicit refresh. */
-export function useFieldConstraints(entity: string | undefined, scope: "internal" | "portal" = "internal") {
+export function useFieldConstraints(entity: string | undefined) {
   return useQuery({
-    ...(scope === "portal"
-      ? orpc.portal.docs.metadata.queryOptions({ input: { entity: entity ?? "" } })
-      : orpc.entities.metadata.queryOptions({ input: { entity: entity ?? "" } })),
+    ...orpc.entities.metadata.queryOptions({ input: { entity: entity ?? "" } }),
     enabled: !!entity,
     retry: false,
     staleTime: 24 * 60 * 60_000,

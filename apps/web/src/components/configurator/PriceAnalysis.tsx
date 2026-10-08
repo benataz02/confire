@@ -10,18 +10,16 @@ import { percent } from "../dashboard/dashboardView.ts";
 import { money } from "../../lib/money.ts";
 import { useCurrency } from "../../orpc.ts";
 
-// The one candidates view, portal and internal alike: rows = candidates (labeled by their
-// open-parameter values), columns = batch quantities, every price cell IS the selection control —
-// one pressed cell = one future quotation line. Below it, how the price moves with quantity for
-// the configurations being quoted. Cost only exists on the internal side (the portal payload never
-// carries it), so the margin row appears exactly where it may.
+// The candidates view: rows = candidates (labeled by their open-parameter values), columns = batch
+// quantities, every price cell IS the selection control — one pressed cell = one future quotation
+// line. Below it, how the price moves with quantity. Absent cost means no margin row.
 export function PriceAnalysis({ model, entries, candidates, selection, onToggle, capped, widest, disabled }: {
   model: ModelDef;
   entries: Entries;
   candidates: PricedCandidate[];
   selection: Sel[];
   onToggle: (candidateIdx: number, batchQty: number) => void;
-  /** the portal's only place to say so; the internal page reports it in its message popover */
+  /** enumeration hit its cap; the configuration page also says so in its message popover */
   capped?: boolean;
   widest?: { key: string; size: number };
   /** locked (quoted) — the cells still show their prices, they just stop being controls */

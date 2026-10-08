@@ -5,7 +5,7 @@ import { ListQueryZ, type FilterCond, type ListQuery } from "@confire/db";
 
 // Compile a list query (ListQuery) into a Postgres WHERE + ORDER BY. entity-list.ts compiles the
 // same query to OData for B1; this one compiles it to SQL for the tenant's own tables (configs,
-// models, masterdata, portal requests). Same query, same rules, two backends.
+// models, masterdata). Same query, same rules, two backends.
 //
 // Pure: no db handle, no transport. Each router hands it a field map and gets clauses back, then
 // writes its own .where(...).orderBy(...).limit(...).offset(...) — Drizzle's builder types don't

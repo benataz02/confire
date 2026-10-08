@@ -489,10 +489,10 @@ describe.skipIf(!process.env.DATABASE_URL)("configs.duplicate (integration)", ()
       tenantId: tid, modelId: m!.id, name: "Bridge cable", createdBy: admin.userId,
       customer: { cardCode: "C0001", cardName: "Acme" },
       entries, batches: [100],
-      // A portal request that was quoted: every field the copy must not inherit, set.
-      source: "portal", status: "quoted", b1DocEntry: 4711, quotedAt: new Date(),
+      // Every field the copy must not inherit, set.
+      status: "quoted", b1DocEntry: 4711, quotedAt: new Date(),
       quotedValue: "1234.5600", quotedCost: "600.0000", calculatedAt: new Date(),
-      selection: [], rejectionNote: null,
+      selection: [],
     }).returning({ id: configProject.id });
 
     const { id: copyId } = await call(router.configs.duplicate, { id: src!.id }, ctx);
@@ -505,8 +505,6 @@ describe.skipIf(!process.env.DATABASE_URL)("configs.duplicate (integration)", ()
     expect(copy!.customer).toEqual({ cardCode: "C0001", cardName: "Acme" });
 
     expect(copy!.status).toBe("draft");
-    // Not "portal": an internal copy must not surface in that client's own request list.
-    expect(copy!.source).toBe("internal");
     // b1DocEntry is the quote idempotency record — inheriting it would make the copy unquotable.
     expect(copy!.b1DocEntry).toBeNull();
     expect(copy!.quotedAt).toBeNull();

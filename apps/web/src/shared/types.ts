@@ -75,10 +75,10 @@ export type FilterField = {
 };
 
 /** Where a value help reads. Beas' `endpoint`, as data: an entity set paged through entities.rows,
- *  or a masterdata query table paged through configs/portal.queryPage. */
+ *  or a masterdata query table paged through configs.queryPage. */
 export type CflSource =
   | { kind: "entity"; entitySet: string }
-  | { kind: "masterdata"; scope: "project" | "portal"; modelId: string; table: string };
+  | { kind: "masterdata"; modelId: string; table: string };
 
 /** Value-help doc §2. `keyField ?? columns[0].key` is the key everywhere. */
 export type CflDialogConfig = {

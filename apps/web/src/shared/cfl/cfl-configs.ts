@@ -34,8 +34,8 @@ export const tokenLabel = (row: Row, d: Pick<CflDialogConfig, "keyField" | "colu
 
 type Overrides = Partial<CflDialogConfig>;
 
-/** Where a configurator form's query value help reads: the internal project or the portal. */
-export type QueryScope = { kind: "project" | "portal"; modelId: string };
+/** Which model's query table a configurator value help pages. */
+export type QueryScope = { modelId: string };
 
 export const cfl = {
   /** Customers only — CardType is fixed on every read, probe included. */
@@ -136,7 +136,7 @@ export const cfl = {
     const { valueCol, labelCol } = refKeyCols(ref, cols);
     return {
       title: table,
-      source: { kind: "masterdata", scope: scope.kind, modelId: scope.modelId, table },
+      source: { kind: "masterdata", modelId: scope.modelId, table },
       keyField: valueCol,
       ...(labelCol && !showValue ? { displayColumns: [labelCol] } : {}),
       columns: (cols.length ? cols : [valueCol]).map((c) => ({

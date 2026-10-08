@@ -22,7 +22,7 @@ const viewIdOf = (v: unknown): string | undefined =>
   (v as { variantItem?: HTMLElement } | undefined)?.variantItem?.dataset.viewId;
 
 /** The view selector as the page title (Beas `beas-view-filters type="title"`): Save, Save As,
- *  Manage; Restore for a dirty system view lives on the filter bar. A portal list has system
+ *  Manage; Restore for a dirty system view lives on the filter bar. A local list has system
  *  views only and no save chrome; a table with nothing to choose is a plain title. */
 export const ViewTitle = memo(function ViewTitle({ slot, title, views, size }: {
   /** filled in by DynamicPageTitle's slot handling — forward it or the element is never slotted */

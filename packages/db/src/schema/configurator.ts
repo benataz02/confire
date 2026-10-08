@@ -1,4 +1,4 @@
-import { boolean, index, jsonb, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { index, jsonb, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { Entries, ModelDef, Outputs, QuerySource, TableRows, Val } from "@confire/config-engine";
 
 // Configurator persistence: a mutable model, and one configuration document that carries its own
@@ -12,9 +12,6 @@ export const configModel = pgTable(
     tenantId: text("tenant_id").notNull(),
     name: text("name").notNull(),
     definition: jsonb("definition").$type<ModelDef>().notNull(),
-    // Client portal publish flag + catalog card subtitle. Columns (not jsonb) so lists filter on them.
-    portal: boolean("portal").notNull().default(false),
-    portalDescription: text("portal_description"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -63,14 +60,13 @@ export const configMasterdata = pgTable(
 );
 export type ConfigMasterdata = typeof configMasterdata.$inferSelect;
 
-export type ProjectStatus = "draft" | "quoted" | "requested" | "rejected";
-export type ProjectSource = "internal" | "portal";
+export type ProjectStatus = "draft" | "quoted";
 export type ProjectCustomer = { cardCode: string; cardName: string };
-// Client-facing history; appended inside each transition. Feeds the portal Timeline and
-// survives submit → reject → resubmit cycles without extra timestamp columns.
+// Appended inside each transition. A jsonb list rather than a column per event, so a new kind
+// does not need a migration.
 export type ProjectEvent = {
   at: string;
-  kind: "created" | "submitted" | "withdrawn" | "rejected" | "quoted";
+  kind: "created" | "quoted";
   note?: string;
 };
 
@@ -96,8 +92,6 @@ export const configProject = pgTable(
     name: text("name").notNull(),
     customer: jsonb("customer").$type<ProjectCustomer>(),
     status: text("status").$type<ProjectStatus>().notNull().default("draft"),
-    source: text("source").$type<ProjectSource>().notNull().default("internal"),
-    rejectionNote: text("rejection_note"),
     events: jsonb("events").$type<ProjectEvent[]>().notNull().default([]),
     entries: jsonb("entries").$type<Entries>().notNull().default({}),
     batches: jsonb("batches").$type<number[]>().notNull().default([]),
@@ -109,7 +103,7 @@ export const configProject = pgTable(
     selection: jsonb("selection").$type<ConfigSelection[]>(),
     // When `candidates` was computed, and null whenever they are empty. Compared against
     // config_model.updatedAt to decide whether a recalculate can be skipped — cheaper than the
-    // ModelDef deep-compare it replaces. Also the fence portal.submit guards on.
+    // ModelDef deep-compare it replaces.
     calculatedAt: timestamp("calculated_at", { withTimezone: true }),
     b1DocEntry: integer("b1_doc_entry"),
     quotedAt: timestamp("quoted_at", { withTimezone: true }),

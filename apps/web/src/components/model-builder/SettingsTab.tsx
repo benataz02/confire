@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Form, FormGroup, FormItem, Input, Label, MessageStrip, Switch } from "@ui5/webcomponents-react";
+import { Form, FormGroup, FormItem, Input, Label, MessageStrip } from "@ui5/webcomponents-react";
 import type { Issue, ModelDef } from "@confire/config-engine";
 import { CflField } from "../../shared/cfl/CflField.tsx";
 import { cfl } from "../../shared/cfl/cfl-configs.ts";
@@ -12,7 +12,7 @@ import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { MasterdataQuerySelect } from "./MasterdataQuerySelect.tsx";
 
-export function SettingsTab({ draft, update, issues, tables, tried, portalMeta, setPortalMeta }: {
+export function SettingsTab({ draft, update, issues, tables, tried }: {
   draft: ModelDef;
   update: (fn: (d: ModelDef) => ModelDef) => void;
   issues: Issue[];
@@ -20,8 +20,6 @@ export function SettingsTab({ draft, update, issues, tables, tried, portalMeta, 
   /** Save was pressed. Until then this tab stays quiet: a new model is empty by definition, and
    *  five red fields on an untouched form say nothing the asterisks don't. */
   tried: boolean;
-  portalMeta: { portal: boolean; portalDescription: string };
-  setPortalMeta: (p: { portal: boolean; portalDescription: string }) => void;
 }) {
   // Batches edited as CSV; parse on change, ignore junk. // ponytail: token editor if CSV annoys
   const [batchText, setBatchText] = useState(draft.batchDefaults.join(", "));
@@ -95,16 +93,6 @@ export function SettingsTab({ draft, update, issues, tables, tried, portalMeta, 
                 ? "Pick the B1 item the quote line is written against — the configured product itself, not a material."
                 : null}
               onValueChange={(v) => update((d) => ({ ...d, pricing: { ...d.pricing, quoteItemCode: v === null ? "" : String(v) } }))} />
-          </FormItem>
-        </FormGroup>
-        <FormGroup headerText="Client portal">
-          <FormItem labelContent={<Label>Available in portal</Label>}>
-            <Switch checked={portalMeta.portal}
-              onChange={(e) => setPortalMeta({ ...portalMeta, portal: e.target.checked })} />
-          </FormItem>
-          <FormItem labelContent={<Label>Portal description</Label>}>
-            <Input value={portalMeta.portalDescription} placeholder="Shown on the client's catalog card"
-              onInput={(e) => setPortalMeta({ ...portalMeta, portalDescription: e.target.value })} />
           </FormItem>
         </FormGroup>
       </Form>

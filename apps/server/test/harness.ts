@@ -1,4 +1,4 @@
-import { db, member, organization, portalClient } from "@confire/db";
+import { db, member, organization } from "@confire/db";
 import type { ModelDef } from "@confire/config-engine";
 import { auth } from "../src/auth.ts";
 
@@ -37,21 +37,12 @@ export async function makeUser(
   return { userId, email, cookie, cookies };
 }
 
-/** Bind a client-role user to a CardCode (skips the invite flow for tests that don't test it). */
-export async function bindClient(tenantId: string, userId: string, cardCode = "C0001", cardName = "Acme Client") {
-  await db.insert(portalClient).values({
-    tenantId, email: `bound-${uid()}@test.local`, cardCode, cardName,
-    userId, inviteTokenHash: `test-${crypto.randomUUID()}`, acceptedAt: new Date(),
-  });
-  return { cardCode, cardName };
-}
-
 export const tenantHeaders = (slug: string, cookie?: string): Headers =>
   new Headers({ "x-forwarded-host": `${slug}.${BASE}`, ...(cookie ? { cookie } : {}) });
 
 // Agent-free model (no query masterdata, no query domains): runs entirely from manual options.
 export const TEST_MODEL: ModelDef = {
-  name: "Cable (portal test)",
+  name: "Cable",
   parameters: [
     {
       key: "material", label: "Material", type: "string", ui: "select",

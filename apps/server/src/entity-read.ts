@@ -8,12 +8,10 @@ import { compileList } from "./entity-list.ts";
 import { decryptSecret, encryptSecret } from "./crypto.ts";
 import { viaB1 } from "./b1.ts";
 
-// The B1 read bodies, once. Two routers call these: entities.* (internal, admin) and
-// portal.docs.* (a client, fenced to their CardCode). Neither owns the implementation.
+// The B1 read bodies, once. entities.* calls these; it does not own the implementation.
 //
-// The `schema` is a parameter rather than something these functions fetch. That is the whole
-// seam: the portal hands in a schema filtered to its allowlist, and compileList's existing rules
-// then do the fencing with no second policy to keep in step.
+// The `schema` is a parameter rather than something these functions fetch, so a caller can hand
+// compileList a schema it already filtered and the existing rules do the fencing.
 
 /** A modelling error from compileList/coerceKey is the caller's mistake, not a server fault. */
 export const bad = (e: unknown): never => {
@@ -23,8 +21,7 @@ export const bad = (e: unknown): never => {
 };
 
 /** What a cursor may be replayed as. A sealed nextLink is bound to its tenant, entity set and
- *  fence, so a portal client cannot hand back an internal user's cursor and read rows their
- *  CardCode filter would have excluded, nor reach an entity `entity-profiles.ts` never curated. */
+ *  list key, so one list's cursor cannot be handed to another. */
 export type CursorFence = { tenantId: string; key: string };
 
 /** B1's `@odata.nextLink`, encrypted. The client gets an opaque blob and hands it straight back:

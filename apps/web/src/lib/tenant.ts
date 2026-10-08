@@ -42,7 +42,7 @@ export function hardRedirect(url: string): Promise<never> {
  * unparsable, a relative path, a foreign host, `javascript:`, protocol-relative to
  * elsewhere — comes back `null` so callers fall through to a safe default instead of
  * following it. Deliberately requires an absolute URL (no base arg): `redirect=` is only
- * ever produced by this app as a full `window.location.href` (see routes/accept.tsx).
+ * ever produced by this app as a full `window.location.href` (see routes/login.tsx).
  */
 export function safeRedirect(url: string | undefined): string | null {
   if (!url) return null;

@@ -55,8 +55,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
   readOnly?: boolean;
   querySource: QueryScope;
   /** Derived cost/price per row for an `items` grid; null = the columns with nothing in them yet.
-   *  Absent = no money columns at all, which is how the portal stays free of cost data:
-   *  PortalRequestPage simply does not pass it. */
+   *  Absent = no money columns at all, which is how the builder preview stays free of cost data. */
   money?: ItemMoney | null;
 }) {
   // Off `me`, not off a prop: the currency is the tenant's, identical for every table on the page,

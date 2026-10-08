@@ -16,8 +16,8 @@ export const Route = createFileRoute("/_authed")({
       // it's their workspace, or onboarding to create/join one.
       const data = await context.queryClient.ensureQueryData(sessionQuery);
       if (!data?.session) throw redirect({ to: "/login" });
-      // Deliberately uncached: accept.tsx reaches this dispatcher via a client-side navigate
-      // right after joining an org, and a cached list would miss the new membership.
+      // Deliberately uncached: a membership can appear between visits to the apex, and a
+      // cached list would miss it.
       const orgs = (await authClient.organization.list()).data ?? [];
       const org = orgs[0];
       if (!org) throw redirect({ to: "/onboarding" });
@@ -44,10 +44,8 @@ export const Route = createFileRoute("/_authed")({
       });
     if (typeof me === "string") return hardRedirect(apexUrl(me));
 
-    // Role decides which app this shell renders. UX only — the server procedures are the boundary.
+    // Role decides which pages this shell renders. UX only — the server procedures are the boundary.
     const path = location.pathname;
-    if (me.role === "client" && !path.startsWith("/portal")) throw redirect({ to: "/portal" });
-    if (me.role !== "client" && path.startsWith("/portal")) throw redirect({ to: "/" });
     if (me.role !== "admin" && me.role !== "owner" && (path === "/settings" || path === "/b1" || path.startsWith("/b1/"))) {
       throw redirect({ to: "/" });
     }

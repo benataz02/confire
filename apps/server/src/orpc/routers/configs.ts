@@ -2,11 +2,11 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
-  db, configModel, configProject, user,
+  db, configModel, configProject,
   type ConfigCandidate, type ConfigSelection, type ProjectEvent,
 } from "@confire/db";
 import {
-  computeOutputs, DslError, enumerate, EntriesZ, propagate, referencedTables, syncTables, TableRowsZ,
+  computeOutputs, DslError, enumerate, EntriesZ, propagate, syncTables, TableRowsZ,
   type Entries, type ModelDef, type Outputs, type ResolvedLookups, type TableRows, type Val,
 } from "@confire/config-engine";
 import { userProcedure } from "../base.ts";
@@ -38,7 +38,7 @@ export async function loadModel(tenantId: string, modelId: string) {
   const [m] = await db
     .select({
       id: configModel.id, name: configModel.name, definition: configModel.definition,
-      updatedAt: configModel.updatedAt, portal: configModel.portal,
+      updatedAt: configModel.updatedAt,
     })
     .from(configModel)
     .where(and(eq(configModel.id, modelId), eq(configModel.tenantId, tenantId)))
@@ -103,7 +103,7 @@ export async function cachedLookups(
  *  resolved from the tenant's masterdata by queryPageSource (`masterdata.queryPage` is the
  *  ad-hoc-query variant and stays admin-only, because it takes a query instead of naming one).
  *  The cursor is a plain row offset and nothing else. */
-export const QueryPageZ = z.object({
+const QueryPageZ = z.object({
   modelId: z.uuid(),
   table: z.string().min(1),
   search: z.string().optional(),
@@ -113,15 +113,10 @@ export const QueryPageZ = z.object({
   match: z.object({ col: z.string(), value: z.union([z.string(), z.number()]) }).optional(),
 });
 
-/** `scopeTo` bounds the read to the tables a model names. The portal passes it: masterdata is
- *  tenant-wide, and an external client must not be able to page a table their model never
- *  references. Internal callers do not — the builder previews a draft whose newest query domain is
- *  not in the saved definition yet, and a member can reach any of the tenant's tables anyway. */
-export async function queryTablePage(
-  tenantId: string, input: z.infer<typeof QueryPageZ>, scopeTo?: ModelDef,
-) {
-  if (scopeTo && !referencedTables(scopeTo).has(input.table))
-    throw new ORPCError("BAD_REQUEST", { message: `Model does not use query table '${input.table}'` });
+/** One page of a query table the value help asked for. The caller has already proved the model
+ *  belongs to this tenant. A member can reach any of the tenant's tables: the builder previews a
+ *  draft whose newest query domain is not in the saved definition yet. */
+async function queryTablePage(tenantId: string, input: z.infer<typeof QueryPageZ>) {
   const rows = await masterdataRows(tenantId);
   let src;
   try {
@@ -148,7 +143,7 @@ export async function liveEngine(
   return { model, lookups: await cachedLookups(tenantId, model, project.entries, project.tables) };
 }
 
-/** The calculate path, shared by configs.calculate and portal.run.
+/** The calculate path.
  *
  *  Reuse: a project whose model is unchanged keeps its candidates instead of re-enumerating.
  *  `calculatedAt` is what proves those candidates still match the project's own entries — every
@@ -382,7 +377,7 @@ export function applySelection(
 }
 
 /** Append one event to config_project.events inside the same guarded UPDATE. */
-export const pushEvent = (kind: ProjectEvent["kind"], note?: string) =>
+const pushEvent = (kind: ProjectEvent["kind"], note?: string) =>
   sql`${configProject.events} || ${JSON.stringify([{ at: new Date().toISOString(), kind, ...(note ? { note } : {}) }])}::jsonb`;
 
 const SelectionZ = z.object({
@@ -395,9 +390,8 @@ const SelectionZ = z.object({
  *  the page held every row. */
 const CUSTOMER_NAME = sql<string>`${configProject.customer}->>'cardName'`;
 
-/** Filterable/sortable columns of the configurations list. Exported because portal.projects.rows is
- *  the same table with a narrower set — it must not offer Customer to the client who IS the customer. */
-export const CONFIG_FIELDS: SqlFields = {
+/** Filterable/sortable columns of the configurations list. */
+const CONFIG_FIELDS: SqlFields = {
   name: { col: configProject.name, kind: "string" },
   modelName: { col: configModel.name, kind: "string" },
   customerName: { col: CUSTOMER_NAME, kind: "string" },
@@ -433,11 +427,8 @@ async function projectState(
 /** projectState plus the two things only a page load or a model switch can change. */
 async function projectPayload(tenantId: string, id: string) {
   const state = await projectState(tenantId, id);
-  const [model, [creator]] = await Promise.all([
-    loadModel(tenantId, state.project.modelId),
-    db.select({ email: user.email }).from(user).where(eq(user.id, state.project.createdBy)).limit(1),
-  ]);
-  return { ...state, model, createdByEmail: creator?.email ?? null };
+  const model = await loadModel(tenantId, state.project.modelId);
+  return { ...state, model };
 }
 
 export const configsRouter = {
@@ -534,8 +525,6 @@ export const configsRouter = {
         // called " (copy)" without the fallback.
         name: copyName(row.name.trim() || "Configuration", taken.map((t) => t.name)),
         customer: row.customer, entries: row.entries, batches: row.batches, tables: row.tables,
-        // Not row.source: an internal copy of a portal request must not show up in that client's
-        // "My requests" list, which filters on source = "portal".
         createdBy: context.userId,
       })
       .returning({ id: configProject.id });
@@ -560,7 +549,7 @@ export const configsRouter = {
         modelId: z.uuid().optional(),
         // ponytail: shape only, no SAP existence check — the UI picks CardCode through a
         // BusinessPartners value help, so a bad code has to be hand-crafted against the API.
-        // Read the BP here (as portalClients.invite does) if that stops being good enough.
+        // Read the BP here if a hand-crafted code starts showing up on quotations.
         customer: z.object({ cardCode: z.string(), cardName: z.string() }).nullable().optional(),
       }),
     )
@@ -767,20 +756,4 @@ export const configsRouter = {
       header: z.record(z.string(), z.unknown()).optional(),
     }))
     .handler(({ input, context }) => createQuote(context.tenantId, input)),
-
-  // Internal reviewer sends a portal request back with a note. requested → rejected.
-  reject: userProcedure
-    .input(z.object({ id: z.uuid(), note: z.string().min(1) }))
-    .handler(async ({ input, context }) => {
-      const updated = await db
-        .update(configProject)
-        .set({ status: "rejected", rejectionNote: input.note, events: pushEvent("rejected", input.note), updatedAt: new Date() })
-        .where(and(
-          eq(configProject.id, input.id), eq(configProject.tenantId, context.tenantId),
-          eq(configProject.status, "requested"),
-        ))
-        .returning({ id: configProject.id });
-      if (!updated.length) throw new ORPCError("BAD_REQUEST", { message: "Only a requested configuration can be rejected" });
-      return projectState(context.tenantId, input.id);
-    }),
 };

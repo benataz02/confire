@@ -57,16 +57,12 @@ export const modelsRouter = {
     .input(z.object({
       id: z.uuid().optional(),
       definition: ModelDefZ,
-      portal: z.boolean().optional(),
-      portalDescription: z.string().nullable().optional(),
     }))
     .handler(async ({ input, context }) => {
       const issues = checkModel(input.definition, knownTables(await masterdataRows(context.tenantId)));
       if (issues.length) throw new ORPCError("BAD_REQUEST", { message: "Model has errors", data: { issues } });
       const fields = {
         name: input.definition.name, definition: input.definition, updatedAt: new Date(),
-        ...(input.portal !== undefined ? { portal: input.portal } : {}),
-        ...(input.portalDescription !== undefined ? { portalDescription: input.portalDescription } : {}),
       };
       // RETURNING the whole row (not just the id) so the client can seed its models.get cache
       // from the save response instead of refetching.
@@ -86,12 +82,11 @@ export const modelsRouter = {
       return ins!;
     }),
 
-  // Copy under the first free name. Server-side because `save` only accepts a definition, so a
-  // client-side copy would silently drop portalDescription (a column, not part of the jsonb).
-  // No checkModel: a byte-identical copy of a stored definition either already passed on save, or
-  // now fails only because masterdata was deleted since — an unhelpful error on an unedited copy.
-  // Nothing cached is copied: the definition keeps its table names, and the cache belongs to the
-  // masterdata rows those names point at, not to the model.
+  // Copy under the first free name. Server-side so the stored definition is what gets copied,
+  // not whatever the browser last rendered. No checkModel: a byte-identical copy of a stored
+  // definition either already passed on save, or now fails only because masterdata was deleted
+  // since — an unhelpful error on an unedited copy. Nothing cached is copied: the definition
+  // keeps its table names, and the cache belongs to the masterdata rows those names point at.
   duplicate: adminProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
     const [row] = await db
       .select()
@@ -103,14 +98,11 @@ export const modelsRouter = {
       .from(configModel)
       .where(eq(configModel.tenantId, context.tenantId));
     const name = copyName(row.name, taken.map((t) => t.name));
-    // `portal` is deliberately left at its false default: a copy of a published model must not
-    // publish itself to the client portal before anyone has looked at it.
     const [ins] = await db
       .insert(configModel)
       .values({
         tenantId: context.tenantId, name,
         definition: { ...row.definition, name },
-        portalDescription: row.portalDescription,
       })
       .returning();
     return ins!;

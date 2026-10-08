@@ -1,4 +1,4 @@
-import type { B1Snapshot, Bucket, OpenQuote, ProjectSource, ProjectStatus } from "@confire/db";
+import type { B1Snapshot, Bucket, OpenQuote, ProjectStatus } from "@confire/db";
 
 export type Window = "month" | "quarter" | "year12";
 
@@ -7,7 +7,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const STALE_QUOTE_DAYS = 7;
 
 export type ProjectRow = {
-  id: string; name: string; status: ProjectStatus; source: ProjectSource;
+  id: string; name: string; status: ProjectStatus;
   createdBy: string; createdAt: Date; customerName: string | null;
   quotedAt: Date | null; b1DocEntry: number | null;
   quotedValue: number | null; quotedCost: number | null;
@@ -156,15 +156,12 @@ export function buildOverview(input: {
   const stage = (...s: ProjectStatus[]) => projects.filter((p) => s.includes(p.status)).length;
 
   const attention = projects
-    .filter((p) => p.status === "requested" || p.status === "rejected" ||
-      (p.status === "quoted" && p.quotedAt !== null &&
-        (now.getTime() - p.quotedAt.getTime()) / DAY_MS > STALE_QUOTE_DAYS))
+    .filter((p) => p.status === "quoted" && p.quotedAt !== null &&
+      (now.getTime() - p.quotedAt.getTime()) / DAY_MS > STALE_QUOTE_DAYS)
     .map((p) => ({
       id: p.id, name: p.name, customer: p.customerName, docEntry: p.b1DocEntry,
-      reason: p.status === "requested" ? "Portal request waiting"
-        : p.status === "rejected" ? "Rejected — needs rework"
-        : `No movement for ${STALE_QUOTE_DAYS}+ days`,
-      ageDays: Math.floor((now.getTime() - (p.quotedAt ?? p.createdAt).getTime()) / DAY_MS),
+      reason: `No movement for ${STALE_QUOTE_DAYS}+ days`,
+      ageDays: Math.floor((now.getTime() - p.quotedAt!.getTime()) / DAY_MS),
     }))
     .sort((a, b) => b.ageDays - a.ageDays);
 
@@ -192,7 +189,7 @@ export function buildOverview(input: {
       value: marginValue, cost: marginCost, covered: withMargin.length, of: quoted.length,
     },
     funnel: [
-      { stage: "Draft", count: stage("draft", "requested", "rejected") },
+      { stage: "Draft", count: stage("draft") },
       { stage: "Quoted", count: stage("quoted") },
       { stage: "Ordered", count: ordered.length },
     ],

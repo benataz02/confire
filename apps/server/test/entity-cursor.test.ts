@@ -4,7 +4,7 @@ const { readRows } = await import("../src/entity-read.ts");
 
 // The list cursor is B1's own @odata.nextLink, encrypted. These cover the reason it is sealed
 // rather than sent as-is: readNext will fetch any URL under the Service Layer base, so an
-// unsealed cursor would let a portal client replace the page-1 CardCode fence with anything.
+// unsealed cursor could be replayed against a different list than the one that issued it.
 
 const schema = {
   name: "Orders", label: "Orders", keys: ["DocEntry"],
@@ -16,7 +16,7 @@ const schema = {
 
 const query = { select: [], filter: [], orderby: [] };
 const internal = { tenantId: "t1", key: "internal" };
-const portal = { tenantId: "t1", key: "portal:C0001" };
+const other = { tenantId: "t1", key: "other" };
 
 /** A transport that answers one page and records what it was asked for. */
 const fake = (nextLink?: string) => {
@@ -59,11 +59,11 @@ describe("list paging cursor", () => {
     expect(seen[1]).toEqual({ nextLink: "Orders?$skip=100", maxPageSize: 100 });
   });
 
-  test("a portal client cannot replay an internal cursor — that is the CardCode fence", async () => {
+  test("a cursor sealed for one list cannot be replayed as another", async () => {
     const { b1 } = fake("Orders?$skip=100");
     const first = await readRows(b1, schema, "Orders", { query, pageSize: 100 }, internal);
     await expect(
-      readRows(b1, schema, "Orders", { query, pageSize: 100, cursor: first.nextCursor }, portal),
+      readRows(b1, schema, "Orders", { query, pageSize: 100, cursor: first.nextCursor }, other),
     ).rejects.toThrow("does not belong to this list");
   });
 

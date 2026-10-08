@@ -268,7 +268,7 @@ export type ViewsApi<S> = ReturnType<typeof useViews<S>>;
  * The views of one table and the state being worked on. `resolve` turns a view's stored (or
  * declared, possibly partial) state into a full one — the list passes resolveListState, the object
  * page its own. `initial` may rewrite the very first state (the list lets the URL win there).
- * `local`: system views only, no server calls, no save chrome — the portal.
+ * `local`: system views only, no server calls, no save chrome.
  */
 export function useViews<S>({ tableId, systemViews, resolve, initial, local = false }: {
   tableId: string;

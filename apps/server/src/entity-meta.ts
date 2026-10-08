@@ -88,8 +88,8 @@ function constraintOf(f: B1Field, rule: { editable: boolean; required: boolean; 
     ...(rule.required ? { Required: true } : {}),
     ...(rule.editable ? { Editable: true } : {}),
     // B1 carries an enum on the wire as its member NAME — `DocumentStatus eq 'bost_Open'` and
-    // `CardType eq 'cCustomer'` are the forms verified against a live b1s/v2 (dashboard-snapshot.ts,
-    // portal.ts' invite check). The parser keeps the ValidValue code as `value`; that is the
+    // `CardType eq 'cCustomer'` are the forms verified against a live b1s/v2. The parser keeps the
+    // ValidValue code as `value`; that is the
     // database column's spelling, not the Service Layer's, so the name is what an option sends.
     ...(f.options ? { Options: f.options.map((o) => ({ value: o.label, label: memberLabel(o.label) })) } : {}),
     ...(f.isUDF ? { Udf: true } : {}),

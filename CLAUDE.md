@@ -48,15 +48,14 @@ the code**, which is why nothing here is conditional on "dev vs prod".
 
 `<slug>.<APP_BASE_DOMAIN>`. `tenant.ts` parses the slug (the only place the host is parsed);
 `orpc/base.ts` joins it against `member` — **the membership join is the tenant boundary**, so a
-forged Host can only ever select an org the user already belongs to. Four procedure builders
+forged Host can only ever select an org the user already belongs to. Three procedure builders
 compose that check:
 
 | Builder | Who |
 |---|---|
-| `sessionProcedure` | signed in, not yet a member (invite acceptance) |
-| `userProcedure` | internal member; **one line fences the `client` role out of every internal endpoint** |
+| `sessionProcedure` | signed in; `me` resolves membership itself |
+| `userProcedure` | member of this workspace; a leftover `client` role stays forbidden |
 | `adminProcedure` | admin/owner — model builder, settings |
-| `clientProcedure` | portal accounts only, plus their `portalClient` CardCode binding |
 
 Dev uses `lvh.me` (not `localhost`): a `.lvh.me` cookie is shared across subdomains, a
 `localhost` one is not. Prod uses Caddy wildcard subdomains → one server.
@@ -104,11 +103,10 @@ the new inputs with none — never a mismatched pair. That is why there is no `c
 `assertConfigMutable`.
 
 **One edit is one call.** `configs.calculate` writes the inputs and recomputes in a single handler,
-and returns exactly what `configs.get` returns; `update`/`select`/`reject` return the same payload.
+and returns exactly what `configs.get` returns; `update`/`select` return the same payload.
 The client sets its query cache from the response (`setProject` in `ConfigProcessPage.tsx`) rather
 than invalidating, so the page holds one `draft` object and `draft !== null` is its whole dirty
-check. The portal still runs `update` → `run` → `get`: it calculates on a button press, not per
-keystroke.
+check.
 
 ## `packages/b1` — the SAP connector
 
@@ -183,7 +181,7 @@ line with its cached options, and a stale cache is a page message instead of a f
 - **Curated-only.** `entity-profiles.ts` names four entities (Quotations, Orders,
   BusinessPartners, Items) and the exact fields on each; the rule is enforced in
   `orpc/routers/entities.ts`, not by which buttons a page draws. Everything else B1 exposes is
-  read-only — DeliveryNotes and Invoices included, which stay copy targets and portal documents.
+  read-only — DeliveryNotes and Invoices included, which stay copy targets.
   `entities.metadata` hands the same rule to the browser as per-field `Editable`/`Required`
   (`toConstraints`), so the form and the allowlist cannot drift.
 - **Idempotent quote write-back.** `configDocumentCommandId()` (SHA-256 over
@@ -205,9 +203,8 @@ generates a page.
 
 - **Features are declared.** `features/b1/` (documents, business partners, items; `B1_FEATURES`
   is the registry — the `/b1/$entity` routes accept nothing else, and the side nav and search list
-  it) and `features/portal/` (the same document builder narrowed to `PORTAL_DOC`/`PORTAL_LINE`).
-  A feature is plain object literals: list columns, filter fields, system views, header, section
-  tree. Local lists (configs, models, masterdata, portal requests) declare theirs in the route file.
+  it). A feature is plain object literals: list columns, filter fields, system views, header, section
+  tree. Local lists (configs, models, masterdata) declare theirs in the route file.
 - **Metadata only merges** (`shared/metadata.ts`, Beas `ii`/`rg`): label, type, options and
   MaxLength fill what a declared field left out; `Required` becomes `required` unless the field
   declared a function; editability is `isEditMode && Editable && !readonly` (on create, `Required`
@@ -223,7 +220,7 @@ generates a page.
   → `in`, string → `contains`/`eq` for `exact`); `entity-list.ts` compiles it to OData,
   `list-sql.ts` to SQL. `ListReport` does no client-side processing (`manualSortBy`), so both match.
 - **Value helps are CFLs** (`shared/cfl/`): `cfl-configs.ts` factories, one `fetchPage` over an
-  entity source (`entities.rows`) or a masterdata source (`configs/portal.queryPage`, with an exact
+  entity source (`entities.rows`) or a masterdata source (`configs.queryPage`, with an exact
   `match` for probes). The key is `keyField ?? columns[0]`. A failed existence probe counts as
   "exists". Type-ahead is `startswith`, the dialog `contains`.
 - **Templates** are props keyed by id (`cellTemplates`, `filterTemplates`, `sectionTemplates`, …);

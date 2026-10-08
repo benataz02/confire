@@ -22,7 +22,7 @@ export const DOCUMENT_STATUS: Facet["statusMapping"] = {
 };
 
 /** Print, and the copy flows out of this document (Quotation -> Order -> Delivery -> Invoice). */
-function DocumentActions({ entity, scope, ctx }: { entity: string; scope: "internal" | "portal"; ctx: HeaderActionContext }) {
+function DocumentActions({ entity, ctx }: { entity: string; ctx: HeaderActionContext }) {
   const go = useEntityNav();
   const copy = useMutation(orpc.entities.copy.mutationOptions({
     onSuccess: (r) => {
@@ -35,7 +35,7 @@ function DocumentActions({ entity, scope, ctx }: { entity: string; scope: "inter
   return (
     <>
       {ctx.constraints?.printable ? (
-        <PrintActions entity={entity} docEntry={docEntry} scope={scope} disabled={ctx.isEditMode} />
+        <PrintActions entity={entity} docEntry={docEntry} disabled={ctx.isEditMode} />
       ) : null}
       {(ctx.constraints?.flows ?? []).map((f) => (
         <Button key={f.target} icon="copy" design="Transparent" disabled={copy.isPending || ctx.isEditMode}
@@ -63,9 +63,7 @@ export function documentFeature(entity: string, o: {
   /** singular, lower case: "New <one>" */
   one: string;
   icon: string;
-  scope?: "internal" | "portal";
 }): EntityFeature {
-  const scope = o.scope ?? "internal";
   return {
     entity,
     label: o.label,
@@ -105,7 +103,7 @@ export function documentFeature(entity: string, o: {
           { field: "DocumentStatus", type: "status", statusMapping: DOCUMENT_STATUS },
           { field: "DocTotal", type: "numeric", unitField: "DocCurrency" },
         ],
-        actions: (ctx) => <DocumentActions entity={entity} scope={scope} ctx={ctx} />,
+        actions: (ctx) => <DocumentActions entity={entity} ctx={ctx} />,
       },
       sections: [
         {

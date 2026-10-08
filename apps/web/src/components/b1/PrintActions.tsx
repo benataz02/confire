@@ -4,13 +4,12 @@ import { Bar, BusyIndicator, Button, Dialog, MessageStrip } from "@ui5/webcompon
 import { orpc } from "../../orpc.ts";
 
 // The one place printing exists in the UI. Everything that can print a SAP document — the object
-// page, the list report's count bar, the portal timeline — renders this and nothing else, so
-// there is exactly one blob-URL lifecycle to get right.
+// page and the list report's count bar — renders this and nothing else, so there is exactly one
+// blob-URL lifecycle to get right.
 //
 // apps/web does not depend on @confire/server at runtime (only `import type` for the router), so the
-// PRINTABLE list is restated here rather than imported — the same reason portalUi.ts inlines
-// ProjectStatus. The server's entity-profiles.ts PRINTABLE is the real boundary; this only
-// decides whether to draw a button.
+// PRINTABLE list is restated here rather than imported. The server's entity-profiles.ts PRINTABLE
+// is the real boundary; this only decides whether to draw a button.
 export const PRINTABLE_ENTITIES = new Set(["Quotations", "Orders", "DeliveryNotes", "Invoices"]);
 
 /** base64 -> a blob URL the browser's own PDF viewer can open.
@@ -19,19 +18,14 @@ const toBlobUrl = (pdf: string) =>
   URL.createObjectURL(new Blob([Uint8Array.from(atob(pdf), (c) => c.charCodeAt(0))], { type: "application/pdf" }));
 
 export function PrintActions({
-  entity, docEntry, scope = "internal", disabled,
+  entity, docEntry, disabled,
 }: {
   entity: string;
   docEntry: number;
-  scope?: "internal" | "portal";
   disabled?: boolean;
 }) {
   const [preview, setPreview] = useState<{ url: string; fileName: string } | null>(null);
-
-  // Two mutation option factories, one call site. `scope` is fixed for a given mount, so this is
-  // not a conditional hook.
-  const options = scope === "portal" ? orpc.portal.docs.print.mutationOptions() : orpc.entities.print.mutationOptions();
-  const print = useMutation(options);
+  const print = useMutation(orpc.entities.print.mutationOptions());
 
   // A blob URL is a document-lifetime allocation; release it when the dialog closes or we unmount.
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url); }, [preview]);

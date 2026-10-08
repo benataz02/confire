@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Bar, Button, BusyIndicator, Dialog, DynamicSideContent, Form, FormGroup, FormItem, IllustratedMessage,
+  Bar, Button, BusyIndicator, DynamicSideContent, Form, FormGroup, FormItem, IllustratedMessage,
   Input, Label, MessageStrip, ObjectPage, ObjectPageSection, ObjectPageTitle, ObjectStatus,
-  Option, Panel, Select, Tag, Text, TextArea, Title, ToggleButton, Toolbar, ToolbarButton, ToolbarItem,
+  Option, Panel, Select, Tag, Text, Title, ToggleButton, Toolbar, ToolbarButton, ToolbarItem,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import { evalTableRows, propagate, type Entries, type ItemsTable, type TableRows, type Val } from "@confire/config-engine";
@@ -76,8 +76,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
   // The batch quantity the items grid is priced at. Read through `batches` below, so a deleted
   // quantity falls back to the first rather than pricing at a batch that no longer exists.
   const [viewQty, setViewQty] = useState<number | null>(null);
-  const [rejectOpen, setRejectOpen] = useState(false);
-  const [note, setNote] = useState("");
   const [railOpen, setRailOpen] = useState(true);
   // Every mutation returns the part of configs.get's payload it could have changed, so the
   // response IS the refetch — no invalidate, no second round trip per edit.
@@ -85,9 +83,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
     qc.setQueryData(orpc.configs.get.queryOptions({ input: { id } }).queryKey,
       (prev) => (prev ? { ...prev, ...patch } : prev));
   const update = useMutation(orpc.configs.update.mutationOptions({ onSuccess: setProject }));
-  const reject = useMutation(orpc.configs.reject.mutationOptions({
-    onSuccess: (data) => { setRejectOpen(false); setProject(data); },
-  }));
   const calc = useMutation(orpc.configs.calculate.mutationOptions({
     onSuccess: (data) => {
       setDraft(null); // the server now holds what the draft held
@@ -126,7 +121,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
 
   const project = q.data?.project;
   const model = q.data?.model;
-  const createdByEmail = q.data?.createdByEmail;
   const { entries, batches, tables } = draft ?? {
     entries: project?.entries ?? {}, batches: project?.batches ?? [], tables: project?.tables ?? {},
   };
@@ -256,11 +250,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
             onClick={() => navigate({ to: "/configs/$id/quote", params: { id } })}>
             Create quote
           </Button>
-          {/* Answering a portal request is finalizing too, so it sits with Create quote, not in the
-              title's object actions. */}
-          {project.status === "requested" ? (
-            <Button design="Negative" onClick={() => setRejectOpen(true)}>Reject</Button>
-          ) : null}
         </>
       } />
   );
@@ -296,9 +285,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
           subHeader={
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
               {project.customer?.cardName ? <Text>{project.customer.cardName}</Text> : null}
-              {project.status === "requested" ? (
-                <Text>Requested by {createdByEmail ?? "a portal user"}</Text>
-              ) : null}
             </div>
           }
           navigationBar={
@@ -452,12 +438,12 @@ export function ConfigProcessPage({ id }: { id: string }) {
                 <ConfiguratorForm section={BATCHES_SECTION} model={model.definition} lookups={lookups.data}
                   lk={lk} prop={prop} entries={entries} onChange={(next) => edit({ entries: next })}
                   onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
-                  querySource={{ kind: "project", modelId: project.modelId }} readOnly={locked}
+                  querySource={{ modelId: project.modelId }} readOnly={locked}
                   batches={batches} onBatchesChange={(next) => edit({ batches: next })} />
                 <ConfiguratorForm model={model.definition} lookups={lookups.data} lk={lk} prop={prop} entries={entries}
                   onChange={(next) => edit({ entries: next })}
                   onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
-                  querySource={{ kind: "project", modelId: project.modelId }} readOnly={locked}
+                  querySource={{ modelId: project.modelId }} readOnly={locked}
                   tables={tables} onTablesChange={(next) => edit({ tables: next })} itemMoney={money}
                   batches={batches} itemBatch={itemQty} onItemBatchChange={setViewQty} />
               </>
@@ -484,26 +470,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
         )}
       </ObjectPageSection>
     </ObjectPage>
-
-    <Dialog open={rejectOpen} headerText="Reject request" onClose={() => setRejectOpen(false)}
-      footer={
-        <Bar design="Footer" endContent={
-          <>
-            <Button design="Negative" disabled={!note.trim() || reject.isPending}
-              onClick={() => reject.mutate({ id, note: note.trim() })}>
-              {reject.isPending ? "Rejecting…" : "Reject with note"}
-            </Button>
-            <Button onClick={() => setRejectOpen(false)}>Cancel</Button>
-          </>
-        } />
-      }
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.5rem 0" }}>
-        {reject.error ? <MessageStrip design="Negative" hideCloseButton>{reject.error.message}</MessageStrip> : null}
-        <Label for="reject-note" required>What should the client change?</Label>
-        <TextArea id="reject-note" rows={4} value={note} onInput={(e) => setNote(e.target.value)} />
-      </div>
-    </Dialog>
     </>
   );
 }

@@ -4,8 +4,8 @@ import { agentTarget, viaB1 } from "./b1.ts";
 import { PRINTABLE } from "./entity-profiles.ts";
 
 // PDF rendering is the agent's SAP B1 API Gateway hop, not a Service Layer read — so it goes
-// through agentPost on a route of its own rather than a transport method. One implementation,
-// called by an admin procedure and a portal one; each adds its own fence before getting here.
+// through agentPost on a route of its own rather than a transport method. entities.print is the
+// one caller; the PRINTABLE allowlist is the fence.
 
 export type PrintedDocument = { pdf: string; fileName: string };
 

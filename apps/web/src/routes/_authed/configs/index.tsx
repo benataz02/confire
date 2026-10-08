@@ -13,7 +13,7 @@ import type { ListFeature, ListQuery, Row } from "../../../shared/types.ts";
 export const Route = createFileRoute("/_authed/configs/")({ component: Configs });
 
 // `customer` is jsonb; the server flattens it to customerName so it filters, sorts and searches
-// like any other column. The old Requested/In-progress toggle is the declared "Requested" view.
+// like any other column.
 const FEATURE: ListFeature = {
   tableId: "configs",
   title: "Configurations",
@@ -28,12 +28,6 @@ const FEATURE: ListFeature = {
     { key: "updatedAt", label: "Last changed", type: "date" },
   ],
   filterFields: [{ key: "name" }, { key: "customerName" }, { key: "status" }],
-  systemViews: [
-    {
-      key: "requested", name: "Requested",
-      state: { filterValues: { status: ["requested"] }, sortBy: [{ field: "updatedAt", direction: "desc" }] },
-    },
-  ],
 };
 
 const statusCell = (row: Row) => {

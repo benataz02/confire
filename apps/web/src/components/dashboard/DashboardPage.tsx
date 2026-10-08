@@ -64,9 +64,9 @@ export function DashboardPage() {
         columnsRatio="FirstWider"
         overlineText={overline}
         headerText={greeting(new Date(), firstName)}
-        actions={me?.role === "client" ? undefined : (
+        actions={
           <Button icon="add" design="Default" onClick={() => navigate({ to: "/configs/new" })}>New configuration</Button>
-        )}
+        }
         endContent={
           <Card
             accessibleName="Needs attention"
@@ -75,7 +75,7 @@ export function DashboardPage() {
               <CardHeader
                 interactive={attentionN > 0}
                 titleText="Needs attention"
-                subtitleText={attentionN ? "Portal requests and stale quotes" : "Nothing waiting"}
+                subtitleText={attentionN ? "Quotes with no movement" : "Nothing waiting"}
                 additionalText={String(attentionN)}
                 avatar={<Icon name="alert" />}
                 onClick={() => { if (attentionN) void navigate({ to: "/configs" }); }}

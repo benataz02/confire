@@ -80,13 +80,12 @@ export function ModelBuilderPage({ id }: { id?: string }) {
   // tenant masterdata, so nothing about the unsaved draft affects them.
   const lookups = usePreviewLookups(m.draft ?? EMPTY_MODEL, { enabled: !!m.draft });
   const allIssues: Issue[] = [...m.issues, ...m.serverIssues];
-  if (m.loading || !m.draft || !m.portalMeta) {
+  if (m.loading || !m.draft) {
     return m.loadError
       ? <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{m.loadError.message}</MessageStrip>
       : <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
   }
   const draft = m.draft;
-  const portalMeta = m.portalMeta;
 
   // One list drives the title's message popover AND the per-section counts, so a tab can never
   // claim a different number of problems than the popover lists under it.
@@ -191,7 +190,7 @@ export function ModelBuilderPage({ id }: { id?: string }) {
       >
         <ObjectPageSection id="settings" titleText={secTitle("settings")}>
           <SettingsTab draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
-            tried={m.tried} portalMeta={portalMeta} setPortalMeta={m.setPortalMeta} />
+            tried={m.tried} />
         </ObjectPageSection>
         {/* fitContent: the section fills what the title and tab bar leave instead of growing with the
             tree, which is the only way the splitter's panes get a height to split and scroll. */}

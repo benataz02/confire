@@ -28,13 +28,13 @@ function extraOf(ref: LookupRef, t: ResolvedTable | undefined, val: Val): string
   return s || undefined;
 }
 
-// The one form both the builder preview and the wizard render. Fully controlled:
+// The one form both the builder preview and the configuration page render. Fully controlled:
 // entries in, entries out; all engine work happens in propagate(). Batch quantities are a field in
-// here too (BATCHES_SECTION) rather than a component of their own, so the internal ObjectPage and
-// the portal wizard cannot drift apart; scrolling, footers and consistency stay with the caller.
+// here too (BATCHES_SECTION) rather than a component of their own; scrolling, footers and
+// consistency stay with the caller.
 
 /** The signature answer to "is this consistent and how big is it?" — one component so the
- *  string stays identical in the wizard bar, the preview footer and the portal step. */
+ *  string stays identical in the page footer and the preview. */
 export function ConsistencyStatus({ prop }: { prop: Propagation }) {
   const conflict = prop.conflicts.length ? prop.conflicts.map((c) => c.message).join(" · ") : null;
   return (
@@ -48,8 +48,8 @@ export function ConsistencyStatus({ prop }: { prop: Propagation }) {
 export const UNPLACED_TABLES_SECTION = "__tables";
 
 /** Key of the synthetic section holding batch quantities. Not in formSections(): it is not part of
- *  the model, so a caller asks for it by name (the ObjectPage subsection, the portal wizard step)
- *  and nothing renders it by accident. */
+ *  the model, so a caller asks for it by name (the ObjectPage subsection) and nothing renders it
+ *  by accident. */
 export const BATCHES_SECTION = "__batches";
 
 /** The sections the form renders: the model's own, plus a trailing one holding any table the
@@ -106,10 +106,10 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   onTablesChange?: (next: TableRows) => void;
   /** batch quantities: the field for section === BATCHES_SECTION, the items grid's batch picker otherwise */
   batches?: number[];
-  /** omit to leave batch quantities out entirely (builder preview, portal Configure step) */
+  /** omit to leave batch quantities out entirely (the builder preview) */
   onBatchesChange?: (next: number[]) => void;
   /** derived cost/price per items row; omit and the grid shows no money columns at all — which is
-   *  how the builder preview and the client portal stay free of cost data */
+   *  how the builder preview stays free of cost data */
   itemMoney?: ItemMoney | null;
   /** the batch quantity `itemMoney` is priced at; omit onItemBatchChange and there is no picker */
   itemBatch?: number;

@@ -32,9 +32,9 @@ export default function CflDialog({ config, initialSearch, multiSelect, onSelect
   const key = keyFieldOf(config);
   const src = config.source;
   const role = useQuery(meQuery).data?.role;
-  // A portal client has no user-state endpoint (userProcedure fences them out): its layout lives
-  // for the dialog's lifetime. ponytail: persist it too if portal users ask.
-  const persist = role !== undefined && role !== "client";
+  // Wait for `me` so a dialog opened before the shell knows who is signed in does not write a
+  // layout under nobody's key.
+  const persist = role !== undefined;
   const stateKey = `cfl:${sourceKey(src)}`;
 
   // Every field the entity has but the config did not declare, as a hidden column: Adapt Filters

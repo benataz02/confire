@@ -1,6 +1,6 @@
 import { os, ORPCError } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
-import { db, member, organization, portalClient } from "@confire/db";
+import { db, member, organization } from "@confire/db";
 import { auth } from "../auth.ts";
 import { tenantSlugFromHost } from "../tenant.ts";
 
@@ -45,13 +45,12 @@ export async function membershipFromHost(headers: Headers, userId: string) {
 /**
  * Procedures a signed-in user calls, scoped to the tenant in the request host
  * (`<slug>.<baseDomain>`). The membership join is the tenant boundary: a forged host
- * can only ever select an org the user already belongs to. Portal (client-role) accounts
- * are fenced out here — every internal-only endpoint composes this procedure.
+ * can only ever select an org the user already belongs to. A leftover `client` membership
+ * — the removed external portal — stays locked out of every internal endpoint.
  */
 export const userProcedure = base.use(requireSession).use(async ({ context, next }) => {
   const row = await membershipFromHost(context.headers, context.user.id);
-  // This one line fences the portal role out of every internal endpoint.
-  if (row.role === "client") throw new ORPCError("FORBIDDEN", { message: "Not available for portal accounts" });
+  if (row.role === "client") throw new ORPCError("FORBIDDEN", { message: "Not available for this account" });
   return next({ context: { tenantId: row.tenantId, role: row.role, userId: context.user.id } });
 });
 
@@ -63,20 +62,5 @@ export const adminProcedure = userProcedure.use(({ context, next }) => {
   return next({});
 });
 
-/** Session only — for procedures a not-yet-member calls (invite acceptance). */
+/** Session only. `me` resolves membership itself so the shell can learn the role. */
 export const sessionProcedure = base.use(requireSession);
-
-/** Portal clients: role must be exactly "client", plus the CardCode binding. */
-export const clientProcedure = base.use(requireSession).use(async ({ context, next }) => {
-  const row = await membershipFromHost(context.headers, context.user.id);
-  if (row.role !== "client") throw new ORPCError("FORBIDDEN", { message: "Portal accounts only" });
-  const [b] = await db
-    .select({ cardCode: portalClient.cardCode, cardName: portalClient.cardName })
-    .from(portalClient)
-    .where(and(eq(portalClient.tenantId, row.tenantId), eq(portalClient.userId, context.user.id)))
-    .limit(1);
-  if (!b) throw new ORPCError("FORBIDDEN", { message: "No customer is linked to this account" });
-  return next({
-    context: { tenantId: row.tenantId, userId: context.user.id, cardCode: b.cardCode, cardName: b.cardName },
-  });
-});

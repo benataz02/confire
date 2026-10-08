@@ -8,8 +8,8 @@
 // Only the WRITE rule lives here. How a page looks — title, sections, columns — is the declared
 // feature config in apps/web/src/features; entities.metadata hands this rule to the browser as
 // `Editable`/`Required`, so the form and the allowlist read one rule and cannot drift.
-// DeliveryNotes and Invoices are deliberately absent: they are read-only (copy targets and portal
-// documents), and absence here is what makes them so.
+// DeliveryNotes and Invoices are deliberately absent: they are read-only copy targets, and
+// absence here is what makes them so.
 
 export type EntityProfile = {
   /** header fields a user may change. NOT a display list — this is the write allowlist. */

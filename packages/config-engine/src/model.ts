@@ -225,8 +225,7 @@ export const isTableGroup = (g: Group): g is TableGroup => "table" in g;
 
 export const ModelDefZ = z.object({
   name: z.string(),
-  /** free text, shown as the builder's page subtitle. Not the portal card subtitle — that is
-   *  config_model.portalDescription, a column so the catalog list can filter on it. */
+  /** free text, shown as the builder's page subtitle. */
   description: z.string().optional(),
   parameters: z.array(ParamZ),
   structure: z.object({
