@@ -92,18 +92,18 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   const aggregates: string[] = [];
   const seenTable = new Set<string>();
   tableDefs.forEach((t, i) => {
-    if (seenTable.has(t.key)) issues.push({ path: `tables[${i}]`, message: `duplicate table '${t.key}'` });
+    if (seenTable.has(t.key)) issues.push({ path: `tables[${i}]`, message: `Another table is already called '${t.key}'.` });
     seenTable.add(t.key);
-    if (baseKeys.has(t.key)) issues.push({ path: `tables[${i}]`, message: `table key '${t.key}' collides with an existing key` });
+    if (baseKeys.has(t.key)) issues.push({ path: `tables[${i}]`, message: `A parameter or computed value is already called '${t.key}'.` });
     const cols = new Set<string>();
     t.columns.forEach((c, j) => {
-      if (cols.has(c.key)) issues.push({ path: `tables[${i}].columns[${j}]`, message: `duplicate column '${c.key}'` });
+      if (cols.has(c.key)) issues.push({ path: `tables[${i}].columns[${j}]`, message: `Another field in this table is already called '${c.key}'.` });
       cols.add(c.key);
       if (c.key === "count")
-        issues.push({ path: `tables[${i}].columns[${j}]`, message: `'count' is reserved: it collides with '${aggregateKey(t.key, "count")}'` });
+        issues.push({ path: `tables[${i}].columns[${j}]`, message: `'count' is taken: formulas read ${aggregateKey(t.key, "count")} as the number of rows.` });
     });
     for (const name of aggregateKeysOf(t)) {
-      if (baseKeys.has(name)) issues.push({ path: `tables[${i}]`, message: `aggregate '${name}' collides with an existing key` });
+      if (baseKeys.has(name)) issues.push({ path: `tables[${i}]`, message: `Formulas would get '${name}' from this table, but that name is already taken — rename the table or the field.` });
       baseKeys.add(name);
       aggregates.push(name);
     }
@@ -274,12 +274,12 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
       } else if (c.cell.kind === "options" && c.cell.ref.source !== "manual") {
         const ref = c.cell.ref;
         const srcCols = tableCols.get(ref.table);
-        if (!srcCols) issues.push({ path, message: `unknown table '${ref.table}'` });
+        if (!srcCols) issues.push({ path, message: `The masterdata '${ref.table}' no longer exists — pick another source.` });
         else {
           const { valueCol, labelCol } = refKeyCols(ref, srcCols);
-          if (!valueCol) issues.push({ path, message: `table '${ref.table}' declares no columns` });
+          if (!valueCol) issues.push({ path, message: `The masterdata '${ref.table}' has no columns to pick from.` });
           for (const col of [...(valueCol ? [valueCol] : []), ...(labelCol ? [labelCol] : [])])
-            if (!srcCols.includes(col)) issues.push({ path, message: `table '${ref.table}' has no column '${col}'` });
+            if (!srcCols.includes(col)) issues.push({ path, message: `The masterdata '${ref.table}' has no column '${col}'.` });
           // the picked row's other columns, in row scope as <column>_<source column> — the same
           // rule a parameter's options domain gets, and bound by the same declaration order.
           for (const col of derivedColumns(ref, srcCols)) inRow.add(derivedKey(c.key, col));
@@ -293,18 +293,19 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
     checkLookups(t.basisExpr, `tables[${i}].basisExpr`);
     const declared = new Set(t.columns.map((c) => c.key));
     if (!t.columns.some((c) => c.key === QTY_COL && c.type === "number"))
-      issues.push({ path: `tables[${i}]`, message: `an items table needs a number column '${QTY_COL}'` });
+      issues.push({ path: `tables[${i}]`, message: `The item grid needs a number field '${QTY_COL}' — it sets each line's quantity.` });
     t.columns.forEach((c, j) => {
       if (RESERVED_ITEM_COLS.has(c.key))
         issues.push({
           path: `tables[${i}].columns[${j}].key`,
-          message: `'${c.key}' is the grid's own cost/price column and cannot be declared`,
+          message: `The grid already shows each line's ${c.key} — pick another key.`,
         });
     });
     for (const [col, target] of Object.entries(t.map ?? {})) {
-      if (!declared.has(col)) issues.push({ path: `tables[${i}].map`, message: `unknown column '${col}'` });
+      if (!declared.has(col)) issues.push({ path: `tables[${i}].map`, message: `The B1 line mapping still names '${col}', which this grid no longer has.` });
       if (RESERVED_LINE_FIELDS.has(target))
-        issues.push({ path: `tables[${i}].map`, message: `'${target}' is set by the price split and cannot be mapped` });
+        // per column, so the dialog can show it on that column's own field
+        issues.push({ path: `tables[${i}].map.${col}`, message: `Confire fills ${target} from the price split — map this field to another one.` });
     }
   });
 

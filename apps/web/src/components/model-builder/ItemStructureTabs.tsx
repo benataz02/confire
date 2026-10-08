@@ -33,6 +33,7 @@ const BOM_COLUMNS: ListColumn[] = [
 const ROUTING_COLUMNS: ListColumn[] = [
   { key: "n", label: "#", width: 48 },
   { key: "resource", label: "Resource" },
+  { key: "desc", label: "Description" },
   { key: "condition", label: "Condition" },
   { key: "setupMin", label: "Setup (min)" },
   { key: "runMinPerUnit", label: "Run / unit (min)" },
@@ -87,6 +88,11 @@ export function ItemStructureTab({ draft, update, issues, tables }: Props) {
     resource: (o, i) => (
       <Input style={{ width: "100%" }} value={o.resource} placeholder="e.g. SAW-01"
         onInput={(e) => setOp(i, { resource: e.target.value })} />
+    ),
+    // Plain text, like the BOM's: what the salesperson reads next to the operation.
+    desc: (o, i) => (
+      <Input style={{ width: "100%" }} value={o.desc ?? ""} placeholder="what this operation does"
+        onInput={(e) => setOp(i, { desc: e.target.value || undefined })} />
     ),
     condition: (_, i) => opCell(i, "condition", true, "always runs when empty"),
     setupMin: (_, i) => opCell(i, "setupMin"),

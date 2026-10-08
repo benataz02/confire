@@ -25,6 +25,8 @@ describe("computeOutputs", () => {
     expect(coatOp.runMinPerUnit).toBeCloseTo(3.2);
     expect(coatOp.totalMin).toBeCloseTo(350);
     expect(coatOp.cost).toBeCloseTo(350);
+    expect(coatOp.ratePerHour).toBeCloseTo(60);
+    expect(coatOp.desc).toBe("");
     expect(o.laborPerUnit).toBeCloseTo(4.1);
 
     expect(o.unitCost).toBeCloseTo(5.38);

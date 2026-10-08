@@ -107,6 +107,8 @@ export const BomLineZ = z.object({
 export const OperationZ = z.object({
   id: z.string(),
   resource: z.string(),
+  // Plain text, not an expression, like BomLineZ.desc: what the operation does, for the salesperson.
+  desc: z.string().optional(),
   condition: z.string().optional(),
   setupMin: z.string(), // expr, minutes per batch
   runMinPerUnit: z.string(), // expr, minutes per unit

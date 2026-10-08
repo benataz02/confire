@@ -282,12 +282,12 @@ describe("checkModel", () => {
 
   test("a table key colliding with a parameter", () => {
     const m: ModelDef = { ...model, tables: [{ ...holes, key: "material" }], structure: base.structure };
-    expect(msgs(m)).toContain("table key 'material' collides with an existing key");
+    expect(msgs(m)).toContain("A parameter or computed value is already called 'material'.");
   });
 
   test("an aggregate colliding with a computed value", () => {
     const m: ModelDef = { ...model, computed: [...model.computed, { key: "holes_size", expr: "1" }] };
-    expect(msgs(m)).toContain("aggregate 'holes_size' collides with an existing key");
+    expect(msgs(m)).toContain("Formulas would get 'holes_size' from this table, but that name is already taken — rename the table or the field.");
   });
 
   test("a cell formula referencing a later column of its own table", () => {
@@ -309,7 +309,7 @@ describe("checkModel", () => {
 
   test("a map target the price split owns", () => {
     const m: ModelDef = { ...model, tables: [holes, { ...parts, map: { code: "ItemCode" } }] };
-    expect(msgs(m)).toContain("'ItemCode' is set by the price split and cannot be mapped");
+    expect(msgs(m)).toContain("Confire fills ItemCode from the price split — map this field to another one.");
   });
 
   test("a basis expression referencing a column the table does not have", () => {
@@ -319,7 +319,7 @@ describe("checkModel", () => {
 
   test("an items table without a number 'quantity' column", () => {
     const m: ModelDef = { ...model, tables: [holes, { ...parts, basisExpr: "1", columns: parts.columns.slice(0, 3) }] };
-    expect(msgs(m)).toContain("an items table needs a number column 'quantity'");
+    expect(msgs(m)).toContain("The item grid needs a number field 'quantity' — it sets each line's quantity.");
   });
 
   test("two items tables", () => {

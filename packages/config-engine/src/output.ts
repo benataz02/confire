@@ -17,9 +17,11 @@ export type BomResult = {
 export type OpResult = {
   id: string;
   resource: string;
+  desc: string;
   setupMin: number;
   runMinPerUnit: number;
   totalMin: number;
+  ratePerHour: number;
   cost: number;
 };
 export type Outputs = {
@@ -70,9 +72,9 @@ export function computeOutputs(
   }
   const ops: OpResult[] = [];
   let laborPerUnit = 0;
-  const pushOp = (id: string, resource: string, setupMin: number, runMinPerUnit: number, rate: number) => {
+  const pushOp = (id: string, resource: string, desc: string, setupMin: number, runMinPerUnit: number, rate: number) => {
     const totalMin = setupMin + runMinPerUnit * batchQty;
-    ops.push({ id, resource, setupMin, runMinPerUnit, totalMin, cost: (totalMin / 60) * rate });
+    ops.push({ id, resource, desc, setupMin, runMinPerUnit, totalMin, ratePerHour: rate, cost: (totalMin / 60) * rate });
     laborPerUnit += ((setupMin / batchQty + runMinPerUnit) / 60) * rate;
   };
   for (const o of model.routing) {
@@ -80,6 +82,7 @@ export function computeOutputs(
     pushOp(
       o.id,
       o.resource,
+      o.desc ?? "",
       numeric(o.setupMin, `routing '${o.id}' setupMin`),
       numeric(o.runMinPerUnit, `routing '${o.id}' runMinPerUnit`),
       numeric(o.ratePerHour, `routing '${o.id}' ratePerHour`),
