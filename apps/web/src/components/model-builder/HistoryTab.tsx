@@ -5,10 +5,10 @@ import {
 } from "@ui5/webcomponents-react";
 import type { Issue, ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
-import { Grid } from "../../shared/list-report/Grid.tsx";
+import { Grid, GridForm } from "../../shared/list-report/Grid.tsx";
 import type { ListColumn } from "../../shared/types.ts";
 import { issueFor } from "./useDraftModel.ts";
-import { GridForm, positions, useEditGrid } from "./useEditGrid.tsx";
+import { DeleteRows, useEditGrid } from "./useEditGrid.tsx";
 import { MasterdataQuerySelect } from "./MasterdataQuerySelect.tsx";
 
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
@@ -104,9 +104,8 @@ export function HistoryTab({ draft, update, issues }: {
           </FormItem>
         </FormGroup>
       </Form>
-      <GridForm name="Parameter mappings">
+      <GridForm headerText="Parameter mappings">
         <Grid {...mappings} title="Parameter mappings" fill={false} selectionMode="Multiple"
-          noDataText="No mappings. Map model parameters to query columns so similar past configurations can be scored."
           toolbarActions={(sel) => (
             <>
               <Button icon="add" design="Transparent"
@@ -114,14 +113,7 @@ export function HistoryTab({ draft, update, issues }: {
                 onClick={() => setH({ mappings: [...h.mappings, { param: draft.parameters[0]!.key, column: cols[0]!, match: "exact", weight: 1 }] })}>
                 Add mapping
               </Button>
-              <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
-                onClick={() => {
-                  const gone = positions(sel.rows);
-                  sel.clear();
-                  setH({ mappings: h.mappings.filter((_, j) => !gone.has(j)) });
-                }}>
-                Delete
-              </Button>
+              <DeleteRows sel={sel} onDelete={(gone) => setH({ mappings: h.mappings.filter((_, j) => !gone.has(j)) })} />
             </>
           )} />
       </GridForm>

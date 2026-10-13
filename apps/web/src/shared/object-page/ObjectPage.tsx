@@ -198,14 +198,17 @@ export function ObjectPage(p: Templates & {
 
   /** What goes to SAP: the writable fields that differ from the baseline. A cleared text field is
    *  sent as "" (B1 keeps a value it is sent null for); a new document's lines lose their empty
-   *  cells, and a create skips what was never filled. */
+   *  cells (and a line added but never filled goes entirely), and a create skips what was never
+   *  filled. */
   const diffOf = (): Row => {
     const out: Row = {};
     for (const [k, v] of Object.entries(formData)) {
       if (!writable(k) || sameState(v, baseline?.[k])) continue;
       if (isNew && isEmptyValue(v)) continue;
       if (Array.isArray(v))
-        out[k] = (v as Row[]).map((line) => Object.fromEntries(Object.entries(line).filter(([, x]) => !isEmptyValue(x))));
+        out[k] = (v as Row[])
+          .map((line) => Object.fromEntries(Object.entries(line).filter(([, x]) => !isEmptyValue(x))))
+          .filter((line) => Object.keys(line).length);
       else out[k] = v === null && fields[k]?.Type === "string" ? "" : v;
     }
     return out;

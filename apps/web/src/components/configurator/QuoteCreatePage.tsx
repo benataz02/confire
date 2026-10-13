@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Bar, Button, BusyIndicator, MessageStrip } from "@ui5/webcomponents-react";
@@ -23,16 +22,6 @@ import { PageError } from "../../shared/object-page/ObjectPageSkeleton.tsx";
 
 const QUOTATIONS = b1Feature("Quotations")!;
 const LOCKED = ["DocumentLines"];
-const TEMPLATES = {
-  lines: ({ content }: { content: ReactNode }) => (
-    <>
-      <MessageStrip design="Information" hideCloseButton style={{ marginBottom: "0.5rem" }}>
-        Lines and prices come from the configuration's items grid. Change them there.
-      </MessageStrip>
-      {content}
-    </>
-  ),
-};
 
 export function QuoteCreatePage({ projectId }: { projectId: string }) {
   const qc = useQueryClient();
@@ -44,6 +33,15 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
   const meta = useFieldConstraints("Quotations");
   const draft = useQuery({ ...orpc.configs.quoteDraft.queryOptions({ input: { projectId } }), retry: false });
   const backToConfig = () => navigate({ to: "/configs/$id", params: { id: projectId } });
+  // The lines' only editor: the configuration's items grid, on the Configure tab.
+  const tableActions = {
+    lines: () => (
+      <Button icon="edit" design="Transparent"
+        onClick={() => navigate({ to: "/configs/$id", params: { id: projectId }, search: { section: "configure" } })}>
+        Edit in configurator
+      </Button>
+    ),
+  };
   const create = useMutation(orpc.configs.createQuote.mutationOptions());
 
   if (draft.isPending || meta.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
@@ -85,7 +83,7 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
       lockedFields={LOCKED}
       localViews
       createLabel="Create in SAP"
-      sectionTemplates={TEMPLATES}
+      tableActions={tableActions}
       onCancelCreate={backToConfig}
       // The draft carries the commandId it was built from, so the server refuses to post a
       // selection that moved between preview and Create rather than quoting something else.

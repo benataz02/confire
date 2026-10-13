@@ -1,6 +1,6 @@
 import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
-import { Form, FormGroup, FormItem } from "@ui5/webcomponents-react";
-import type { CellTemplate, GridState } from "../../shared/list-report/Grid.tsx";
+import { Button } from "@ui5/webcomponents-react";
+import type { CellTemplate, GridState, Selection } from "../../shared/list-report/Grid.tsx";
 import type { ListColumn, Row } from "../../shared/types.ts";
 
 // Grid over a model array edited in place (BOM, routing, constraints, mappings) — ConfigTable's
@@ -16,30 +16,18 @@ export const positionOf = (row: Row) => row[IDX] as number;
 /** The array positions of the selected rows. */
 export const positions = (rows: Row[]) => new Set(rows.map(positionOf));
 
-/** The FormItem class that holds a table in a `FormGroup colSpan={layout}`, the way ConfiguratorForm
- *  places ConfigTable: the Form lays a group's items in `column-count` columns, so the item breaks
- *  out with `column-span: all` (FormItem's columnSpan is deprecated since UI5 2.23 and does nothing),
- *  and its label part is hidden — the Grid's toolbar names the table. Same rule and style id as
- *  ConfiguratorForm's, so whichever module loads first injects it. */
-const TABLE_ITEM = "confire-table-item";
-if (typeof document !== "undefined" && !document.getElementById(TABLE_ITEM)) {
-  const el = document.createElement("style");
-  el.id = TABLE_ITEM;
-  el.textContent = `.${TABLE_ITEM}{column-span:all}.${TABLE_ITEM}::part(label){display:none}`;
-  document.head.appendChild(el);
-}
-
-// ConfiguratorForm's FORM_PROPS, so a grid sits in the builder the way ConfigTable sits in a section.
-const GRID_FORM = { accessibleMode: "Edit", labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2" } as const;
-
-/** A grid in a Form of its own: one full-width headerless group, as ConfiguratorForm places a table. */
-export function GridForm({ name, children }: { name: string; children: ReactNode }) {
+/** The toolbar's Delete: hands over the selected positions. The selection goes first — row ids are
+ *  positions, so a kept one would land on the rows that moved up. */
+export function DeleteRows({ sel, onDelete }: { sel: Selection; onDelete: (gone: Set<number>) => void }) {
   return (
-    <Form {...GRID_FORM} accessibleName={name}>
-      <FormGroup colSpan={GRID_FORM.layout}>
-        <FormItem className={TABLE_ITEM}>{children}</FormItem>
-      </FormGroup>
-    </Form>
+    <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
+      onClick={() => {
+        const gone = positions(sel.rows);
+        sel.clear();
+        onDelete(gone);
+      }}>
+      Delete
+    </Button>
   );
 }
 

@@ -1,14 +1,16 @@
 import { useMemo, useState } from "react";
 import {
   Bar, Button, CheckBox, Dialog, FlexBox, Form, FormGroup, FormItem, Icon, Input, Label,
-  MessageStrip, MultiComboBox, MultiComboBoxItem, Option, Select, StepInput, Table, TableCell,
-  TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, TextArea,
+  MessageStrip, MultiComboBox, MultiComboBoxItem, Option, Select, StepInput, Text, TextArea,
 } from "@ui5/webcomponents-react";
 import { checkModel, derivedColumns, displayColumns } from "@confire/config-engine";
 import type { LookupRef, ModelDef, Param } from "@confire/config-engine";
+import { Grid, GridForm } from "../../shared/list-report/Grid.tsx";
+import type { ListColumn } from "../../shared/types.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { masterdataRef, modelWithParam, sourceBadge, type TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
+import { DeleteRows, useEditGrid } from "./useEditGrid.tsx";
 
 type Tables = TableCols[];
 
@@ -238,7 +240,7 @@ export function ParamDialog({ draft, tables, initial, isNew, onOk, onCancel }: {
           </Form>
         ) : null}
 
-        {/* Outside the Form: a list of records is a table, and a table is not a form field. */}
+        {/* A Form of its own (GridForm): a list of records is a table, and a table is not a form field. */}
         {manualRef ? (
           <ManualOptions ref_={manualRef} onChange={(ref) => set({ domain: { kind: "options", ref } })} />
         ) : null}
@@ -373,6 +375,9 @@ function SourceRefEditor({ ref_, tables, tried, onChange }: {
   );
 }
 
+// A module constant: useEditGrid rebuilds its cell templates when the columns change.
+const OPTION_COLUMNS: ListColumn[] = [{ key: "value", label: "Value" }, { key: "label", label: "Label" }];
+
 function ManualOptions({ ref_, onChange }: {
   ref_: Extract<LookupRef, { source: "manual" }>;
   onChange: (r: LookupRef) => void;
@@ -389,37 +394,27 @@ function ManualOptions({ ref_, onChange }: {
       }),
     });
 
+  const grid = useEditGrid(ref_.options, OPTION_COLUMNS, {
+    value: (o, i) => (
+      <Input style={W} value={String(o.value ?? "")} accessibleName="Value"
+        onInput={(e) => setOpt(i, { value: e.target.value })} />
+    ),
+    label: (o, i) => (
+      <Input style={W} value={o.label ?? ""} placeholder="optional" accessibleName="Label"
+        onInput={(e) => setOpt(i, { label: e.target.value })} />
+    ),
+  });
+
   return (
-    <>
-      <Table accessibleName="Options" noDataText="No options yet." rowActionCount={1} overflowMode="Popin"
-        onRowActionClick={(e) => {
-          const i = Number((e.detail.row as unknown as HTMLElement).dataset.idx);
-          onChange({ ...ref_, options: ref_.options.filter((_, j) => j !== i) });
-        }}
-        headerRow={
-          <TableHeaderRow>
-            <TableHeaderCell minWidth="10rem"><span>Value</span></TableHeaderCell>
-            <TableHeaderCell minWidth="10rem"><span>Label</span></TableHeaderCell>
-          </TableHeaderRow>
-        }>
-        {ref_.options.map((o, i) => (
-          <TableRow key={i} rowKey={`opt-${i}`} data-idx={String(i)}
-            actions={<TableRowAction icon="delete" text="Remove option" />}>
-            <TableCell>
-              <Input value={String(o.value ?? "")} accessibleName="Value"
-                onInput={(e) => setOpt(i, { value: e.target.value })} />
-            </TableCell>
-            <TableCell>
-              <Input value={o.label ?? ""} placeholder="optional" accessibleName="Label"
-                onInput={(e) => setOpt(i, { label: e.target.value })} />
-            </TableCell>
-          </TableRow>
-        ))}
-      </Table>
-      <div>
-        <Button icon="add"
-          onClick={() => onChange({ ...ref_, options: [...ref_.options, { value: "" }] })}>Add option</Button>
-      </div>
-    </>
+    <GridForm headerText="Options">
+      <Grid {...grid} title="Options" fill={false} selectionMode="Multiple"
+        toolbarActions={(sel) => (
+          <>
+            <Button icon="add" design="Transparent"
+              onClick={() => onChange({ ...ref_, options: [...ref_.options, { value: "" }] })}>Add option</Button>
+            <DeleteRows sel={sel} onDelete={(gone) => onChange({ ...ref_, options: ref_.options.filter((_, j) => !gone.has(j)) })} />
+          </>
+        )} />
+    </GridForm>
   );
 }

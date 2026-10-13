@@ -4,14 +4,14 @@ import {
   StepInput, Text,
 } from "@ui5/webcomponents-react";
 import { checkModel, ITEM_COL, QTY_COL, RESERVED_LINE_FIELDS, type LookupRef, type ModelDef, type TableColumn, type TableDef } from "@confire/config-engine";
-import { Grid } from "../../shared/list-report/Grid.tsx";
+import { Grid, GridForm } from "../../shared/list-report/Grid.tsx";
 import { useFieldConstraints, type EntityConstraints } from "../../shared/metadata.ts";
 import type { ListColumn } from "../../shared/types.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { NONE, PAIRS, W, lbl, optValue } from "./ParamDialog.tsx";
 import { masterdataRef, modelWithTable, rowVars, sourceBadge, type TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
-import { GridForm, positions, useEditGrid } from "./useEditGrid.tsx";
+import { positions, useEditGrid } from "./useEditGrid.tsx";
 
 /** What is wrong with a table or field key, in the author's words — formulas read both by key. */
 const keyProblem = (key: string) =>
@@ -204,7 +204,7 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
       }
     >
 
-      <Form {...PAIRS} accessibleMode="Edit" >
+      <Form {...PAIRS} accessibleMode="Edit" headerText="Definition">
         <FormGroup accessibleName="Definition" columnSpan={2}>
           <FormItem labelContent={lbl("Key", "The name formulas use. This table contributes <key>_count and one sum per numeric column to every expression scope.", true)}>
             <Input value={t.key} style={W} valueState={tableKeyError ? "Negative" : "None"}
@@ -248,9 +248,10 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
         ) : null}
       </Form>
 
-      <GridForm name="Fields">
+      <GridForm headerText="Fields">
+        {/* Not an empty-state hint: the one place "no fields" (which blocks Save) is reported. */}
         <Grid {...grid} title="Fields" fill={false} selectionMode="Multiple"
-          noDataText={tried ? "Add at least one field: the salesperson needs something to fill in." : "No fields yet"}
+          noDataText={tried ? "Add at least one field: the salesperson needs something to fill in." : undefined}
           toolbarActions={(sel) => {
             // Locked fields stay put — their key is read-only for the same reason.
             const gone = new Set([...positions(sel.rows)].filter((j) => !locked.has(t.columns[j]?.key ?? "")));

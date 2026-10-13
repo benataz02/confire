@@ -4,12 +4,12 @@ import {
   MultiComboBox, MultiComboBoxItem, Option, Select, Text,
 } from "@ui5/webcomponents-react";
 import type { Constraint, Issue, ModelDef, ResolvedLookups, Val } from "@confire/config-engine";
-import { Grid } from "../../shared/list-report/Grid.tsx";
+import { Grid, GridForm } from "../../shared/list-report/Grid.tsx";
 import type { ListColumn } from "../../shared/types.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
-import { GridForm, positionOf, positions, useEditGrid } from "./useEditGrid.tsx";
+import { DeleteRows, positionOf, positions, useEditGrid } from "./useEditGrid.tsx";
 import { confirm } from "../confirm.ts";
 
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
@@ -34,7 +34,8 @@ const TABLE_COLUMNS: ListColumn[] = [
 export const parseLit = (s: string): Cell =>
   s === "" ? null : s === "true" ? true : s === "false" ? false : !Number.isNaN(Number(s)) ? Number(s) : s;
 
-// Each table in a Form of its own (GridForm); the Grid toolbar names it, with its row count.
+// Each table in a Form of its own (GridForm): the Form titles it, the Grid toolbar repeats the
+// name with its row count.
 export function RulesTab({ draft, update, issues, lookups, tables = [] }: {
   draft: ModelDef; update: Update; issues: Issue[]; lookups?: ResolvedLookups; tables?: TableCols[];
 }) {
@@ -79,9 +80,8 @@ export function RulesTab({ draft, update, issues, lookups, tables = [] }: {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <GridForm name="Expression constraints">
+      <GridForm headerText="Expression constraints">
         <Grid {...exprGrid} title="Expression constraints" fill={false} selectionMode="Multiple"
-          noDataText='No expression constraints. Add rules like coating != "none" that must hold across the configuration.'
           toolbarActions={(sel) => (
             <>
               <Button icon="add" design="Transparent"
@@ -89,20 +89,12 @@ export function RulesTab({ draft, update, issues, lookups, tables = [] }: {
                 Add constraint
               </Button>
               {/* Expression rows are a single line, so they delete without a prompt. */}
-              <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
-                onClick={() => {
-                  const gone = new Set([...positions(sel.rows)].map((p) => exprs[p]!.i));
-                  sel.clear();
-                  removeCs(gone);
-                }}>
-                Delete
-              </Button>
+              <DeleteRows sel={sel} onDelete={(gone) => removeCs(new Set([...gone].map((p) => exprs[p]!.i)))} />
             </>
           )} />
       </GridForm>
-      <GridForm name="Combination tables">
+      <GridForm headerText="Combination tables">
         <Grid {...tableGrid} title="Combination tables" fill={false} selectionMode="Multiple"
-          noDataText="No combination tables. Add one to allow or forbid specific combinations of parameter values."
           onRowClick={(row) => setEditingTable(tablesC[positionOf(row)]!.i)}
           toolbarActions={(sel) => (
             <>
@@ -215,22 +207,15 @@ function ComboTableDialog({ draft, lookups, value, onOk, onCancel }: {
         </FormGroup>
       </Form>
       {c.params.length >= 2 ? (
-        <GridForm name="Combination rows">
-          <Grid {...grid} title="Combination rows" fill={false} selectionMode="Multiple" noDataText="No rows yet."
+        <GridForm headerText="Combination rows">
+          <Grid {...grid} title="Combination rows" fill={false} selectionMode="Multiple"
             toolbarActions={(sel) => (
               <>
                 <Button icon="add" design="Transparent"
                   onClick={() => setCLocal((x) => ({ ...x, rows: [...x.rows, x.params.map(() => null)] }))}>
                   Add row
                 </Button>
-                <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
-                  onClick={() => {
-                    const gone = positions(sel.rows);
-                    sel.clear();
-                    setCLocal((x) => ({ ...x, rows: x.rows.filter((_, j) => !gone.has(j)) }));
-                  }}>
-                  Delete
-                </Button>
+                <DeleteRows sel={sel} onDelete={(gone) => setCLocal((x) => ({ ...x, rows: x.rows.filter((_, j) => !gone.has(j)) }))} />
               </>
             )} />
         </GridForm>

@@ -228,8 +228,9 @@ generates a page.
 - Deviations from Beas, on purpose: `Editable`/`writable` come from the server; `resolveColumns`
   fills grid columns from metadata; `fixedFilters: FilterCond[]` replaces raw `defaultFilter`
   OData; the value-help dialog persists one layout per user (`cfl:<source>`), not named views;
-  the editable lines grid is the ui5 `Table` (AnalyticalTable re-creates cells under the cursor);
-  lines are editable on a *new* document only.
+  document lines are `Grid` in both modes, editable cells as stable per-column templates
+  (`EditGrid`; a new Cell component remounts the input under the cursor) with Add line / Delete
+  instead of an auto-added draft row; lines are editable on a *new* document only.
 
 One rule worth knowing before editing `compileList`: a **filter** — or a **search field** — naming
 a missing field is an error (dropping it would show *more* rows than asked for), a **select** or

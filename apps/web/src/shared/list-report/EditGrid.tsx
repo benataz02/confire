@@ -1,19 +1,18 @@
-import { useRef } from "react";
+import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import {
-  Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction,
-} from "@ui5/webcomponents-react";
+import { Button } from "@ui5/webcomponents-react";
 import { FormField } from "../object-page/FormField.tsx";
 import { allExist } from "../cfl/existence.ts";
+import { Grid, type CellTemplate, type GridState, type Selection } from "./Grid.tsx";
 import type { FormField as Field, ListColumn, Row } from "../types.ts";
 
-// beas-grid in edit mode (§3.4, value-help doc §8): array data only, every editable column an
-// inline FormField, and a draft row at the end that becomes a real one on its first edit
-// (edit.autoAddRow). Used for a new document's lines.
+// A document's lines (§3.4, value-help doc §8) on Grid: read mode is Grid's own formatted cells and
+// links; edit mode (a new document's lines) makes every editable column an inline FormField, with
+// Add line / Delete on the toolbar instead of Beas' auto-added draft row.
 //
-// The UI5 Table, not AnalyticalTable: AnalyticalTable re-creates its cells when the data array
-// changes, and an input re-created under the cursor loses focus on every keystroke — the ui5 Table
-// keeps its rows (the pattern ItemStructureTabs and ConfigTable already use).
+// Typing in an AnalyticalTable keeps focus only while each column's Cell component survives the
+// edit — ConfigTable's and useEditGrid's pattern: templates built once per column set, reading this
+// render's lines through a ref.
 
 /** Cell errors are keyed `<row index>:<column key>`. */
 export const cellKey = (i: number, col: string) => `${i}:${col}`;
@@ -52,60 +51,86 @@ export async function validateCflCells(qc: QueryClient, columns: ListColumn[], r
   return errors;
 }
 
-/** Is a line still the untouched draft? Every editable cell empty. */
-const isBlankRow = (r: Row) => Object.values(r).every((v) => v === null || v === undefined || v === "");
+/** An editor owns its keys: AnalyticalTable's keyboard navigation takes Arrow/Home/End off any
+ *  focused cell and Enter selects the row (useEditGrid's rule). */
+const ownKeys = (e: KeyboardEvent) => e.stopPropagation();
 
-export function EditGrid({ columns, rows, onChange, readOnly, errors }: {
+/** The array position each grid row carries, so a cell and the selection name the line they mean. */
+const IDX = "#i";
+
+export function EditGrid({ title, columns, rows, onChange, readOnly, errors, toolbarActions }: {
+  title?: string;
   columns: ListColumn[];
   rows: Row[];
   onChange: (rows: Row[]) => void;
   readOnly?: boolean;
   errors?: Record<string, string>;
+  /** the caller's buttons, ahead of Add/Delete */
+  toolbarActions?: (selection: Selection) => ReactNode;
 }) {
-  const visible = columns.filter((c) => !c.hidden);
-  // The draft row: always one empty line after the real ones while editing.
-  const shown = readOnly ? rows : [...rows, {}];
+  // The page re-applies its layout on every keystroke, which hands over a new column array whose
+  // shown columns are the same objects. Keep the last array while they are: Grid builds one Cell
+  // component per column off it, and a new one remounts the input under the cursor.
+  const prev = useRef<ListColumn[]>([]);
+  const shownCols = columns.filter((c) => !c.hidden);
+  const visible = shownCols.length === prev.current.length && shownCols.every((c, i) => c === prev.current[i])
+    ? prev.current
+    : (prev.current = shownCols);
+
+  const gridColumns = useMemo(() => visible.map((c) => ({ ...c, sortable: false })), [visible]);
+  const state = useMemo<GridState>(() => ({ columns: visible.map((c) => c.key), sortBy: [], groupBy: [] }), [visible]);
+  // `errors` too: the templates read them through the ref, and only new data re-renders the cells.
+  const data = useMemo(() => rows.map((r, i) => ({ ...r, [IDX]: i })), [rows, errors]);
+
   // A value-help pick sets the key and then patches the line from the row in the same tick, before
   // the parent re-renders — so each edit builds on the last one, not on the rows this render got.
-  const latest = useRef(rows);
-  latest.current = rows;
+  const latest = useRef({ rows, errors, onChange });
+  latest.current = { rows, errors, onChange };
   const setCell = (i: number, patch: Row) => {
-    const cur = latest.current;
-    const next = [...cur];
-    next[i] = { ...(cur[i] ?? {}), ...patch };
-    latest.current = next.filter((r, j) => j < cur.length || !isBlankRow(r));
-    onChange(latest.current);
+    const next = [...latest.current.rows];
+    next[i] = { ...next[i], ...patch };
+    latest.current.rows = next;
+    latest.current.onChange(next);
   };
 
+  // Stable for the column set (see `visible`); this render's lines and errors come through the ref.
+  const cellTemplates = useMemo(
+    () => (readOnly ? undefined : Object.fromEntries(visible.filter(cellEditable).map((c): [string, CellTemplate] => [c.key, (row) => {
+      const i = row[IDX] as number;
+      const r = latest.current.rows[i] ?? {};
+      return (
+        <div style={{ width: "100%" }} onKeyDown={ownKeys}>
+          <FormField inline field={asField(c)} value={r[c.key]} formData={r} editable
+            error={latest.current.errors?.[cellKey(i, c.key)]}
+            onChange={(v) => setCell(i, { [c.key]: v })}
+            onRowSelect={c.onRowSelect ? (picked) => setCell(i, c.onRowSelect!(picked)) : undefined} />
+        </div>
+      );
+    }]))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visible, readOnly],
+  );
+
   return (
-    <Table overflowMode="Popin" noDataText="No lines." rowActionCount={readOnly ? 0 : 1}
-      onRowActionClick={(e) => {
-        const i = Number((e.detail.row as unknown as HTMLElement).dataset.idx);
-        if (i < rows.length) onChange(rows.filter((_, j) => j !== i));
-      }}
-      headerRow={
-        <TableHeaderRow>
-          {visible.map((c) => (
-            <TableHeaderCell key={c.key} minWidth={c.width ? `${c.width}px` : "8rem"}>
-              <span>{c.label ?? c.key}</span>
-            </TableHeaderCell>
-          ))}
-        </TableHeaderRow>
-      }>
-      {shown.map((r, i) => (
-        <TableRow key={i} rowKey={`line-${i}`} data-idx={String(i)}
-          actions={readOnly || i >= rows.length ? undefined : <TableRowAction icon="delete" text="Delete line" />}>
-          {visible.map((c) => (
-            <TableCell key={c.key}>
-              <FormField inline field={asField(c)} value={r[c.key]} formData={r}
-                editable={!readOnly && cellEditable(c)}
-                error={errors?.[cellKey(i, c.key)]}
-                onChange={(v) => setCell(i, { [c.key]: v })}
-                onRowSelect={c.onRowSelect ? (row) => setCell(i, c.onRowSelect!(row)) : undefined} />
-            </TableCell>
-          ))}
-        </TableRow>
-      ))}
-    </Table>
+    <Grid title={title} columns={gridColumns} state={state} rows={data} fill={false} showSettings={false}
+      exportName={title} noDataText="No lines" cellTemplates={cellTemplates}
+      selectionMode={readOnly ? "None" : "Multiple"}
+      toolbarActions={readOnly && !toolbarActions ? undefined : (sel) => (
+        <>
+          {toolbarActions?.(sel)}
+          {readOnly ? null : (
+            <>
+              <Button icon="add" design="Transparent" onClick={() => onChange([...rows, {}])}>Add line</Button>
+              <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
+                onClick={() => {
+                  const gone = new Set(sel.rows.map((r) => r[IDX] as number));
+                  // row ids are positions, so a kept selection would land on the lines that moved up
+                  sel.clear();
+                  onChange(rows.filter((_, j) => !gone.has(j)));
+                }}>Delete</Button>
+            </>
+          )}
+        </>
+      )} />
   );
 }

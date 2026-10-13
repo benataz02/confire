@@ -2,12 +2,12 @@ import { Button, Input } from "@ui5/webcomponents-react";
 import type { Issue, ModelDef } from "@confire/config-engine";
 import { CflField } from "../../shared/cfl/CflField.tsx";
 import { cfl } from "../../shared/cfl/cfl-configs.ts";
-import { Grid } from "../../shared/list-report/Grid.tsx";
+import { Grid, GridForm } from "../../shared/list-report/Grid.tsx";
 import type { ListColumn } from "../../shared/types.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
-import { GridForm, positions, useEditGrid } from "./useEditGrid.tsx";
+import { DeleteRows, useEditGrid } from "./useEditGrid.tsx";
 
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
 type Props = { draft: ModelDef; update: Update; issues: Issue[]; tables?: TableCols[] };
@@ -46,7 +46,8 @@ const ROUTING_COLUMNS: ListColumn[] = [
 const LITERAL = /^\s*"([^"\\]*)"\s*$/;
 const asCode = (expr: string): string | undefined => LITERAL.exec(expr)?.[1];
 
-// Each table in a Form of its own (GridForm); the Grid toolbar names it, with its row count.
+// Each table in a Form of its own (GridForm): the Form titles it, the Grid toolbar repeats the
+// name with its row count.
 export function ItemStructureTab({ draft, update, issues, tables }: Props) {
   const setBom = (i: number, patch: Partial<ModelDef["bom"][number]>) =>
     update((d) => ({ ...d, bom: d.bom.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
@@ -102,9 +103,8 @@ export function ItemStructureTab({ draft, update, issues, tables }: Props) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <GridForm name="BOM">
+      <GridForm headerText="BOM">
         <Grid {...bom} title="BOM" fill={false} selectionMode="Multiple"
-          noDataText="No BOM lines. Pick the item; its unit price is read from the model's price list on every calculation."
           toolbarActions={(sel) => (
             <>
               <Button icon="add" design="Transparent"
@@ -114,20 +114,12 @@ export function ItemStructureTab({ draft, update, issues, tables }: Props) {
                 }))}>
                 Add line
               </Button>
-              <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
-                onClick={() => {
-                  const gone = positions(sel.rows);
-                  sel.clear();
-                  update((d) => ({ ...d, bom: d.bom.filter((_, j) => !gone.has(j)) }));
-                }}>
-                Delete
-              </Button>
+              <DeleteRows sel={sel} onDelete={(gone) => update((d) => ({ ...d, bom: d.bom.filter((_, j) => !gone.has(j)) }))} />
             </>
           )} />
       </GridForm>
-      <GridForm name="Routing">
+      <GridForm headerText="Routing">
         <Grid {...routing} title="Routing" fill={false} selectionMode="Multiple"
-          noDataText="No operations. Times are minutes, rate is cost per hour; setup is amortized over the batch."
           toolbarActions={(sel) => (
             <>
               <Button icon="add" design="Transparent"
@@ -137,14 +129,7 @@ export function ItemStructureTab({ draft, update, issues, tables }: Props) {
                 }))}>
                 Add operation
               </Button>
-              <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
-                onClick={() => {
-                  const gone = positions(sel.rows);
-                  sel.clear();
-                  update((d) => ({ ...d, routing: d.routing.filter((_, j) => !gone.has(j)) }));
-                }}>
-                Delete
-              </Button>
+              <DeleteRows sel={sel} onDelete={(gone) => update((d) => ({ ...d, routing: d.routing.filter((_, j) => !gone.has(j)) }))} />
             </>
           )} />
       </GridForm>

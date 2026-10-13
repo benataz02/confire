@@ -10,6 +10,7 @@ import {
 } from "@confire/config-engine";
 import { CflField } from "../../shared/cfl/CflField.tsx";
 import { cfl, type QueryScope } from "../../shared/cfl/cfl-configs.ts";
+import { TABLE_ITEM } from "../../shared/list-report/Grid.tsx";
 import { ConfigTable } from "./ConfigTable.tsx";
 import type { ItemMoney } from "./itemMoney.ts";
 import { displayValue, rowTable, setEntry } from "./formHelpers.ts";
@@ -69,18 +70,9 @@ function formSections(model: ModelDef): { key: string; title: string; icon?: str
 // labelSpan 12 everywhere = labels on top of their fields (natively left-aligned), field takes the full column.
 const FORM_PROPS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2", headerLevel: "H5" } as const;
 
-// A table group holds exactly one FormItem, and it must not be one column wide. Form.css lays a
-// group's items with `column-count: <the group's colSpan>`, so the group spans the whole Form
-// (colSpan mirrors FORM_PROPS.layout) and the item breaks out of that column flow with the native
-// `column-span: all`. FormItem's own `columnSpan` is deprecated since UI5 2.23 and does nothing,
-// so the CSS is the only lever. The label part is hidden: ConfigTable's Grid toolbar names the
-// table (with its row count) and carries Add/Delete.
-if (typeof document !== "undefined" && !document.getElementById("confire-table-item")) {
-  const el = document.createElement("style");
-  el.id = "confire-table-item";
-  el.textContent = `.confire-table-item{column-span:all}.confire-table-item::part(label){display:none}`;
-  document.head.appendChild(el);
-}
+// A table group holds exactly one FormItem, and it must not be one column wide: the group spans
+// the whole Form (colSpan mirrors FORM_PROPS.layout) and the item breaks out of the column flow
+// (TABLE_ITEM). ConfigTable's Grid toolbar names the table, with its row count, and carries Add/Delete.
 
 export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, section, disabled, readOnly, querySource, tables, onTablesChange, batches, onBatchesChange, itemMoney, itemBatch, onItemBatchChange }: {
   model: ModelDef;
@@ -372,7 +364,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
             const def = defOf(g.table)!;
             return (
               <FormGroup key={`${g.table}:${gi}`} colSpan={FORM_PROPS.layout}>
-                <FormItem className="confire-table-item">
+                <FormItem className={TABLE_ITEM}>
                   <ConfigTable def={def} rows={tableRows[g.table] ?? []}
                     scopeVars={prop.values} lookups={lk} querySource={querySource}
                     disabled={disabled || !onTablesChange} readOnly={readOnly}

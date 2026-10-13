@@ -3,14 +3,14 @@ import { Form, FormGroup, FormItem, Input, Label, MessageStrip } from "@ui5/webc
 import type { Issue, ModelDef } from "@confire/config-engine";
 import { CflField } from "../../shared/cfl/CflField.tsx";
 import { cfl } from "../../shared/cfl/cfl-configs.ts";
-
-/** Label mode: the price list's name shows, its number is what the model stores. */
-const PRICE_LIST = { dialogConfig: cfl.priceLists() };
-const ITEM = { dialogConfig: cfl.items() };
 import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { MasterdataQuerySelect } from "./MasterdataQuerySelect.tsx";
+
+/** Label mode: the price list's name shows, its number is what the model stores. */
+const PRICE_LIST = { dialogConfig: cfl.priceLists() };
+const ITEM = { dialogConfig: cfl.items() };
 
 export function SettingsTab({ draft, update, issues, tables, tried }: {
   draft: ModelDef;

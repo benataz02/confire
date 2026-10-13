@@ -3,6 +3,7 @@ import {
   Form, FormGroup, FormItem, Label, ObjectPageSection, ObjectPageSubSection, type ObjectPageSectionPropTypes,
 } from "@ui5/webcomponents-react";
 import { EditGrid } from "../list-report/EditGrid.tsx";
+import { GridForm, type Selection } from "../list-report/Grid.tsx";
 import { evalDyn } from "../validation.ts";
 import { FormField } from "./FormField.tsx";
 import type { FieldTemplate, FormContext, FormField as Field, Group, Row, Section, SectionTemplate } from "../types.ts";
@@ -19,6 +20,8 @@ export type Templates = {
   groupTemplates?: Record<string, SectionTemplate>;
   subsectionTemplates?: Record<string, SectionTemplate>;
   fieldTemplates?: Record<string, FieldTemplate>;
+  /** buttons in a table section's grid toolbar, keyed by section id */
+  tableActions?: Record<string, (selection: Selection) => ReactNode>;
 };
 
 export type SectionContext = FormContext & {
@@ -95,8 +98,12 @@ export function objectPageSection(s: Section, ctx: SectionContext): ReactElement
     content = (
       <>
         {ctx.errors[key] ? <Label style={{ color: "var(--sapNegativeTextColor)" }}>{ctx.errors[key]}</Label> : null}
-        <EditGrid columns={s.table.columns} rows={rows} readOnly={!editable} errors={ctx.cellErrors[key]}
-          onChange={(next) => ctx.updateField(key, next)} />
+        {/* a Form of its own for the card padding a field section gets from formOf */}
+        <GridForm name={s.label}>
+          <EditGrid title={s.label} columns={s.table.columns} rows={rows} readOnly={!editable} errors={ctx.cellErrors[key]}
+            toolbarActions={ctx.templates.tableActions?.[s.id]}
+            onChange={(next) => ctx.updateField(key, next)} />
+        </GridForm>
       </>
     );
   } else if (s.fields?.length || s.groups?.length) {

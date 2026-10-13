@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import {
-  AnalyticalTable, AnalyticalTableHooks, Bar, Button, IllustratedMessage, Title,
+  AnalyticalTable, AnalyticalTableHooks, Bar, Button, Form, FormGroup, FormItem, IllustratedMessage, Title,
   type AnalyticalTableCellInstance, type AnalyticalTableColumnDefinition, type AnalyticalTablePropTypes,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
@@ -72,6 +72,34 @@ async function exportXlsx(title: string, columns: ListColumn[], rows: Row[]) {
     [header, ...rows.map((r) => columns.map((c) => cell(r[c.key], c)))],
     { columns: columns.map((c) => ({ width: Math.max(10, Math.round((c.width ?? 140) / 7)) })) },
   ).toFile(`${title || "export"}.xlsx`);
+}
+
+/** The FormItem class that holds a table in a `FormGroup colSpan={layout}` (GridForm, and
+ *  ConfiguratorForm's table groups): the Form lays a group's items in `column-count` columns, so the
+ *  item breaks out with `column-span: all` (FormItem's columnSpan is deprecated since UI5 2.23 and
+ *  does nothing), and its label part is hidden — the Form's title or the Grid's toolbar names the
+ *  table. */
+export const TABLE_ITEM = "confire-table-item";
+if (typeof document !== "undefined" && !document.getElementById(TABLE_ITEM)) {
+  const el = document.createElement("style");
+  el.id = TABLE_ITEM;
+  el.textContent = `.${TABLE_ITEM}{column-span:all}.${TABLE_ITEM}::part(label){display:none}`;
+  document.head.appendChild(el);
+}
+
+// ConfiguratorForm's FORM_PROPS, so a grid sits in a page the way ConfigTable sits in a section.
+const GRID_FORM = { accessibleMode: "Edit", labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2", headerLevel: "H5" } as const;
+
+/** A grid in a Form of its own: one full-width group, as ConfiguratorForm places a table. With
+ *  `headerText` the Form titles the table; without, `name` only labels it (a section already does). */
+export function GridForm({ name, headerText, children }: { name?: string; headerText?: string; children: ReactNode }) {
+  return (
+    <Form {...GRID_FORM} headerText={headerText} accessibleName={name}>
+      <FormGroup colSpan={GRID_FORM.layout}>
+        <FormItem className={TABLE_ITEM}>{children}</FormItem>
+      </FormGroup>
+    </Form>
+  );
 }
 
 export function Grid({
@@ -313,7 +341,10 @@ export function Grid({
           additionalEmptyRowsCount={hasMore ? 5 : 0}
           infiniteScrollThreshold={40}
           onLoadMore={onLoadMore}
-          NoDataComponent={NoData}
+          // Sized to its rows, the body is three rows high and an illustration overflows it: an empty
+          // one shows the table's own plain line of noDataText, or nothing.
+          NoDataComponent={fill ? NoData : undefined}
+          noDataText={noDataText ?? ""}
           sortable
           groupable={columns.some((c) => c.groupable)}
           onSort={handleSort}
