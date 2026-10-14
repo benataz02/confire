@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import type { QueryClient } from "@tanstack/react-query";
 import { createORPCClient, onError } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
@@ -31,18 +30,11 @@ export const orpc = createTanstackQueryUtils(client);
 export const meQuery = orpc.me.queryOptions({ staleTime: Infinity });
 
 /**
- * Owner/admin of the user's one org: whether sap_connection exists.
- * FORBIDDEN means a member/client — they belong on the tenant, not the agent form.
+ * The apex dispatcher's answer: the user's workspace and whether it still needs an agent (null =
+ * no company yet). Uncached on purpose — a company or an agent row can appear between visits to
+ * the apex, and a cached answer would send the user back to a step they already finished.
  */
-export async function sapGate(qc: QueryClient): Promise<"connected" | "setup" | "member"> {
-  try {
-    const r = await qc.fetchQuery({ ...orpc.sap.connection.queryOptions(), retry: false, staleTime: 0 });
-    return r.connected ? "connected" : "setup";
-  } catch (e) {
-    if ((e as { code?: string }).code === "FORBIDDEN") return "member";
-    throw e;
-  }
-}
+export const lobbyQuery = orpc.sap.lobby.queryOptions({ staleTime: 0, retry: false });
 
 /**
  * The tenant's B1 local currency, for every money figure in the app. It rides on `me` rather than

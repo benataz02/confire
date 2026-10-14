@@ -29,7 +29,7 @@ Internal users accept requests, then quote them, send them back for changes, or 
 | D1 | Deployment | A separate SPA (`apps/portal`) and a separate server process, both from this repo and image, sharing Postgres. |
 | D2 | Domain | One purchased domain (`confire.ai` or similar), split into **sibling zones**: internal on `app.confire.ai` + `<slug>.app.confire.ai`, portal on `portal.confire.ai` + `<slug>.portal.confire.ai`. `confire.ai` itself is the marketing site. |
 | D3 | Identity | **One shared `user` table.** The same email can be internal at supplier A and external at supplier B, but never both inside the same tenant. |
-| D4 | Customer org | A customer company is a Better Auth **organization in the portal instance**: one per tenant × CardCode. The company owner can invite colleagues. |
+| D4 | Customer org | A customer company is a **plain Confire table** (`portal_company`, not a Better Auth organization): one per tenant × CardCode. The company owner can invite colleagues. |
 | D5 | Auto-join | A verified sign-in whose email domain is registered to a company on this tenant **joins that company as `viewer`** (the lowest role). Free-mail domains are blocked. A Microsoft email counts as verified only on the `xms_edov` claim (§4.4). |
 | D6 | Sign-in | Email + password (with verification), Google, Microsoft. |
 | D7 | Lead timing | Self-registration creates a **pending application in Confire**. The B1 lead (`CardType = cLid`) is created **only when an internal user approves it**. |
@@ -70,8 +70,8 @@ portal.confire.ai               portal apex: login / signup / supplier lobby    
   and **one** Microsoft callback per zone, and no wildcard redirect URIs, which providers don't allow
   anyway.
 - **`tenant.ts` stays the only place a host is parsed.** It already takes `baseDomain` as a
-  parameter; the portal process passes `PORTAL_BASE_DOMAIN`. Dev: `app.lvh.me` / `portal.lvh.me`
-  (`*.lvh.me` resolves at any depth). The tenant is still the internal `organization` row, looked up
+  parameter; the portal process passes `PORTAL_BASE_DOMAIN`. Dev: `app.confire.localhost` /
+  `portal.confire.localhost` (`*.localhost` resolves at any depth). The tenant is still the internal `organization` row, looked up
   by slug.
 - **One Caddy, two wildcard sites** (`*.app.{$DOMAIN}`, `*.portal.{$DOMAIN}`) plus the two apexes,
   each proxying to its own upstream. Both certificates are wildcards, so both use the DNS challenge
@@ -100,33 +100,47 @@ direct dependencies" rule out of the picture for server code.
 |---|---|---|
 | Process | `confire-server` | `confire-portal` |
 | `user`, `account`, `verification` | shared | shared (same tables) |
-| `session` | `session` | **`portal_session`** (`session.modelName`) |
+| `session` | `session` | **`portal_session`** (`session.modelName: "portalSession"`) |
 | Cookie | prefix `better-auth`, `.app.<domain>` | prefix `confire-portal`, `.portal.<domain>` |
-| `organization` plugin | manufacturer = org; `member` = employees only (the `client` role is gone) | **customer company** = org → `portal_company`, `portal_member`, `portal_invitation` |
+| `organization` plugin | manufacturer = org; `member` = employees only (the `client` role is gone); `organizationLimit: 1` | **none**: companies, members and invitations are Confire tables (§4.2) |
 | Email + password | `requireEmailVerification: true` (D13) | `requireEmailVerification: true` |
 | Social | Google, Microsoft | Google, Microsoft (same OAuth clients, second callback URL) |
-| `organizationLimit` | 1 (unchanged) | unlimited across tenants; one company per user **per tenant** (§4.2) |
-| Plugins | `organization` | `organization` (+ access control), `captcha` (Turnstile) |
+| Plugins | `organization` | `captcha` (Turnstile) |
 
 Separate session tables mean a portal session can never authenticate an internal request, even
 when replayed by hand. Users and linked accounts are shared on purpose: one password and one Google
 link per person. The cost is that a password reset on either side changes it for both.
 
-Schema files: the portal instance gets its own `better-auth-generate` target writing
-`packages/db/src/schema/portal-auth.ts`, which `schema/index.ts` re-exports. Its output must contain
-only `portal_*` tables. The shared `user`, `account` and `verification` stay owned by `auth.ts`.
+**No organization plugin on the portal.** Its endpoints assume a signed-in member acting on their
+own org, while the portal's main writer is an internal user acting on a customer's. Verified on
+Better Auth 1.7.7: `invite-member` requires the caller's own membership with `invitation:create`;
+`createOrganization` drops every `input: false` field from its body (even from `auth.api`) and needs
+an owner who already exists; `acceptInvitation` runs `beforeAcceptInvitation` but not
+`beforeAddMember`. Every rule would be routed around, and ~15 `/api/auth/organization/*` endpoints
+would still be live on the portal apex, waiting to be locked down. The rules live in Confire's SQL
+instead, next to the membership join that already is the tenant boundary.
 
-### 4.2 Portal organization = customer company
+Schema: `packages/db/src/schema/portal.ts`, hand-written and re-exported from `schema/index.ts`. It
+holds `portalSession` (Better Auth's `session` columns, without `activeOrganizationId`) and the
+company tables in §4.2. The portal instance has **no generate target**: it adds one core table, and
+the shared `user`, `account` and `verification` stay owned by the generated `auth.ts`. The drizzle
+adapter resolves `schema[modelName]`, so `modelName` is the **export key** (`portalSession`), not the
+SQL table name.
 
-- `schema.organization.additionalFields`: `tenantId`, `cardCode`, `cardType` (`cCustomer` | `cLid`),
-  all `input: false`, so only the server writes them. There is a **unique index on (`tenantId`,
-  `cardCode`)**.
+### 4.2 Customer company: plain tables
 
-  `ponytail: the composite unique index is hand-added to the generated portal-auth.ts; re-add it
-  after every regenerate. Move it into a non-generated schema file if that ever bites.`
-- `allowUserToCreateOrganization: false`. Companies are created server-side only, on an internal
-  invite or when an application is approved.
-- Roles via `createAccessControl`:
+- `portal_company (id, tenantId, cardCode, cardName, cardType)` with **unique (tenantId, cardCode)**;
+  `cardType` is `cCustomer` | `cLid`. Rows are created server-side only, on an internal invite or
+  when an application is approved. Nothing a portal user can call creates, renames or deletes one.
+- `portal_member (companyId, userId, tenantId, role)`: **primary key (companyId, userId)** and
+  **unique (tenantId, userId)**. The second index *is* "one company per user per tenant". It is a
+  constraint rather than a hook, so a concurrent join and accept cannot both win. `tenantId` is
+  copied from the company for exactly that index.
+- `portal_invitation (id, tenantId, companyId, email, role, invitedBy, status, expiresAt)`, where
+  `status` is `pending | accepted | canceled`. The random `id` goes in the link, but holding it is not
+  enough: acceptance also checks the email (below).
+- Roles are the `role` column. The §4.3 builders are the whole permission check; there is no
+  access-control config.
 
   | Role | Can |
   |---|---|
@@ -139,14 +153,22 @@ only `portal_*` tables. The shared `user`, `account` and `verification` stay own
   written **only by internal users**: on approval (the applicant's verified email domain) or from the
   Companies page. A company cannot claim a domain itself, because a lead that registered a competitor's
   domain would capture that competitor's staff.
-- `organizationHooks.beforeAddMember` enforces "one company per user per tenant" and "not an
-  internal member of the same tenant". The internal invite acceptance gets the mirror check.
-- `organizationHooks.beforeCreateInvitation`: if the inviter is a portal owner, the email domain must
-  be one of the company's domains (D24). Internal admins create invitations through a server call,
-  which skips this rule.
-- `requireEmailVerificationOnInvitation: true`.
+- **One insert path for members.** `addPortalMember(tx, …)` is the only code that writes
+  `portal_member` (auto-join, invitation accept, application approval). It refuses an internal
+  member of the same tenant ("you work for this supplier") and maps a unique violation on
+  (tenantId, userId) to "already in a company here". On the internal side, the mirror check goes in
+  the internal instance's `beforeAcceptInvitation`, because `acceptInvitation` does not run
+  `beforeAddMember` (verified on 1.7.7).
+- **Invitations.** `company.members.invite` (portal owner) requires the email's domain to be one of
+  the company's domains (D24). `portalCompanies.invite` (internal admin) skips that rule. Both insert
+  the row and mail the link through `Mailer`. `onboarding.accept` checks what Better Auth's
+  `acceptInvitation` checks (pending, not expired, `email` equal to the user's email ignoring case,
+  `user.emailVerified`), plus company `tenantId` = host tenant. Then, in one transaction, a guarded
+  `UPDATE … SET status = 'accepted' WHERE status = 'pending'` and `addPortalMember`. A double click
+  loses at the guard.
 - **The tenant boundary is still host → tenant → membership join**, as in `orpc/base.ts` today.
-  `session.activeOrganizationId` is never trusted for authorization.
+  There is no active-company state: the host picks the tenant, and the unique index leaves at most
+  one company there.
 
 ### 4.3 Portal procedure builders
 
@@ -169,14 +191,16 @@ user with no company there. `portal.onboarding.join` then:
 1. requires `user.emailVerified`;
 2. rejects free-mail domains (a list in code);
 3. looks up `portal_company_domain (hostTenant, domain(user.email))`;
-4. calls `auth.api.addMember({ role: "viewer" })` and writes a `joined` audit event.
+4. calls `addPortalMember` with role `viewer` (§4.2) and writes a `joined` audit event.
 
 If nothing matches, the user sees the application form (§5.2) when self-registration is enabled
 for the tenant, and an "ask your supplier for an invite" page when it is not.
 
 Microsoft: in multi-tenant Entra apps the `email` claim is not guaranteed verified. The Microsoft
 provider's `mapProfileToUser` sets `emailVerified` from the optional `xms_edov` claim, which the
-Entra app registration has to emit. Google's `email_verified` is used as-is.
+Entra app registration has to emit. Google's `email_verified` is used as-is. Since 1.7 a Microsoft
+account is keyed on the `oid` claim and a token without one is rejected: the mapper can change
+`emailVerified` (it is spread after the built-in value), never the identity a link attaches to.
 
 ### 4.5 Other plugins
 
@@ -193,11 +217,10 @@ Entra app registration has to emit. Google's `email_verified` is used as-is.
    `BusinessPartners`, customers **and** leads; the old `CardType === "cCustomer"` check is relaxed)
    and enters an email.
 2. The server re-reads the BP from SAP, finds or creates `portal_company` for (tenant, CardCode),
-   optionally registers the email's domain (a checkbox, never for free-mail), and creates an
-   `owner` invitation. `sendInvitationEmail` mails
-   `https://<slug>.portal.<domain>/accept/<invitationId>`.
-3. The invitee signs in or signs up (D6) on the apex, comes back, and accepts. They become the
-   company owner.
+   optionally registers the email's domain (a checkbox, never for free-mail), and inserts an
+   `owner` invitation. `Mailer` sends `https://<slug>.portal.<domain>/accept/<invitationId>`.
+3. The invitee signs in or signs up (D6) on the apex, comes back, and accepts (`onboarding.accept`,
+   §4.2). They become the company owner.
 
 ### 5.2 Self-registration (tenant setting `selfRegistration`, default off)
 
@@ -229,9 +252,10 @@ New tables (all with `tenantId text` like the rest, no FK to `organization`):
 
 | Table | Columns (key ones) | Notes |
 |---|---|---|
-| `portal_session` | Better Auth core | `session.modelName` |
-| `portal_company` | BA org + `tenantId`, `cardCode`, `cardType` | unique (tenantId, cardCode) |
-| `portal_member`, `portal_invitation` | BA org plugin | |
+| `portal_session` | Better Auth `session` columns, hand-written | `session.modelName: "portalSession"`; no `tenantId` |
+| `portal_company` | `id`, `tenantId`, `cardCode`, `cardName`, `cardType` | unique (tenantId, cardCode) |
+| `portal_member` | `companyId`, `userId`, `tenantId`, `role` (owner\|buyer\|viewer), `createdAt` | PK (companyId, userId); unique (tenantId, userId) |
+| `portal_invitation` | `id`, `tenantId`, `companyId`, `email`, `role`, `invitedBy`, `status` (pending\|accepted\|canceled), `expiresAt`, `createdAt` | `id` is the link token |
 | `portal_company_domain` | `tenantId`, `domain`, `companyId`, `addedBy`, `addedAt` | PK (tenantId, domain) |
 | `portal_application` | `id`, `tenantId`, `userId`, `status` (pending\|approved\|rejected), `form jsonb` ({header, addresses, contact}), `decidedBy`, `decidedAt`, `reason`, `companyId`, `cardCode` | one pending per (tenant, user) |
 | `portal_settings` | `tenantId` PK, `settings jsonb` | one document loaded and saved whole (CLAUDE.md convention): `selfRegistration`, `onboarding: { fields: [{ key, required }], addresses, contact }`, `leadSeries`, `docFields: { [entity]: { header: [], lines: [] } }`, `branding: { displayName, accent, logoFileId }`, `notifyFallback: string[]`, `replyTo` |
@@ -343,7 +367,7 @@ their own `userId`). There are no shared views on the portal side.
 | Namespace | Procedures | Builder |
 |---|---|---|
 | root | `me` (session + tenant + `member` / `onboarding` / `pending` state + branding) | session |
-| `onboarding` | `join`, `apply`, `application`, `formSchema` | session |
+| `onboarding` | `join`, `invitation`, `accept`, `apply`, `application`, `formSchema` | session |
 | `company` | `get`, `members.list`, `members.invite`, `members.setRole`, `members.remove`, `domains.list` | member / owner |
 | `models` | `list` (published, with `portalPricing`) | member |
 | `projects` | `rows`, `get`, `create`, `update`, `remove`, `run`, `lookups`, `queryPage`, `submit`, `withdraw`, `resubmit`, `respondQuote` | member (read) / buyer (write) |
@@ -422,7 +446,7 @@ Each phase ends type-checked per project, with its tests green, and is usable on
 |---|---|
 | P0 Foundations | Host split (`APP_BASE_DOMAIN=app.…`, `PORTAL_BASE_DOMAIN`), Caddy two-zone config, `Mailer` seam + internal email verification, **delete the old portal** (§14). |
 | P1 `packages/ui` | Move `apps/web/src/shared/*` into `packages/ui` with a data-source seam replacing the `scope: "portal"` switches; `apps/web` behaves identically. |
-| P2 Portal skeleton | Portal entrypoint, portal Better Auth instance (`portal_session`, org plugin mapping, access control, captcha), builders, `me`, apex login / signup / lobby, `apps/portal` shell with NavigationLayout and branding. |
+| P2 Portal skeleton | Portal entrypoint, portal Better Auth instance (`portal_session`, captcha), `schema/portal.ts`, builders, `me`, apex login / signup / lobby, `apps/portal` shell with NavigationLayout and branding. |
 | P3 Invites & companies | Internal Companies page + invite, accept page, company page (colleague invites on domains), domains, auto-join. |
 | P4 Projects & lifecycle | Status migration, `config_project_event`, portal projects + configurator + pricing modes, internal Requests inbox + Accept / Send back / Decline, revisions with diff, Timeline (events + doc chain), comments. |
 | P5 Documents | Portal List Report / Object Page for the four entities, `docFields` settings + denylist, print, project link. |
@@ -436,7 +460,7 @@ them. Record any verified error strings in code comments, as the repo already do
 
 | Phase | Check |
 |---|---|
-| P2 | Better Auth 1.7: `session.modelName` + organization `schema.*.modelName` + `additionalFields` together on a shared `user` table; `inferOrgAdditionalFields` on the client; generating a second instance into `portal-auth.ts` without touching the `user`, `account` and `verification` it shares. |
+| P2 | Better Auth 1.7.7: a second instance with `session.modelName: "portalSession"` over the hand-written table, sharing `user`, `account` and `verification`; sign-in on one zone creates a row only in its own session table. |
 | P2 | `xms_edov` arrives in the Microsoft profile once configured as an optional claim. |
 | P4 | `createQuote` for a `cLid` BP: B1 accepts a Sales Quotation for a lead (and which later documents it refuses until conversion). |
 | P6 | BP POST with `Series` and no `CardCode` returns the generated `CardCode`; `BPAddresses` and `ContactEmployees` are accepted inline in the same POST; `U_CF_Key` on OCRD (alphanumeric, 64) filters as on quotations. |

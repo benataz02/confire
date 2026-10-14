@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { authClient, sessionQuery } from "../auth-client.ts";
-import { meQuery, sapGate } from "../orpc.ts";
+import { sessionQuery } from "../auth-client.ts";
+import { lobbyQuery, meQuery } from "../orpc.ts";
 import { apexUrl, currentSlug, hardRedirect, tenantUrl } from "../lib/tenant.ts";
 import { AppShell } from "../components/AppShell.tsx";
 
@@ -13,17 +13,12 @@ export const Route = createFileRoute("/_authed")({
     if (!slug) {
       // Apex lobby: no tenant to resolve, so this is the one branch that reads the session
       // directly. A user belongs to exactly one company, so there is nothing to pick:
-      // it's their workspace, or onboarding to create/join one.
+      // it's their workspace, or onboarding to create one or connect its agent.
       const data = await context.queryClient.ensureQueryData(sessionQuery);
       if (!data?.session) throw redirect({ to: "/login" });
-      // Deliberately uncached: a membership can appear between visits to the apex, and a
-      // cached list would miss it.
-      const orgs = (await authClient.organization.list()).data ?? [];
-      const org = orgs[0];
-      if (!org) throw redirect({ to: "/onboarding" });
-      const gate = await sapGate(context.queryClient);
-      if (gate === "setup") throw redirect({ to: "/onboarding" });
-      return hardRedirect(tenantUrl(org.slug));
+      const lobby = await context.queryClient.fetchQuery(lobbyQuery);
+      if (!lobby || lobby.needsAgent) throw redirect({ to: "/onboarding" });
+      return hardRedirect(tenantUrl(lobby.slug));
     }
 
     // Tenant subdomain: one call covers signed-in, member-of-this-workspace, and role.

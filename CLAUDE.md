@@ -13,7 +13,11 @@ Everything runs on **Bun** (no npm — see `package.json` workspaces).
 docker compose up -d db                 # Postgres 17 on :5432 (dev runs server/web with bun)
 bun install
 bun run db:push                         # drizzle-kit push — the ONLY schema migration 
+bun run auth:generate                   # regenerate schema/auth.ts after a Better Auth config change
 ```
+
+The Better Auth CLI is the `auth` package (`@better-auth/cli` stopped at 1.4). Its version is pinned
+in `apps/server/package.json` and moves together with `better-auth`.
 
 There is no lint step. Type-checking is the gate, and it is **per project** — there is no root
 tsconfig that covers everything, so a change can typecheck in one package and break another:
@@ -57,8 +61,13 @@ compose that check:
 | `userProcedure` | member of this workspace; a leftover `client` role stays forbidden |
 | `adminProcedure` | admin/owner — model builder, settings |
 
-Dev uses `lvh.me` (not `localhost`): a `.lvh.me` cookie is shared across subdomains, a
-`localhost` one is not. Prod uses Caddy wildcard subdomains → one server.
+Dev uses `confire.localhost` (the code's default, so no env is needed): `*.localhost` resolves to
+loopback with no hosts file, and the second label matters — the browser treats bare `localhost` as a
+TLD, so a `.localhost` cookie never reaches `acme.localhost`. Not `.local` either: that is mDNS, and
+nss-mdns answers it before `/etc/hosts` is read. Prod is `APP_BASE_DOMAIN=app.confire.ai` (the
+marketing apex stays outside the cookie zone): Caddy wildcard subdomains → one server, with one
+wildcard cert via the Cloudflare DNS challenge (`CADDY_TLS=cloudflare`; see `docker-compose.yml`).
+Google rejects `http://*.localhost` OAuth redirect URIs, so dev signs in with email/password.
 
 ## `packages/config-engine` — the calculation core
 

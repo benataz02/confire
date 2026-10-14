@@ -19,16 +19,17 @@ const MicrosoftGlyph = () => (
   </svg>
 );
 
-// Always the apex dispatcher — it is what knows whether this user has a company yet.
-const callbackURL = "/";
+// Always the apex dispatcher — it is what knows whether this user has a company yet. Failures go
+// to login, which reads ?error=; without this Better Auth strands the user on its own error page.
+const urls = { callbackURL: "/", errorCallbackURL: "/login" };
 
 export function SocialButtons() {
   return (
     <div className="auth-social">
-      <Button onClick={() => authClient.signIn.social({ provider: "google", callbackURL })}>
+      <Button onClick={() => authClient.signIn.social({ provider: "google", ...urls })}>
         <span className="auth-social__label"><GoogleGlyph /> Continue with Google</span>
       </Button>
-      <Button onClick={() => authClient.signIn.social({ provider: "microsoft", callbackURL })}>
+      <Button onClick={() => authClient.signIn.social({ provider: "microsoft", ...urls })}>
         <span className="auth-social__label"><MicrosoftGlyph /> Continue with Microsoft</span>
       </Button>
     </div>

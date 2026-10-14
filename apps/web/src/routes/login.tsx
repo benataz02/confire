@@ -7,21 +7,25 @@ import { AuthLayout } from "../components/AuthLayout.tsx";
 import { SocialButtons } from "../components/SocialButtons.tsx";
 import { apexUrl, hardRedirect, isApex, safeRedirect } from "../lib/tenant.ts";
 
+// Social sign-in failures come back as ?error=<code> (SocialButtons' errorCallbackURL).
+// account_not_linked is the one people hit: a password account already owns the email, and
+// Better Auth won't attach a provider to an unverified one — which is every password account
+// until a mailer exists. Don't "fix" that: it's what stops someone pre-registering a colleague's
+// address and inheriting their Google login.
+const oauthMessage = (code: string) =>
+  code === "account_not_linked"
+    ? "This email already has a password account. Sign in with your password."
+    : `Sign-in with that provider didn't complete (${code}).`;
+
 export const Route = createFileRoute("/login")({
-  validateSearch: (s: Record<string, unknown>): { redirect?: string; email?: string } => ({
+  validateSearch: (s: Record<string, unknown>): { redirect?: string; error?: string } => ({
     redirect: typeof s.redirect === "string" ? s.redirect : undefined,
-    email: typeof s.email === "string" ? s.email : undefined,
+    error: typeof s.error === "string" ? s.error : undefined,
   }),
   // Auth lives on the apex only. Already signed in? Hand off to the apex dispatcher (`/`),
-  // or straight back to `redirect` (e.g. an invite accept link) when it's safe to do so.
-  beforeLoad: async ({ context, search }) => {
-    if (!isApex()) {
-      const q = new URLSearchParams();
-      if (search.redirect) q.set("redirect", search.redirect);
-      if (search.email) q.set("email", search.email);
-      const qs = q.toString();
-      return hardRedirect(apexUrl(`/login${qs ? `?${qs}` : ""}`));
-    }
+  // or straight back to `redirect` (the page a 401 bounced from, see orpc.ts) when it's safe.
+  beforeLoad: async ({ context, search, location }) => {
+    if (!isApex()) return hardRedirect(apexUrl(`/login${location.searchStr}`));
     const data = await context.queryClient.ensureQueryData(sessionQuery);
     if (data?.session) {
       const to = safeRedirect(search.redirect);
@@ -34,8 +38,8 @@ export const Route = createFileRoute("/login")({
 
 function Login() {
   const navigate = useNavigate();
-  const { redirect: redirectTo, email: emailFromInvite } = Route.useSearch();
-  const [email, setEmail] = useState(emailFromInvite ?? "");
+  const { redirect: redirectTo, error: oauthError } = Route.useSearch();
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const queryClient = useQueryClient();
@@ -63,12 +67,13 @@ function Login() {
   });
 
   const submit = () => email && password && signIn.mutate({ email, password });
+  const error = signIn.error?.message ?? (oauthError ? oauthMessage(oauthError) : null);
 
   return (
     <AuthLayout>
       <h2 className="auth-h1">Welcome back</h2>
       <p className="auth-sub">Sign in to your Confire workspace.</p>
-      {signIn.error ? <MessageStrip design="Negative" hideCloseButton>{signIn.error.message}</MessageStrip> : null}
+      {error ? <MessageStrip design="Negative" hideCloseButton>{error}</MessageStrip> : null}
       <label className="auth-field">
         <span>Email</span>
         <Input type="Email" value={email} onInput={(e) => setEmail(e.target.value)} />
@@ -88,7 +93,7 @@ function Login() {
       <div className="auth-or">or</div>
       <SocialButtons />
       <p className="auth-alt">
-        New to Confire? <Link to="/signup" search={{ redirect: redirectTo, email: emailFromInvite }}>Create an account</Link>
+        New to Confire? <Link to="/signup" search={{ redirect: redirectTo }}>Create an account</Link>
       </p>
     </AuthLayout>
   );

@@ -1,10 +1,10 @@
 import { db, member, organization } from "@confire/db";
 import type { ModelDef } from "@confire/config-engine";
 import { auth } from "../src/auth.ts";
+import { baseDomain } from "../src/tenant.ts";
 
 export { call } from "@orpc/server";
 
-const BASE = process.env.APP_BASE_DOMAIN ?? "lvh.me";
 const uid = () => crypto.randomUUID().slice(0, 8);
 
 export async function makeTenant(): Promise<{ tenantId: string; slug: string }> {
@@ -38,7 +38,7 @@ export async function makeUser(
 }
 
 export const tenantHeaders = (slug: string, cookie?: string): Headers =>
-  new Headers({ "x-forwarded-host": `${slug}.${BASE}`, ...(cookie ? { cookie } : {}) });
+  new Headers({ "x-forwarded-host": `${slug}.${baseDomain}`, ...(cookie ? { cookie } : {}) });
 
 // Agent-free model (no query masterdata, no query domains): runs entirely from manual options.
 export const TEST_MODEL: ModelDef = {

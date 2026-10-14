@@ -1,6 +1,6 @@
 /**
  * Bootstrap a dev tenant from an empty database: a user + the org whose slug IS the
- * subdomain. Sign in at http://lvh.me:5173, land on http://<slug>.lvh.me:5173.
+ * subdomain. Sign in at http://confire.localhost:5173, land on http://<slug>.confire.localhost:5173.
  *
  *   bun run seed:dev [slug] [email] [password]
  *
@@ -13,7 +13,7 @@ import { auth } from "../apps/server/src/auth.ts";
 
 const slug = process.env.SLUG ?? "alumigraf";
 const email = process.env.EMAIL ?? `dev@${slug}.test`;
-const password = process.env.PASSWORD ?? "dev1234";
+const password = process.env.PASSWORD ?? "dev12345";
 
 async function main(): Promise<void> {
   const [existingUser] = await db
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
     console.log(`org   ${slug} (created)`);
   }
 
-  console.log(`\nsign in: http://lvh.me:5173  ->  http://${slug}.lvh.me:5173`);
+  console.log(`\nsign in: http://confire.localhost:5173  ->  http://${slug}.confire.localhost:5173`);
 }
 
 await main();

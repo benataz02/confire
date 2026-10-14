@@ -7,21 +7,33 @@ import { sapConnectionExists, upsertSapConnection } from "../../seed-agent.ts";
 import { encryptSecret } from "../../crypto.ts";
 
 /** Apex onboarding has no tenant Host — the user's one org is the tenant. */
-async function ownedTenant(userId: string): Promise<string> {
+async function oneMembership(userId: string) {
   const [row] = await db
-    .select({ tenantId: organization.id, role: member.role })
+    .select({ tenantId: organization.id, slug: organization.slug, role: member.role })
     .from(member)
     .innerJoin(organization, eq(organization.id, member.organizationId))
     .where(eq(member.userId, userId))
     .limit(1);
-  if (!row || (row.role !== "owner" && row.role !== "admin")) throw new ORPCError("FORBIDDEN");
+  return row;
+}
+
+const isAdmin = (role: string) => role === "owner" || role === "admin";
+
+async function ownedTenant(userId: string): Promise<string> {
+  const row = await oneMembership(userId);
+  if (!row || !isAdmin(row.role)) throw new ORPCError("FORBIDDEN");
   return row.tenantId;
 }
 
 export const sapRouter = {
-  connection: sessionProcedure.handler(async ({ context }) => ({
-    connected: await sapConnectionExists(await ownedTenant(context.user.id)),
-  })),
+  // The apex dispatcher's one call: which workspace, and does it still need an agent? null = no
+  // company yet. Only an owner/admin can connect one, so a member — or a leftover client, whom the
+  // tenant shell turns away — goes straight to the tenant whether or not the row exists.
+  lobby: sessionProcedure.handler(async ({ context }) => {
+    const row = await oneMembership(context.user.id);
+    if (!row) return null;
+    return { slug: row.slug, needsAgent: isAdmin(row.role) && !(await sapConnectionExists(row.tenantId)) };
+  }),
   connect: sessionProcedure
     .input(z.object({
       agentUrl: z.url(),

@@ -240,20 +240,6 @@
 .auth-alt a { color: #0a6ed1; text-decoration: none; font-weight: 600; }
 .auth-alt a:hover { text-decoration: underline; }
 
-.auth-invite-list { display: flex; flex-direction: column; gap: 0.6rem; }
-.auth-invite {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.65rem 0.8rem;
-  border: 1px solid #e2e6ee;
-  border-radius: 10px;
-  background: #fff;
-}
-.auth-invite b { font-weight: 600; color: #0c1326; }
-.auth-invite small { color: #6b7280; }
-
 /* ---------- motion / reveal ---------- */
 .reveal {
   opacity: 0;

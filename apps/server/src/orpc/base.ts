@@ -2,9 +2,7 @@ import { os, ORPCError } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
 import { db, member, organization } from "@confire/db";
 import { auth } from "../auth.ts";
-import { tenantSlugFromHost } from "../tenant.ts";
-
-export const baseDomain = process.env.APP_BASE_DOMAIN ?? "lvh.me";
+import { baseDomain, tenantSlugFromHost } from "../tenant.ts";
 
 // Initial context provided by the Hono adapter on every request.
 export interface InitialContext {

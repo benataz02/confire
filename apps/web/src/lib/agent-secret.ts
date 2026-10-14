@@ -6,8 +6,8 @@ export function generateAgentSecret(): string {
   return btoa(bin).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
-/** Select a visible input, then copy. The Clipboard API is gone on http://lvh.me (not a secure
- *  context), so execCommand on a selected input is the path that works in dev. */
+/** Select a visible input, then copy. The Clipboard API is gone outside a secure context (plain
+ *  http on a LAN IP), so execCommand on a selected input is the path that works everywhere. */
 export function copyInput(input: HTMLInputElement | null | undefined): boolean {
   if (!input) return false;
   input.focus();

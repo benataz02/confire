@@ -1,5 +1,13 @@
 # Dev:  docker compose up -d db          (just Postgres; run server/web with bun)
 # Prod: docker compose --profile full up  (Postgres + server + Caddy wildcard subdomains)
+#
+# A real domain is .env only, no code change:
+#   APP_BASE_DOMAIN=app.confire.ai    tenants on <slug>.app.confire.ai; the SPA is rebuilt for it
+#   CADDY_TLS=cloudflare              + CLOUDFLARE_API_TOKEN (Zone:Zone:Read + Zone:DNS:Edit)
+#   BETTER_AUTH_SECRET=...            openssl rand -base64 32
+# Cloudflare DNS: A records for app.confire.ai and *.app.confire.ai, DNS only (grey cloud) —
+# Caddy terminates TLS, and Cloudflare's free edge cert does not cover a two-level wildcard.
+# OAuth consoles: redirect URI https://app.confire.ai/api/auth/callback/{google,microsoft}.
 services:
   db:
     image: postgres:17
@@ -7,8 +15,9 @@ services:
       POSTGRES_USER: confire
       POSTGRES_PASSWORD: confire
       POSTGRES_DB: confire
+    # Loopback only: the dev server reaches it on localhost, the prod server over the compose network.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -23,24 +32,44 @@ services:
       dockerfile: apps/server/Dockerfile
       # Subdomain base domain is baked into the SPA at build time.
       args:
-        VITE_APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-confire.local}
+        VITE_APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-confire.localhost}
     environment:
       DATABASE_URL: postgres://confire:confire@db:5432/confire
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev-secret-change-me-min-32-chars-long}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
-      APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-confire.local}
+      # Fail fast: a placeholder here would sign cookies AND (via crypto.ts' fallback) encrypt SAP
+      # secrets with a string that is in git. Better Auth only rejects its own default secret.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET (openssl rand -base64 32)}
+      # The apex as the browser sees it (Caddy, HTTPS) — the OAuth redirect URI and the
+      # `.${APP_BASE_DOMAIN}` session cookie are both derived from it, so :3000 would break both.
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-https://${APP_BASE_DOMAIN:-confire.localhost}}
+      APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-confire.localhost}
+      # Unset leaves that sign-in button dead: Better Auth only logs a warning at boot.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
       PORT: 3000
     depends_on:
       db:
         condition: service_healthy
+    # Loopback only: Caddy is the public door. A public :3000 would serve plain HTTP and take a
+    # client-supplied X-Forwarded-Host (orpc/base.ts prefers it) that Caddy otherwise overwrites.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     profiles: ["full"]
 
   caddy:
-    image: caddy:2
+    # Stock Caddy ships no DNS providers; the wildcard cert's DNS challenge needs one compiled in.
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM caddy:2-builder AS build
+        RUN xcaddy build --with github.com/caddy-dns/cloudflare
+        FROM caddy:2
+        COPY --from=build /usr/bin/caddy /usr/bin/caddy
     environment:
-      APP_DOMAIN: ${APP_BASE_DOMAIN:-confire.local}
+      APP_DOMAIN: ${APP_BASE_DOMAIN:-confire.localhost}
+      CADDY_TLS: ${CADDY_TLS:-internal}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
     ports:
       - "80:80"
       - "443:443"

@@ -1,20 +1,26 @@
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins";
 import { db } from "@confire/db/client";
 import * as schema from "@confire/db/schema";
+import { baseDomain, tenantSlugFromHost } from "./tenant.ts";
 
-const baseDomain = process.env.APP_BASE_DOMAIN ?? "lvh.me";
+/** The web's SLUG_RE is UX; this is the gate. Better Auth takes any non-empty slug, and one the host
+ *  parser cannot hand back is a workspace no request can ever reach — with organizationLimit: 1 and
+ *  deletion off, its owner could not start over. */
+const assertSlug = (slug: string | undefined) => {
+  if (slug !== undefined && tenantSlugFromHost(`${slug}.${baseDomain}`, baseDomain) !== slug) {
+    throw new APIError("BAD_REQUEST", { message: "Invalid workspace URL" });
+  }
+};
 
+// secret and baseURL come from BETTER_AUTH_SECRET / BETTER_AUTH_URL, which Better Auth reads itself.
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "pg", schema }),
-  secret: process.env.BETTER_AUTH_SECRET,
-  baseURL: process.env.BETTER_AUTH_URL,
-  emailAndPassword: { 
-    enabled: true,
-		minPasswordLength: 4, // Default is 8, lower it for dev
-		maxPasswordLength: 128,
-  },
+  // Default min length (8) on purpose: there is no dev/prod branch here, so a dev-only floor ships.
+  // Sign-in never checks length, so an existing shorter dev password still logs in.
+  emailAndPassword: { enabled: true },
   socialProviders: {
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",
@@ -30,6 +36,15 @@ export const auth = betterAuth({
       // A user belongs to exactly one company — there is no workspace picker anywhere in the
       // app, so a second one would be unreachable. Better Auth returns FORBIDDEN on create.
       organizationLimit: 1,
+      // No UI deletes a company, and nothing references organization.id by FK — a delete through
+      // /organization/delete would orphan every tenant_id row and free the slug. Off until a real
+      // offboarding flow exists to clean those up.
+      disableOrganizationDeletion: true,
+      // Update too: an admin can rename the slug through /organization/update.
+      organizationHooks: {
+        beforeCreateOrganization: async ({ organization }) => assertSlug(organization.slug),
+        beforeUpdateOrganization: async ({ organization }) => assertSlug(organization.slug),
+      },
       // No seeding hook: every list's Standard view is declared in code (the web features), so a
       // new tenant has nothing to be given.
     }),
@@ -41,7 +56,7 @@ export const auth = betterAuth({
   // Auth lives on the apex, but the app POSTs (sign-out) from every tenant subdomain, so those
   // origins need trusting; baseURL's own origin is trusted automatically. A pattern without
   // `://` is matched against URL.host — which includes the port — hence both forms: prod
-  // (`acme.confire.app`) and dev (`acme.lvh.me:5173`). Anything outside the base domain — a LAN
+  // (`acme.app.confire.ai`) and dev (`acme.confire.localhost:5173`). Anything outside the base domain — a LAN
   // IP to open the app from a phone — is a per-machine fact, so it comes from
   // APP_TRUSTED_ORIGINS (comma-separated) and never from a literal in here.
   trustedOrigins: [

@@ -1,14 +1,22 @@
 # Wildcard subdomain -> single server. The subdomain IS the tenant: the server resolves
 # it from the (preserved) Host header and validates it against membership (orpc/base.ts).
-# `tls internal` issues a local CA cert for *.confire.local dev.
-# ponytail: for a real domain in prod, swap `tls internal` for a DNS-challenge cert
-#           (wildcard certs can't use the HTTP challenge) — one directive change.
-*.{$APP_DOMAIN} {
+#
+# CADDY_TLS picks where certificates come from (compose defaults it to `internal`):
+#   internal    Caddy's local CA, for running the full stack on confire.localhost.
+#   cloudflare  One wildcard cert through the ACME DNS challenge (a wildcard cannot use the HTTP
+#               challenge). Not a cert per tenant: every issued cert lands in the public
+#               Certificate Transparency logs, so per-tenant certs would publish the customer list.
+(tls-internal) {
 	tls internal
-	reverse_proxy server:3000
 }
 
-{$APP_DOMAIN} {
-	tls internal
+(tls-cloudflare) {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+}
+
+{$APP_DOMAIN}, *.{$APP_DOMAIN} {
+	import tls-{$CADDY_TLS}
 	reverse_proxy server:3000
 }

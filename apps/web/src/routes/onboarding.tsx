@@ -1,10 +1,10 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Input, Button, MessageStrip, BusyIndicator, CheckBox } from "@ui5/webcomponents-react";
+import { Input, Button, MessageStrip, CheckBox } from "@ui5/webcomponents-react";
 import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
-import { orpc, sapGate } from "../orpc.ts";
+import { lobbyQuery, orpc } from "../orpc.ts";
 import {
   apexUrl, BASE_DOMAIN, hardRedirect, isApex, isReserved, SLUG_RE, toSlug, tenantUrl,
 } from "../lib/tenant.ts";
@@ -17,16 +17,13 @@ export const Route = createFileRoute("/onboarding")({
     if (!isApex()) return hardRedirect(apexUrl("/onboarding"));
     const data = await context.queryClient.ensureQueryData(sessionQuery);
     if (!data?.session) throw redirect({ to: "/login" });
-    const org = ((await authClient.organization.list()).data ?? [])[0];
-    if (!org) return { agentSetupSlug: null as string | null };
-    const gate = await sapGate(context.queryClient);
-    if (gate === "setup") return { agentSetupSlug: org.slug };
-    return hardRedirect(tenantUrl(org.slug));
+    const lobby = await context.queryClient.fetchQuery(lobbyQuery);
+    if (!lobby) return { agentSetupSlug: null as string | null };
+    if (lobby.needsAgent) return { agentSetupSlug: lobby.slug };
+    return hardRedirect(tenantUrl(lobby.slug));
   },
   component: Onboarding,
 });
-
-type Invite = { id: string; organizationId: string; organizationName: string };
 
 const DEFAULT_AGENT_URL = "http://localhost:4000";
 const sanitizeSlug = (v: string) => v.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 31);
@@ -62,15 +59,9 @@ function Onboarding() {
   });
   const available = slugValid && avail.data === true;
 
-  // Pending invites addressed to this user's email (no mailer needed — they just appear).
-  const invites = useQuery({
-    queryKey: ["user-invitations"],
-    enabled: step === "company",
-    queryFn: async () => {
-      const res = await authClient.organization.listUserInvitations();
-      return ((res.data ?? []) as Array<Invite & { status: string }>).filter((i) => i.status === "pending");
-    },
-  });
+  // ponytail: no invitation list — nothing in the app sends one, and Better Auth refuses to list
+  //           them for an unverified email, which every password account is until a mailer
+  //           exists. Add it back with the member-invite UI.
 
   const create = useMutation({
     mutationFn: async () => {
@@ -84,14 +75,6 @@ function Onboarding() {
     onSuccess: () => hardRedirect(tenantUrl(slug)),
   }));
 
-  const accept = useMutation({
-    mutationFn: async (inv: Invite) => {
-      const res = await authClient.organization.acceptInvitation({ invitationId: inv.id });
-      if (res.error) throw new Error(res.error.message ?? "Could not accept invitation");
-    },
-    onSuccess: () => navigate({ to: "/" }), // apex dispatcher routes to the joined workspace
-  });
-
   // The only way off this page without an org: browser-back just re-runs the apex
   // dispatcher, which sends a 0-org user straight back here.
   const signOut = async () => {
@@ -100,9 +83,8 @@ function Onboarding() {
     navigate({ to: "/login" });
   };
 
-  const busy = create.isPending || accept.isPending || connect.isPending;
-  const error = create.error ?? accept.error ?? connect.error;
-  const pending = invites.data ?? [];
+  const busy = create.isPending || connect.isPending;
+  const error = create.error ?? connect.error;
   const canCreate = company.trim().length > 0 && available && !busy;
   const canConnect = agentUrl.trim().length > 0 && secret.trim().length > 0 && !busy;
   const errMsg = error instanceof Error ? error.message : error ? String(error) : null;
@@ -194,22 +176,8 @@ function Onboarding() {
   return (
     <AuthLayout>
       <h2 className="auth-h1">Set up your workspace</h2>
-      <p className="auth-sub">Create your company to get started, or join one you were invited to.</p>
+      <p className="auth-sub">Create your company to get started.</p>
       {errMsg ? <MessageStrip design="Negative" hideCloseButton>{errMsg}</MessageStrip> : null}
-
-      {invites.isPending ? <BusyIndicator active /> : null}
-
-      {pending.length > 0 ? (
-        <div className="auth-invite-list">
-          {pending.map((inv) => (
-            <div className="auth-invite" key={inv.id}>
-              <span><b>{inv.organizationName}</b><br /><small>You've been invited to join</small></span>
-              <Button design="Emphasized" disabled={busy} onClick={() => accept.mutate(inv)}>Join</Button>
-            </div>
-          ))}
-          <div className="auth-or">or create your own</div>
-        </div>
-      ) : null}
 
       <label className="auth-field">
         <span>Company name</span>
@@ -238,7 +206,7 @@ function Onboarding() {
       </label>
 
       <Button
-        design={pending.length > 0 ? "Default" : "Emphasized"}
+        design="Emphasized"
         disabled={!canCreate}
         onClick={() => create.mutate()}
       >

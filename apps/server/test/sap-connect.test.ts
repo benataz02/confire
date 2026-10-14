@@ -40,13 +40,13 @@ describe.skipIf(!process.env.DATABASE_URL)("upsertSapConnection", () => {
   });
 });
 
-describe.skipIf(!process.env.DATABASE_URL)("sap.connect / sap.connection", () => {
-  test("owner on apex writes the row; connection flips false → true", async () => {
-    const { tenantId } = await makeTenant();
+describe.skipIf(!process.env.DATABASE_URL)("sap.connect / sap.lobby", () => {
+  test("owner on apex writes the row; lobby stops asking for an agent", async () => {
+    const { tenantId, slug } = await makeTenant();
     const owner = await makeUser("owner", tenantId);
     const ctx = apex(owner.cookie);
 
-    expect(await call(router.sap.connection, undefined, ctx)).toEqual({ connected: false });
+    expect(await call(router.sap.lobby, undefined, ctx)).toEqual({ slug, needsAgent: true });
 
     await call(router.sap.connect, {
       agentUrl: "http://localhost:4000",
@@ -62,7 +62,7 @@ describe.skipIf(!process.env.DATABASE_URL)("sap.connect / sap.connection", () =>
     expect(row!.accessClientId).toBe("aid");
     expect(row!.accessClientSecret).toBe("asec");
     expect(row!.beasEnabled).toBe(true);
-    expect(await call(router.sap.connection, undefined, ctx)).toEqual({ connected: true });
+    expect(await call(router.sap.lobby, undefined, ctx)).toEqual({ slug, needsAgent: false });
   });
 
   test("second connect updates agentUrl", async () => {
@@ -75,18 +75,36 @@ describe.skipIf(!process.env.DATABASE_URL)("sap.connect / sap.connection", () =>
     expect(row!.agentUrl).toBe("https://agent.example");
   });
 
-  test("member, client, and non-member are FORBIDDEN", async () => {
-    const { tenantId } = await makeTenant();
+  test("member, client, and non-member can't connect; lobby sends them on", async () => {
+    const { tenantId, slug } = await makeTenant();
     const member = await makeUser("member", tenantId);
     const client = await makeUser("client", tenantId);
     const stranger = await makeUser();
     const body = { agentUrl: "http://localhost:4000", secret: "x" };
     expect(await code(call(router.sap.connect, body, apex(member.cookie)))).toBe("FORBIDDEN");
-    expect(await code(call(router.sap.connection, undefined, apex(member.cookie)))).toBe("FORBIDDEN");
     expect(await code(call(router.sap.connect, body, apex(client.cookie)))).toBe("FORBIDDEN");
-    expect(await code(call(router.sap.connection, undefined, apex(client.cookie)))).toBe("FORBIDDEN");
     expect(await code(call(router.sap.connect, body, apex(stranger.cookie)))).toBe("FORBIDDEN");
-    expect(await code(call(router.sap.connection, undefined, apex(stranger.cookie)))).toBe("FORBIDDEN");
+    // No agent yet, but they couldn't connect one — so the tenant, not the agent form.
+    expect(await call(router.sap.lobby, undefined, apex(member.cookie))).toEqual({ slug, needsAgent: false });
+    expect(await call(router.sap.lobby, undefined, apex(client.cookie))).toEqual({ slug, needsAgent: false });
+    expect(await call(router.sap.lobby, undefined, apex(stranger.cookie))).toBeNull();
+  });
+
+  test("a slug the host can't resolve is refused on create and rename", async () => {
+    const u = await makeUser();
+    for (const slug of ["Acme", "app", "a.b", "a_b"]) {
+      await expect(auth.api.createOrganization({ body: { name: slug, slug, userId: u.userId } })).rejects.toThrow("Invalid workspace URL");
+    }
+    const { tenantId } = await makeTenant();
+    const owner = await makeUser("owner", tenantId);
+    const rename = (slug: string) =>
+      auth.api.updateOrganization({
+        body: { organizationId: tenantId, data: { slug } },
+        headers: new Headers({ cookie: owner.cookie }),
+      });
+    await expect(rename("www")).rejects.toThrow("Invalid workspace URL");
+    const ok = `r${crypto.randomUUID().slice(0, 8)}`;
+    expect((await rename(ok))?.slug).toBe(ok);
   });
 
   test("createOrganization does not insert sap_connection", async () => {
