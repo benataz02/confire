@@ -42,7 +42,7 @@ function ResetPassword() {
     return (
       <PortalAuthLayout slug={t}>
         <h2 className="auth-h1">Password changed</h2>
-        <p className="auth-sub">You were signed out of the portal everywhere. Sign in with your new password.</p>
+        <p className="auth-sub">You were signed out everywhere. Sign in with your new password.</p>
         <p className="auth-alt"><Link to="/login" search={{ t }}>Sign in</Link></p>
       </PortalAuthLayout>
     );

@@ -2,7 +2,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { captcha } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
-import { db, organization } from "@confire/db";
+import { db, organization, session } from "@confire/db";
 import * as schema from "@confire/db/schema";
 import { portalBaseDomain } from "../tenant.ts";
 import { authMail } from "../mail/auth-mail.tsx";
@@ -51,8 +51,12 @@ export const portalAuth = betterAuth({
     enabled: true,
     requireEmailVerification: true,
     sendResetPassword: mail.sendResetPassword,
-    // Revokes portal sessions only. The password itself is shared with the internal zone (§4.1).
+    // Revokes portal sessions; the password is shared with the internal zone (§4.1), so the
+    // internal instance's sessions go too.
     revokeSessionsOnPasswordReset: true,
+    onPasswordReset: async ({ user }) => {
+      await db.delete(session).where(eq(session.userId, user.id));
+    },
   },
   emailVerification: {
     sendVerificationEmail: mail.sendVerificationEmail,

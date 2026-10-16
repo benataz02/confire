@@ -42,6 +42,26 @@ describe("portal Better Auth instance", () => {
     expect((await portalAuth.api.getSession({ headers: new Headers({ cookie }) }))?.user.id).toBe(internal.userId);
   });
 
+  test("a password reset on either zone ends the sessions of both (the password is shared)", async () => {
+    const resetToken = async (email: string) => {
+      for (let i = 0; i < 100; i++) {
+        const mail = devOutbox.findLast((m) => m.to === email && m.subject === "Reset your password");
+        const token = mail?.text.match(/\/api\/auth\/reset-password\/([^?\s]+)/)?.[1];
+        if (token) return token;
+        await Bun.sleep(20);
+      }
+      throw new Error(`no reset mail to ${email}`);
+    };
+    for (const [resetter, label] of [[portalAuth, "portal"], [auth, "internal"]] as const) {
+      const u = await makeUser();
+      const portalCookie = await portalSignIn(u.email);
+      await resetter.api.requestPasswordReset({ body: { email: u.email, redirectTo: "/reset-password" } });
+      await resetter.api.resetPassword({ body: { newPassword: `new-${label}-1234`, token: await resetToken(u.email) } });
+      expect(await auth.api.getSession({ headers: new Headers({ cookie: u.cookie }) })).toBeNull();
+      expect(await portalAuth.api.getSession({ headers: new Headers({ cookie: portalCookie }) })).toBeNull();
+    }
+  });
+
   test("sign-up through the HTTP endpoint needs a captcha token", async () => {
     const res = await portalAuth.handler(new Request("http://portal.lvh.me:5180/api/auth/sign-up/email", {
       method: "POST",
@@ -97,6 +117,14 @@ describe("portal procedure builders", () => {
     // Even with a seat — the builder refuses before it ever reads one.
     await makePortalSeat(tenantId, staff.userId, "owner");
     for (const p of Object.values(probe)) expect(await codeOf(call(p, undefined, ctx(slug, cookie)))).toBe("FORBIDDEN");
+  });
+
+  test("a leftover `client` membership (the removed in-app portal, D23) is not staff", async () => {
+    const { tenantId, slug } = await makeTenant();
+    const former = await makeUser("client", tenantId);
+    const cookie = await portalSignIn(former.email);
+    expect(await call(probe.session, undefined, ctx(slug, cookie))).toBe(tenantId);
+    expect((await call(portalRouter.me, undefined, ctx(slug, cookie))).internal).toBe(false);
   });
 
   test("no seat here: the session builder passes, the member builders refuse", async () => {

@@ -1,5 +1,5 @@
 import { os, ORPCError } from "@orpc/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { db, member, organization, portalCompany, portalMember } from "@confire/db";
 import { portalAuth } from "../auth.ts";
 import { portalBaseDomain, tenantSlugFromHost } from "../../tenant.ts";
@@ -33,10 +33,12 @@ export async function tenantFromHost(headers: Headers) {
   return tenant;
 }
 
-/** Works for this supplier — any internal membership, a leftover `client` row included (D23). */
+/** Works for this supplier: an internal membership. A leftover `client` row (the removed in-app
+ *  portal) is not staff — it stays locked out of the internal app, and the portal does not read it
+ *  (spec D23), so its owner is a customer here like any other. */
 export async function isInternalMember(tenantId: string, userId: string): Promise<boolean> {
   const [row] = await db.select({ id: member.id }).from(member)
-    .where(and(eq(member.organizationId, tenantId), eq(member.userId, userId))).limit(1);
+    .where(and(eq(member.organizationId, tenantId), eq(member.userId, userId), ne(member.role, "client"))).limit(1);
   return !!row;
 }
 

@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins";
+import { eq } from "drizzle-orm";
 import { db } from "@confire/db/client";
 import * as schema from "@confire/db/schema";
 import { baseDomain, tenantSlugFromHost } from "./tenant.ts";
@@ -32,9 +33,13 @@ export const auth = betterAuth({
     // Existing unverified accounts are not grandfathered: sendOnSignIn mails them a fresh link.
     requireEmailVerification: true,
     sendResetPassword: mail.sendResetPassword,
-    // A reset is what someone does when a session may be in the wrong hands. Revokes this
-    // instance's sessions only; the portal's live in their own table (spec §4.1).
+    // A reset is what someone does when a session may be in the wrong hands. This revokes this
+    // instance's sessions; the password is shared with the portal (spec §4.1), so its sessions —
+    // in their own table — go too.
     revokeSessionsOnPasswordReset: true,
+    onPasswordReset: async ({ user }) => {
+      await db.delete(schema.portalSession).where(eq(schema.portalSession.userId, user.id));
+    },
   },
   emailVerification: {
     sendVerificationEmail: mail.sendVerificationEmail,
