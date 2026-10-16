@@ -15,6 +15,17 @@ export const baseDomain = (process.env.APP_BASE_DOMAIN ?? "app.lvh.me").toLowerC
  *  session cookie must never be sent to `*.portal.<domain>`, and the other way round. */
 export const portalBaseDomain = (process.env.PORTAL_BASE_DOMAIN ?? "portal.lvh.me").toLowerCase();
 
+/** The portal apex as the browser sees it. Both processes read it: the portal's Better Auth
+ *  baseURL, and the links an internal invitation mails out. */
+export const portalAuthUrl = (process.env.PORTAL_AUTH_URL ?? `http://${portalBaseDomain}:5180`).replace(/\/+$/, "");
+
+/** A supplier's portal page: the apex URL with the slug in front, protocol and dev port included. */
+export function portalTenantUrl(slug: string, path = "/"): string {
+  const url = new URL(path, portalAuthUrl);
+  url.hostname = `${slug}.${url.hostname}`;
+  return url.toString();
+}
+
 /** `acme.app.lvh.me` + base `app.lvh.me` -> "acme"; apex/reserved/deeper -> null. */
 export function tenantSlugFromHost(
   host: string | null | undefined,
@@ -50,5 +61,6 @@ if (import.meta.main) {
   assert.equal(t("acme.app.lvh.me", "portal.lvh.me"), null);
   assert.equal(t("portal.lvh.me", "portal.lvh.me"), null); // portal apex
   assert.notEqual(portalBaseDomain, baseDomain);
+  assert.equal(tenantSlugFromHost(new URL(portalTenantUrl("acme", "/accept/x")).host, portalBaseDomain), "acme");
   console.log("tenant.ts ok");
 }

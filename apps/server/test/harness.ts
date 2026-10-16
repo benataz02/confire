@@ -55,8 +55,7 @@ export async function portalSignIn(email: string): Promise<string> {
 }
 
 /** A verified user who signed up on the portal (no internal membership anywhere). */
-export async function makePortalUser(): Promise<{ userId: string; email: string; cookie: string }> {
-  const email = `p${uid()}@test.local`;
+export async function makePortalUser(email = `p${uid()}@test.local`): Promise<{ userId: string; email: string; cookie: string }> {
   const { user: u } = await portalAuth.api.signUpEmail({ body: { email, password: "test1234", name: email } });
   await db.update(user).set({ emailVerified: true }).where(eq(user.id, u.id));
   return { userId: u.id, email, cookie: await portalSignIn(email) };
@@ -65,7 +64,8 @@ export async function makePortalUser(): Promise<{ userId: string; email: string;
 export const portalHeaders = (slug: string, cookie?: string): Headers =>
   new Headers({ "x-forwarded-host": `${slug}.${portalBaseDomain}`, ...(cookie ? { cookie } : {}) });
 
-/** A customer company with one seat. P3's addPortalMember will own this write; tests insert directly. */
+/** A customer company with one seat, inserted directly rather than through addPortalMember: the
+ *  builder tests need a seat even for staff, which addPortalMember refuses. */
 export async function makePortalSeat(tenantId: string, userId: string, role: PortalRole, cardName = "Kunde GmbH") {
   const [company] = await db.insert(portalCompany)
     .values({ tenantId, cardCode: `C${uid()}`, cardName, cardType: "cCustomer" })

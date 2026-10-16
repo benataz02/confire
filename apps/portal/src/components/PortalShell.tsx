@@ -8,6 +8,7 @@ import {
 } from "@ui5/webcomponents-react";
 import type { NavigationLayoutDomRef, NavigationLayoutPropTypes, SideNavigationPropTypes } from "@ui5/webcomponents-react";
 import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
+import { ROLE_LABEL } from "@confire/ui/portal/CompanyPeople.tsx";
 import { authClient } from "../auth-client.ts";
 import { lobbyQuery, meQuery, type Me } from "../orpc.ts";
 import { apexUrl, authSearch, hardRedirect } from "../lib/host.ts";
@@ -15,10 +16,9 @@ import { apexUrl, authSearch, hardRedirect } from "../lib/host.ts";
 // The supplier's portal chrome (spec §9): the same NavigationLayout + ShellBar + SideNavigation
 // pattern as the internal AppShell, wearing the supplier's name and logo (D20). Fiori: no shell-bar
 // Back button (the browser's does that), the branding element leads home, the profile opens the
-// user menu. P3+ add the side-nav items (Projects, Documents, Company) as their pages land.
+// user menu. P4+ add the side-nav items (Projects, Documents) as their pages land.
 
-export const roleLabel = (role: "owner" | "buyer" | "viewer") =>
-  role === "owner" ? "Owner" : role === "buyer" ? "Buyer" : "Viewer";
+export const roleLabel = (role: keyof typeof ROLE_LABEL) => ROLE_LABEL[role];
 
 const initials = (name: string) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
@@ -105,7 +105,12 @@ export function PortalShell() {
         </>
       }
       sideContent={
-        <SideNavigation onSelectionChange={onSelect}>
+        <SideNavigation
+          onSelectionChange={onSelect}
+          fixedItems={me.company.role === "owner" ? (
+            <SideNavigationItem text="Company" icon="building" data-to="/company" selected={pathname === "/company"} />
+          ) : undefined}
+        >
           <SideNavigationItem text="Home" icon="home" data-to="/" selected={pathname === "/"} />
         </SideNavigation>
       }

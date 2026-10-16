@@ -2,12 +2,13 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
-import { meQuery } from "../orpc.ts";
+import { client, meQuery } from "../orpc.ts";
 import { PortalAuthLayout } from "../components/AuthChrome.tsx";
 import { apexUrl, authSearch, hardRedirect, isApex, loginUrl } from "../lib/host.ts";
 
-// Signed in on a supplier's host without a seat there (spec §9). P3 adds auto-join by a registered
-// email domain and invitation acceptance; until then this page says how to get in.
+// Signed in on a supplier's host without a seat there (spec §4.4, §9). First auto-join: a verified
+// address on a domain the supplier registered to a company joins it as viewer, and lands home. If
+// nothing matches, this page says how to get in — an invitation, whose link is /accept/<id>.
 export const Route = createFileRoute("/onboarding")({
   beforeLoad: async ({ context }) => {
     if (isApex()) throw redirect({ to: "/" });
@@ -17,6 +18,11 @@ export const Route = createFileRoute("/onboarding")({
     });
     if (!me) return hardRedirect(loginUrl());
     if (me.company && !me.internal) throw redirect({ to: "/" });
+    // A failed join is the same as no match: the page below still says how to get in.
+    if (!me.internal && (await client.onboarding.join().catch(() => null))) {
+      await context.queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
+      throw redirect({ to: "/" });
+    }
     return { me };
   },
   component: Onboarding,

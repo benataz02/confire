@@ -4,7 +4,7 @@ import { captcha } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
 import { db, organization, session } from "@confire/db";
 import * as schema from "@confire/db/schema";
-import { portalBaseDomain } from "../tenant.ts";
+import { portalAuthUrl, portalBaseDomain } from "../tenant.ts";
 import { authMail } from "../mail/auth-mail.tsx";
 import { CONFIRE, type Brand } from "../mail/layout.tsx";
 
@@ -13,9 +13,6 @@ import { CONFIRE, type Brand } from "../mail/layout.tsx";
 // but its own session table and cookie zone, so a portal session can never authenticate an internal
 // request. No organization plugin: companies, seats and invitations are Confire tables (§4.2).
 
-/** The portal apex as the browser sees it. Always passed: left unset, Better Auth would fall back to
- *  BETTER_AUTH_URL — the internal apex, which this process shares an .env with in dev. */
-export const portalAuthUrl = (process.env.PORTAL_AUTH_URL ?? `http://${portalBaseDomain}:5180`).replace(/\/+$/, "");
 
 /** Spec D5/§4.4: in multi-tenant Entra apps the `email` claim is not verified, so a Microsoft email
  *  counts as verified only on the optional `xms_edov` claim (the app registration has to emit it).
@@ -38,6 +35,8 @@ const mail = authMail(brandOf);
 
 export const portalAuth = betterAuth({
   appName: "Confire portal",
+  // Always passed: left unset, Better Auth would fall back to BETTER_AUTH_URL — the internal apex,
+  // which this process shares an .env with in dev.
   baseURL: portalAuthUrl,
   // secret: BETTER_AUTH_SECRET, read by Better Auth itself — the same one as the internal instance.
   database: drizzleAdapter(db, { provider: "pg", schema }),

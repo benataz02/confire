@@ -1,4 +1,5 @@
-import { index, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { boolean, index, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 
 // The customer portal (spec docs/superpowers/specs/2026-10-07-portal-redesign.md §4, §6).
@@ -29,7 +30,9 @@ export const portalSession = pgTable(
 );
 
 export type PortalCardType = "cCustomer" | "cLid";
-export type PortalRole = "owner" | "buyer" | "viewer";
+export const PORTAL_ROLES = ["owner", "buyer", "viewer"] as const;
+export type PortalRole = (typeof PORTAL_ROLES)[number];
+export type PortalInviteStatus = "pending" | "accepted" | "canceled";
 
 /** A customer company: one per tenant × CardCode, the register of which CardCodes are on the portal
  *  (§4.2). Created server-side only — by an invitation or an onboarding submit — never by a call a
@@ -66,5 +69,52 @@ export const portalMember = pgTable(
   (t) => [
     primaryKey({ columns: [t.companyId, t.userId] }),
     uniqueIndex("portal_member_tenant_user_uq").on(t.tenantId, t.userId),
+  ],
+);
+
+/** An invitation into a company (§4.2, §5). `companyId` null is a new-client invitation (P6) until
+ *  its onboarding submit sets it, so every accepted invitation ends up linked to a CardCode. The
+ *  random id is the link token, but holding it is not enough: acceptance also checks the email.
+ *  Written only through apps/server/src/portal/members.ts. */
+export const portalInvitation = pgTable(
+  "portal_invitation",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: text("tenant_id").notNull(),
+    companyId: uuid("company_id").references(() => portalCompany.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: text("role").$type<PortalRole>().notNull(),
+    invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
+    registerDomain: boolean("register_domain").notNull().default(false),
+    status: text("status").$type<PortalInviteStatus>().notNull().default("pending"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // "One open invitation per email per tenant" as a constraint: two concurrent sends cannot both
+    // win. An expired invitation is still `pending` here, so a send cancels those first.
+    uniqueIndex("portal_invitation_pending_uq").on(t.tenantId, sql`lower(${t.email})`).where(sql`status = 'pending'`),
+    index("portal_invitation_company_idx").on(t.companyId),
+  ],
+);
+
+/** The auto-join index (§4.4): a verified sign-in on this domain joins this company as `viewer`.
+ *  The primary key is what stops one domain mapping to two companies. Written only by internal
+ *  users: a company cannot claim a domain itself, or a lead that registered a competitor's domain
+ *  would capture that competitor's staff. */
+export const portalCompanyDomain = pgTable(
+  "portal_company_domain",
+  {
+    tenantId: text("tenant_id").notNull(),
+    domain: text("domain").notNull(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => portalCompany.id, { onDelete: "cascade" }),
+    addedBy: text("added_by").references(() => user.id, { onDelete: "set null" }),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.domain] }),
+    index("portal_company_domain_company_idx").on(t.companyId),
   ],
 );

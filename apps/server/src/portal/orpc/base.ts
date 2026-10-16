@@ -1,8 +1,12 @@
 import { os, ORPCError } from "@orpc/server";
-import { and, eq, ne } from "drizzle-orm";
-import { db, member, organization, portalCompany, portalMember } from "@confire/db";
+import { eq } from "drizzle-orm";
+import { db, organization } from "@confire/db";
 import { portalAuth } from "../auth.ts";
 import { portalBaseDomain, tenantSlugFromHost } from "../../tenant.ts";
+import { isInternalMember, seatOf } from "../members.ts";
+
+// Shared with the internal process, which must not import this module (it builds portalAuth).
+export { isInternalMember, seatOf };
 
 // The portal's procedure builders (spec §4.3). The boundary is the internal app's, one step longer:
 // host → tenant (organization) → this user's seat (portal_member ⋈ portal_company on that tenant).
@@ -31,29 +35,6 @@ export async function tenantFromHost(headers: Headers) {
     .from(organization).where(eq(organization.slug, slug)).limit(1);
   if (!tenant) throw new ORPCError("NOT_FOUND", { message: "No such supplier" });
   return tenant;
-}
-
-/** Works for this supplier: an internal membership. A leftover `client` row (the removed in-app
- *  portal) is not staff — it stays locked out of the internal app, and the portal does not read it
- *  (spec D23), so its owner is a customer here like any other. */
-export async function isInternalMember(tenantId: string, userId: string): Promise<boolean> {
-  const [row] = await db.select({ id: member.id }).from(member)
-    .where(and(eq(member.organizationId, tenantId), eq(member.userId, userId), ne(member.role, "client"))).limit(1);
-  return !!row;
-}
-
-/** This user's seat at the supplier, or undefined. */
-export async function seatOf(tenantId: string, userId: string) {
-  const [seat] = await db
-    .select({
-      companyId: portalCompany.id, cardCode: portalCompany.cardCode, cardName: portalCompany.cardName,
-      cardType: portalCompany.cardType, role: portalMember.role,
-    })
-    .from(portalMember)
-    .innerJoin(portalCompany, eq(portalCompany.id, portalMember.companyId))
-    .where(and(eq(portalMember.userId, userId), eq(portalCompany.tenantId, tenantId)))
-    .limit(1);
-  return seat;
 }
 
 /** Signed in, tenant resolved from the host, maybe no company there yet. Refuses the supplier's own

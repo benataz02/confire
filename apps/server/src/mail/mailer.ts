@@ -19,7 +19,7 @@ export type Mail = {
   idempotencyKey?: string;
 };
 
-export type SentMail = { to: string; subject: string; from: string; html: string; text: string };
+export type SentMail = { to: string; subject: string; from: string; replyTo?: string; html: string; text: string };
 
 // A sending_access key: it can send and nothing else, so a leak cannot touch domains or keys.
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
@@ -40,7 +40,7 @@ export async function sendMail(mail: Mail): Promise<{ id: string | null; error: 
     const from = formatFrom(mail.fromName, `notify@${mailDomain}`);
     const [html, text] = await Promise.all([render(mail.body), render(mail.body, { plainText: true })]);
     if (!resend) {
-      devOutbox.push({ to: mail.to, subject: mail.subject, from, html, text });
+      devOutbox.push({ to: mail.to, subject: mail.subject, from, replyTo: mail.replyTo, html, text });
       if (devOutbox.length > 50) devOutbox.shift();
       console.log(`[mail] ${from} -> ${mail.to}: ${mail.subject}\n${text}\n`);
       return { id: null, error: null };

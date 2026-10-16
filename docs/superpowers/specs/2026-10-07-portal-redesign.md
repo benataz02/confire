@@ -2,7 +2,10 @@
 
 **Date:** 2026-10-07
 **Status:** Spec agreed through Q&A. **P0–P2 built 2026-10-16** (plan:
-`docs/superpowers/plans/2026-10-16-portal-p0-p2.md`); P3–P7 not yet. §16 lists what must be checked
+`docs/superpowers/plans/2026-10-16-portal-p0-p2.md`). **P3 built 2026-10-16** (plan:
+`docs/superpowers/plans/2026-10-16-portal-p3.md`). Decided then: no `joined` event until P4; the
+last-owner guard applies on both sides; owners list and cancel their own pending invitations;
+invitation Reply-To is the inviter until P7. P4–P7 are not built yet. §16 lists what must be checked
 against a live B1 and Better Auth before the matching phase starts.
 **Revised 2026-10-16:** onboarding is invitation-only (D7, D17, D25, D26, §5). Open
 self-registration, applications and their approval are gone.

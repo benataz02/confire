@@ -131,7 +131,8 @@ export type ListPageInput = z.infer<typeof ListPageZ>;
 /** The row count the filter would return, carried along with the page. A window function costs no
  *  second round trip and no repeat of the join, and at tenant-table sizes it is free — which is why
  *  these lists have no `count: true` first-page flag the way entities.rows needs one for B1. */
-export const TOTAL = sql<number>`count(*) over ()`.as("_total");
+// count() is a bigint, which node-postgres hands back as a string; mapWith makes the type true.
+export const TOTAL = sql<number>`count(*) over ()`.mapWith(Number).as("_total");
 
 /** Shape a raw page (rows carrying `_total`) into the `{ rows, total, nextSkip }` every list
  *  endpoint returns. `_total` is stripped so a row is only ever its own columns. */

@@ -2,7 +2,7 @@ import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@confire/db/client";
 import * as schema from "@confire/db/schema";
 import { baseDomain, tenantSlugFromHost } from "./tenant.ts";
@@ -69,6 +69,18 @@ export const auth = betterAuth({
       organizationHooks: {
         beforeCreateOrganization: async ({ organization }) => assertSlug(organization.slug),
         beforeUpdateOrganization: async ({ organization }) => assertSlug(organization.slug),
+        // Spec D3/§4.2: never staff and customer of the same supplier. The portal's addPortalMember
+        // refuses staff; this is its mirror. Here and not in beforeAddMember: acceptInvitation does
+        // not run beforeAddMember (verified on 1.7.7).
+        beforeAcceptInvitation: async ({ user, organization }) => {
+          const [seat] = await db.select({ userId: schema.portalMember.userId }).from(schema.portalMember)
+            .where(and(eq(schema.portalMember.tenantId, organization.id), eq(schema.portalMember.userId, user.id))).limit(1);
+          if (seat) {
+            throw new APIError("FORBIDDEN", {
+              message: "This account is a customer on this company's portal, so it can't join its workspace too. Ask an admin to remove it from the portal first.",
+            });
+          }
+        },
       },
       // No seeding hook: every list's Standard view is declared in code (the web features), so a
       // new tenant has nothing to be given.

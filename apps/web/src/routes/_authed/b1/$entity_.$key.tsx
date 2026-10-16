@@ -23,7 +23,7 @@ function EntityRecord() {
   if (d.loading) return <ObjectPageSkeleton />;
   if (d.error || !d.constraints || !d.row) return <PageError error={d.error ?? new Error("Not found")} />;
   return (
-    <ObjectPage entity={entity} constraints={d.constraints} data={d.row}
+    <ObjectPage {...feature.detail.templates} entity={entity} constraints={d.constraints} data={d.row}
       sections={feature.detail.sections} header={feature.detail.header}
       // No ETag means B1 gave us nothing to guard the write with; refuse rather than send a blind PATCH.
       editDisabled={!d.etag}

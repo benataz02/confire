@@ -86,6 +86,21 @@ every tenant-scoped one refuses the supplier's own staff (any internal `member` 
 | `portalMemberProcedure` | + a seat: `portal_member ⋈ portal_company` on that tenant |
 | `portalBuyerProcedure` / `portalOwnerProcedure` | seat role `buyer`/`owner` / `owner` |
 
+**`portal/members.ts` is the only writer** of `portal_member` (`addPortalMember`), `portal_company_domain`
+(`claimDomain`) and `portal_invitation` (`sendInvitation`, `cancelInvitations`), and both processes
+import it. The internal router (`orpc/routers/portal.ts`: `portalInvitations`, `portalCompanies`)
+and the portal's (`onboarding`, `company`) therefore enforce one rule set. The rules:
+- "One open invitation per email" is a partial unique index. Expired rows are still `pending`, so a send cancels them first.
+- A second way into the same company never lowers a role.
+- No change may leave a company that had an owner with none.
+- Free-mail domains are never registered or auto-joined.
+- Staff and customer of one tenant are mutually exclusive: `addPortalMember` refuses staff, and the
+  internal `beforeAcceptInvitation` refuses a portal customer.
+
+Ways in are an invitation (`/accept/<id>`, existing-BP from the BP Object Page's *Invite to portal*)
+or auto-join (`onboarding.join`, a verified address on a domain registered to a company).
+`bun run seed:portal` gives a dev tenant a company and an owner login.
+
 The portal's sign-up, sign-in and reset request need a Cloudflare Turnstile token
 (`x-captcha-response`); dev uses Cloudflare's always-pass test keys. Its account mail wears the
 supplier named by the page's `?t=<slug>` — display only, nothing trusts it. Host rules for both

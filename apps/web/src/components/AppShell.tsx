@@ -76,6 +76,7 @@ export function AppShell() {
             })),
             page("Configurator models", "/models", "tree"),
             page("Masterdata", "/masterdata", "table-view"),
+            page("Portal invitations", "/portal/invitations", "paper-plane"),
             page("Settings", "/settings", "action-settings"),
           ]
         : []),
@@ -233,6 +234,13 @@ export function AppShell() {
                   </>
                 ) : null}
               </SideNavigationGroup>
+              {/* The customer portal (spec §10). Requests, for every member, land with P4. */}
+              {isAdmin ? (
+                <SideNavigationGroup text="Portal" expanded>
+                  <SideNavigationItem text="Invitations" icon="paper-plane" data-to="/portal/invitations"
+                    selected={pathname === "/portal/invitations"} />
+                </SideNavigationGroup>
+              ) : null}
         </SideNavigation>
       }
     >

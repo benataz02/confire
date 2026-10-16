@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { FilterCond, FilterValue, ViewState } from "@confire/db";
 import type { EntityConstraints } from "./metadata.ts";
+import type { Templates } from "./object-page/ObjectPageSection.tsx";
 
 // The config shapes a feature declares and the two shells read — LIST-REPORT-OBJECT-PAGE.md §9 and
 // VALUE-HELP-AND-KEY-NAVIGATION.md §2, typed. A feature writes object literals of these; metadata
@@ -211,6 +212,8 @@ export type DetailFeature = {
   sections: Section[];
   /** what a new record starts with in create mode */
   createDefaults?: () => Row;
+  /** section/field templates, keyed by id — a section drawn by the app (the BP's Portal section) */
+  templates?: Templates;
 };
 
 /** One entity's declared pages: its list, its object page, and where its records live. */

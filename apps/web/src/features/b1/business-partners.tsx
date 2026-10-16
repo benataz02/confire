@@ -1,5 +1,6 @@
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import type { EntityFeature } from "@confire/ui/types.ts";
+import { BpPortalSection, InviteToPortal } from "../../components/portal/BpPortal.tsx";
 
 // Business partners, declared. CardCode and CardType are requiredOnCreate but not in the write
 // allowlist, so metadata makes them editable while creating and read-only after — nothing here
@@ -33,6 +34,11 @@ export const businessPartners: EntityFeature = {
       titleField: "CardName",
       subtitleFields: ["CardCode", "CardType"],
       createTitle: "New business partner",
+      // Customers and leads only (spec §5.1); the server re-reads the BP and refuses the rest anyway.
+      actions: ({ formData, isNew, isEditMode }) =>
+        isNew || isEditMode || formData.CardType === "cSupplier" ? null : (
+          <InviteToPortal cardCode={String(formData.CardCode)} cardName={String(formData.CardName ?? formData.CardCode)} />
+        ),
     },
     sections: [
       {
@@ -56,7 +62,16 @@ export const businessPartners: EntityFeature = {
         label: "Notes",
         fields: [{ key: "Notes", controlType: "textarea" }, { key: "FreeText", controlType: "textarea" }],
       },
+      // Who from this BP is on the customer portal (spec §10). No fields: the template draws it.
+      { id: "portal", label: "Portal", visible: (d, _edit, isNew) => !isNew && d.CardType !== "cSupplier" },
     ],
     createDefaults: () => ({ CardType: "cCustomer" }),
+    templates: {
+      sectionTemplates: {
+        portal: ({ formData }) => (
+          <BpPortalSection cardCode={String(formData.CardCode)} cardName={String(formData.CardName ?? formData.CardCode)} />
+        ),
+      },
+    },
   },
 };
