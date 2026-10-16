@@ -61,14 +61,30 @@ compose that check:
 | `userProcedure` | member of this workspace; a leftover `client` role stays forbidden |
 | `adminProcedure` | admin/owner — model builder, settings |
 
-Dev uses `lvh.me` (public DNS: it and every subdomain → 127.0.0.1). Not `localhost`: the browser
-treats it as a TLD, so a `.localhost` cookie never reaches `acme.localhost`. Not `confire.localhost`
-either — the cookie works, but Google rejects `http://*.localhost` OAuth redirect URIs. Not `.local`:
-that is mDNS, and nss-mdns answers it before `/etc/hosts` is read.
+Dev uses `app.lvh.me` (public DNS: lvh.me at any depth → 127.0.0.1; open `http://app.lvh.me:5173`).
+Not `localhost`: the browser treats it as a TLD, so a `.localhost` cookie never reaches
+`acme.localhost`. Not `confire.localhost` either — the cookie works, but Google rejects
+`http://*.localhost` OAuth redirect URIs. Not `.local`: that is mDNS, and nss-mdns answers it before
+`/etc/hosts` is read. Not bare `lvh.me`: its cookie would reach the customer portal's sibling zone
+(`portal.lvh.me`, spec `docs/superpowers/specs/2026-10-07-portal-redesign.md` §3).
 
-Prod is `APP_BASE_DOMAIN=app.confire.ai` (the marketing apex stays outside the cookie zone): Caddy
-wildcard subdomains → one server, with one wildcard cert via the Cloudflare DNS challenge
-(`CADDY_TLS=cloudflare`; see `docker-compose.yml`).
+Prod is one `DOMAIN=confire.ai` in compose, split into sibling zones: `APP_BASE_DOMAIN=app.confire.ai`
+for this app and `PORTAL_BASE_DOMAIN=portal.confire.ai` for the portal (the marketing apex stays
+outside both cookie zones). Caddy: one wildcard site per zone, each with one wildcard cert via the
+Cloudflare DNS challenge (`CADDY_TLS=cloudflare`; see `docker-compose.yml`).
+
+## Mail
+
+`apps/server/src/mail/`: `sendMail` is the seam — Resend when `RESEND_API_KEY` is set, otherwise the
+console (the server log prints each mail, links included; tests read `devOutbox`). Sender
+`notify@<MAIL_DOMAIN>`, the display name quoted by `formatFrom`. Templates are React Email
+components (`react-email`, pinned: 6.11.3 requires a `@react-email/render` that was never
+published), one typed props object each, drawn in `layout.tsx`'s frame with a `Brand`. Sends are
+fire-and-forget and never throw — a mail is never on a request's critical path.
+
+Email + password sign-in requires a verified address (`requireEmailVerification`): sign-up returns
+no session, and an unverified sign-in is refused with `EMAIL_NOT_VERIFIED` after mailing a fresh
+link (`sendOnSignIn`). The test harness verifies its users directly before signing them in.
 
 ## `packages/config-engine` — the calculation core
 

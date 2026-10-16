@@ -1,6 +1,6 @@
 /**
  * Bootstrap a dev tenant from an empty database: a user + the org whose slug IS the
- * subdomain. Sign in at http://lvh.me:5173, land on http://<slug>.lvh.me:5173.
+ * subdomain. Sign in at http://app.lvh.me:5173, land on http://<slug>.app.lvh.me:5173.
  *
  *   bun run seed:dev [slug] [email] [password]
  *
@@ -22,9 +22,10 @@ async function main(): Promise<void> {
     .where(eq(userTable.email, email))
     .limit(1);
 
-  const userId =
-    existingUser?.id ??
-    (await auth.api.signUpEmail({ body: { email, password, name: "Dev User" } })).user.id;
+  // A seeded login is verified at birth: whoever runs the seed owns it, and sign-in requires a
+  // verified email (auth.ts). An existing unverified user is left alone — it gets a fresh link on
+  // its next sign-in, printed by the console mailer.
+  const userId = existingUser?.id ?? (await createVerifiedUser());
   console.log(`user  ${email} / ${password}`);
 
   const [existingOrg] = await db
@@ -42,7 +43,13 @@ async function main(): Promise<void> {
     console.log(`org   ${slug} (created)`);
   }
 
-  console.log(`\nsign in: http://lvh.me:5173  ->  http://${slug}.lvh.me:5173`);
+  console.log(`\nsign in: http://app.lvh.me:5173  ->  http://${slug}.app.lvh.me:5173`);
+}
+
+async function createVerifiedUser(): Promise<string> {
+  const { user } = await auth.api.signUpEmail({ body: { email, password, name: "Dev User" } });
+  await db.update(userTable).set({ emailVerified: true }).where(eq(userTable.id, user.id));
+  return user.id;
 }
 
 await main();

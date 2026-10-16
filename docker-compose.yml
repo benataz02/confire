@@ -2,12 +2,17 @@
 # Prod: docker compose --profile full up  (Postgres + server + Caddy wildcard subdomains)
 #
 # A real domain is .env only, no code change:
-#   APP_BASE_DOMAIN=app.confire.ai    tenants on <slug>.app.confire.ai; the SPA is rebuilt for it
+#   DOMAIN=confire.ai                 internal on app.confire.ai + <slug>.app.confire.ai, the customer
+#                                     portal on portal.confire.ai + <slug>.portal.confire.ai (sibling
+#                                     cookie zones, spec §3); the SPAs are rebuilt for it
 #   CADDY_TLS=cloudflare              + CLOUDFLARE_API_TOKEN (Zone:Zone:Read + Zone:DNS:Edit)
 #   BETTER_AUTH_SECRET=...            openssl rand -base64 32
-# Cloudflare DNS: A records for app.confire.ai and *.app.confire.ai, DNS only (grey cloud) —
-# Caddy terminates TLS, and Cloudflare's free edge cert does not cover a two-level wildcard.
-# OAuth consoles: redirect URI https://app.confire.ai/api/auth/callback/{google,microsoft}.
+#   RESEND_API_KEY=re_...             a sending_access key; unset = mail is printed to the server log
+# Cloudflare DNS: A records for app, *.app, portal and *.portal, DNS only (grey cloud) — Caddy
+# terminates TLS, and Cloudflare's free edge cert does not cover a two-level wildcard.
+# Resend: verify mail.<DOMAIN> (SPF, DKIM, MX for the return path). Its region is fixed when the
+# domain is added, so pick EU vs US first.
+# OAuth consoles: redirect URI https://app.<DOMAIN>/api/auth/callback/{google,microsoft}.
 services:
   db:
     image: postgres:17
@@ -32,16 +37,19 @@ services:
       dockerfile: apps/server/Dockerfile
       # Subdomain base domain is baked into the SPA at build time.
       args:
-        VITE_APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-lvh.me}
+        VITE_APP_BASE_DOMAIN: app.${DOMAIN:-lvh.me}
     environment:
       DATABASE_URL: postgres://confire:confire@db:5432/confire
       # Fail fast: a placeholder here would sign cookies AND (via crypto.ts' fallback) encrypt SAP
       # secrets with a string that is in git. Better Auth only rejects its own default secret.
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET (openssl rand -base64 32)}
       # The apex as the browser sees it (Caddy, HTTPS) — the OAuth redirect URI and the
-      # `.${APP_BASE_DOMAIN}` session cookie are both derived from it, so :3000 would break both.
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-https://${APP_BASE_DOMAIN:-lvh.me}}
-      APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-lvh.me}
+      # `.app.${DOMAIN}` session cookie are both derived from it, so :3000 would break both.
+      BETTER_AUTH_URL: https://app.${DOMAIN:-lvh.me}
+      APP_BASE_DOMAIN: app.${DOMAIN:-lvh.me}
+      # Mail (apps/server/src/mail): sender notify@mail.<DOMAIN>. No key = the console mailer.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_DOMAIN: mail.${DOMAIN:-lvh.me}
       # Unset leaves that sign-in button dead: Better Auth only logs a warning at boot.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -67,7 +75,7 @@ services:
         FROM caddy:2
         COPY --from=build /usr/bin/caddy /usr/bin/caddy
     environment:
-      APP_DOMAIN: ${APP_BASE_DOMAIN:-lvh.me}
+      DOMAIN: ${DOMAIN:-lvh.me}
       CADDY_TLS: ${CADDY_TLS:-internal}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
     ports:

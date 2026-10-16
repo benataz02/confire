@@ -1,11 +1,16 @@
-# Wildcard subdomain -> single server. The subdomain IS the tenant: the server resolves
-# it from the (preserved) Host header and validates it against membership (orpc/base.ts).
+# Two sibling zones (spec §3), one process each. The subdomain IS the tenant: each server resolves
+# it from the (preserved) Host header against its own base domain (tenant.ts) and validates it
+# against membership — orpc/base.ts internally, portal/orpc/base.ts on the portal.
+#   app.{$DOMAIN}, *.app.{$DOMAIN}         internal app   -> server:3000
+#   portal.{$DOMAIN}, *.portal.{$DOMAIN}   customer portal -> portal:3001
+# {$DOMAIN} itself (the marketing site) is not served here, and stays outside both cookie zones.
 #
 # CADDY_TLS picks where certificates come from (compose defaults it to `internal`):
 #   internal    Caddy's local CA, for running the full stack on lvh.me.
-#   cloudflare  One wildcard cert through the ACME DNS challenge (a wildcard cannot use the HTTP
-#               challenge). Not a cert per tenant: every issued cert lands in the public
-#               Certificate Transparency logs, so per-tenant certs would publish the customer list.
+#   cloudflare  One wildcard cert per zone through the ACME DNS challenge (a wildcard cannot use the
+#               HTTP challenge), one provider token for both. Not a cert per tenant: every issued cert
+#               lands in the public Certificate Transparency logs, so per-tenant certs would publish
+#               the customer list.
 (tls-internal) {
 	tls internal
 }
@@ -16,7 +21,12 @@
 	}
 }
 
-{$APP_DOMAIN}, *.{$APP_DOMAIN} {
+app.{$DOMAIN}, *.app.{$DOMAIN} {
 	import tls-{$CADDY_TLS}
 	reverse_proxy server:3000
+}
+
+portal.{$DOMAIN}, *.portal.{$DOMAIN} {
+	import tls-{$CADDY_TLS}
+	reverse_proxy portal:3001
 }

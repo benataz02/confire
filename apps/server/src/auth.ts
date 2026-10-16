@@ -5,6 +5,8 @@ import { organization } from "better-auth/plugins";
 import { db } from "@confire/db/client";
 import * as schema from "@confire/db/schema";
 import { baseDomain, tenantSlugFromHost } from "./tenant.ts";
+import { authMail } from "./mail/auth-mail.tsx";
+import { CONFIRE } from "./mail/layout.tsx";
 
 /** The web's SLUG_RE is UX; this is the gate. Better Auth takes any non-empty slug, and one the host
  *  parser cannot hand back is a workspace no request can ever reach — with organizationLimit: 1 and
@@ -15,12 +17,30 @@ const assertSlug = (slug: string | undefined) => {
   }
 };
 
+// Internal mail is always Confire's: the apex has no tenant to brand it with.
+const mail = authMail(async () => CONFIRE);
+
 // secret and baseURL come from BETTER_AUTH_SECRET / BETTER_AUTH_URL, which Better Auth reads itself.
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "pg", schema }),
   // Default min length (8) on purpose: there is no dev/prod branch here, so a dev-only floor ships.
   // Sign-in never checks length, so an existing shorter dev password still logs in.
-  emailAndPassword: { enabled: true },
+  emailAndPassword: {
+    enabled: true,
+    // Spec D13: a mailer exists, so an address has to be proven before it signs in. Sign-up then
+    // returns no session, and every sign-in of an unverified account is refused (EMAIL_NOT_VERIFIED).
+    // Existing unverified accounts are not grandfathered: sendOnSignIn mails them a fresh link.
+    requireEmailVerification: true,
+    sendResetPassword: mail.sendResetPassword,
+    // A reset is what someone does when a session may be in the wrong hands. Revokes this
+    // instance's sessions only; the portal's live in their own table (spec §4.1).
+    revokeSessionsOnPasswordReset: true,
+  },
+  emailVerification: {
+    sendVerificationEmail: mail.sendVerificationEmail,
+    sendOnSignIn: true,
+    autoSignInAfterVerification: true,
+  },
   socialProviders: {
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",
@@ -56,7 +76,7 @@ export const auth = betterAuth({
   // Auth lives on the apex, but the app POSTs (sign-out) from every tenant subdomain, so those
   // origins need trusting; baseURL's own origin is trusted automatically. A pattern without
   // `://` is matched against URL.host — which includes the port — hence both forms: prod
-  // (`acme.app.confire.ai`) and dev (`acme.lvh.me:5173`). Anything outside the base domain — a LAN
+  // (`acme.app.confire.ai`) and dev (`acme.app.lvh.me:5173`). Anything outside the base domain — a LAN
   // IP to open the app from a phone — is a per-machine fact, so it comes from
   // APP_TRUSTED_ORIGINS (comma-separated) and never from a literal in here.
   trustedOrigins: [

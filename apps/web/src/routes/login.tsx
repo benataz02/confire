@@ -7,15 +7,19 @@ import { AuthLayout } from "../components/AuthLayout.tsx";
 import { SocialButtons } from "../components/SocialButtons.tsx";
 import { apexUrl, hardRedirect, isApex, safeRedirect } from "../lib/tenant.ts";
 
-// Social sign-in failures come back as ?error=<code> (SocialButtons' errorCallbackURL).
-// account_not_linked is the one people hit: a password account already owns the email, and
-// Better Auth won't attach a provider to an unverified one — which is every password account
-// until a mailer exists. Don't "fix" that: it's what stops someone pre-registering a colleague's
-// address and inheriting their Google login.
-const oauthMessage = (code: string) =>
+// Failures that come back as ?error=<code>: social sign-in (SocialButtons' errorCallbackURL) and a
+// verification link (signup.tsx's callbackURL; Better Auth appends the code). account_not_linked is
+// the social one people hit: a password account already owns the email, and Better Auth won't attach
+// a provider to one whose owner never confirmed the address. Don't "fix" that: it's what stops someone
+// pre-registering a colleague's address and inheriting their Google login.
+const errorMessage = (code: string) =>
   code === "account_not_linked"
     ? "This email already has a password account. Sign in with your password."
-    : `Sign-in with that provider didn't complete (${code}).`;
+    : code === "TOKEN_EXPIRED" || code === "INVALID_TOKEN"
+      ? "That confirmation link has expired or was already used. Sign in to get a new one."
+      : code === "INVALID_USER" || code === "USER_NOT_FOUND"
+        ? "That confirmation link belongs to a different account."
+        : `Sign-in didn't complete (${code}).`;
 
 export const Route = createFileRoute("/login")({
   validateSearch: (s: Record<string, unknown>): { redirect?: string; error?: string } => ({
@@ -50,6 +54,9 @@ function Login() {
     // hand these credentials the wrong workspace. Better Auth replaces the session cookie.
     mutationFn: async (vars: { email: string; password: string }) => {
       const res = await authClient.signIn.email(vars);
+      // Unverified: Better Auth has just mailed a fresh link (sendOnSignIn), so say where it went.
+      if (res.error?.code === "EMAIL_NOT_VERIFIED")
+        throw new Error(`Confirm your email address first. We've sent a new link to ${vars.email}.`);
       if (res.error) throw new Error(res.error.message ?? "Sign in failed");
       return res.data;
     },
@@ -67,7 +74,7 @@ function Login() {
   });
 
   const submit = () => email && password && signIn.mutate({ email, password });
-  const error = signIn.error?.message ?? (oauthError ? oauthMessage(oauthError) : null);
+  const error = signIn.error?.message ?? (oauthError ? errorMessage(oauthError) : null);
 
   return (
     <AuthLayout>
@@ -90,6 +97,7 @@ function Login() {
       <Button design="Emphasized" disabled={signIn.isPending} onClick={submit}>
         {signIn.isPending ? "Signing in…" : "Sign in"}
       </Button>
+      <p className="auth-alt"><Link to="/forgot-password">Forgot your password?</Link></p>
       <div className="auth-or">or</div>
       <SocialButtons />
       <p className="auth-alt">

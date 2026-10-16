@@ -1,6 +1,6 @@
-import { createFileRoute, redirect, useNavigate, Link } from "@tanstack/react-router";
+import { createFileRoute, redirect, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { Input, Button, MessageStrip } from "@ui5/webcomponents-react";
 import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
@@ -24,35 +24,41 @@ export const Route = createFileRoute("/signup")({
 });
 
 function Signup() {
-  const navigate = useNavigate();
   const { redirect: redirectTo } = Route.useSearch();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const queryClient = useQueryClient();
-
   const signUp = useMutation({
     // Unconditional for the same reason as login: a session belonging to someone else must
     // never pass for "signed up".
     mutationFn: async (vars: { name: string; email: string; password: string }) => {
-      // ponytail: no email verification — no mailer in the repo. Enable Better Auth
-      //           requireEmailVerification + a sender when one exists.
-      const res = await authClient.signUp.email(vars);
+      // No session comes back: the address has to be confirmed first (auth.ts). The link's
+      // callbackURL is login, carrying `redirect` on: confirming signs the user in, and login then
+      // hands off to `redirect` or the apex dispatcher; a dead link lands there as ?error=<code>.
+      const callbackURL = apexUrl(`/login${redirectTo ? `?${new URLSearchParams({ redirect: redirectTo })}` : ""}`);
+      const res = await authClient.signUp.email({ ...vars, callbackURL });
       if (res.error) throw new Error(res.error.message ?? "Sign up failed");
       return res.data;
-    },
-    onSuccess: async () => {
-      // staleTime:0 is load-bearing: a cached `null` counts as a cache hit, so ensureQueryData
-      // would never refetch after sign-up.
-      await queryClient.fetchQuery({ ...sessionQuery, staleTime: 0 });
-      const to = safeRedirect(redirectTo);
-      if (to) return void hardRedirect(to);
-      navigate({ to: "/onboarding" }); // brand-new user has no org yet
     },
   });
 
   const submit = () => name && email && password && signUp.mutate({ name, email, password });
+
+  if (signUp.isSuccess) {
+    return (
+      <AuthLayout>
+        <h2 className="auth-h1">Check your inbox</h2>
+        <p className="auth-sub">
+          We've sent a link to <strong>{email}</strong>. Open it to confirm your address and finish
+          setting up your account.
+        </p>
+        <p className="auth-alt">
+          Nothing arrived? Signing in sends a new link. <Link to="/login" search={{ redirect: redirectTo }}>Sign in</Link>
+        </p>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout>

@@ -1,4 +1,5 @@
-import { db, member, organization } from "@confire/db";
+import { eq } from "drizzle-orm";
+import { db, member, organization, user } from "@confire/db";
 import type { ModelDef } from "@confire/config-engine";
 import { auth } from "../src/auth.ts";
 import { baseDomain } from "../src/tenant.ts";
@@ -19,8 +20,12 @@ export async function makeUser(
   tenantId?: string,
 ): Promise<{ userId: string; email: string; cookie: string; cookies: string }> {
   const email = `u${uid()}@test.local`;
-  const res = await auth.api.signUpEmail({
-    body: { email, password: "test1234", name: email },
+  // Sign-up opens no session while email verification is required (auth.ts), so the harness
+  // verifies the address the way the emailed link would, then signs in for the cookies.
+  await auth.api.signUpEmail({ body: { email, password: "test1234", name: email } });
+  await db.update(user).set({ emailVerified: true }).where(eq(user.email, email));
+  const res = await auth.api.signInEmail({
+    body: { email, password: "test1234" },
     returnHeaders: true,
   });
   // First cookie is session_token (what most tests send). `cookies` is the full Cookie header

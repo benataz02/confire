@@ -4,7 +4,8 @@
 
 const RESERVED = new Set(["app", "www", "api", "auth", "admin", "static", "assets"]);
 
-export const BASE_DOMAIN = (import.meta.env.VITE_APP_BASE_DOMAIN ?? "localhost").toLowerCase();
+// Same default as the server (apps/server/src/tenant.ts): dev needs no env; a prod build passes it.
+export const BASE_DOMAIN = (import.meta.env.VITE_APP_BASE_DOMAIN ?? "app.lvh.me").toLowerCase();
 
 /** Tenant slug from window.location.hostname, or null on the apex/reserved hosts. */
 export function currentSlug(): string | null {

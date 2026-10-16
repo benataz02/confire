@@ -4,13 +4,18 @@ import assert from "node:assert/strict";
 
 const RESERVED = new Set(["app", "www", "api", "auth", "admin", "static", "assets"]);
 
-/** Prod sets APP_BASE_DOMAIN (e.g. `app.confire.ai`). Dev is `lvh.me`: public DNS sends it and every
- *  subdomain to 127.0.0.1, a `.lvh.me` cookie spans subdomains (bare `localhost` is a TLD to the
- *  browser), and Google accepts its OAuth redirect URI. `confire.localhost` was tried: the cookie
- *  works, but Google rejects `http://*.localhost` redirect URIs. */
-export const baseDomain = (process.env.APP_BASE_DOMAIN ?? "lvh.me").toLowerCase();
+/** Prod sets APP_BASE_DOMAIN (e.g. `app.confire.ai`). Dev is `app.lvh.me`: public DNS sends lvh.me
+ *  and every subdomain, at any depth, to 127.0.0.1, a `.app.lvh.me` cookie spans subdomains (bare
+ *  `localhost` is a TLD to the browser), and Google accepts its OAuth redirect URI.
+ *  `confire.localhost` was tried: the cookie works, but Google rejects `http://*.localhost` redirect
+ *  URIs. Not bare `lvh.me` either: its cookie would reach the portal's sibling zone. */
+export const baseDomain = (process.env.APP_BASE_DOMAIN ?? "app.lvh.me").toLowerCase();
 
-/** `acme.confire.local` + base `confire.local` -> "acme"; apex/reserved/deeper -> null. */
+/** The portal process's zone (spec §3), a sibling of baseDomain, never a child: a `.app.<domain>`
+ *  session cookie must never be sent to `*.portal.<domain>`, and the other way round. */
+export const portalBaseDomain = (process.env.PORTAL_BASE_DOMAIN ?? "portal.lvh.me").toLowerCase();
+
+/** `acme.app.lvh.me` + base `app.lvh.me` -> "acme"; apex/reserved/deeper -> null. */
 export function tenantSlugFromHost(
   host: string | null | undefined,
   baseDomain: string,
@@ -38,5 +43,12 @@ if (import.meta.main) {
   assert.equal(t("a.b.confire.local", "confire.local"), null); // deeper subdomain
   assert.equal(t("acme.evil.com", "confire.local"), null); // wrong base
   assert.equal(t(null, "confire.local"), null);
+  // Two sibling zones (spec §3): each process parses only its own, and neither swallows the other.
+  assert.equal(t("acme.app.lvh.me:5173", "app.lvh.me"), "acme");
+  assert.equal(t("acme.portal.lvh.me:5174", "portal.lvh.me"), "acme");
+  assert.equal(t("acme.portal.lvh.me", "app.lvh.me"), null);
+  assert.equal(t("acme.app.lvh.me", "portal.lvh.me"), null);
+  assert.equal(t("portal.lvh.me", "portal.lvh.me"), null); // portal apex
+  assert.notEqual(portalBaseDomain, baseDomain);
   console.log("tenant.ts ok");
 }
