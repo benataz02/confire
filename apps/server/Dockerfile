@@ -4,9 +4,9 @@ WORKDIR /app
 # Install deps against the committed lockfile, then build the SPA the server will serve.
 COPY . .
 RUN bun install --frozen-lockfile
-# Bake the subdomain base domain into the SPA (apps/web/src/lib/tenant.ts). Defaults to the
-# dev domain for a bare build; compose passes APP_BASE_DOMAIN.
-ARG VITE_APP_BASE_DOMAIN=confire.localhost
+# Bake the subdomain base domain into the SPA (apps/web/src/lib/tenant.ts). Defaults to
+# localhost for a bare build; compose passes APP_BASE_DOMAIN.
+ARG VITE_APP_BASE_DOMAIN=localhost
 RUN VITE_APP_BASE_DOMAIN="$VITE_APP_BASE_DOMAIN" bun run build:web
 
 # After the build so it only shapes runtime. Better Auth enables rate limiting only when

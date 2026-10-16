@@ -63,11 +63,13 @@ export const ParamZ = z.object({
     .optional(),
   defaultExpr: z.string().optional(),
   visibleWhen: z.string().optional(),
+  /** mandatory only while this holds — see `mandatory` */
   requiredWhen: z.string().optional(),
   /** informational per-unit price shown at the field's top-right; never enters the calculated price */
   priceExpr: z.string().optional(),
-  /** the form asks for it: asterisk on the label, negative state while empty. A default that
-   *  fills the field counts as an answer. ponytail: display only — nothing gates the quote on it. */
+  /** the quote waits for it (missingInputs, enforced by buildQuoteSeed): asterisk on the label,
+   *  negative state while empty. A default that fills the field counts as an answer; a hidden
+   *  field is never required. */
   mandatory: z.boolean().optional(),
   readonly: z.boolean().optional(),
   excludeFromDomains: z.boolean().optional(),
@@ -130,6 +132,8 @@ export const TableColumnZ = z.object({
   label: z.string(),
   type: z.enum(["string", "number", "boolean"]),
   unit: z.string().optional(),
+  /** every row needs a value here before the quote — see requiredColumn */
+  required: z.boolean().optional(),
   cell: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("input") }),
     z.object({ kind: z.literal("options"), ref: LookupRefZ }),
@@ -152,6 +156,15 @@ export const QTY_COL = "quantity";
  *  carries a code, so the document history matches on this column instead of a model setting
  *  naming some parameter — one less pointer that can go stale. */
 export const ITEM_COL = "itemcode";
+
+/** The items grid's description column — the quotation line's text. */
+export const ITEM_NAME_COL = "itemname";
+
+/** Code, name and quantity are what make a row a quotation line, so they are required whatever
+ *  the column says; any other column only when the author ticks `required`. */
+export const REQUIRED_ITEM_COLS = new Set([ITEM_COL, ITEM_NAME_COL, QTY_COL]);
+export const requiredColumn = (t: TableDef, c: TableColumn): boolean =>
+  !!c.required || (t.role === "items" && REQUIRED_ITEM_COLS.has(c.key));
 
 /** The two money columns the items grid renders at runtime. Deliberately NOT `TableColumn`s: a
  *  model never declares them, so they take no room in the author's namespace and produce no
@@ -335,10 +348,10 @@ export const itemsTable = (): ItemsTable => ({
   title: "Items",
   role: "items",
   basisExpr: "1",
-  map: { [ITEM_COL]: "U_CF_ItemCode", itemname: "ItemDescription" },
+  map: { [ITEM_COL]: "U_CF_ItemCode", [ITEM_NAME_COL]: "ItemDescription" },
   columns: [
     { key: ITEM_COL, label: "Item code", type: "string", cell: { kind: "input" } },
-    { key: "itemname", label: "Item name", type: "string", cell: { kind: "input" } },
+    { key: ITEM_NAME_COL, label: "Item name", type: "string", cell: { kind: "input" } },
     { key: QTY_COL, label: "Quantity", type: "number", cell: { kind: "input" } },
   ],
 });

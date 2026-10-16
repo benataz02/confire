@@ -1,4 +1,6 @@
 import type { Entries, ModelDef, Outputs } from "@confire/config-engine";
+import type { GridState } from "../../shared/list-report/Grid.tsx";
+import type { Row } from "../../shared/types.ts";
 
 // Pure view logic for the configuration wizard. Client-side mirrors of the server's
 // ConfigCandidate/ConfigSelection jsonb shapes (web doesn't depend on @confire/db; structural match).
@@ -48,13 +50,35 @@ export function bestByBatch(candidates: PricedCandidate[]): Record<number, numbe
   return Object.fromEntries(Object.entries(best).map(([q, v]) => [q, v.idx]));
 }
 
-export const isSelected = (sel: Sel[], candidateIdx: number, batchQty: number): boolean =>
-  sel.some((s) => s.candidateIdx === candidateIdx && s.batchQty === batchQty);
+/** A price line's grid row id: the pair a Sel names. */
+export const lineKey = (s: Sel): string => `${s.candidateIdx}:${s.batchQty}`;
 
-export const toggleSelection = (sel: Sel[], candidateIdx: number, batchQty: number): Sel[] =>
-  isSelected(sel, candidateIdx, batchQty)
-    ? sel.filter((s) => !(s.candidateIdx === candidateIdx && s.batchQty === batchQty))
-    : [...sel, { candidateIdx, batchQty }];
+/** The selection after a grid change. The grid only knows the lines on screen, so a pick a filter
+ *  hides is kept and the rest follow the grid. Pick order holds: kept picks first, new ones after. */
+export function mergeSelection(selection: Sel[], shown: Set<string>, picked: Sel[]): Sel[] {
+  const on = new Set(picked.map(lineKey));
+  const had = new Set(selection.map(lineKey));
+  return [
+    ...selection.filter((s) => !shown.has(lineKey(s)) || on.has(lineKey(s))),
+    ...picked.filter((p) => !had.has(lineKey(p))),
+  ];
+}
+
+const compare = (a: unknown, b: unknown): number =>
+  typeof a === "number" || typeof b === "number"
+    ? Number(a ?? -Infinity) - Number(b ?? -Infinity)
+    : String(a ?? "").localeCompare(String(b ?? ""), undefined, { numeric: true });
+
+/** Grid's sort is a server's job; every candidate is already here, so this is that server.
+ *  Numbers numerically (an empty one lowest), text with its digits compared as numbers. */
+export const sortRows = (rows: Row[], sortBy: GridState["sortBy"]): Row[] =>
+  [...rows].sort((x, y) => {
+    for (const s of sortBy) {
+      const d = compare(x[s.field], y[s.field]);
+      if (d) return s.direction === "desc" ? -d : d;
+    }
+    return 0;
+  });
 
 // Rows the price chart draws: every configuration with a picked cell, in pick order — or, before
 // anything is picked, the cheapest one at the first quantity, so the chart is never empty.

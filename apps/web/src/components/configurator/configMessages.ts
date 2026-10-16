@@ -21,6 +21,8 @@ export function configMessages(a: {
   /** a cardCode is set — a half-filled customer is not one */
   customer: boolean;
   prop: Propagation | null;
+  /** what the quote still waits on — missingInputs plus the batch quantities, keyed by data-param */
+  missing?: { key: string; message: string }[];
   candidates: number;
   capped: boolean;
   widest?: { key: string; size: number };
@@ -58,6 +60,13 @@ export function configMessages(a: {
       id: "customer", type: "Critical", text: "Pick a business partner",
       detail: "Required before the configuration can calculate.", ...CONFIGURE, anchor: "#cfg-customer",
     });
+
+  // Why Create quote has not appeared yet. Critical for the same reason as the two above.
+  (a.missing ?? []).forEach((m, i) =>
+    out.push({
+      id: `missing:${i}`, type: "Critical", text: m.message,
+      detail: "Required before the configuration can be quoted.", ...CONFIGURE, anchor: `[data-param="${m.key}"]`,
+    }));
 
   (a.prop?.conflicts ?? []).forEach((c, i) => {
     const key = conflictParam(c.path);

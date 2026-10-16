@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ModelDef, ResolvedLookups } from "../src/model";
-import { bindings, domainOf, propagate } from "../src/propagate";
+import { bindings, domainOf, missingInputs, propagate } from "../src/propagate";
 import { fieldGroup, lookups, model } from "./fixture";
 
 describe("bindings", () => {
@@ -213,3 +213,24 @@ describe("derived lookup columns", () => {
   });
 });
 
+
+describe("missingInputs", () => {
+  test("mandatory, requiredWhen, hidden, items rows and required cells", () => {
+    const m: ModelDef = structuredClone(model);
+    const at = (k: string) => m.parameters.find((p) => p.key === k)!;
+    at("material").mandatory = true;
+    at("color").mandatory = true; // hidden while coated=false, so not required
+    at("section").requiredWhen = 'material == "alu"';
+    const items = m.tables!.find((t) => t.role === "items")!;
+    items.columns.push({ key: "note", label: "Note", type: "string", required: true, cell: { kind: "input" } });
+    const keys = (entries: Record<string, string>, rows: Record<string, string | number>[]) =>
+      missingInputs(m, lookups, propagate(m, lookups, entries, { [items.key]: rows }), { [items.key]: rows })
+        .map((x) => x.message);
+
+    expect(keys({}, [])).toEqual(["Conductor material is required", "Items: add at least one row"]);
+    expect(keys({ material: "alu" }, [{ itemcode: "A", itemname: "a", quantity: 1 }]))
+      .toEqual(["Cross-section is required", "Items: Note is empty in row 1"]);
+    expect(keys({ material: "steel" }, [{ itemcode: "A", itemname: "a", quantity: 1, note: "x" }, { itemcode: "B" }]))
+      .toEqual(["Items: Item name is empty in row 2", "Items: Quantity is empty in row 2", "Items: Note is empty in row 2"]);
+  });
+});

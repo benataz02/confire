@@ -2,7 +2,7 @@
 # it from the (preserved) Host header and validates it against membership (orpc/base.ts).
 #
 # CADDY_TLS picks where certificates come from (compose defaults it to `internal`):
-#   internal    Caddy's local CA, for running the full stack on confire.localhost.
+#   internal    Caddy's local CA, for running the full stack on lvh.me.
 #   cloudflare  One wildcard cert through the ACME DNS challenge (a wildcard cannot use the HTTP
 #               challenge). Not a cert per tenant: every issued cert lands in the public
 #               Certificate Transparency logs, so per-tenant certs would publish the customer list.

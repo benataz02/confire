@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import {
-  Bar, Button, ComboBox, ComboBoxItem, Dialog, Form, FormGroup, FormItem, Input, Option, Select,
+  Bar, Button, CheckBox, ComboBox, ComboBoxItem, Dialog, Form, FormGroup, FormItem, Input, Option, Select,
   StepInput, Text,
 } from "@ui5/webcomponents-react";
-import { checkModel, ITEM_COL, QTY_COL, RESERVED_LINE_FIELDS, type LookupRef, type ModelDef, type TableColumn, type TableDef } from "@confire/config-engine";
+import { checkModel, QTY_COL, REQUIRED_ITEM_COLS, RESERVED_LINE_FIELDS, type LookupRef, type ModelDef, type TableColumn, type TableDef } from "@confire/config-engine";
 import { Grid, GridForm } from "../../shared/list-report/Grid.tsx";
 import { useFieldConstraints, type EntityConstraints } from "../../shared/metadata.ts";
 import type { ListColumn } from "../../shared/types.ts";
@@ -42,7 +42,7 @@ const parseManual = (type: TableColumn["type"], text: string): LookupRef => ({
  *  split, silently stop writing a mapped SAP field, or leave the document history with nothing to
  *  match on. Mapped columns are derived, not hardcoded, so the set follows the author if they remap. */
 const lockedColumns = (t: TableDef): Set<string> =>
-  t.role === "items" ? new Set([QTY_COL, ITEM_COL, ...Object.keys(t.map ?? {})]) : new Set<string>();
+  t.role === "items" ? new Set([...REQUIRED_ITEM_COLS, ...Object.keys(t.map ?? {})]) : new Set<string>();
 
 // One row per TableColumn. Module constants: useEditGrid rebuilds its cell templates when the
 // column set changes, and a rebuild remounts the input under the cursor.
@@ -54,8 +54,12 @@ const COLUMNS: ListColumn[] = [
   { key: "cell", label: "Cell", width: 160 },
   { key: "value", label: "Options / formula" },
 ];
-// The items table also says where each column lands on the quotation line.
-const ITEM_COLUMNS: ListColumn[] = [...COLUMNS, { key: "map", label: "B1 line field", width: 240 }];
+// The items table also says which columns every line must fill, and where each lands on the line.
+const ITEM_COLUMNS: ListColumn[] = [
+  ...COLUMNS,
+  { key: "required", label: "Mandatory", width: 112 },
+  { key: "map", label: "B1 line field", width: 240 },
+];
 
 /** A new calculation table. The role is not a choice: a model has exactly one items table, seeded
  *  by starterModel and undeletable, and every table added in the builder is a calc table. */
@@ -168,6 +172,12 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
       ) : (
         <Text>Typed in by the salesperson</Text>
       ),
+    // Code, name and quantity are what make a row a quotation line: ticked, and not the author's to untick.
+    required: (c, j) => (
+      <CheckBox accessibleName={`${c.label || c.key} is mandatory`}
+        checked={!!c.required || REQUIRED_ITEM_COLS.has(c.key)} disabled={REQUIRED_ITEM_COLS.has(c.key)}
+        onChange={(e) => setCol(j, { required: e.target.checked || undefined })} />
+    ),
     // Quantity is not the author's to map: config-quote.ts writes DocumentLine.Quantity itself
     // (row quantity x batch), and RESERVED_LINE_FIELDS rejects a mapping to it — so show where it
     // lands and leave it alone.

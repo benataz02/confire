@@ -40,7 +40,7 @@ export function ConsistencyStatus({ prop }: { prop: Propagation }) {
   const conflict = prop.conflicts.length ? prop.conflicts.map((c) => c.message).join(" · ") : null;
   return (
     <ObjectStatus state={conflict ? "Negative" : "Positive"}>
-      {conflict ?? `✓ Consistent · ${prop.open.length} open · ~${prop.candidateEstimate} candidate${prop.candidateEstimate === 1 ? "" : "s"}`}
+      {conflict ?? `✓ Consistent · ${prop.open.length} open`}
     </ObjectStatus>
   );
 }
@@ -148,7 +148,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     return (
       <Form headerText="Batch quantities" {...FORM_PROPS} {...formMode}>
         <FormGroup>
-          <FormItem labelContent={<Label required>Quantities</Label>}>
+          <FormItem labelContent={<Label required>Quantities</Label>} data-param={BATCHES_SECTION}>
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
                 {/* value is set once on mount (React only writes a prop that changed), so the field
@@ -202,7 +202,8 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     // propagated value, so a field an auto-default filled already counts as answered.
     // Radio and checkbox get the asterisk only: a checkbox is never empty (false is an answer), and
     // painting every radio in a group negative would read as "these options are wrong".
-    const req = !!p.mandatory;
+    // prop.required, not p.mandatory: it also holds requiredWhen — what missingInputs gates on.
+    const req = !!prop.required[key];
     const reqProps = {
       required: req,
       valueState: req && (v === undefined || v === null || v === "") ? "Negative" : "None",
@@ -364,7 +365,9 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
             const def = defOf(g.table)!;
             return (
               <FormGroup key={`${g.table}:${gi}`} colSpan={FORM_PROPS.layout}>
-                <FormItem className={TABLE_ITEM}>
+                {/* data-param: table keys share the parameters' namespace, so a missing-row message
+                    scrolls here the same way a parameter's does. */}
+                <FormItem className={TABLE_ITEM} data-param={g.table}>
                   <ConfigTable def={def} rows={tableRows[g.table] ?? []}
                     scopeVars={prop.values} lookups={lk} querySource={querySource}
                     disabled={disabled || !onTablesChange} readOnly={readOnly}
@@ -390,7 +393,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
                     // labelSpan is 12, so the label owns a full-width row above its control — its
                     // right end IS the input's top-right corner, which is where the price belongs.
                     <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", width: "100%" }}>
-                      <Label required={!!p.mandatory && !readOnly && !p.readonly}>
+                      <Label required={!!prop.required[k] && !readOnly && !p.readonly}>
                         {p.label + (p.unit ? ` (${p.unit})` : "")}
                         {p.help ? <Icon name="message-information" accessibleName={p.help} title={p.help}
                           style={{ marginInlineStart: "0.375rem", cursor: "help", color: "var(--sapContent_IconColor)" }} /> : null}

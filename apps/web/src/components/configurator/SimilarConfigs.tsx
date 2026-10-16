@@ -1,7 +1,6 @@
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useEffect, useState, type CSSProperties } from "react";
 import { BusyIndicator, Button, IllustratedMessage, List, ListItemCustom, MessageStrip, Tag } from "@ui5/webcomponents-react";
-import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import "@ui5/webcomponents-fiori/dist/illustrations/BeforeSearch.js";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoEntries.js";
 import type { Entries, ModelDef, Val } from "@confire/config-engine";
@@ -72,8 +71,8 @@ export function SimilarConfigs({ projectId, model, entries, onCopy }: {
   });
   const labelOf = (key: string) => model.parameters.find((p) => p.key === key)?.label ?? key;
 
-  if (!h?.mappings.length)
-    return empty("NoData", "Similarity not set up", "Map parameters to history columns in the model builder's History tab.");
+  // The process page does not mount this when history has no mappings.
+  if (!h?.mappings.length) return null;
   if (!anyFilled)
     return empty("BeforeSearch", "Nothing to compare yet", "Fill a mapped parameter to find similar past configurations.");
   if (q.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "2rem" }} />;

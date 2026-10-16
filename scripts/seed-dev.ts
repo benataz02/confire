@@ -1,6 +1,6 @@
 /**
  * Bootstrap a dev tenant from an empty database: a user + the org whose slug IS the
- * subdomain. Sign in at http://confire.localhost:5173, land on http://<slug>.confire.localhost:5173.
+ * subdomain. Sign in at http://lvh.me:5173, land on http://<slug>.lvh.me:5173.
  *
  *   bun run seed:dev [slug] [email] [password]
  *
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
     console.log(`org   ${slug} (created)`);
   }
 
-  console.log(`\nsign in: http://confire.localhost:5173  ->  http://${slug}.confire.localhost:5173`);
+  console.log(`\nsign in: http://lvh.me:5173  ->  http://${slug}.lvh.me:5173`);
 }
 
 await main();

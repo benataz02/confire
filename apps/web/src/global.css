@@ -105,3 +105,21 @@
 .confire-flush .confire-inset { padding: 1rem var(--_ui5_popup_content_padding_m_l) 0 }
 .confire-flush[media-range="S"] .confire-inset { padding-inline: var(--_ui5_popup_content_padding_s) }
 .confire-flush[media-range="XL"] .confire-inset { padding-inline: var(--_ui5_popup_content_padding_xl) }
+
+/* A floating footer that appears once the page is ready for its finalizing action rises in with a
+   small overshoot, rather than popping into place, and leaves the same way backwards: a small lift,
+   then down. The page unmounts it when the out animation ends, so that one must always end. */
+@keyframes confire-footer-in {
+  from { transform: translateY(calc(100% + 1rem)); opacity: 0 }
+  to { transform: none; opacity: 1 }
+}
+@keyframes confire-footer-out {
+  to { transform: translateY(calc(100% + 1rem)); opacity: 0 }
+}
+.confire-footer-in { animation: confire-footer-in 350ms cubic-bezier(0.34, 1.4, 0.64, 1) both }
+.confire-footer-out { animation: confire-footer-out 250ms cubic-bezier(0.36, 0, 0.66, -0.4) both }
+@media (prefers-reduced-motion: reduce) {
+  .confire-footer-in { animation: none }
+  /* not `none`: no animation means no animationend, and the bar would never leave */
+  .confire-footer-out { animation-duration: 1ms }
+}

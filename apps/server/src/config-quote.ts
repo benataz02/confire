@@ -7,6 +7,8 @@ import {
   computeOutputs,
   DslError,
   itemSplit,
+  missingInputs,
+  propagate,
   typedPrice,
   type ItemsTable,
   type ModelDef,
@@ -174,6 +176,10 @@ export function buildQuoteSeed(
   if (!project.customer) {
     throw new ORPCError("BAD_REQUEST", { message: "Customer is required before quoting" });
   }
+  // The same check that hides the page's Create quote — the browser is not trusted to have done it.
+  const gaps = missingInputs(model, lookups, propagate(model, lookups, project.entries, project.tables), project.tables);
+  if (gaps.length)
+    throw new ORPCError("BAD_REQUEST", { message: `Complete the configuration before quoting: ${gaps.map((g) => g.message).join("; ")}` });
   if (!project.selection?.length) {
     throw new ORPCError("BAD_REQUEST", { message: "Select at least one candidate before quoting" });
   }

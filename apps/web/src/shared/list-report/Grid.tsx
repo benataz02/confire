@@ -1,8 +1,9 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import {
-  AnalyticalTable, AnalyticalTableHooks, Bar, Button, Form, FormGroup, FormItem, IllustratedMessage, Title,
+  AnalyticalTable, AnalyticalTableHooks, Bar, Button, Form, FormGroup, FormItem, IllustratedMessage, Label, Title,
   type AnalyticalTableCellInstance, type AnalyticalTableColumnDefinition, type AnalyticalTablePropTypes,
+  type AnalyticalTableInstance, type ReactTableHooks,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import { decodeBool } from "@confire/b1";
@@ -74,6 +75,18 @@ async function exportXlsx(title: string, columns: ListColumn[], rows: Row[]) {
   ).toFile(`${title || "export"}.xlsx`);
 }
 
+/** react-table starts every group shut. For a grid whose rows are all loaded, grouping is a way to
+ *  read them, not to hide them: open every group whenever the set of groups changes. A group the
+ *  user closes stays closed until then. Not for a paged list, where a page appending new groups
+ *  would reopen the ones the user closed. */
+const useExpandGroups = (hooks: ReactTableHooks) => {
+  hooks.useInstance.push((instance: AnalyticalTableInstance) => {
+    const groups = (instance.onlyGroupedFlatRows ?? []).map((r) => r.id).join();
+    const expand = instance.toggleAllRowsExpanded;
+    useEffect(() => { if (groups) expand?.(true); }, [groups, expand]);
+  });
+};
+
 /** The FormItem class that holds a table in a `FormGroup colSpan={layout}` (GridForm, and
  *  ConfiguratorForm's table groups): the Form lays a group's items in `column-count` columns, so the
  *  item breaks out with `column-span: all` (FormItem's columnSpan is deprecated since UI5 2.23 and
@@ -105,7 +118,7 @@ export function GridForm({ name, headerText, children }: { name?: string; header
 export function Grid({
   title, columns, state, onStateChange, rows, total, loading, hasMore, onLoadMore, loadAll, keyOf,
   selectionMode = "None", selectedIds, onSelectionChange, onRowClick, toolbarActions, cellTemplates,
-  exportName, showSettings = true, fill = true, epoch, noDataText,
+  exportName, showSettings = true, fill = true, epoch, noDataText, expandGroups,
 }: {
   title?: string;
   /** every column the view may show, resolved against metadata */
@@ -136,6 +149,8 @@ export function Grid({
   /** remounts the table when a view is applied wholesale, so its own resize state starts over */
   epoch?: number;
   noDataText?: string;
+  /** every row is loaded, so groups open as they appear (useExpandGroups) */
+  expandGroups?: boolean;
 }) {
   const canOpen = useCanOpen();
   const [selected, setSelected] = useState(NO_SELECTION);
@@ -170,9 +185,9 @@ export function Grid({
     () =>
       visible.map((c) => {
         const template = cellTemplates?.[c.key];
-        const Cell = ({ cell, row }: AnalyticalTableCellInstance) => {
+        const Cell = ({ cell }: AnalyticalTableCellInstance) => {
           // A group header row has no `original`, only the grouped value (react-table useGroupBy).
-          if (cell.isGrouped) return <span>{formatValue(cell.value, c.type, c.options, c.integer)} ({row.subRows.length})</span>;
+          if (cell.isGrouped) return <span>{formatValue(cell.value, c.type, c.options, c.integer)}</span>;
           const r = ((cell.row as { original?: Row }).original ?? {}) as Row;
           const v = r[c.key];
           if (template) return <>{template(r, c)}</>;
@@ -192,12 +207,16 @@ export function Grid({
         return {
           id: c.key,
           accessor: (row: Row) => row[c.key],
-          Header: c.label ?? c.key,
+          // A Label, not "*" in the text: UI5 draws the asterisk and announces "required".
+          Header: c.required ? () => <Label required>{c.label ?? c.key}</Label> : c.label ?? c.key,
           ...(state.columnWidths?.[c.key] ?? c.width ? { width: state.columnWidths?.[c.key] ?? c.width } : {}),
           ...(endAligned(c.type) ? { hAlign: "End" as const } : {}),
           disableSortBy: c.sortable === false,
           disableGroupBy: c.groupable !== true,
           Cell,
+          // A group row has no aggregates, and react-table falls back to Cell for them — which
+          // then formats a record that does not exist (NaN out of a money template).
+          Aggregated: () => null,
         };
       }),
     [visible, state.columnWidths, cellTemplates, canOpen],
@@ -237,8 +256,10 @@ export function Grid({
         if (header?.id && Number.isFinite(width) && widths?.[header.id] !== width)
           change?.({ columnWidths: { ...widths, [header.id]: width } });
       }),
+      // Fixed for a grid's lifetime, so the plugin list (and react-table's hook order) never changes.
+      ...(expandGroups ? [useExpandGroups] : []),
     ],
-    [],
+    [expandGroups],
   );
 
   const handleSort = useCallback<NonNullable<AnalyticalTablePropTypes["onSort"]>>((e) => {
@@ -275,12 +296,14 @@ export function Grid({
     [title, noDataText],
   );
 
+  // A controlled selection may arrive before any click, and may name rows that are not loaded.
+  const selCount = selectedIds && keyOf ? rows.filter((r) => selectedIds[keyOf(r)]).length : selected.rows.length;
   const fullScreenLabel = maximized ? "Exit full screen" : "Full screen";
   const toolbar = (
     <Bar
       startContent={title ? (
         <Title level="H5">
-          {title} ({selectionMode === "Multiple" && selected.rows.length ? `${selected.rows.length}/` : ""}{total ?? rows.length})
+          {title} ({selectionMode === "Multiple" && selCount ? `${selCount}/` : ""}{total ?? rows.length})
         </Title>
       ) : undefined}
       endContent={

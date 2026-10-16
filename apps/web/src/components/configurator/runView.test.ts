@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { Outputs } from "@confire/config-engine";
-import { chartRows, margin, unpricedItems, type Candidate, type PricedCandidate } from "./runView.ts";
+import {
+  chartRows, margin, mergeSelection, sortRows, unpricedItems, type Candidate, type PricedCandidate,
+} from "./runView.ts";
 
 const cand = (...prices: number[]): PricedCandidate => ({
   assignment: {},
@@ -19,6 +21,30 @@ describe("chartRows", () => {
   });
   test("no candidates → no lines", () => {
     expect(chartRows([], [])).toEqual([]);
+  });
+});
+
+describe("mergeSelection", () => {
+  const s = (candidateIdx: number, batchQty: number) => ({ candidateIdx, batchQty });
+  test("a pick hidden by a filter survives a change to the visible ones", () => {
+    // 0:10 is filtered out; 1:10 was picked and is unticked; 2:10 is newly ticked
+    expect(mergeSelection([s(0, 10), s(1, 10)], new Set(["1:10", "2:10"]), [s(2, 10)]))
+      .toEqual([s(0, 10), s(2, 10)]);
+  });
+  test("pick order holds", () => {
+    expect(mergeSelection([s(2, 10), s(0, 10)], new Set(["0:10", "2:10", "1:10"]), [s(0, 10), s(1, 10), s(2, 10)]))
+      .toEqual([s(2, 10), s(0, 10), s(1, 10)]);
+  });
+});
+
+describe("sortRows", () => {
+  const rows = [{ q: 100, m: "B", p: 2 }, { q: 10, m: "a10", p: null }, { q: 10, m: "a9", p: 1 }];
+  test("multi-key, numbers numerically, text with numeric digits", () => {
+    expect(sortRows(rows, [{ field: "q", direction: "asc" }, { field: "m", direction: "asc" }]).map((r) => r.m))
+      .toEqual(["a9", "a10", "B"]);
+  });
+  test("an empty number sorts lowest; desc flips", () => {
+    expect(sortRows(rows, [{ field: "p", direction: "desc" }]).map((r) => r.p)).toEqual([2, 1, null]);
   });
 });
 

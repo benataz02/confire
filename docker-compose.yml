@@ -32,7 +32,7 @@ services:
       dockerfile: apps/server/Dockerfile
       # Subdomain base domain is baked into the SPA at build time.
       args:
-        VITE_APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-confire.localhost}
+        VITE_APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-lvh.me}
     environment:
       DATABASE_URL: postgres://confire:confire@db:5432/confire
       # Fail fast: a placeholder here would sign cookies AND (via crypto.ts' fallback) encrypt SAP
@@ -40,8 +40,8 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET (openssl rand -base64 32)}
       # The apex as the browser sees it (Caddy, HTTPS) — the OAuth redirect URI and the
       # `.${APP_BASE_DOMAIN}` session cookie are both derived from it, so :3000 would break both.
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-https://${APP_BASE_DOMAIN:-confire.localhost}}
-      APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-confire.localhost}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-https://${APP_BASE_DOMAIN:-lvh.me}}
+      APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-lvh.me}
       # Unset leaves that sign-in button dead: Better Auth only logs a warning at boot.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -67,7 +67,7 @@ services:
         FROM caddy:2
         COPY --from=build /usr/bin/caddy /usr/bin/caddy
     environment:
-      APP_DOMAIN: ${APP_BASE_DOMAIN:-confire.localhost}
+      APP_DOMAIN: ${APP_BASE_DOMAIN:-lvh.me}
       CADDY_TLS: ${CADDY_TLS:-internal}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
     ports:

@@ -1,7 +1,7 @@
 import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Button, CheckBox, Input, Option, Select, Text } from "@ui5/webcomponents-react";
 import {
-  columnOptions, evalTableRows, COST_COL, PRICE_COL, typedPrice,
+  columnOptions, evalTableRows, requiredColumn, COST_COL, PRICE_COL, typedPrice,
   type ResolvedLookups, type ResolvedTable, type TableColumn, type TableDef, type Val,
 } from "@confire/config-engine";
 import { CflField } from "../../shared/cfl/CflField.tsx";
@@ -114,6 +114,9 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
     const computed = c.cell.kind === "formula";
     const overridden = computed && stored !== undefined && stored !== null;
     const value = computed ? (evaluated[ri]?.[c.key] ?? null) : stored;
+    // Same rule missingInputs applies, so a red cell is exactly what keeps Create quote hidden.
+    const req = requiredColumn(def, c);
+    const blank = req && (value === undefined || value === null || value === "");
 
     if (readOnly) {
       if (computed) return <Text>{show(value ?? null)}</Text>;
@@ -143,7 +146,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
       return (
         <CflField
           config={{ dialogConfig: cfl.masterdataQuery(querySource, ref, canonical, { title: header(c), showValue: def.role === "items" }) }}
-          value={stored ?? null} disabled={disabled} accessibleName={header(c)}
+          value={stored ?? null} disabled={disabled} required={req} accessibleName={header(c)}
           onRowSelect={(row) => onQueryPick?.(pickKey, ref.table, rowTable(row, canonical))}
           onValueChange={(nv) => {
             if (nv === undefined || nv === null || nv === "") onQueryPick?.(pickKey, ref.table, undefined);
@@ -155,7 +158,8 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
     if (c.cell.kind === "options") {
       const opts = columnOptions(c, lookups);
       return (
-        <Select style={{ width: "100%" }} disabled={disabled}
+        <Select style={{ width: "100%" }} disabled={disabled} required={req}
+          valueState={blank ? "Negative" : "None"} valueStateMessage={<div>{`${header(c)} is required.`}</div>}
           value={stored === undefined || stored === null ? "" : JSON.stringify(stored)}
           onChange={(e) => {
             const j = (e.detail.selectedOption as HTMLElement).dataset.j;
@@ -171,12 +175,12 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
 
     return (
       <Input style={{ width: "100%" }} type={c.type === "number" ? "Number" : "Text"}
-        accessibleName={header(c)}
+        accessibleName={header(c)} required={req}
         value={value === undefined || value === null ? "" : computed ? show(value) : String(value)}
         // The clear icon IS the revert, and the value state is how a hand-typed number is told
         // apart from a calculated one at a glance.
-        showClearIcon={overridden} valueState={overridden ? "Information" : "None"}
-        valueStateMessage={<div>Overridden by hand. Clear the field to go back to the formula.</div>}
+        showClearIcon={overridden} valueState={overridden ? "Information" : blank ? "Negative" : "None"}
+        valueStateMessage={<div>{overridden ? "Overridden by hand. Clear the field to go back to the formula." : `${header(c)} is required.`}</div>}
         disabled={disabled}
         onInput={(e) => {
           const raw = e.target.value ?? "";
@@ -191,12 +195,14 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
   // A width off the cell text would change per keystroke and rebuild every cell; size from the
   // headers if narrow columns become a complaint.
   const columns = useMemo<ListColumn[]>(() => [
-    ...def.columns.map((c) => ({ key: c.key, label: header(c), type: c.type, sortable: false })),
+    ...def.columns.map((c) => ({
+      key: c.key, label: header(c), type: c.type, sortable: false, required: !readOnly && requiredColumn(def, c),
+    })),
     ...(showMoney ? [
       { key: COST_COL, label: costHeader, type: "number" as const, sortable: false },
       { key: PRICE_COL, label: priceHeader, type: "number" as const, sortable: false },
     ] : []),
-  ], [def, showMoney, costHeader, priceHeader]);
+  ], [def, readOnly, showMoney, costHeader, priceHeader]);
   const state = useMemo<GridState>(() => ({ columns: columns.map((c) => c.key), sortBy: [], groupBy: [] }), [columns]);
   const data = useMemo(() => rows.map((r, i) => ({ ...r, [IDX]: i })), [rows]);
 

@@ -57,3 +57,8 @@ test("an item costed at 0 is a Candidates warning, one per item, naming the pric
 test("a clean configuration has nothing to say", () => {
   expect(configMessages(base)).toEqual([]);
 });
+
+test("what the quote waits on is listed, each jumping to its field", () => {
+  const msgs = configMessages({ ...base, missing: [{ key: "items", message: "Items: add at least one row" }] });
+  expect(msgs.map((m) => [m.type, m.text, m.anchor])).toEqual([["Critical", "Items: add at least one row", '[data-param="items"]']]);
+});

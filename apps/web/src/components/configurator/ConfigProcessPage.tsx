@@ -3,17 +3,20 @@ import { useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar, Button, BusyIndicator, DynamicSideContent, Form, FormGroup, FormItem, IllustratedMessage,
-  Input, Label, MessageStrip, ObjectPage, ObjectPageSection, ObjectPageTitle, ObjectStatus,
+  Input, Label, MessageStrip, ObjectPage, ObjectPageSection, ObjectPageTitle,
   Option, Panel, Select, Tag, Text, Title, ToggleButton, Toolbar, ToolbarButton, ToolbarItem,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
-import { evalTableRows, propagate, type Entries, type ItemsTable, type TableRows, type Val } from "@confire/config-engine";
+import {
+  evalTableRows, missingInputs, propagate,
+  type Entries, type ItemsTable, type Propagation, type ResolvedLookups, type ResolvedTable, type TableRows, type Val,
+} from "@confire/config-engine";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts";
 import { client, meQuery, orpc, useCurrency } from "../../orpc.ts";
 import { money as formatMoney } from "../../lib/money.ts";
 import { confirm } from "../confirm.ts";
 import { toast } from "../toast.ts";
-import { statusUi, toggleSelection, toPriced, unpricedItems, type Sel } from "./runView.ts";
+import { statusUi, toPriced, unpricedItems, type Sel } from "./runView.ts";
 import { BATCHES_SECTION, ConfiguratorForm, ConsistencyStatus } from "./ConfiguratorForm.tsx";
 import { CflField } from "../../shared/cfl/CflField.tsx";
 import { cfl } from "../../shared/cfl/cfl-configs.ts";
@@ -43,8 +46,8 @@ const CUSTOMER = { dialogConfig: cfl.customers() };
 /** One insights panel's content column. */
 const PANEL_BODY = { display: "flex", flexDirection: "column", gap: "0.75rem", padding: "0 0.25rem 0.5rem" } as const;
 
-// One scroll: Configure, Candidates, Create quote. Missing run or selection is an empty state.
-// Local overlays (override ?? server) until persist.
+// Two tabs, Configure and Candidates, and one finalizing action in the footer once everything the
+// quote needs is filled. Local overlays (override ?? server) until persist.
 export function ConfigProcessPage({ id }: { id: string }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -77,6 +80,9 @@ export function ConfigProcessPage({ id }: { id: string }) {
   // quantity falls back to the first rather than pricing at a batch that no longer exists.
   const [viewQty, setViewQty] = useState<number | null>(null);
   const [railOpen, setRailOpen] = useState(true);
+  // Whether the footer is mounted. It outlives `showFooter` by its out animation, which is what
+  // clears this; `showFooter` turning true sets it straight away (below).
+  const [footerUp, setFooterUp] = useState(false);
   // Every mutation returns the part of configs.get's payload it could have changed, so the
   // response IS the refetch — no invalidate, no second round trip per edit.
   const setProject = (patch: Partial<Payload>) =>
@@ -162,6 +168,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
   };
   // Everything set on the configuration itself that Calculate needs. cardCode, not just a truthy
   // customer: a half-filled one would otherwise pass the gate and reach the B1 quotation seed.
+  // The quote needs more (`gaps` below); the calculation runs without it, as a live preview.
   const missing = [
     ...(project?.name.trim() ? [] : ["name"]),
     ...(project?.customer?.cardCode ? [] : ["business partner"]),
@@ -227,32 +234,63 @@ export function ConfigProcessPage({ id }: { id: string }) {
   // Same paramPrices() the per-field badges read, so the two cannot disagree.
   const optionPrices = lk && prop ? paramPrices(model.definition, prop, lk.tables) : NONE;
 
+  // What the quote waits on beyond name and customer, in form order. buildQuoteSeed refuses on the
+  // same missingInputs(), so a hidden button and a refused quote cannot disagree.
+  const gaps = [
+    ...(batches.length ? [] : [{ key: BATCHES_SECTION, message: "Add at least one batch quantity" }]),
+    ...(lk && prop ? missingInputs(model.definition, lk, prop, tables) : []),
+  ];
+  // The footer holds the finalizing action, so it exists only once there is something to finalize.
+  // It stays while an edit recalculates: dropping it per keystroke would make it flicker.
+  const ready = !locked && !!prop && missing.length === 0 && gaps.length === 0;
+  // Under Candidates the bar waits for a ticked line: there, picking is the step in progress, and
+  // the bar is what finishes it.
+  const showFooter = ready && (sectionParam.props.selectedSectionId !== "candidates" || selection.length > 0);
+  if (showFooter && !footerUp) setFooterUp(true);
+  // Several candidates: which to quote is the user's pick, made under Candidates. One leaves nothing
+  // to pick, so Create quote picks every batch quantity of it on the way out. configs.quoteDraft
+  // builds from the *saved* selection, hence `busy` while a pick or an edit is still saving.
+  const mustPick = candidates.length > 1 && !project.selection?.length;
+  const busy = !runReady || draft !== null || calcBusy || selOverride !== null || select.isPending;
+  const toQuote = () => void navigate({ to: "/configs/$id/quote", params: { id } });
+  const finalize = () =>
+    mustPick ? sectionParam.go("candidates")
+    : project.selection?.length ? toQuote()
+    : select.mutate(
+        { projectId: id, selection: candidates[0]!.perBatch.map((b) => ({ candidateIdx: 0, batchQty: b.batchQty })) },
+        { onSuccess: toQuote },
+      );
+
   const footer = (
-    <Bar design="FloatingFooter"
+    // confire-footer-in/-out (global.css): the bar rises in when it mounts, i.e. when `showFooter`
+    // turns true, and drops out when it turns false — unmounting only once that animation is done.
+    <Bar design="FloatingFooter" className={showFooter ? "confire-footer-in" : "confire-footer-out"}
+      onAnimationEnd={(e) => { if (e.animationName === "confire-footer-out") setFooterUp(false); }}
       startContent={
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           {prop ? <ConsistencyStatus prop={prop} /> : null}
-          {missing.length ? <ObjectStatus state="Critical">{missing.join(" and ")} required</ObjectStatus> : null}
           {shouldCalc || calcBusy || select.isPending ? <BusyIndicator active delay={0} size="S" /> : null}
           {selection.length ? <Text>Selected: {formatMoney(selectedTotal, currency)}</Text> : null}
         </div>
       }
       endContent={
-        <>
-          {/* The finalizing action, and the only Emphasized one on the page — the Fiori rule.
-              configs.quoteDraft builds from the *saved* selection, so a pick still saving or a
-              pending edit has nothing to quote yet. */}
-          <Button design="Emphasized"
-            disabled={locked || draft !== null || selOverride !== null || !project.selection?.length}
-            tooltip={draft !== null ? "Calculate first"
-              : selOverride !== null ? (select.isError ? "The selection was not saved — see messages" : "Saving the selection…")
-              : !project.selection?.length ? "Pick at least one price under Candidates" : "Create the quotation in SAP"}
-            onClick={() => navigate({ to: "/configs/$id/quote", params: { id } })}>
-            Create quote
-          </Button>
-        </>
+        // The finalizing action, and the only Emphasized one on the page — the Fiori rule.
+        <Button design="Emphasized" disabled={conflicted || busy}
+          tooltip={conflicted || calc.isError || select.isError ? "Resolve the issues in the messages first"
+            : busy ? "Calculating…" : undefined}
+          onClick={finalize}>
+          {mustPick ? "Select candidate" : "Create quote"}
+        </Button>
       } />
   );
+
+  // What both ConfiguratorForms share: the batch-quantity field above and the model's own sections.
+  const formProps = (canonical: NonNullable<typeof lookups.data>, lk: ResolvedLookups, prop: Propagation) => ({
+    model: model.definition, lookups: canonical, lk, prop, entries, batches, readOnly: locked,
+    querySource: { modelId: project.modelId },
+    onChange: (next: Entries) => edit({ entries: next }),
+    onQueryPick: (k: string, t: string, sel: ResolvedTable | undefined) => setPicks((p) => setQueryPick(p, k, t, sel)),
+  });
 
   // No ObjectPageHeader and no message strips: everything the page has to say is one list behind
   // the title's MessageViewButton, grouped by the section it belongs to.
@@ -261,6 +299,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
     name: project.name,
     customer: !!project.customer?.cardCode,
     prop,
+    missing: gaps,
     candidates: candidates.length,
     unpriced: unpricedItems(candidates),
     capped: q.data.capped,
@@ -274,7 +313,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
   });
 
   return (
-    <>
     <ObjectPage
       mode="IconTabBar"
       hidePinButton
@@ -282,11 +320,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
       titleArea={
         <ObjectPageTitle
           header={<Title>{project.name.trim() || "New configuration"}</Title>}
-          subHeader={
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-              {project.customer?.cardName ? <Text>{project.customer.cardName}</Text> : null}
-            </div>
-          }
+          subHeader={project.customer?.cardName ? <Text>{project.customer.cardName}</Text> : undefined}
           navigationBar={
             <Toolbar design="Transparent">
               {/* A Toolbar only measures — and overflows — its own item types: the two plain
@@ -339,13 +373,15 @@ export function ConfigProcessPage({ id }: { id: string }) {
           </Tag>
         </ObjectPageTitle>
       }
-      footerArea={!locked ? footer : undefined}
+      footerArea={footerUp ? footer : undefined}
     >
       <ObjectPageSection id="configure" titleText="Configure" fitContent>
         <DynamicSideContent style={{ flex: 1, minHeight: 0 }} sideContentVisibility="AlwaysShow"
           hideSideContent={!railShown} accessibilityAttributes={{ sideContent: { ariaLabel: "Insights" } }}
           sideContent={
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.5rem" }}>
+            // No padding on top: the panel's top edge lines up with the General form.
+            // The form column has none, and both headers are the same 2.75rem.
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", paddingInline: "0.5rem", paddingBlockEnd: "0.5rem" }}>
               {/* The total rides in headerText rather than a `header` slot: a custom header is only
                   toggled by its arrow, this one by the whole bar — and the figure survives collapsing. */}
               <Panel accessibleRole="Region" headerLevel="H5"
@@ -360,14 +396,20 @@ export function ConfigProcessPage({ id }: { id: string }) {
                   {optionPrices.length ? <OptionPrices rows={optionPrices} cur={currency} /> : null}
                 </div>
               </Panel>
-              <Panel accessibleRole="Region" headerLevel="H5" headerText="Similar configurations" collapsed>
-                <div style={PANEL_BODY}>
-                  <SimilarConfigs projectId={id} model={model.definition} entries={entries} onCopy={copyValues} />
-                </div>
-              </Panel>
+              {/* No mappings means the History tab was never filled in — an empty "not set up"
+                  panel is just noise in the rail. */}
+              {model.definition.history?.mappings.length ? (
+                <Panel accessibleRole="Region" headerLevel="H5" headerText="Similar configurations" collapsed>
+                  <div style={PANEL_BODY}>
+                    <SimilarConfigs projectId={id} model={model.definition} entries={entries} onCopy={copyValues} />
+                  </div>
+                </Panel>
+              ) : null}
             </div>
           }>
-          <div style={{ display: "flex", flexDirection: "column", gap: "1rem", paddingBlockEnd: "1rem" }}>
+          {/* The main pane scrolls itself. The section's inline padding sits outside that
+              pane, so without this the form meets the scrollbar. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "1rem", paddingBlockEnd: "1rem", paddingInlineEnd: "0.5rem" }}>
             {/* The configuration's own attributes. No draft state: each control commits on change
                 (UI5 fires that on blur/Enter) against the server value, and `required` + a negative
                 valueState on the empty case is the Fiori way to say the same thing the footer does.
@@ -435,17 +477,11 @@ export function ConfigProcessPage({ id }: { id: string }) {
             </Form>
             {lookups.data && lk && prop ? (
               <>
-                <ConfiguratorForm section={BATCHES_SECTION} model={model.definition} lookups={lookups.data}
-                  lk={lk} prop={prop} entries={entries} onChange={(next) => edit({ entries: next })}
-                  onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
-                  querySource={{ modelId: project.modelId }} readOnly={locked}
-                  batches={batches} onBatchesChange={(next) => edit({ batches: next })} />
-                <ConfiguratorForm model={model.definition} lookups={lookups.data} lk={lk} prop={prop} entries={entries}
-                  onChange={(next) => edit({ entries: next })}
-                  onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
-                  querySource={{ modelId: project.modelId }} readOnly={locked}
+                <ConfiguratorForm section={BATCHES_SECTION} {...formProps(lookups.data, lk, prop)}
+                  onBatchesChange={(next) => edit({ batches: next })} />
+                <ConfiguratorForm {...formProps(lookups.data, lk, prop)}
                   tables={tables} onTablesChange={(next) => edit({ tables: next })} itemMoney={money}
-                  batches={batches} itemBatch={itemQty} onItemBatchChange={setViewQty} />
+                  itemBatch={itemQty} onItemBatchChange={setViewQty} />
               </>
             ) : lookups.error ? (
               /* Why the options are missing is a page message; the retry it needs is not something
@@ -455,14 +491,16 @@ export function ConfigProcessPage({ id }: { id: string }) {
           </div>
         </DynamicSideContent>
       </ObjectPageSection>
-      <ObjectPageSection id="candidates" titleText="Candidates">
+      {/* The count rides in the tab, like the model builder's issue counts — the Fiori anchor-bar
+          counter. The real one, not prop.candidateEstimate: by the time it shows, it has calculated. */}
+      <ObjectPageSection id="candidates" titleText={runReady ? `Candidates (${candidates.length})` : "Candidates"}>
         {/* capped/widest are not passed: this page reports them in its message popover. No lookups
             needed either — the prices are the calculation's own, so they render with the agent off.
             A pending edit is about to replace these candidates, so they stop taking picks. */}
         {candidates.length > 0 ? (
           <PriceAnalysis model={model.definition} entries={project.entries}
             candidates={candidates.map(toPriced)} selection={selection}
-            onToggle={(i, b) => { select.reset(); setSel(toggleSelection(selection, i, b)); }}
+            onSelect={(s) => { select.reset(); setSel(s); }}
             disabled={locked || draft !== null} />
         ) : (
           <IllustratedMessage name="NoData" design="Medium" titleText="No candidates yet"
@@ -470,7 +508,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
         )}
       </ObjectPageSection>
     </ObjectPage>
-    </>
   );
 }
 

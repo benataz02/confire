@@ -61,13 +61,14 @@ compose that check:
 | `userProcedure` | member of this workspace; a leftover `client` role stays forbidden |
 | `adminProcedure` | admin/owner — model builder, settings |
 
-Dev uses `confire.localhost` (the code's default, so no env is needed): `*.localhost` resolves to
-loopback with no hosts file, and the second label matters — the browser treats bare `localhost` as a
-TLD, so a `.localhost` cookie never reaches `acme.localhost`. Not `.local` either: that is mDNS, and
-nss-mdns answers it before `/etc/hosts` is read. Prod is `APP_BASE_DOMAIN=app.confire.ai` (the
-marketing apex stays outside the cookie zone): Caddy wildcard subdomains → one server, with one
-wildcard cert via the Cloudflare DNS challenge (`CADDY_TLS=cloudflare`; see `docker-compose.yml`).
-Google rejects `http://*.localhost` OAuth redirect URIs, so dev signs in with email/password.
+Dev uses `lvh.me` (public DNS: it and every subdomain → 127.0.0.1). Not `localhost`: the browser
+treats it as a TLD, so a `.localhost` cookie never reaches `acme.localhost`. Not `confire.localhost`
+either — the cookie works, but Google rejects `http://*.localhost` OAuth redirect URIs. Not `.local`:
+that is mDNS, and nss-mdns answers it before `/etc/hosts` is read.
+
+Prod is `APP_BASE_DOMAIN=app.confire.ai` (the marketing apex stays outside the cookie zone): Caddy
+wildcard subdomains → one server, with one wildcard cert via the Cloudflare DNS challenge
+(`CADDY_TLS=cloudflare`; see `docker-compose.yml`).
 
 ## `packages/config-engine` — the calculation core
 

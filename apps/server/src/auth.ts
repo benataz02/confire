@@ -56,7 +56,7 @@ export const auth = betterAuth({
   // Auth lives on the apex, but the app POSTs (sign-out) from every tenant subdomain, so those
   // origins need trusting; baseURL's own origin is trusted automatically. A pattern without
   // `://` is matched against URL.host — which includes the port — hence both forms: prod
-  // (`acme.app.confire.ai`) and dev (`acme.confire.localhost:5173`). Anything outside the base domain — a LAN
+  // (`acme.app.confire.ai`) and dev (`acme.lvh.me:5173`). Anything outside the base domain — a LAN
   // IP to open the app from a phone — is a per-machine fact, so it comes from
   // APP_TRUSTED_ORIGINS (comma-separated) and never from a literal in here.
   trustedOrigins: [
