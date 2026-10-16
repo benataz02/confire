@@ -12,8 +12,8 @@ import type { PanelDomRef } from "@ui5/webcomponents-react";
 import type { ODataQuery, QuerySource, Val } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { colMinWidth } from "../configurator/tableWidths.ts";
-import { confirm } from "../confirm.ts";
-import { toast } from "../toast.ts";
+import { confirm } from "@confire/ui/confirm.ts";
+import { toast } from "@confire/ui/toast.ts";
 
 // One editor for both kinds. The kind is picked once, on create: a saved row keeps it, because
 // switching would throw away either the maintained rows or the query behind it.

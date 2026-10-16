@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { RouterClient } from "@orpc/server";
 import type { AppRouter } from "@confire/server/router";
-import { orpc } from "../orpc.ts";
+import { useUiSource } from "./source.tsx";
 import type { FilterField, FormField, ListColumn, Section } from "./types.ts";
 
 // Beas' FieldConstraintsService + ii/Jo/Zo + rg (LIST-REPORT-OBJECT-PAGE.md §7.1). The server
@@ -16,6 +16,7 @@ export type Constraints = Record<string, FieldConstraint>;
 /** One entity's constraints. A day in the browser cache costs nothing: the server reads them from
  *  entity_meta in Postgres and only re-reads $metadata on an explicit refresh. */
 export function useFieldConstraints(entity: string | undefined) {
+  const { orpc } = useUiSource();
   return useQuery({
     ...orpc.entities.metadata.queryOptions({ input: { entity: entity ?? "" } }),
     enabled: !!entity,

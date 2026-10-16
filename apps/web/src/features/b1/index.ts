@@ -1,7 +1,7 @@
 import { businessPartners } from "./business-partners.tsx";
 import { documentFeature } from "./documents.tsx";
 import { items } from "./items.tsx";
-import type { EntityFeature } from "../../shared/types.ts";
+import type { EntityFeature } from "@confire/ui/types.ts";
 
 // The declared set of B1 entities. This IS the B1 surface of the app: the /b1 routes accept only
 // these, and the side nav and the shellbar search list them. Adding an entity (or a Beas one — the

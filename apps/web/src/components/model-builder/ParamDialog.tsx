@@ -5,8 +5,8 @@ import {
 } from "@ui5/webcomponents-react";
 import { checkModel, derivedColumns, displayColumns } from "@confire/config-engine";
 import type { LookupRef, ModelDef, Param } from "@confire/config-engine";
-import { Grid, GridForm } from "../../shared/list-report/Grid.tsx";
-import type { ListColumn } from "../../shared/types.ts";
+import { Grid, GridForm } from "@confire/ui/list-report/Grid.tsx";
+import type { ListColumn } from "@confire/ui/types.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { masterdataRef, modelWithParam, sourceBadge, type TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";

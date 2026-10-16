@@ -4,8 +4,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   Bar, Button, Dialog, FlexBox, Menu, MenuItem, MessageStrip, ObjectPage as Ui5ObjectPage, SplitButton, Tab, TabContainer,
 } from "@ui5/webcomponents-react";
-import { confirm } from "../../components/confirm.ts";
+import { confirm } from "../confirm.ts";
 import { exists, notFoundMessage } from "../cfl/existence.ts";
+import { useUiSource } from "../source.tsx";
 import { validateCflCells } from "../list-report/EditGrid.tsx";
 import { ColumnsTab, type ColumnItem } from "../list-report/GridSettingsDialog.tsx";
 import { ViewTitle } from "../list-report/FilterHeader.tsx";
@@ -57,6 +58,7 @@ export function ObjectPage(p: Templates & {
   const { constraints, isNew = false } = p;
   const fields = constraints.fields;
   const qc = useQueryClient();
+  const { client } = useUiSource();
 
   // rg() + the auto UDF section, unless the feature declared its own `udf`.
   const resolved = useMemo(() => {
@@ -240,13 +242,13 @@ export function ObjectPage(p: Templates & {
         if (!f.cfl || f.cfl.mustExist === false || !isEditable(f)) continue;
         const v = formData[f.key];
         if (isEmptyValue(v) || sameState(v, baseline?.[f.key])) continue;
-        if (!(await exists(qc, f.cfl, v))) ex[f.key] = notFoundMessage(f.cfl);
+        if (!(await exists(qc, client, f.cfl, v))) ex[f.key] = notFoundMessage(f.cfl);
       }
       // 3. the lines grid's value-help cells
       const cells: Record<string, Record<string, string>> = {};
       for (const s of shown) {
         if (!s.table || !isTableEditable(s.table.key)) continue;
-        const ce = await validateCflCells(qc, s.table.columns, (formData[s.table.key] as Row[] | undefined) ?? []);
+        const ce = await validateCflCells(qc, client, s.table.columns, (formData[s.table.key] as Row[] | undefined) ?? []);
         if (Object.keys(ce).length) cells[s.table.key] = ce;
       }
       // 4. the field rules

@@ -11,6 +11,7 @@
     "@confire/b1": "workspace:*",
     "@confire/config-engine": "workspace:*",
     "@confire/server": "workspace:*",
+    "@confire/ui": "workspace:*",
     "@orpc/client": "^1.14.6",
     "@orpc/tanstack-query": "^1.14.6",
     "@tanstack/react-query": "^5.101.0",
@@ -23,8 +24,7 @@
     "@ui5/webcomponents-react-charts": "^2.27.2",
     "better-auth": "^1.7.7",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "write-excel-file": "^4.1.1"
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@tanstack/router-plugin": "^1.168.18",

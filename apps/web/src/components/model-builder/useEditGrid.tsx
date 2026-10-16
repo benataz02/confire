@@ -1,7 +1,7 @@
 import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@ui5/webcomponents-react";
-import type { CellTemplate, GridState, Selection } from "../../shared/list-report/Grid.tsx";
-import type { ListColumn, Row } from "../../shared/types.ts";
+import type { CellTemplate, GridState, Selection } from "@confire/ui/list-report/Grid.tsx";
+import type { ListColumn, Row } from "@confire/ui/types.ts";
 
 // Grid over a model array edited in place (BOM, routing, constraints, mappings) — ConfigTable's
 // pattern, shared by the builder's tables: every cell is the caller's editor, and Grid only

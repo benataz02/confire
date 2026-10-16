@@ -2,8 +2,8 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { coerceKey, parseKeyParam, type Key } from "@confire/b1";
-import { client, orpc } from "../orpc.ts";
-import { toast } from "../components/toast.ts";
+import { useUiSource } from "./source.tsx";
+import { toast } from "./toast.ts";
 import { useFieldConstraints, type EntityConstraints } from "./metadata.ts";
 import { entityPath } from "./navigation.ts";
 import type { CreateAction } from "./object-page/ObjectPage.tsx";
@@ -27,6 +27,7 @@ export function useDetailView({ entity, routeKey, route, isNew = false }: {
 }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { client, orpc } = useUiSource();
   const meta = useFieldConstraints(entity);
   const constraints = meta.data;
 

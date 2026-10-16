@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Form, FormGroup, FormItem, Input, Label, MessageStrip } from "@ui5/webcomponents-react";
 import type { Issue, ModelDef } from "@confire/config-engine";
-import { CflField } from "../../shared/cfl/CflField.tsx";
-import { cfl } from "../../shared/cfl/cfl-configs.ts";
+import { CflField } from "@confire/ui/cfl/CflField.tsx";
+import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";

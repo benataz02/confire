@@ -14,12 +14,12 @@ import {
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts";
 import { client, meQuery, orpc, useCurrency } from "../../orpc.ts";
 import { money as formatMoney } from "../../lib/money.ts";
-import { confirm } from "../confirm.ts";
-import { toast } from "../toast.ts";
+import { confirm } from "@confire/ui/confirm.ts";
+import { toast } from "@confire/ui/toast.ts";
 import { statusUi, toPriced, unpricedItems, type Sel } from "./runView.ts";
 import { BATCHES_SECTION, ConfiguratorForm, ConsistencyStatus } from "./ConfiguratorForm.tsx";
-import { CflField } from "../../shared/cfl/CflField.tsx";
-import { cfl } from "../../shared/cfl/cfl-configs.ts";
+import { CflField } from "@confire/ui/cfl/CflField.tsx";
+import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import { PriceAnalysis } from "./PriceAnalysis.tsx";
 import { CostBody, OptionPrices } from "./InsightsRail.tsx";
 import { SimilarConfigs } from "./SimilarConfigs.tsx";

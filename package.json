@@ -31,6 +31,7 @@
     "test:engine": "bun test packages/config-engine",
     "test:server": "bun test apps/server",
     "test:web": "bun test apps/web",
+    "test:ui": "bun test packages/ui",
     "kill": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/kill-dev.ps1",
     "seed:agent": "bun --env-file=.env scripts/seed-agent.ts",
     "dev:agent": "bun --cwd apps/agent dev"

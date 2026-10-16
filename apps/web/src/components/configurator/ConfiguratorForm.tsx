@@ -8,9 +8,9 @@ import {
   displayColumns, domainOf, isTableGroup, placedTables, refKeyCols,
   type DomainOption, type Entries, type Group, type LookupRef, type ModelDef, type Propagation, type ResolvedLookups, type ResolvedTable, type TableDef, type TableRows, type Val,
 } from "@confire/config-engine";
-import { CflField } from "../../shared/cfl/CflField.tsx";
-import { cfl, type QueryScope } from "../../shared/cfl/cfl-configs.ts";
-import { TABLE_ITEM } from "../../shared/list-report/Grid.tsx";
+import { CflField } from "@confire/ui/cfl/CflField.tsx";
+import { cfl, type QueryScope } from "@confire/ui/cfl/cfl-configs.ts";
+import { TABLE_ITEM } from "@confire/ui/list-report/Grid.tsx";
 import { ConfigTable } from "./ConfigTable.tsx";
 import type { ItemMoney } from "./itemMoney.ts";
 import { displayValue, rowTable, setEntry } from "./formHelpers.ts";

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { checkModel, type Issue, type ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import type { TableCols } from "./exprHelpers.ts";
-import { toast } from "../toast.ts";
+import { toast } from "@confire/ui/toast.ts";
 import { starterModel } from "./starterModel.ts";
 
 export const issueFor = (issues: Issue[], path: string) => issues.find((i) => i.path === path);

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { orpc } from "../orpc.ts";
+import { useUiSource } from "./source.tsx";
 import { isEmptyValue } from "./validation.ts";
 import type {
   FilterCond, FilterField, FilterValue, ListColumn, ListQuery, SystemView, ViewState,
@@ -278,6 +278,7 @@ export function useViews<S>({ tableId, systemViews, resolve, initial, local = fa
   local?: boolean;
 }) {
   const qc = useQueryClient();
+  const { orpc } = useUiSource();
   const listOpts = orpc.views.list.queryOptions({ input: { tableId } });
   // A failed list is not a broken page: the declared views still work, so it is only "no saved
   // views" — hence isFetched rather than isSuccess as the gate.

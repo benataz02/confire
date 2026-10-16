@@ -3,6 +3,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { Button } from "@ui5/webcomponents-react";
 import { FormField } from "../object-page/FormField.tsx";
 import { allExist } from "../cfl/existence.ts";
+import type { UiSource } from "../source.tsx";
 import { Grid, type CellTemplate, type GridState, type Selection } from "./Grid.tsx";
 import type { FormField as Field, ListColumn, Row } from "../types.ts";
 
@@ -38,12 +39,12 @@ const cellEditable = (c: ListColumn) => !!c.metaEditable && !c.readonly;
  * validateCflCells(): every value-help column's distinct values probed once, every cell holding a
  * missing one marked. A failed probe counts as existing, as everywhere else.
  */
-export async function validateCflCells(qc: QueryClient, columns: ListColumn[], rows: Row[]): Promise<Record<string, string>> {
+export async function validateCflCells(qc: QueryClient, client: UiSource["client"], columns: ListColumn[], rows: Row[]): Promise<Record<string, string>> {
   const errors: Record<string, string> = {};
   for (const c of columns) {
     if (!c.cflConfig || !cellEditable(c)) continue;
     const cfg = { dialogConfig: c.cflConfig };
-    const missing = await allExist(qc, cfg, rows.map((r) => r[c.key]));
+    const missing = await allExist(qc, client, cfg, rows.map((r) => r[c.key]));
     rows.forEach((r, i) => {
       if (missing.has(String(r[c.key] ?? "").trim())) errors[cellKey(i, c.key)] = `${c.cflConfig!.title} not found`;
     });

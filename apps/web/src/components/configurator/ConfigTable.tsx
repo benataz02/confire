@@ -4,10 +4,10 @@ import {
   columnOptions, evalTableRows, requiredColumn, COST_COL, PRICE_COL, typedPrice,
   type ResolvedLookups, type ResolvedTable, type TableColumn, type TableDef, type Val,
 } from "@confire/config-engine";
-import { CflField } from "../../shared/cfl/CflField.tsx";
-import { cfl, type QueryScope } from "../../shared/cfl/cfl-configs.ts";
-import { Grid, type CellTemplate, type GridState } from "../../shared/list-report/Grid.tsx";
-import type { ListColumn } from "../../shared/types.ts";
+import { CflField } from "@confire/ui/cfl/CflField.tsx";
+import { cfl, type QueryScope } from "@confire/ui/cfl/cfl-configs.ts";
+import { Grid, type CellTemplate, type GridState } from "@confire/ui/list-report/Grid.tsx";
+import type { ListColumn } from "@confire/ui/types.ts";
 import { displayValue, rowTable } from "./formHelpers.ts";
 import { addRow, pasteRows, removeRows, setCell, type Row } from "./configTableOps.ts";
 import { money as fmtMoney } from "../../lib/money.ts";

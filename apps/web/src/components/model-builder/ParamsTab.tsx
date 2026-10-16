@@ -8,7 +8,7 @@ import {
 import "@ui5/webcomponents-fiori/dist/illustrations/AddColumn.js";
 import { isTableGroup, itemsTable, propagate, type Entries, type ResolvedLookups, type TableRows } from "@confire/config-engine";
 import type { Issue, ModelDef, Param, TableDef } from "@confire/config-engine";
-import { confirm } from "../confirm.ts";
+import { confirm } from "@confire/ui/confirm.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { ParamDialog } from "./ParamDialog.tsx";
 import { TableDialog, newCalcTable } from "./TableDialog.tsx";

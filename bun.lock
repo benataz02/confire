@@ -54,6 +54,7 @@
         "@confire/b1": "workspace:*",
         "@confire/config-engine": "workspace:*",
         "@confire/server": "workspace:*",
+        "@confire/ui": "workspace:*",
         "@orpc/client": "^1.14.6",
         "@orpc/tanstack-query": "^1.14.6",
         "@tanstack/react-query": "^5.101.0",
@@ -67,7 +68,6 @@
         "better-auth": "^1.7.7",
         "react": "^19.2.7",
         "react-dom": "^19.2.7",
-        "write-excel-file": "^4.1.1",
       },
       "devDependencies": {
         "@tanstack/router-plugin": "^1.168.18",
@@ -109,6 +109,30 @@
         "@types/bun": "^1.4.0",
         "@types/pg": "^8.20.0",
         "drizzle-kit": "^0.31.10",
+      },
+    },
+    "packages/ui": {
+      "name": "@confire/ui",
+      "dependencies": {
+        "@confire/b1": "workspace:*",
+        "@confire/config-engine": "workspace:*",
+        "@confire/db": "workspace:*",
+        "@confire/server": "workspace:*",
+        "@orpc/server": "^1.14.6",
+        "@orpc/tanstack-query": "^1.14.6",
+        "@tanstack/react-query": "^5.101.0",
+        "@tanstack/react-router": "^1.170.16",
+        "@ui5/webcomponents-fiori": "^2.27.2",
+        "@ui5/webcomponents-react": "^2.27.2",
+        "react": "^19.2.7",
+        "react-dom": "^19.2.7",
+        "write-excel-file": "^4.1.1",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.4.0",
+        "@types/react": "^19.2.17",
+        "@types/react-dom": "^19.2.3",
+        "typescript": "^7.0.2",
       },
     },
   },
@@ -174,6 +198,8 @@
     "@confire/db": ["@confire/db@workspace:packages/db"],
 
     "@confire/server": ["@confire/server@workspace:apps/server"],
+
+    "@confire/ui": ["@confire/ui@workspace:packages/ui"],
 
     "@confire/web": ["@confire/web@workspace:apps/web"],
 

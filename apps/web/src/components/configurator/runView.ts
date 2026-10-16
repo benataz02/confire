@@ -1,6 +1,6 @@
 import type { Entries, ModelDef, Outputs } from "@confire/config-engine";
-import type { GridState } from "../../shared/list-report/Grid.tsx";
-import type { Row } from "../../shared/types.ts";
+import type { GridState } from "@confire/ui/list-report/Grid.tsx";
+import type { Row } from "@confire/ui/types.ts";
 
 // Pure view logic for the configuration wizard. Client-side mirrors of the server's
 // ConfigCandidate/ConfigSelection jsonb shapes (web doesn't depend on @confire/db; structural match).

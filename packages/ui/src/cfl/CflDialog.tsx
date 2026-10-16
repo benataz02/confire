@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Bar, Button, Dialog } from "@ui5/webcomponents-react";
-import { meQuery, orpc } from "../../orpc.ts";
+import { useUiSource } from "../source.tsx";
 import { resolveColumns, useFieldConstraints } from "../metadata.ts";
 import { buildPool, defaultState, mergeKnownColumns, toQuery } from "../views.ts";
 import { useListView } from "../useListView.ts";
@@ -31,7 +31,8 @@ export default function CflDialog({ config, initialSearch, multiSelect, onSelect
 }) {
   const key = keyFieldOf(config);
   const src = config.source;
-  const role = useQuery(meQuery).data?.role;
+  const { client, orpc, useRole } = useUiSource();
+  const role = useRole();
   // Wait for `me` so a dialog opened before the shell knows who is signed in does not write a
   // layout under nobody's key.
   const persist = role !== undefined;
@@ -101,7 +102,7 @@ export default function CflDialog({ config, initialSearch, multiSelect, onSelect
   const list = useListView({
     queryKey: ["cfl-dialog", sourceKey(src), request],
     queryFn: ({ pageParam }: { pageParam: string | number | undefined }) =>
-      fetchPage(src, { ...request, cursor: pageParam, count: pageParam === undefined }),
+      fetchPage(client, src, { ...request, cursor: pageParam, count: pageParam === undefined }),
     initialPageParam: undefined as string | number | undefined,
     getNextPageParam: (last: { next?: string | number }) => last.next,
     enabled: src.kind === "masterdata" || !meta.isPending,

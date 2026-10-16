@@ -1,12 +1,12 @@
 import { useMutation } from "@tanstack/react-query";
 import { Button, MessageStrip } from "@ui5/webcomponents-react";
 import { orpc } from "../../orpc.ts";
-import { toast } from "../../components/toast.ts";
+import { toast } from "@confire/ui/toast.ts";
 import { PrintActions } from "../../components/b1/PrintActions.tsx";
-import { cfl } from "../../shared/cfl/cfl-configs.ts";
-import { useEntityNav } from "../../shared/EntityLink.tsx";
-import { toIsoDay } from "../../shared/format.ts";
-import type { EntityFeature, Facet, HeaderActionContext } from "../../shared/types.ts";
+import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
+import { useEntityNav } from "@confire/ui/EntityLink.tsx";
+import { toIsoDay } from "@confire/ui/format.ts";
+import type { EntityFeature, Facet, HeaderActionContext } from "@confire/ui/types.ts";
 
 // The B1 marketing documents, declared. One builder for all four: Quotations and Orders are
 // writable, DeliveryNotes and Invoices read-only — which is the server's word (entities.metadata

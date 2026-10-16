@@ -4,13 +4,13 @@ import {
   MultiComboBox, MultiComboBoxItem, Option, Select, Text,
 } from "@ui5/webcomponents-react";
 import type { Constraint, Issue, ModelDef, ResolvedLookups, Val } from "@confire/config-engine";
-import { Grid, GridForm } from "../../shared/list-report/Grid.tsx";
-import type { ListColumn } from "../../shared/types.ts";
+import { Grid, GridForm } from "@confire/ui/list-report/Grid.tsx";
+import type { ListColumn } from "@confire/ui/types.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { DeleteRows, positionOf, positions, useEditGrid } from "./useEditGrid.tsx";
-import { confirm } from "../confirm.ts";
+import { confirm } from "@confire/ui/confirm.ts";
 
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
 type TableConstraint = Extract<Constraint, { kind: "table" }>;

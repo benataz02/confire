@@ -4,14 +4,14 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BusyIndicator, Toolbar, ToolbarButton } from "@ui5/webcomponents-react";
 import { client, orpc } from "../../../orpc.ts";
 import { b1Feature } from "../../../features/b1/index.ts";
-import { ListReport } from "../../../shared/list-report/ListReport.tsx";
-import { ObjectPage } from "../../../shared/object-page/ObjectPage.tsx";
-import { ObjectPageSkeleton, PageError } from "../../../shared/object-page/ObjectPageSkeleton.tsx";
-import { useFieldConstraints } from "../../../shared/metadata.ts";
-import { useListView } from "../../../shared/useListView.ts";
-import { useDetailView } from "../../../shared/useDetailView.ts";
+import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
+import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
+import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
+import { useFieldConstraints } from "@confire/ui/metadata.ts";
+import { useListView } from "@confire/ui/useListView.ts";
+import { useDetailView } from "@confire/ui/useDetailView.ts";
 import { PrintActions } from "../../../components/b1/PrintActions.tsx";
-import type { EntityFeature, ListQuery, Row } from "../../../shared/types.ts";
+import type { EntityFeature, ListQuery, Row } from "@confire/ui/types.ts";
 
 // One declared B1 entity's list — or, with the `#create` fragment, its object page in create mode
 // (Beas' createModeMatch: `/items#create` is the detail component, `/items` the list). Only the

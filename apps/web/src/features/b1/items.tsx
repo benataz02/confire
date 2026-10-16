@@ -1,4 +1,4 @@
-import type { EntityFeature } from "../../shared/types.ts";
+import type { EntityFeature } from "@confire/ui/types.ts";
 
 // Items, declared. ItemCode is requiredOnCreate and not in the write allowlist: editable while
 // creating, read-only after.

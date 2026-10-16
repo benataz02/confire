@@ -4,9 +4,9 @@ import {
   StepInput, Text,
 } from "@ui5/webcomponents-react";
 import { checkModel, QTY_COL, REQUIRED_ITEM_COLS, RESERVED_LINE_FIELDS, type LookupRef, type ModelDef, type TableColumn, type TableDef } from "@confire/config-engine";
-import { Grid, GridForm } from "../../shared/list-report/Grid.tsx";
-import { useFieldConstraints, type EntityConstraints } from "../../shared/metadata.ts";
-import type { ListColumn } from "../../shared/types.ts";
+import { Grid, GridForm } from "@confire/ui/list-report/Grid.tsx";
+import { useFieldConstraints, type EntityConstraints } from "@confire/ui/metadata.ts";
+import type { ListColumn } from "@confire/ui/types.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { NONE, PAIRS, W, lbl, optValue } from "./ParamDialog.tsx";
 import { masterdataRef, modelWithTable, rowVars, sourceBadge, type TableCols } from "./exprHelpers.ts";

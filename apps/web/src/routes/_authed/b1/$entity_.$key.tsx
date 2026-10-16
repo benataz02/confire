@@ -1,8 +1,8 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { b1Feature } from "../../../features/b1/index.ts";
-import { ObjectPage } from "../../../shared/object-page/ObjectPage.tsx";
-import { ObjectPageSkeleton, PageError } from "../../../shared/object-page/ObjectPageSkeleton.tsx";
-import { useDetailView } from "../../../shared/useDetailView.ts";
+import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
+import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
+import { useDetailView } from "@confire/ui/useDetailView.ts";
 
 // One record of a declared B1 entity. Editing is offered when the server says the entity is
 // writable, on the fields its write allowlist names, and every save carries the ETag read with

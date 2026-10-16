@@ -1,4 +1,4 @@
-import { client } from "../../orpc.ts";
+import type { UiSource } from "../source.tsx";
 import type { CflSource, FilterCond, Row } from "../types.ts";
 
 // The Beas CFL `endpoint`, as one function over Confire's two sources. Everything a value help
@@ -26,7 +26,7 @@ const toRows = (columns: string[], rows: unknown[][]): Row[] =>
 
 /** The one read. A masterdata source understands search and an exact key (`eq` on one field) —
  *  any other filter is dropped there rather than sent, because it has nowhere to go. */
-export async function fetchPage(source: CflSource, req: CflRequest): Promise<CflPage> {
+export async function fetchPage(client: UiSource["client"], source: CflSource, req: CflRequest): Promise<CflPage> {
   if (source.kind === "entity") {
     const page = await client.entities.rows({
       entity: source.entitySet,

@@ -1,5 +1,5 @@
-import { cfl } from "../../shared/cfl/cfl-configs.ts";
-import type { EntityFeature } from "../../shared/types.ts";
+import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
+import type { EntityFeature } from "@confire/ui/types.ts";
 
 // Business partners, declared. CardCode and CardType are requiredOnCreate but not in the write
 // allowlist, so metadata makes them editable while creating and read-only after — nothing here

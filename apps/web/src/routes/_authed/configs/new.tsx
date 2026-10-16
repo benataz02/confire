@@ -7,8 +7,8 @@ import {
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoEntries.js";
 import { orpc } from "../../../orpc.ts";
-import { CflField } from "../../../shared/cfl/CflField.tsx";
-import { cfl } from "../../../shared/cfl/cfl-configs.ts";
+import { CflField } from "@confire/ui/cfl/CflField.tsx";
+import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 
 export const Route = createFileRoute("/_authed/configs/new")({ component: NewConfig });
 

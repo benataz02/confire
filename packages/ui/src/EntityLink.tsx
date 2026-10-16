@@ -1,13 +1,12 @@
 import { useCallback, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Link } from "@ui5/webcomponents-react";
-import { meQuery } from "../orpc.ts";
+import { useUiSource } from "./source.tsx";
 import { canOpenRoute, entityPath } from "./navigation.ts";
 
 /** Whether this user may open a route — `/b1/*` is admin-only. */
 export function useCanOpen(): (route: string) => boolean {
-  const role = useQuery(meQuery).data?.role;
+  const role = useUiSource().useRole();
   return useCallback((route: string) => canOpenRoute(route, role), [role]);
 }
 

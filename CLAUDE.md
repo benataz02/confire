@@ -24,7 +24,7 @@ tsconfig that covers everything, so a change can typecheck in one package and br
 
 ```bash
 bunx tsc -p apps/server/tsconfig.json --noEmit
-# projects: packages/{b1,config-engine,db}, apps/{agent,server,web}
+# projects: packages/{b1,config-engine,db,ui}, apps/{agent,server,web}
 bun --cwd apps/web build                # also regenerates routeTree.gen.ts (gitignored)
 ```
 
@@ -224,20 +224,26 @@ line with its cached options, and a stale cache is a page message instead of a f
 ## List Report / Object Page
 
 Copied from the Beas client (`LIST-REPORT-OBJECT-PAGE.md`, `VALUE-HELP-AND-KEY-NAVIGATION.md`):
-two shells in `apps/web/src/shared/` driven by **declared** per-entity configs. Metadata never
+two shells in `packages/ui/src/` (`@confire/ui`, imported by path: `@confire/ui/list-report/ListReport.tsx`)
+driven by **declared** per-entity configs. Metadata never
 generates a page.
 
-- **Features are declared.** `features/b1/` (documents, business partners, items; `B1_FEATURES`
+- **The data source is injected.** The shells never import an app's oRPC client: they read and write
+  through `UiSource` (`source.tsx`) — the internal router's own client and query utils, provided once in
+  `apps/web/src/main.tsx`. The query keys therefore stay the app's, so the app's own cache writes
+  (`QuoteCreatePage` seeding `entities.one`) still land. `global.css` (UI5 quirks the shells need) lives
+  there too. `bun run test:ui` runs its tests.
+- **Features are declared.** `apps/web/src/features/b1/` (documents, business partners, items; `B1_FEATURES`
   is the registry — the `/b1/$entity` routes accept nothing else, and the side nav and search list
   it). A feature is plain object literals: list columns, filter fields, system views, header, section
   tree. Local lists (configs, models, masterdata) declare theirs in the route file.
-- **Metadata only merges** (`shared/metadata.ts`, Beas `ii`/`rg`): label, type, options and
+- **Metadata only merges** (`metadata.ts`, Beas `ii`/`rg`): label, type, options and
   MaxLength fill what a declared field left out; `Required` becomes `required` unless the field
   declared a function; editability is `isEditMode && Editable && !readonly` (on create, `Required`
   counts too). The one thing metadata adds: `U_` fields as hidden columns and an auto
   "User-defined fields" section. Enum options carry B1's member *name* (`bost_Open`) — that is what
   the Service Layer sends and filters on.
-- **One combined view per list** (`shared/views.ts`): layout + filters in one `ViewState`, Beas'
+- **One combined view per list** (`views.ts`): layout + filters in one `ViewState`, Beas'
   own field names. System views are code (`system:<key>`, Standard first unless a feature declares
   `default`); personal/shared ones are `ui_view` rows, the active one per user a `ui_user_state`
   key. Dirty is a canonical-JSON compare — jsonb reorders keys. On first load the URL's filters
@@ -245,7 +251,7 @@ generates a page.
 - **`ListQuery` is the wire query.** `toQuery` turns a state into it (range → ge/lt-next-day, list
   → `in`, string → `contains`/`eq` for `exact`); `entity-list.ts` compiles it to OData,
   `list-sql.ts` to SQL. `ListReport` does no client-side processing (`manualSortBy`), so both match.
-- **Value helps are CFLs** (`shared/cfl/`): `cfl-configs.ts` factories, one `fetchPage` over an
+- **Value helps are CFLs** (`cfl/`): `cfl-configs.ts` factories, one `fetchPage` over an
   entity source (`entities.rows`) or a masterdata source (`configs.queryPage`, with an exact
   `match` for probes). The key is `keyField ?? columns[0]`. A failed existence probe counts as
   "exists". Type-ahead is `startswith`, the dialog `contains`.

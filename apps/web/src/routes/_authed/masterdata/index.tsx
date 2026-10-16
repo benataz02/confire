@@ -3,11 +3,11 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@ui5/webcomponents-react";
 import { orpc } from "../../../orpc.ts";
-import { ListReport } from "../../../shared/list-report/ListReport.tsx";
-import { useListView } from "../../../shared/useListView.ts";
-import { confirm } from "../../../components/confirm.ts";
-import { toast } from "../../../components/toast.ts";
-import type { ListFeature, ListQuery, Row } from "../../../shared/types.ts";
+import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
+import { useListView } from "@confire/ui/useListView.ts";
+import { confirm } from "@confire/ui/confirm.ts";
+import { toast } from "@confire/ui/toast.ts";
+import type { ListFeature, ListQuery, Row } from "@confire/ui/types.ts";
 
 export const Route = createFileRoute("/_authed/masterdata/")({ component: Masterdata });
 

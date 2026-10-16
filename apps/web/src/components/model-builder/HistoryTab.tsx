@@ -5,8 +5,8 @@ import {
 } from "@ui5/webcomponents-react";
 import type { Issue, ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
-import { Grid, GridForm } from "../../shared/list-report/Grid.tsx";
-import type { ListColumn } from "../../shared/types.ts";
+import { Grid, GridForm } from "@confire/ui/list-report/Grid.tsx";
+import type { ListColumn } from "@confire/ui/types.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { DeleteRows, useEditGrid } from "./useEditGrid.tsx";
 import { MasterdataQuerySelect } from "./MasterdataQuerySelect.tsx";

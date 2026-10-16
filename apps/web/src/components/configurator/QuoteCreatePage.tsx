@@ -3,9 +3,9 @@ import { useNavigate } from "@tanstack/react-router";
 import { Bar, Button, BusyIndicator, MessageStrip } from "@ui5/webcomponents-react";
 import { meQuery, orpc } from "../../orpc.ts";
 import { b1Feature } from "../../features/b1/index.ts";
-import { useFieldConstraints } from "../../shared/metadata.ts";
-import { ObjectPage } from "../../shared/object-page/ObjectPage.tsx";
-import { PageError } from "../../shared/object-page/ObjectPageSkeleton.tsx";
+import { useFieldConstraints } from "@confire/ui/metadata.ts";
+import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
+import { PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 
 // The last step of a configuration, as the Quotations document it actually is: the declared
 // Quotations object page, in create mode, opened on a server-built draft.

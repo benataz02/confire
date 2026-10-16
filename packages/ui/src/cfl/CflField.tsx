@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button, MultiInput, SuggestionItemCustom, Text, Token, type MultiInputDomRef,
 } from "@ui5/webcomponents-react";
-import { orpc } from "../../orpc.ts";
+import { useUiSource } from "../source.tsx";
 import { EntityLink, useCanOpen, useEntityNav } from "../EntityLink.tsx";
 import { formatValue } from "../format.ts";
 import { showLink } from "../navigation.ts";
@@ -59,6 +59,7 @@ export function CflField({
   const src = config.searchEndpoint ?? d.source;
   const mustExist = mustExistProp ?? config.mustExist ?? true;
   const qc = useQueryClient();
+  const { client } = useUiSource();
   const canOpen = useCanOpen();
   const go = useEntityNav();
   const inputRef = useRef<MultiInputDomRef>(null);
@@ -84,7 +85,7 @@ export function CflField({
   // entry, so a probed key never costs a second read for its label.
   const label = useQuery({
     queryKey: probeKey(config, value),
-    queryFn: () => fetchPage(src, probeRequest(config, value)),
+    queryFn: () => fetchPage(client, src, probeRequest(config, value)),
     enabled: labelMode && !isBlank(value),
     staleTime: 5 * 60_000,
     retry: false,
@@ -103,7 +104,7 @@ export function CflField({
       setErr(null);
       return;
     }
-    const p = findRow(qc, config, v);
+    const p = findRow(qc, client, config, v);
     onCheckStarted?.(p);
     const row = await p;
     if (row === null) {
@@ -129,7 +130,7 @@ export function CflField({
       try {
         // startswith, as Beas' type-ahead — the dialog searches with contains. A masterdata
         // source has no startswith and uses contains either way.
-        const page = await fetchPage(src, {
+        const page = await fetchPage(client, src, {
           search: text, searchFields: d.searchFields, mode: "startswith", filter: d.fixedFilters,
           count: src.kind === "entity",
         });
@@ -160,7 +161,7 @@ export function CflField({
     if (!fresh.length) return;
     const next = [...tokens, ...fresh];
     onValueChange(next);
-    if (mustExist) void allExist(qc, config, next.map((t) => t[key])).then((gone) =>
+    if (mustExist) void allExist(qc, client, config, next.map((t) => t[key])).then((gone) =>
       setErr(gone.size ? `${notFoundMessage(config)}: ${[...gone].join(", ")}` : null));
   };
 
@@ -319,6 +320,7 @@ export function CflField({
  *  those columns in that order (read from the cache only; a suggestion never costs a fetch). */
 function SuggestionRow({ row, config }: { row: Row; config: CflFieldConfig }) {
   const qc = useQueryClient();
+  const { orpc } = useUiSource();
   const d = config.dialogConfig;
   const layout = qc.getQueryData(orpc.views.getState.queryOptions({ input: { key: `cfl:${sourceKey(d.source)}` } }).queryKey) as
     { columns?: string[] } | null | undefined;

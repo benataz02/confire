@@ -4,6 +4,7 @@ import { cfl, keyFieldOf, keysToTokens, tokensToKeys } from "./cfl-configs.ts";
 import { exists, findRow, probeRequest } from "./existence.ts";
 import { entityPath, showLink } from "../navigation.ts";
 import type { CflFieldConfig } from "../types.ts";
+import type { UiSource } from "../source.tsx";
 
 test("the key is keyField, else the first column", () => {
   expect(keyFieldOf({ columns: [{ key: "Code" }, { key: "Name" }] })).toBe("Code");
@@ -37,18 +38,20 @@ const client = (answer: () => Promise<unknown>) => {
   return qc;
 };
 const cfg: CflFieldConfig = { dialogConfig: cfl.items() };
+// Never called: the stubbed fetchQuery answers before any queryFn could reach the backend.
+const backend = {} as UiSource["client"];
 
 test("a failed probe counts as exists; an empty answer is missing", async () => {
   const silence = console.warn;
   console.warn = () => {};
   try {
-    expect(await exists(client(() => Promise.reject(new Error("agent down"))), cfg, "A1")).toBe(true);
-    expect(await findRow(client(() => Promise.reject(new Error("agent down"))), cfg, "A1")).toBeUndefined();
+    expect(await exists(client(() => Promise.reject(new Error("agent down"))), backend, cfg, "A1")).toBe(true);
+    expect(await findRow(client(() => Promise.reject(new Error("agent down"))), backend, cfg, "A1")).toBeUndefined();
   } finally {
     console.warn = silence;
   }
-  expect(await exists(client(async () => ({ rows: [] })), cfg, "A1")).toBe(false);
-  expect(await findRow(client(async () => ({ rows: [{ ItemCode: "a1" }, { ItemCode: "A1", ItemName: "x" }] })), cfg, "A1"))
+  expect(await exists(client(async () => ({ rows: [] })), backend, cfg, "A1")).toBe(false);
+  expect(await findRow(client(async () => ({ rows: [{ ItemCode: "a1" }, { ItemCode: "A1", ItemName: "x" }] })), backend, cfg, "A1"))
     .toEqual({ ItemCode: "A1", ItemName: "x" });
 });
 

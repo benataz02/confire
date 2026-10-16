@@ -11,8 +11,8 @@ import {
 import { percent } from "../dashboard/dashboardView.ts";
 import { money } from "../../lib/money.ts";
 import { useCurrency } from "../../orpc.ts";
-import { Grid, type CellTemplate, type GridState } from "../../shared/list-report/Grid.tsx";
-import type { ListColumn, Row } from "../../shared/types.ts";
+import { Grid, type CellTemplate, type GridState } from "@confire/ui/list-report/Grid.tsx";
+import type { ListColumn, Row } from "@confire/ui/types.ts";
 
 // The line's own fields. Not identifiers, so no parameter key — a column of its own — collides.
 const IDX = "#i";

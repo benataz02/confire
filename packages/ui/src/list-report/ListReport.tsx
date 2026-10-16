@@ -50,7 +50,7 @@ export function ListReport({
   error?: Error | null;
 }) {
   const navigate = useNavigate();
-  const search = useRouterState({ select: (s) => s.location.search }) as Record<string, unknown>;
+  const search = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
 
   const columns = useMemo(() => {
     const declared = resolveColumns(feature.columns, constraints);
