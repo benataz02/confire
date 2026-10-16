@@ -1,8 +1,9 @@
 import { eq } from "drizzle-orm";
-import { db, member, organization, user } from "@confire/db";
+import { db, member, organization, portalCompany, portalMember, user, type PortalRole } from "@confire/db";
 import type { ModelDef } from "@confire/config-engine";
 import { auth } from "../src/auth.ts";
-import { baseDomain } from "../src/tenant.ts";
+import { portalAuth } from "../src/portal/auth.ts";
+import { baseDomain, portalBaseDomain } from "../src/tenant.ts";
 
 export { call } from "@orpc/server";
 
@@ -44,6 +45,34 @@ export async function makeUser(
 
 export const tenantHeaders = (slug: string, cookie?: string): Headers =>
   new Headers({ "x-forwarded-host": `${slug}.${baseDomain}`, ...(cookie ? { cookie } : {}) });
+
+// --- customer portal (apps/server/src/portal) ---------------------------------------------------
+
+/** Signs `email` in on the portal instance — the same user row, a portal_session row and cookie. */
+export async function portalSignIn(email: string): Promise<string> {
+  const res = await portalAuth.api.signInEmail({ body: { email, password: "test1234" }, returnHeaders: true });
+  return res.headers.getSetCookie().map((c) => c.split(";")[0]!).join("; ");
+}
+
+/** A verified user who signed up on the portal (no internal membership anywhere). */
+export async function makePortalUser(): Promise<{ userId: string; email: string; cookie: string }> {
+  const email = `p${uid()}@test.local`;
+  const { user: u } = await portalAuth.api.signUpEmail({ body: { email, password: "test1234", name: email } });
+  await db.update(user).set({ emailVerified: true }).where(eq(user.id, u.id));
+  return { userId: u.id, email, cookie: await portalSignIn(email) };
+}
+
+export const portalHeaders = (slug: string, cookie?: string): Headers =>
+  new Headers({ "x-forwarded-host": `${slug}.${portalBaseDomain}`, ...(cookie ? { cookie } : {}) });
+
+/** A customer company with one seat. P3's addPortalMember will own this write; tests insert directly. */
+export async function makePortalSeat(tenantId: string, userId: string, role: PortalRole, cardName = "Kunde GmbH") {
+  const [company] = await db.insert(portalCompany)
+    .values({ tenantId, cardCode: `C${uid()}`, cardName, cardType: "cCustomer" })
+    .returning();
+  await db.insert(portalMember).values({ companyId: company!.id, userId, tenantId, role });
+  return company!;
+}
 
 // Agent-free model (no query masterdata, no query domains): runs entirely from manual options.
 export const TEST_MODEL: ModelDef = {

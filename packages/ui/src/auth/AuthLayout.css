@@ -260,3 +260,23 @@
   .auth-brand { display: none; }
   .auth-panel { background: linear-gradient(180deg, #ffffff, #eef2f9); }
 }
+
+/* The customer portal's brand panel shows the supplier's name, not the six-letter wordmark: a smaller
+   size that wraps a long name ("Müller & Söhne Präzisionsteile GmbH") instead of overflowing. */
+.auth-brand__mark--name {
+  font-size: clamp(2rem, 3.6vw, 3.25rem);
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+.auth-brand__logo {
+  display: block;
+  height: 3.5rem;
+  width: auto;
+  max-width: 12rem;
+  margin-bottom: 1.5rem;
+  border-radius: 0.5rem;
+  object-fit: contain;
+}
+/* Turnstile's widget is 65px tall; holding the space keeps the form from jumping when it loads. */
+.auth-captcha { min-height: 65px; }

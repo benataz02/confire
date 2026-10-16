@@ -1,30 +1,11 @@
-import { Hono } from "hono";
-import { serveStatic } from "hono/bun";
-import { RPCHandler, BodyLimitPlugin } from "@orpc/server/fetch";
 import { auth } from "./auth.ts";
 import { router } from "./orpc/router.ts";
+import { serve } from "./serve.ts";
 
-const app = new Hono();
-// Streams the body and rejects (PAYLOAD_TOO_LARGE) as soon as the running byte count
-// crosses the cap — before the request body is ever fully buffered/parsed.
-const rpc = new RPCHandler(router, { plugins: [new BodyLimitPlugin({ maxBodySize: 2 * 1024 * 1024 })] });
-
-// Layer 1 identity — Better Auth owns /api/auth/*.
-app.all("/api/auth/*", (c) => auth.handler(c.req.raw));
-
-// oRPC — browser session procedures.
-app.use("/rpc/*", async (c, next) => {
-  const { matched, response } = await rpc.handle(c.req.raw, {
-    prefix: "/rpc",
-    context: { headers: c.req.raw.headers },
-  });
-  if (matched) return c.newResponse(response.body, response);
-  await next();
+// The internal app's process (app.<domain>). The customer portal is portal/index.ts.
+export default serve({
+  auth,
+  router,
+  spaDist: process.env.WEB_DIST ?? "../web/dist",
+  port: Number(process.env.PORT ?? 3000),
 });
-
-// Serve the built SPA in production. In dev the SPA runs on Vite and proxies /rpc + /api here.
-const webDist = process.env.WEB_DIST ?? "../web/dist";
-app.use("/*", serveStatic({ root: webDist }));
-app.get("/*", serveStatic({ path: `${webDist}/index.html` }));
-
-export default { port: Number(process.env.PORT ?? 3000), fetch: app.fetch };

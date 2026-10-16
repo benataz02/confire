@@ -6,21 +6,9 @@ import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { SocialButtons } from "../components/SocialButtons.tsx";
 import { apexUrl, hardRedirect, isApex, safeRedirect } from "../lib/tenant.ts";
+import { authErrorMessage, notVerifiedMessage } from "@confire/ui/auth/messages.ts";
 
-// Failures that come back as ?error=<code>: social sign-in (SocialButtons' errorCallbackURL) and a
-// verification link (signup.tsx's callbackURL; Better Auth appends the code). account_not_linked is
-// the social one people hit: a password account already owns the email, and Better Auth won't attach
-// a provider to one whose owner never confirmed the address. Don't "fix" that: it's what stops someone
-// pre-registering a colleague's address and inheriting their Google login.
-const errorMessage = (code: string) =>
-  code === "account_not_linked"
-    ? "This email already has a password account. Sign in with your password."
-    : code === "TOKEN_EXPIRED" || code === "INVALID_TOKEN"
-      ? "That confirmation link has expired or was already used. Sign in to get a new one."
-      : code === "INVALID_USER" || code === "USER_NOT_FOUND"
-        ? "That confirmation link belongs to a different account."
-        : `Sign-in didn't complete (${code}).`;
-
+// ?error=<code> (social sign-in, a dead verification link) reads through authErrorMessage.
 export const Route = createFileRoute("/login")({
   validateSearch: (s: Record<string, unknown>): { redirect?: string; error?: string } => ({
     redirect: typeof s.redirect === "string" ? s.redirect : undefined,
@@ -55,8 +43,7 @@ function Login() {
     mutationFn: async (vars: { email: string; password: string }) => {
       const res = await authClient.signIn.email(vars);
       // Unverified: Better Auth has just mailed a fresh link (sendOnSignIn), so say where it went.
-      if (res.error?.code === "EMAIL_NOT_VERIFIED")
-        throw new Error(`Confirm your email address first. We've sent a new link to ${vars.email}.`);
+      if (res.error?.code === "EMAIL_NOT_VERIFIED") throw new Error(notVerifiedMessage(vars.email));
       if (res.error) throw new Error(res.error.message ?? "Sign in failed");
       return res.data;
     },
@@ -74,7 +61,7 @@ function Login() {
   });
 
   const submit = () => email && password && signIn.mutate({ email, password });
-  const error = signIn.error?.message ?? (oauthError ? errorMessage(oauthError) : null);
+  const error = signIn.error?.message ?? (oauthError ? authErrorMessage(oauthError) : null);
 
   return (
     <AuthLayout>

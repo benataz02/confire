@@ -14,9 +14,9 @@ import { authClient } from "../auth-client.ts";
 import { meQuery } from "../orpc.ts";
 import { B1_FEATURES } from "../features/b1/index.ts";
 import { GlobalSearch, type SearchEntry } from "./GlobalSearch.tsx";
-import { useRef, useState, useEffect, useMemo } from "react";
+import { useRef, useState, useMemo } from "react";
 import type { MouseEvent } from "react";
-import { getTheme, setTheme } from '@ui5/webcomponents-base/dist/config/Theme.js';
+import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 
 
 // The app shell for every signed-in page. The tenant is the subdomain; the auth gate lives in the
@@ -39,8 +39,7 @@ export function AppShell() {
     if ((e.target as HTMLElement).closest("ui5-side-navigation, ui5-shellbar, ui5-user-menu")) return;
     if (!navLayoutRef.current?.isSideCollapsed()) setNavMode("Collapsed");
   };
-  const [density, setDensity] = useState<Density>(() => (localStorage.getItem("density") as Density) ?? getDensity());
-  const [theme, setThemeState] = useState<string>(() => localStorage.getItem("theme") ?? getTheme());
+  const { theme, setTheme: setThemeState, density, setDensity } = useAppearance();
 
   // Identity + org role in one query, already primed by _authed's beforeLoad — a cache read.
   // Role decides whether the Settings item shows; the server gates it too.
@@ -58,15 +57,6 @@ export function AppShell() {
     if (b1) navigate({ to: "/b1/$entity", params: { entity: b1[1]! } });
     else navigate({ to: to });
   };
-
-  const THEMES = [
-    { id: 'sap_horizon', labelKey: 'Morning Horizon' },
-    { id: 'sap_horizon_dark', labelKey: 'Evening Horizon' },
-    { id: 'sap_fiori_3', labelKey: 'Quartz Light' },
-    { id: 'sap_fiori_3_dark', labelKey: 'Quartz Dark' },
-    { id: 'sap_fiori_3_hcb', labelKey: 'High Contrast Black' },
-    { id: 'sap_fiori_3_hcw', labelKey: 'High Contrast White' },
-  ] as const;
 
   // What the shellbar search can reach besides objects: the same targets as the side nav, plus the
   // appearance settings that otherwise only live in the user menu.
@@ -90,7 +80,7 @@ export function AppShell() {
           ]
         : []),
       ...THEMES.map((t) => ({
-        group: "Settings", text: t.labelKey, description: "Theme", icon: "palette",
+        group: "Settings", text: t.label, description: "Theme", icon: "palette",
         run: () => setThemeState(t.id),
       })),
       { group: "Settings", text: "Compact", description: "Density", icon: "resize-horizontal", run: () => setDensity('compact') },
@@ -98,28 +88,6 @@ export function AppShell() {
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, navigate]);
-
-  type Density = 'cozy' | 'compact';
-
-  function getDensity(): Density {
-    return document.body.classList.contains('ui5-content-density-compact') ? 'compact' : 'cozy';
-  }
-
-  useEffect (() => {
-    if (density === 'compact') {
-      document.body.classList.add('ui5-content-density-compact');
-      document.body.classList.remove('ui5-content-density-cozy');
-    } else {
-      document.body.classList.add('ui5-content-density-cozy');
-      document.body.classList.remove('ui5-content-density-compact');
-    }
-    localStorage.setItem('density', density);
-  }, [density]);
-
-  useEffect(() => {
-    setTheme(theme);
-    localStorage.setItem('theme', theme);
-  }, [theme]);
 
   const signOut = async () => {
     await authClient.signOut();
@@ -197,7 +165,7 @@ export function AppShell() {
               {THEMES.map((t) => (
                 <UserMenuItem
                   key={t.id}
-                  text={t.labelKey}
+                  text={t.label}
                   icon={theme === t.id ? "sys-enter" : ""}
                   onClick={() => setThemeState(t.id)}
                 >

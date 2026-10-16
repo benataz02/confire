@@ -4,12 +4,14 @@
   "private": true,
   "exports": {
     ".": "./src/index.ts",
-    "./router": "./src/orpc/router.ts"
+    "./router": "./src/orpc/router.ts",
+    "./portal-router": "./src/portal/orpc/router.ts"
   },
   "scripts": {
     "dev": "bun run --hot src/index.ts",
     "start": "bun run src/index.ts",
-    "better-auth-generate": "bunx auth@1.7.7 generate --config src/auth.ts --output ../../packages/db/src/schema/auth.ts -y"
+    "better-auth-generate": "bunx auth@1.7.7 generate --config src/auth.ts --output ../../packages/db/src/schema/auth.ts -y",
+    "start:portal": "bun run src/portal/index.ts"
   },
   "dependencies": {
     "@confire/b1": "workspace:*",

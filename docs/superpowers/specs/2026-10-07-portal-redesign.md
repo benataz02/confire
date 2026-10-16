@@ -1,8 +1,9 @@
 # Customer portal: a separate app for external users
 
 **Date:** 2026-10-07
-**Status:** Spec agreed through Q&A. Not built yet; §16 lists what must be checked against a live
-B1 and Better Auth before the matching phase starts.
+**Status:** Spec agreed through Q&A. **P0–P2 built 2026-10-16** (plan:
+`docs/superpowers/plans/2026-10-16-portal-p0-p2.md`); P3–P7 not yet. §16 lists what must be checked
+against a live B1 and Better Auth before the matching phase starts.
 **Revised 2026-10-16:** onboarding is invitation-only (D7, D17, D25, D26, §5). Open
 self-registration, applications and their approval are gone.
 **Revised 2026-10-16:** this builds from the current internal-only codebase. The previous in-app

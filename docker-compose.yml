@@ -12,7 +12,10 @@
 # terminates TLS, and Cloudflare's free edge cert does not cover a two-level wildcard.
 # Resend: verify mail.<DOMAIN> (SPF, DKIM, MX for the return path). Its region is fixed when the
 # domain is added, so pick EU vs US first.
-# OAuth consoles: redirect URI https://app.<DOMAIN>/api/auth/callback/{google,microsoft}.
+# OAuth consoles: redirect URIs https://app.<DOMAIN>/api/auth/callback/{google,microsoft} and
+# https://portal.<DOMAIN>/api/auth/callback/{google,microsoft} — same clients, one callback per zone.
+# Microsoft: emit the optional `xms_edov` claim (the portal trusts a Microsoft email only on it).
+# Turnstile: one widget for portal.<DOMAIN> — TURNSTILE_SITE_KEY (built in) + TURNSTILE_SECRET_KEY.
 services:
   db:
     image: postgres:17
@@ -31,22 +34,29 @@ services:
       timeout: 3s
       retries: 10
 
-  server:
+  server: &app
+    image: confire-app
     build:
       context: .
       dockerfile: apps/server/Dockerfile
-      # Subdomain base domain is baked into the SPA at build time.
+      # Each SPA's zone (and the portal's Turnstile site key) is baked in at build time.
       args:
         VITE_APP_BASE_DOMAIN: app.${DOMAIN:-lvh.me}
-    environment:
+        VITE_PORTAL_BASE_DOMAIN: portal.${DOMAIN:-lvh.me}
+        VITE_TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+    environment: &app-env
       DATABASE_URL: postgres://confire:confire@db:5432/confire
       # Fail fast: a placeholder here would sign cookies AND (via crypto.ts' fallback) encrypt SAP
       # secrets with a string that is in git. Better Auth only rejects its own default secret.
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET (openssl rand -base64 32)}
       # The apex as the browser sees it (Caddy, HTTPS) — the OAuth redirect URI and the
       # `.app.${DOMAIN}` session cookie are both derived from it, so :3000 would break both.
+      # The portal reads it too: the Confire logo in mail, and where to send a supplier's staff.
       BETTER_AUTH_URL: https://app.${DOMAIN:-lvh.me}
       APP_BASE_DOMAIN: app.${DOMAIN:-lvh.me}
+      # The portal's apex and zone (spec §3): its own OAuth callback and `.portal.${DOMAIN}` cookie.
+      PORTAL_AUTH_URL: https://portal.${DOMAIN:-lvh.me}
+      PORTAL_BASE_DOMAIN: portal.${DOMAIN:-lvh.me}
       # Mail (apps/server/src/mail): sender notify@mail.<DOMAIN>. No key = the console mailer.
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       MAIL_DOMAIN: mail.${DOMAIN:-lvh.me}
@@ -64,6 +74,18 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     profiles: ["full"]
+
+  # The customer portal (spec §3): the same image, a second process with its own event loop.
+  portal:
+    <<: *app
+    command: ["bun", "run", "--cwd", "apps/server", "start:portal"]
+    environment:
+      <<: *app-env
+      PORTAL_PORT: 3001
+      # Required here: without it every sign-up / sign-in / reset request fails closed (500).
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:?set TURNSTILE_SECRET_KEY (Cloudflare Turnstile widget secret)}
+    ports:
+      - "127.0.0.1:3001:3001"
 
   caddy:
     # Stock Caddy ships no DNS providers; the wildcard cert's DNS challenge needs one compiled in.
@@ -86,6 +108,7 @@ services:
       - caddy_data:/data
     depends_on:
       - server
+      - portal
     profiles: ["full"]
 
 volumes:

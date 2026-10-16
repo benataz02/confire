@@ -4,7 +4,7 @@ import "@ui5/webcomponents-fiori/dist/illustrations/ErrorScreen.js";
 import "@ui5/webcomponents-fiori/dist/illustrations/PageNotFound.js";
 import "@ui5/webcomponents-fiori/dist/illustrations/tnt/CodePlaceholder.js";
 
-// Router-wide boundaries, wired as createRouter defaults in main.tsx. Any route can still
+// Router-wide boundaries, wired as createRouter defaults in each app's main.tsx. Any route can still
 // override with its own errorComponent/notFoundComponent.
 
 // `reset()` is router.invalidate() under the hood — it re-runs the loader, so retry is real.

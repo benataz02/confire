@@ -1,15 +1,13 @@
-import type { CSSProperties, ReactNode } from "react";
-import "./AuthLayout.css";
+import type { ReactNode } from "react";
+import { AuthLayout as Frame, revealDelay as delay } from "@confire/ui/auth/AuthLayout.tsx";
 
-const delay = (ms: number): CSSProperties => ({ ["--d" as string]: `${ms}ms` });
-
-// Branded split-screen used by login / signup / onboarding. Left panel is pure
-// presentation (the cloud -> agent -> B1 sync motif); right panel slots the form.
+// Confire's split screen for login / signup / onboarding: the brand panel is pure presentation
+// (the cloud -> agent -> B1 sync motif); the frame and its CSS are shared with the customer portal.
 export function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="auth-root">
-      <aside className="auth-brand">
-        <div className="auth-brand__inner">
+    <Frame
+      brand={
+        <>
           <h1 className="auth-brand__mark reveal" style={delay(0)}>Confire</h1>
           <p className="auth-brand__tagline reveal" style={delay(90)}>
             Quotes that reach SAP&nbsp;B1.<br />
@@ -25,11 +23,10 @@ export function AuthLayout({ children }: { children: ReactNode }) {
           <p className="auth-brand__foot reveal" style={delay(260)}>
             Outbound-only · idempotent by design
           </p>
-        </div>
-      </aside>
-      <main className="auth-panel">
-        <div className="auth-panel__form reveal" style={delay(120)}>{children}</div>
-      </main>
-    </div>
+        </>
+      }
+    >
+      {children}
+    </Frame>
   );
 }

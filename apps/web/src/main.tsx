@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen.ts";
-import { RouteError, RouteNotFound } from "./components/Boundaries.tsx";
+import { RouteError, RouteNotFound } from "@confire/ui/Boundaries.tsx";
 import { UiSourceProvider, type UiSource } from "@confire/ui/source.tsx";
 import { client, meQuery, orpc } from "./orpc.ts";
 

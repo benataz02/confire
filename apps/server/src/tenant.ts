@@ -45,7 +45,7 @@ if (import.meta.main) {
   assert.equal(t(null, "confire.local"), null);
   // Two sibling zones (spec §3): each process parses only its own, and neither swallows the other.
   assert.equal(t("acme.app.lvh.me:5173", "app.lvh.me"), "acme");
-  assert.equal(t("acme.portal.lvh.me:5174", "portal.lvh.me"), "acme");
+  assert.equal(t("acme.portal.lvh.me:5180", "portal.lvh.me"), "acme");
   assert.equal(t("acme.portal.lvh.me", "app.lvh.me"), null);
   assert.equal(t("acme.app.lvh.me", "portal.lvh.me"), null);
   assert.equal(t("portal.lvh.me", "portal.lvh.me"), null); // portal apex

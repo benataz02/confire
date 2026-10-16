@@ -12,6 +12,8 @@ Everything runs on **Bun** (no npm — see `package.json` workspaces).
 ```bash
 docker compose up -d db                 # Postgres 17 on :5432 (dev runs server/web with bun)
 bun install
+bun run dev                             # internal app http://app.lvh.me:5173 (server :3000), customer
+                                        # portal http://portal.lvh.me:5180 (server :3001), agent :4000
 bun run db:push                         # drizzle-kit push — the ONLY schema migration 
 bun run auth:generate                   # regenerate schema/auth.ts after a Better Auth config change
 ```
@@ -24,24 +26,31 @@ tsconfig that covers everything, so a change can typecheck in one package and br
 
 ```bash
 bunx tsc -p apps/server/tsconfig.json --noEmit
-# projects: packages/{b1,config-engine,db,ui}, apps/{agent,server,web}
+# projects: packages/{b1,config-engine,db,ui}, apps/{agent,server,web,portal}
 bun --cwd apps/web build                # also regenerates routeTree.gen.ts (gitignored)
+bun --cwd apps/portal build             # same, for the portal's route tree
 ```
 
 Note `apps/server/tsconfig.json` also includes `../../scripts`, so the seed/migration/e2e scripts
 are checked there rather than in a project of their own.
 
-## The three processes
+## The processes
 
 ```
-Browser (React + UI5 Web Components)
-   │ oRPC over /rpc, same-origin (dev: Vite proxy; prod: server serves the built SPA)
-   ▼
-Confire server (Bun + Hono)  ── Postgres
+Browser: apps/web (staff)               Browser: apps/portal (the manufacturer's customers)
+   │ oRPC over /rpc, same-origin            │ (dev: Vite proxy; prod: each server serves its SPA)
+   ▼                                        ▼
+Confire server (apps/server/src/index.ts)   Portal server (apps/server/src/portal/index.ts)
+   │                        └── Postgres ──┘
    │ HTTPS to the tenant's agentUrl, one named operation per endpoint
    ▼
 confire-agent (Bun, on the customer's network) ── SAP B1 Service Layer /b1s/v2
 ```
+
+The customer portal is a second process from the same image (compose service `portal`, CMD
+`start:portal`) so external traffic never shares an event loop with staff. Both are `serve.ts`:
+Better Auth on `/api/auth`, oRPC on `/rpc` with the 2 MB body cap, the SPA on the rest. The design
+record is `docs/superpowers/specs/2026-10-07-portal-redesign.md`; P0–P2 are built (see its §15).
 
 The agent is a Windows service the customer installs. SAP credentials live in its `agent.json`
 and never reach the cloud. `sapConnection.agentUrl` is `http://localhost:4000` in dev and a
@@ -60,6 +69,27 @@ compose that check:
 | `sessionProcedure` | signed in; `me` resolves membership itself |
 | `userProcedure` | member of this workspace; a leftover `client` role stays forbidden |
 | `adminProcedure` | admin/owner — model builder, settings |
+
+**The portal** is the same pattern on its own zone: `<slug>.<PORTAL_BASE_DOMAIN>`, parsed by the same
+`tenantSlugFromHost`, with its own Better Auth instance (`portal/auth.ts`) over the **shared** `user`,
+`account` and `verification` tables but its **own** session table (`portal_session`, export key
+`portalSession` = `session.modelName`) and cookie (`confire-portal.*` on `.portal.<domain>`), so a
+portal session can never authenticate an internal request. No organization plugin: a customer
+company is `portal_company` (one per tenant × CardCode) and a seat is `portal_member`, whose unique
+`(tenantId, userId)` index is "one company per user per tenant". Builders (`portal/orpc/base.ts`);
+every tenant-scoped one refuses the supplier's own staff (any internal `member` of the host tenant):
+
+| Builder | Who |
+|---|---|
+| `portalAuthedProcedure` | signed in on the portal; no tenant (the apex lobby); `me` resolves the rest itself |
+| `portalSessionProcedure` | + the host's tenant, maybe no seat yet |
+| `portalMemberProcedure` | + a seat: `portal_member ⋈ portal_company` on that tenant |
+| `portalBuyerProcedure` / `portalOwnerProcedure` | seat role `buyer`/`owner` / `owner` |
+
+The portal's sign-up, sign-in and reset request need a Cloudflare Turnstile token
+(`x-captcha-response`); dev uses Cloudflare's always-pass test keys. Its account mail wears the
+supplier named by the page's `?t=<slug>` — display only, nothing trusts it. Host rules for both
+SPAs (slug, apex URLs, `safeRedirect`, scoped to one zone) are `@confire/ui/host.ts`.
 
 Dev uses `app.lvh.me` (public DNS: lvh.me at any depth → 127.0.0.1; open `http://app.lvh.me:5173`).
 Not `localhost`: the browser treats it as a TLD, so a `.localhost` cookie never reaches
