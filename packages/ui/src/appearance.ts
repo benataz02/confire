@@ -6,10 +6,14 @@ import { getTheme, setTheme as applyTheme } from "@ui5/webcomponents-base/dist/c
 export const THEMES = [
   { id: "sap_horizon", label: "Morning Horizon" },
   { id: "sap_horizon_dark", label: "Evening Horizon" },
+  { id: "sap_horizon_hcb", label: "Horizon High Contrast Black" },
+  { id: "sap_horizon_hcw", label: "Horizon High Contrast White" },
+  { id: "sap_horizon_auto", label: "Horizon Auto" },
+  { id: "sap_horizon_hc_auto", label: "Horizon High Contrast Auto" },
   { id: "sap_fiori_3", label: "Quartz Light" },
   { id: "sap_fiori_3_dark", label: "Quartz Dark" },
-  { id: "sap_fiori_3_hcb", label: "High Contrast Black" },
-  { id: "sap_fiori_3_hcw", label: "High Contrast White" },
+  { id: "sap_fiori_3_hcb", label: "Quartz High Contrast Black" },
+  { id: "sap_fiori_3_hcw", label: "Quartz High Contrast White" },
 ] as const;
 
 export type Density = "cozy" | "compact";

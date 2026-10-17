@@ -3,13 +3,13 @@ import { useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar, Button, BusyIndicator, DynamicSideContent, Form, FormGroup, FormItem, IllustratedMessage,
-  Input, Label, MessageStrip, ObjectPage, ObjectPageSection, ObjectPageTitle,
-  Option, Panel, Select, Tag, Text, Title, ToggleButton, Toolbar, ToolbarButton, ToolbarItem,
+  Input, Label, MessageStrip, MultiInput, ObjectPage, ObjectPageSection, ObjectPageTitle,
+  Option, Panel, Select, Tag, Text, Title, ToggleButton, Token, Toolbar, ToolbarButton, ToolbarItem,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import {
   evalTableRows, missingInputs, propagate,
-  type Entries, type ItemsTable, type Propagation, type ResolvedLookups, type ResolvedTable, type TableRows, type Val,
+  type Entries, type ItemsTable, type TableRows, type Val,
 } from "@confire/config-engine";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts";
 import { client, meQuery, orpc, useCurrency } from "../../orpc.ts";
@@ -17,7 +17,7 @@ import { money as formatMoney } from "../../lib/money.ts";
 import { confirm } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { statusUi, toPriced, unpricedItems, type Sel } from "./runView.ts";
-import { BATCHES_SECTION, ConfiguratorForm, ConsistencyStatus } from "./ConfiguratorForm.tsx";
+import { ConfiguratorForm, ConsistencyStatus } from "./ConfiguratorForm.tsx";
 import { CflField } from "@confire/ui/cfl/CflField.tsx";
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import { PriceAnalysis } from "./PriceAnalysis.tsx";
@@ -25,7 +25,7 @@ import { CostBody, OptionPrices } from "./InsightsRail.tsx";
 import { SimilarConfigs } from "./SimilarConfigs.tsx";
 import { paramPrices } from "./costElements.ts";
 import { itemMoney, moneyTotals } from "./itemMoney.ts";
-import { needsCalculation } from "./configProcessState.ts";
+import { addBatch, needsCalculation } from "./configProcessState.ts";
 import { configMessages } from "./configMessages.ts";
 import { PageMessages } from "../PageMessages.tsx";
 import { useSectionParam } from "../../lib/sectionParam.ts";
@@ -42,6 +42,9 @@ const NONE: never[] = [];
 
 /** The customer value help: customers only, with a link to the BP for whoever may open /b1. */
 const CUSTOMER = { dialogConfig: cfl.customers() };
+
+/** The batch field's message anchor. `__`: data-param shares its namespace with parameter keys. */
+const BATCHES = "__batches";
 
 /** One insights panel's content column. */
 const PANEL_BODY = { display: "flex", flexDirection: "column", gap: "0.75rem", padding: "0 0.25rem 0.5rem" } as const;
@@ -237,7 +240,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
   // What the quote waits on beyond name and customer, in form order. buildQuoteSeed refuses on the
   // same missingInputs(), so a hidden button and a refused quote cannot disagree.
   const gaps = [
-    ...(batches.length ? [] : [{ key: BATCHES_SECTION, message: "Add at least one batch quantity" }]),
+    ...(batches.length ? [] : [{ key: BATCHES, message: "Add at least one batch quantity" }]),
     ...(lk && prop ? missingInputs(model.definition, lk, prop, tables) : []),
   ];
   // The footer holds the finalizing action, so it exists only once there is something to finalize.
@@ -283,14 +286,6 @@ export function ConfigProcessPage({ id }: { id: string }) {
         </Button>
       } />
   );
-
-  // What both ConfiguratorForms share: the batch-quantity field above and the model's own sections.
-  const formProps = (canonical: NonNullable<typeof lookups.data>, lk: ResolvedLookups, prop: Propagation) => ({
-    model: model.definition, lookups: canonical, lk, prop, entries, batches, readOnly: locked,
-    querySource: { modelId: project.modelId },
-    onChange: (next: Entries) => edit({ entries: next }),
-    onQueryPick: (k: string, t: string, sel: ResolvedTable | undefined) => setPicks((p) => setQueryPick(p, k, t, sel)),
-  });
 
   // No ObjectPageHeader and no message strips: everything the page has to say is one list behind
   // the title's MessageViewButton, grouped by the section it belongs to.
@@ -414,7 +409,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
                 (UI5 fires that on blur/Enter) against the server value, and `required` + a negative
                 valueState on the empty case is the Fiori way to say the same thing the footer does.
                 Display mode is Text, matching ConfiguratorForm — accessibleMode only announces it. */}
-            <Form headerText="General" headerLevel="H5" labelSpan="S12 M12 L12 XL12" layout="S1 M2 L3 XL3"
+            <Form headerText="General" headerLevel="H5" labelSpan="S12 M12 L12 XL12" layout="S1 M2 L4 XL4"
               accessibleMode={locked ? "Display" : "Edit"} itemSpacing={locked ? "Large" : "Normal"}>
               <FormGroup>
                 <FormItem labelContent={<Label for={locked ? undefined : "cfg-name"} required>Name</Label>}>
@@ -473,16 +468,36 @@ export function ConfigProcessPage({ id }: { id: string }) {
                   </div>
                   )}
                 </FormItem>
+                <FormItem labelContent={<Label required>Batch quantities</Label>}>
+                  {locked ? <Text>{batches.join(", ")}</Text> : (
+                  /* Type a quantity, Enter (or leaving the field) makes it a token. Uncontrolled:
+                      the typed text is cleared by hand once it has become a token. */
+                  <MultiInput type="Number" data-param={BATCHES} style={{ width: "100%" }}
+                    placeholder="Type a quantity, press Enter"
+                    valueState={batches.length ? "None" : "Negative"}
+                    valueStateMessage={<div>Add at least one batch quantity.</div>}
+                    tokens={batches.map((b) => <Token key={b} text={String(b)} />)}
+                    onChange={(e) => {
+                      edit({ batches: addBatch(batches, e.target.value ?? "") });
+                      e.target.value = "";
+                    }}
+                    onTokenDelete={(e) => {
+                      const gone = new Set(e.detail.tokens.map((t) => Number((t as HTMLElement).getAttribute("text"))));
+                      const left = batches.filter((b) => !gone.has(b));
+                      // Deleting the last quantity falls back to 1 rather than leaving nothing to price.
+                      edit({ batches: left.length ? left : [1] });
+                    }} />
+                  )}
+                </FormItem>
               </FormGroup>
             </Form>
             {lookups.data && lk && prop ? (
-              <>
-                <ConfiguratorForm section={BATCHES_SECTION} {...formProps(lookups.data, lk, prop)}
-                  onBatchesChange={(next) => edit({ batches: next })} />
-                <ConfiguratorForm {...formProps(lookups.data, lk, prop)}
-                  tables={tables} onTablesChange={(next) => edit({ tables: next })} itemMoney={money}
-                  itemBatch={itemQty} onItemBatchChange={setViewQty} />
-              </>
+              <ConfiguratorForm model={model.definition} lookups={lookups.data} lk={lk} prop={prop}
+                entries={entries} readOnly={locked} querySource={{ modelId: project.modelId }}
+                onChange={(next) => edit({ entries: next })}
+                onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
+                tables={tables} onTablesChange={(next) => edit({ tables: next })} itemMoney={money}
+                batches={batches} itemBatch={itemQty} onItemBatchChange={setViewQty} />
             ) : lookups.error ? (
               /* Why the options are missing is a page message; the retry it needs is not something
                  a message can carry, so the button stays here. */

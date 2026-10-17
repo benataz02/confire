@@ -1,8 +1,7 @@
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import {
-  Button, CheckBox, Form, FormGroup, FormItem, Icon, Input, Label, MultiComboBox, MultiComboBoxItem,
-  ObjectStatus, Option, RadioButton, SegmentedButton, SegmentedButtonItem, Select, StepInput, Text, Title, Token, Tokenizer,
-  type StepInputDomRef,
+  CheckBox, Form, FormGroup, FormItem, Icon, Input, Label, MultiComboBox, MultiComboBoxItem,
+  ObjectStatus, Option, RadioButton, SegmentedButton, SegmentedButtonItem, Select, StepInput, Text, Title,
 } from "@ui5/webcomponents-react";
 import {
   displayColumns, domainOf, isTableGroup, placedTables, refKeyCols,
@@ -14,7 +13,6 @@ import { TABLE_ITEM } from "@confire/ui/list-report/Grid.tsx";
 import { ConfigTable } from "./ConfigTable.tsx";
 import type { ItemMoney } from "./itemMoney.ts";
 import { displayValue, rowTable, setEntry } from "./formHelpers.ts";
-import { addBatch } from "./configProcessState.ts";
 import { paramPrices } from "./costElements.ts";
 import { money } from "../../lib/money.ts";
 import { useCurrency } from "../../orpc.ts";
@@ -30,8 +28,7 @@ function extraOf(ref: LookupRef, t: ResolvedTable | undefined, val: Val): string
 }
 
 // The one form both the builder preview and the configuration page render. Fully controlled:
-// entries in, entries out; all engine work happens in propagate(). Batch quantities are a field in
-// here too (BATCHES_SECTION) rather than a component of their own; scrolling, footers and
+// entries in, entries out; all engine work happens in propagate(). Scrolling, footers and
 // consistency stay with the caller.
 
 /** The signature answer to "is this consistent and how big is it?" — one component so the
@@ -47,11 +44,6 @@ export function ConsistencyStatus({ prop }: { prop: Propagation }) {
 
 /** Key of the synthetic section that catches tables the author never placed. */
 export const UNPLACED_TABLES_SECTION = "__tables";
-
-/** Key of the synthetic section holding batch quantities. Not in formSections(): it is not part of
- *  the model, so a caller asks for it by name (the ObjectPage subsection) and nothing renders it
- *  by accident. */
-export const BATCHES_SECTION = "__batches";
 
 /** The sections the form renders: the model's own, plus a trailing one holding any table the
  *  author forgot to place. A table nobody can reach is a table whose sums are permanently zero —
@@ -74,7 +66,7 @@ const FORM_PROPS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2", head
 // the whole Form (colSpan mirrors FORM_PROPS.layout) and the item breaks out of the column flow
 // (TABLE_ITEM). ConfigTable's Grid toolbar names the table, with its row count, and carries Add/Delete.
 
-export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, section, disabled, readOnly, querySource, tables, onTablesChange, batches, onBatchesChange, itemMoney, itemBatch, onItemBatchChange }: {
+export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, disabled, readOnly, querySource, tables, onTablesChange, batches, itemMoney, itemBatch, onItemBatchChange }: {
   model: ModelDef;
   /** Canonical first-page snapshot — seeds query value help. */
   lookups: ResolvedLookups;
@@ -84,8 +76,6 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   entries: Entries;
   onChange: (next: Entries) => void;
   onQueryPick: (paramKey: string, table: string, selected: ResolvedTable | undefined) => void;
-  /** render only this section; its Form header still carries the title */
-  section?: string;
   disabled?: boolean;
   /** Locked (a quoted configuration). Form goes accessibleMode="Display" and fields render as
    *  Text — the UI5 display-form pattern. Not `disabled`: a pending save still shows inputs. */
@@ -96,10 +86,8 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   tables?: TableRows;
   /** omit to render the tables read-only (builder preview) */
   onTablesChange?: (next: TableRows) => void;
-  /** batch quantities: the field for section === BATCHES_SECTION, the items grid's batch picker otherwise */
+  /** batch quantities, for the items grid's batch picker */
   batches?: number[];
-  /** omit to leave batch quantities out entirely (the builder preview) */
-  onBatchesChange?: (next: number[]) => void;
   /** derived cost/price per items row; omit and the grid shows no money columns at all — which is
    *  how the builder preview stays free of cost data */
   itemMoney?: ItemMoney | null;
@@ -113,73 +101,10 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     () => new Map(paramPrices(model, prop, lk.tables).map((c) => [c.key, c.amount])),
     [model, prop, lk],
   );
-  // The quantity being dialled in. StepInput owns its own value (it formats and clamps it), so
-  // this is a ref, not state: nothing here re-renders when the number changes.
-  const qty = useRef<StepInputDomRef>(null);
-
-  // Batch quantities are a field, not a component: a StepInput for the number (numeric by
-  // contract — spinner, min, keyboard up/down, no text to parse) and a Tokenizer for the ones
-  // already added. Adding is an explicit action rather than StepInput's `change`, because change
-  // also fires on every +/- click (`_modifyValue(step, true)`) — committing there would token
-  // every step of the way up to 10.
   const formMode = {
     accessibleMode: readOnly ? "Display" : "Edit",
     itemSpacing: readOnly ? "Large" : "Normal",
   } as const;
-
-  if (section === BATCHES_SECTION) {
-    const bs = batches ?? [];
-    if (readOnly) {
-      return (
-        <Form headerText="Batch quantities" {...FORM_PROPS} {...formMode}>
-          <FormGroup>
-            <FormItem labelContent={<Label>Quantities</Label>}>
-              <Text>{bs.join(", ")}</Text>
-            </FormItem>
-          </FormGroup>
-        </Form>
-      );
-    }
-    if (!onBatchesChange) return null;
-    // StepInput settles `value` on Enter (its own keydown handler), on blur and on each spin —
-    // all of which run before our keydown listener and before the Add button's click (focusout
-    // precedes click) — so the ref holds the committed number by the time we read it.
-    const add = () => onBatchesChange(addBatch(bs, String(qty.current?.value ?? "")));
-    return (
-      <Form headerText="Batch quantities" {...FORM_PROPS} {...formMode}>
-        <FormGroup>
-          <FormItem labelContent={<Label required>Quantities</Label>} data-param={BATCHES_SECTION}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
-                {/* value is set once on mount (React only writes a prop that changed), so the field
-                    keeps whatever the user last dialled in and they can spin on from it. */}
-                <StepInput ref={qty} value={1} min={1} step={1} required disabled={disabled}
-                  accessibleName="Batch quantity" style={{ flex: "1 1 auto" }}
-                  onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
-                <Button icon="add" design="Transparent" disabled={disabled}
-                  accessibleName="Add quantity" tooltip="Add quantity" onClick={add} />
-              </div>
-              {bs.length ? (
-                // multiLine: a quote can carry a dozen batch sizes and an n-more indicator would
-                // hide the very list the user is checking. showClearAll needs it too.
-                <Tokenizer multiLine showClearAll disabled={disabled} accessibleName="Batch quantities"
-                  onTokenDelete={(e) => {
-                    const gone = new Set(e.detail.tokens.map((t) => Number((t as HTMLElement).getAttribute("text"))));
-                    onBatchesChange(bs.filter((b) => !gone.has(b)));
-                  }}>
-                  {bs.map((b) => <Token key={b} text={String(b)} />)}
-                </Tokenizer>
-              ) : (
-                // Fiori: a required field with nothing in it carries the negative state, not just
-                // the asterisk. StepInput can't: it writes its own valueState in _updateValueState.
-                <ObjectStatus state="Negative">Add at least one quantity</ObjectStatus>
-              )}
-            </div>
-          </FormItem>
-        </FormGroup>
-      </Form>
-    );
-  }
 
   const set = (key: string, v: Val | undefined) => {
     if (v === undefined) {
@@ -318,7 +243,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   // ordinary label-and-field group.
   const byKey = new Map(model.structure.sections.map((s) => [s.key, s]));
   const defOf = (k: string) => (model.tables ?? []).find((t) => t.key === k);
-  const shown = formSections(model).filter((s) => !section || s.key === section);
+  const shown = formSections(model);
   const tableRows = tables ?? {};
   const setRows = (key: string, rows: Record<string, Val>[]) =>
     onTablesChange?.({ ...tableRows, [key]: rows });

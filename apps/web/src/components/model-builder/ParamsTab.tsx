@@ -282,10 +282,17 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1rem",
       flex: "1 1 auto", minInlineSize: 0, overflowY: "auto",
     }}>
-      <div style={{ display: "flex", flexDirection: "column" }}>
+      {/* Form's shell (.ui5-form-root) is the rounded card: 0.75rem and the group background.
+          Table exposes no CSS part for its frame, so the title bar and the rows share this
+          wrapper and overflow clips them to the curve. */}
+      <div style={{
+        display: "flex", flexDirection: "column",
+        backgroundColor: "var(--sapGroup_ContentBackground)",
+        borderRadius: "0.75rem", overflow: "hidden",
+      }}>
       {/* Every other add lives on the row it adds into, so this is the only action with no row to
-          hang it on. */}
-      <Bar design="Subheader" style={{ borderBlockEnd: "none" }}
+          hang it on. marginTop cancels the Subheader's -1px overlap, which the clip would shave. */}
+      <Bar design="Subheader" style={{ borderBlockEnd: "none"}}
         startContent={<Title level="H5">Form structure</Title>}
         endContent={<Button icon="add" onClick={addSection}>Add section</Button>}
       />

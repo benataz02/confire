@@ -40,9 +40,9 @@ export function sameTables(a: TableRows, b: TableRows): boolean {
   return JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 }
 
-/** Parse one dialled-in quantity into the batch list: positive integers only, de-duped, ascending.
- *  StepInput clamps to `min` but still yields 0 before the user touches it, and its value is a
- *  number that can be NaN — so everything the guards reject here is reachable. */
+/** Parse one typed quantity into the batch list: positive integers only, de-duped, ascending.
+ *  A Number input still lets through "", "-3" and "2.5", so everything the guards reject here
+ *  is reachable. */
 export function addBatch(batches: number[], raw: string): number[] {
   const n = Number(raw.trim()); // "" and "  " both coerce to 0, which the n < 1 guard rejects
   if (!Number.isInteger(n) || n < 1 || batches.includes(n)) return batches;
