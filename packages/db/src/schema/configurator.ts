@@ -1,10 +1,14 @@
-import { index, jsonb, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { boolean, index, jsonb, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { Entries, ModelDef, Outputs, QuerySource, TableRows, Val } from "@confire/config-engine";
 
 // Configurator persistence: a mutable model, and one configuration document that carries its own
 // latest calculation. Spec: docs/superpowers/specs/2026-07-03-configurator-design.md.
 
 // The whole model is one jsonb document (ModelDef), loaded/saved whole like ui_view.state.
+/** What a portal client sees of a model's prices before the quotation (spec §7.2). */
+export type PortalPricing = "indicative" | "request";
+
 export const configModel = pgTable(
   "config_model",
   {
@@ -12,6 +16,10 @@ export const configModel = pgTable(
     tenantId: text("tenant_id").notNull(),
     name: text("name").notNull(),
     definition: jsonb("definition").$type<ModelDef>().notNull(),
+    // Customer portal (spec D15, D21): columns, not ModelDef keys, so publishing never bumps
+    // `updatedAt` — that would invalidate every stored calculation of the model.
+    portal: boolean("portal").notNull().default(false),
+    portalPricing: text("portal_pricing").$type<PortalPricing>().notNull().default("request"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -60,15 +68,12 @@ export const configMasterdata = pgTable(
 );
 export type ConfigMasterdata = typeof configMasterdata.$inferSelect;
 
-export type ProjectStatus = "draft" | "quoted";
+/** Internal configurations use only draft and quoted; the rest is the portal lifecycle (spec §7).
+ *  project-lifecycle.ts is the only writer. */
+export const PROJECT_STATUSES = ["draft", "submitted", "in_review", "returned", "declined", "quoted"] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 export type ProjectCustomer = { cardCode: string; cardName: string };
-// Appended inside each transition. A jsonb list rather than a column per event, so a new kind
-// does not need a migration.
-export type ProjectEvent = {
-  at: string;
-  kind: "created" | "quoted";
-  note?: string;
-};
+export type QuoteResponse = "accepted" | "declined";
 
 // One enumerated configuration, priced per batch quantity, and the user's pick of one.
 export type ConfigCandidate = { assignment: Entries; perBatch: { batchQty: number; outputs: Outputs }[] };
@@ -92,7 +97,14 @@ export const configProject = pgTable(
     name: text("name").notNull(),
     customer: jsonb("customer").$type<ProjectCustomer>(),
     status: text("status").$type<ProjectStatus>().notNull().default("draft"),
-    events: jsonb("events").$type<ProjectEvent[]>().notNull().default([]),
+    // The portal fence (spec §6): a client's project. Null = an internal-only configuration. Every
+    // portal read and write is fenced on it, and an internal read never sees one in `draft`.
+    portalCompanyId: uuid("portal_company_id"),
+    // Set by accept; the client sees the name. ponytail: no reassignment — add a "Reassign" action
+    // when a sales team asks for one.
+    assigneeId: text("assignee_id"),
+    quoteResponse: text("quote_response").$type<QuoteResponse>(),
+    quoteRespondedAt: timestamp("quote_responded_at", { withTimezone: true }),
     entries: jsonb("entries").$type<Entries>().notNull().default({}),
     batches: jsonb("batches").$type<number[]>().notNull().default([]),
     // Row data for the model's tables (item matrix, calculation tables), by table key. A sibling
@@ -105,6 +117,8 @@ export const configProject = pgTable(
     // config_model.updatedAt to decide whether a recalculate can be skipped — cheaper than the
     // ModelDef deep-compare it replaces.
     calculatedAt: timestamp("calculated_at", { withTimezone: true }),
+    // The CURRENT quotation: a re-quote modifies it, or replaces it when B1 has it closed (§7.3).
+    // Each `quoted` event keeps its own docEntry, so an earlier quotation stays findable.
     b1DocEntry: integer("b1_doc_entry"),
     quotedAt: timestamp("quoted_at", { withTimezone: true }),
     // Engineered value/cost of the selected candidates, captured once when the quotation is
@@ -118,10 +132,60 @@ export const configProject = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("config_project_tenant_status_idx").on(t.tenantId, t.status)],
+  (t) => [
+    index("config_project_tenant_status_idx").on(t.tenantId, t.status),
+    index("config_project_portal_company_idx").on(t.portalCompanyId),
+  ],
 );
 
 export type ConfigProject = typeof configProject.$inferSelect;
+
+export const PROJECT_EVENT_KINDS = [
+  "created", "submitted", "resubmitted", "withdrawn", "accepted", "returned", "declined", "revised",
+  "quoted", "quote_accepted", "quote_declined", "comment", "file",
+] as const;
+export type ProjectEventKind = (typeof PROJECT_EVENT_KINDS)[number];
+export type ProjectInputs = { entries: Entries; batches: number[]; tables: TableRows };
+/** Indicative figures per batch quantity — what the client saw at submit (§7.2). `from`: several
+ *  candidates, so the cheapest one. */
+export type PortalPrice = { batchQty: number; unitPrice: number; total: number; from: boolean };
+export type RevisionDiff = {
+  entries: Record<string, [Val | undefined, Val | undefined]>;
+  batches?: [number[], number[]];
+  /** row counts, before and after, for every table whose rows changed */
+  tables: Record<string, [number, number]>;
+};
+/** `payload` per kind (spec §6). */
+export type ProjectEventPayload =
+  | { inputs: ProjectInputs; prices?: PortalPrice[] }
+  | RevisionDiff
+  | { docEntry: number; docNum: number | null; value: number; mode: "created" | "updated"; inputs: ProjectInputs }
+  | { fileId: string };
+
+// The project's timeline (spec §6, §8), append-only. project-lifecycle.ts writes every status
+// event in the same transaction as the guarded status UPDATE; comments are written beside it.
+// `visibility` is the portal fence: the portal reads `external` only, in SQL.
+export const configProjectEvent = pgTable(
+  "config_project_event",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: text("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull().references(() => configProject.id, { onDelete: "cascade" }),
+    // clock_timestamp(), not now(): now() is the transaction's start, and a transition writes
+    // `revised` and its own event in one transaction — they must not tie on the timeline.
+    at: timestamp("at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
+    kind: text("kind").$type<ProjectEventKind>().notNull(),
+    actorUserId: text("actor_user_id"),
+    actorSide: text("actor_side").$type<"internal" | "external">().notNull(),
+    visibility: text("visibility").$type<"external" | "internal">().notNull().default("external"),
+    note: text("note"),
+    payload: jsonb("payload").$type<ProjectEventPayload>(),
+    // P7: a notification that failed lands here instead of failing the request.
+    mailError: text("mail_error"),
+  },
+  (t) => [index("config_project_event_project_idx").on(t.projectId, t.at)],
+);
+export type ConfigProjectEvent = typeof configProjectEvent.$inferSelect;
 
 // Cached values of a "query" masterdata, wholesale-replaced per sync.
 //

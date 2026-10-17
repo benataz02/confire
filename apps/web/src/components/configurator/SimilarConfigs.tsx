@@ -4,7 +4,7 @@ import { BusyIndicator, Button, IllustratedMessage, List, ListItemCustom, Messag
 import "@ui5/webcomponents-fiori/dist/illustrations/BeforeSearch.js";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoEntries.js";
 import type { Entries, ModelDef, Val } from "@confire/config-engine";
-import { money } from "../../lib/money.ts";
+import { money } from "@confire/ui/money.ts";
 import { orpc } from "../../orpc.ts";
 
 // "Similar configurations": the process page's fuzzy help, ranking the model's cached history

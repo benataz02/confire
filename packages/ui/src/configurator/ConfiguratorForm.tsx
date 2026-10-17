@@ -4,18 +4,16 @@ import {
   ObjectStatus, Option, RadioButton, SegmentedButton, SegmentedButtonItem, Select, StepInput, Text, Title,
 } from "@ui5/webcomponents-react";
 import {
-  displayColumns, domainOf, isTableGroup, placedTables, refKeyCols,
+  displayColumns, domainOf, isTableGroup, paramPrices, placedTables, refKeyCols,
   type DomainOption, type Entries, type Group, type LookupRef, type ModelDef, type Propagation, type ResolvedLookups, type ResolvedTable, type TableDef, type TableRows, type Val,
 } from "@confire/config-engine";
-import { CflField } from "@confire/ui/cfl/CflField.tsx";
-import { cfl, type QueryScope } from "@confire/ui/cfl/cfl-configs.ts";
-import { TABLE_ITEM } from "@confire/ui/list-report/Grid.tsx";
+import { CflField } from "../cfl/CflField.tsx";
+import { cfl, type QueryScope } from "../cfl/cfl-configs.ts";
+import { TABLE_ITEM } from "../list-report/Grid.tsx";
 import { ConfigTable } from "./ConfigTable.tsx";
-import type { ItemMoney } from "./itemMoney.ts";
 import { displayValue, rowTable, setEntry } from "./formHelpers.ts";
-import { paramPrices } from "./costElements.ts";
-import { money } from "../../lib/money.ts";
-import { useCurrency } from "../../orpc.ts";
+import { money, type ItemMoney } from "../money.ts";
+import { useUiSource } from "../source.tsx";
 
 /** The ref's display columns for one option value, joined — shown next to the option. */
 function extraOf(ref: LookupRef, t: ResolvedTable | undefined, val: Val): string | undefined {
@@ -66,7 +64,7 @@ const FORM_PROPS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2", head
 // the whole Form (colSpan mirrors FORM_PROPS.layout) and the item breaks out of the column flow
 // (TABLE_ITEM). ConfigTable's Grid toolbar names the table, with its row count, and carries Add/Delete.
 
-export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, disabled, readOnly, querySource, tables, onTablesChange, batches, itemMoney, itemBatch, onItemBatchChange }: {
+export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, disabled, readOnly, querySource, tables, onTablesChange, batches, itemMoney, itemBatch, onItemBatchChange, badges, evaluated }: {
   model: ModelDef;
   /** Canonical first-page snapshot — seeds query value help. */
   lookups: ResolvedLookups;
@@ -94,12 +92,18 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   /** the batch quantity `itemMoney` is priced at; omit onItemBatchChange and there is no picker */
   itemBatch?: number;
   onItemBatchChange?: (qty: number) => void;
+  /** Per-parameter price badges the server evaluated (the portal, spec §7.1): replaces the local
+   *  paramPrices, so no priceExpr has to reach the browser. Omit to compute them here. */
+  badges?: Record<string, number>;
+  /** Table rows the server evaluated, by table key (the portal): replaces ConfigTable's local
+   *  evalTableRows — the browser holds no formula to evaluate — and makes formula cells read-only. */
+  evaluated?: Record<string, Record<string, Val>[]>;
 }) {
-  const currency = useCurrency();
+  const currency = useUiSource().useCurrency();
   // Same source the rail's Costs card reads, so a badge and the card can never disagree.
   const priceOf = useMemo(
-    () => new Map(paramPrices(model, prop, lk.tables).map((c) => [c.key, c.amount])),
-    [model, prop, lk],
+    () => new Map(badges ? Object.entries(badges) : paramPrices(model, prop, lk.tables).map((c) => [c.key, c.amount])),
+    [badges, model, prop, lk],
   );
   const formMode = {
     accessibleMode: readOnly ? "Display" : "Edit",
@@ -297,6 +301,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
                     scopeVars={prop.values} lookups={lk} querySource={querySource}
                     disabled={disabled || !onTablesChange} readOnly={readOnly}
                     money={def.role === "items" ? itemMoney : undefined}
+                    evaluated={evaluated?.[g.table] ?? (evaluated ? [] : undefined)}
                     onQueryPick={onQueryPick} onChange={(rows) => setRows(g.table, rows)} />
                 </FormItem>
               </FormGroup>

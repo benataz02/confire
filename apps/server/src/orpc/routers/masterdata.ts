@@ -9,6 +9,9 @@ import { syncNow } from "../../masterdata-sync.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { runnerFor, tenantConnector } from "../../b1.ts";
 import { copyName } from "../../copy-name.ts";
+import { masterdataRows } from "../../config-project.ts";
+
+export { masterdataRows };
 
 // Tenant masterdata: one entity, two kinds. "table" keeps its values here; "query" keeps a live
 // B1/Beas read. Models reference either by name and never hold the definition, so the same query
@@ -34,20 +37,6 @@ const SaveZ = z.discriminatedUnion("kind", [
   z.object({ ...base, kind: z.literal("table"), columns: z.array(ColumnZ).min(1), rows: z.array(z.array(ValZ)) }),
   z.object({ ...base, kind: z.literal("query"), query: MasterdataQueryZ }),
 ]);
-
-/** Every masterdata row of a tenant, in the shape the resolvers take. `id` is in there now
- *  because it is the key of the row cache, and the sync state because a resolve reports it. */
-export async function masterdataRows(tenantId: string): Promise<MasterdataRow[]> {
-  return db
-    .select({
-      id: configMasterdata.id, name: configMasterdata.name, kind: configMasterdata.kind,
-      columns: configMasterdata.columns, rows: configMasterdata.rows, query: configMasterdata.query,
-      syncedAt: configMasterdata.syncedAt, syncError: configMasterdata.syncError,
-      rowCount: configMasterdata.rowCount,
-    })
-    .from(configMasterdata)
-    .where(eq(configMasterdata.tenantId, tenantId));
-}
 
 /** Column keys per table, the namespace checkModel validates against. */
 export const knownTables = (rows: MasterdataRow[]) =>

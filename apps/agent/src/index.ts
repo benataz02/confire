@@ -48,13 +48,21 @@ function authorized(req: Request): boolean {
 
 type Handler = (t: B1Transport, body: any) => Promise<unknown>;
 
+/** The bound actions the cloud may ask for, per entity set. Checked here, on-prem, as well as in
+ *  the cloud router: a leaked cloud token must not be able to Cancel or Close anything else. */
+const ACTIONS: Record<string, readonly string[]> = { Quotations: ["Close"] };
+
 const routes: Record<string, Handler> = {
   "/entity-set": (t, b) => t.readEntitySet(b.entitySet, b.query),
   "/entity": (t, b) => t.readEntity(b.entitySet, b.key, b.query),
   "/next": (t, b) => t.readNext(b.nextLink, b.maxPageSize),
   "/cross-join": (t, b) => t.crossJoin(b),
   "/create": (t, b) => t.createEntity(b.entitySet, b.data, { prefer: b.prefer }),
-  "/update": (t, b) => t.updateEntity(b.entitySet, b.key, b.data, { etag: b.etag }),
+  "/update": (t, b) => t.updateEntity(b.entitySet, b.key, b.data, { etag: b.etag, replaceCollections: b.replaceCollections === true }),
+  "/action": (t, b) => {
+    if (!ACTIONS[b.entitySet]?.includes(b.name)) throw new B1Error(403, null, `Action '${b.entitySet}/${b.name}' is not allowed`);
+    return t.action(b.entitySet, b.key, b.name);
+  },
   "/delete": (t, b) => t.deleteEntity(b.entitySet, b.key, { etag: b.etag }),
   "/metadata": async (t, b) => ({ status: 200, data: await t.metadata(b) }),
 };

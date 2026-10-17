@@ -92,8 +92,11 @@ export class RemoteTransport implements B1Transport {
   createEntity(entitySet: string, data: unknown, o?: { prefer?: Prefer }) {
     return this.call("/create", { entitySet, data, prefer: o?.prefer });
   }
-  updateEntity(entitySet: string, key: Key, data: unknown, o?: { etag?: string }) {
-    return this.call("/update", { entitySet, key, data, etag: o?.etag });
+  updateEntity(entitySet: string, key: Key, data: unknown, o?: { etag?: string; replaceCollections?: boolean }) {
+    return this.call("/update", { entitySet, key, data, etag: o?.etag, replaceCollections: o?.replaceCollections });
+  }
+  action(entitySet: string, key: Key, name: string) {
+    return this.call("/action", { entitySet, key, name });
   }
   deleteEntity(entitySet: string, key: Key, o?: { etag?: string }) {
     return this.call("/delete", { entitySet, key, etag: o?.etag });

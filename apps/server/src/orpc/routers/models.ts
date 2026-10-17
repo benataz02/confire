@@ -5,7 +5,8 @@ import { db, configModel, configProject } from "@confire/db";
 import { checkModel, ModelDefZ, syncTables } from "@confire/config-engine";
 import { adminProcedure } from "../base.ts";
 import { resolveLookups } from "../../lookups.ts";
-import { knownTables, masterdataRows } from "./masterdata.ts";
+import { knownTables } from "./masterdata.ts";
+import { masterdataRows } from "../../config-project.ts";
 import { ensureFresh, rowCache } from "../../masterdata-sync.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { copyName } from "../../copy-name.ts";
@@ -80,6 +81,21 @@ export const modelsRouter = {
         .values({ tenantId: context.tenantId, ...fields })
         .returning();
       return ins!;
+    }),
+
+  /** Publish on the customer portal (spec D15, D21). Its own call, not part of `save`: these are
+   *  columns beside the definition, and touching `updatedAt` here would invalidate every stored
+   *  calculation of the model for a change that cannot affect one. Unpublishing hides the model
+   *  from the catalog; projects already created from it keep working. */
+  publish: adminProcedure
+    .input(z.object({ id: z.uuid(), portal: z.boolean(), portalPricing: z.enum(["indicative", "request"]) }))
+    .handler(async ({ input, context }) => {
+      const [row] = await db.update(configModel)
+        .set({ portal: input.portal, portalPricing: input.portalPricing })
+        .where(and(eq(configModel.id, input.id), eq(configModel.tenantId, context.tenantId)))
+        .returning();
+      if (!row) throw new ORPCError("NOT_FOUND");
+      return row;
     }),
 
   // Copy under the first free name. Server-side so the stored definition is what gets copied,

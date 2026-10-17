@@ -93,6 +93,10 @@ export const entitySetPath = (entitySet: string, q?: QueryOptions): string =>
 export const entityPath = (entitySet: string, key: Key, q?: QueryOptions): string =>
   withQuery(`${assertName(entitySet)}(${buildKeyValue(key)})`, queryString(q));
 
+/** `Quotations(5)/Close` — a bound action, no query options. */
+export const actionPath = (entitySet: string, key: Key, name: string): string =>
+  `${entityPath(entitySet, key)}/${assertName(name, "action")}`;
+
 /** `$crossjoin(A,A/B)?$expand=A($select=…),A/B($select=…)&$filter=…` — B1 wants the expand
  *  clause unencoded, so it is composed by hand and only the values are escaped. */
 export function crossJoinPath(spec: CrossJoinSpec): string {

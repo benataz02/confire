@@ -9,7 +9,7 @@ import {
   type PricedCandidate, type Sel,
 } from "./runView.ts";
 import { percent } from "../dashboard/dashboardView.ts";
-import { money } from "../../lib/money.ts";
+import { money } from "@confire/ui/money.ts";
 import { useCurrency } from "../../orpc.ts";
 import { Grid, type CellTemplate, type GridState } from "@confire/ui/list-report/Grid.tsx";
 import type { ListColumn, Row } from "@confire/ui/types.ts";

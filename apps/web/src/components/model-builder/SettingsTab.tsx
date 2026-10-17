@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Form, FormGroup, FormItem, Input, Label, MessageStrip } from "@ui5/webcomponents-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Form, FormGroup, FormItem, Input, Label, MessageStrip, Option, Select, Switch, Text } from "@ui5/webcomponents-react";
 import type { Issue, ModelDef } from "@confire/config-engine";
 import { CflField } from "@confire/ui/cfl/CflField.tsx";
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
@@ -7,12 +8,16 @@ import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { MasterdataQuerySelect } from "./MasterdataQuerySelect.tsx";
+import { orpc } from "../../orpc.ts";
+import { toast } from "@confire/ui/toast.ts";
 
 /** Label mode: the price list's name shows, its number is what the model stores. */
 const PRICE_LIST = { dialogConfig: cfl.priceLists() };
 const ITEM = { dialogConfig: cfl.items() };
 
-export function SettingsTab({ draft, update, issues, tables, tried }: {
+export function SettingsTab({ modelId, draft, update, issues, tables, tried }: {
+  /** absent until the model is saved — publishing needs a row to publish */
+  modelId?: string;
   draft: ModelDef;
   update: (fn: (d: ModelDef) => ModelDef) => void;
   issues: Issue[];
@@ -97,9 +102,63 @@ export function SettingsTab({ draft, update, issues, tables, tried }: {
         </FormGroup>
       </Form>
 
+      <PortalSettings modelId={modelId} />
+
       <MessageStrip design="Information" hideCloseButton>
         The tables behind LOOKUP() and table domains — maintained values and live B1/Beas queries alike — are managed on the Masterdata page and shared by every model.
       </MessageStrip>
     </div>
+  );
+}
+
+const PRICING_TEXT = {
+  indicative: "Indicative prices while configuring",
+  request: "Prices on request (none until quoted)",
+} as const;
+
+/** The customer portal (spec D15, D21). Applied as it is changed, not on Save: these are columns
+ *  beside the definition, so publishing never touches the model's calculations. */
+function PortalSettings({ modelId }: { modelId?: string }) {
+  const qc = useQueryClient();
+  const rec = useQuery({ ...orpc.models.get.queryOptions({ input: { id: modelId! } }), enabled: !!modelId });
+  const publish = useMutation(orpc.models.publish.mutationOptions({
+    onSuccess: (row) => {
+      qc.setQueryData(orpc.models.get.queryOptions({ input: { id: row.id } }).queryKey, row);
+      toast(row.portal ? "Published on the customer portal" : "Not on the customer portal");
+    },
+  }));
+  const portal = rec.data?.portal ?? false;
+  const pricing = rec.data?.portalPricing ?? "request";
+  const set = (patch: Partial<{ portal: boolean; portalPricing: "indicative" | "request" }>) =>
+    publish.mutate({ id: modelId!, portal, portalPricing: pricing, ...patch });
+  const off = !modelId || !rec.data || publish.isPending;
+
+  return (
+    <Form accessibleMode="Edit" labelSpan="S12 M12 L12 XL12" layout="S1 M2 L2 XL2">
+      <FormGroup headerText="Customer portal">
+        <FormItem labelContent={<Label for="model-portal">Publish on the portal</Label>}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+            <Switch id="model-portal" checked={portal} disabled={off} accessibleName="Publish on the portal"
+              onChange={(e) => set({ portal: e.target.checked })} />
+            <Text style={{ fontSize: "0.75rem", color: "var(--sapContent_LabelColor)" }}>
+              {modelId
+                ? "Every customer company on the portal can configure it. Applies at once, without Save."
+                : "Save the model first."}
+            </Text>
+          </div>
+        </FormItem>
+        <FormItem labelContent={<Label for="model-portal-pricing">Prices shown to clients</Label>}>
+          <Select id="model-portal-pricing" value={pricing} disabled={off} style={{ width: "100%" }}
+            onChange={(e) => set({ portalPricing: (e.detail.selectedOption.value ?? "request") as "indicative" | "request" })}>
+            {Object.entries(PRICING_TEXT).map(([v, t]) => <Option key={v} value={v}>{t}</Option>)}
+          </Select>
+        </FormItem>
+      </FormGroup>
+      {publish.error ? (
+        <FormGroup>
+          <FormItem><MessageStrip design="Negative" hideCloseButton>{publish.error.message}</MessageStrip></FormItem>
+        </FormGroup>
+      ) : null}
+    </Form>
   );
 }

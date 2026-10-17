@@ -4,15 +4,14 @@ import {
   columnOptions, evalTableRows, requiredColumn, COST_COL, PRICE_COL, typedPrice,
   type ResolvedLookups, type ResolvedTable, type TableColumn, type TableDef, type Val,
 } from "@confire/config-engine";
-import { CflField } from "@confire/ui/cfl/CflField.tsx";
-import { cfl, type QueryScope } from "@confire/ui/cfl/cfl-configs.ts";
-import { Grid, type CellTemplate, type GridState } from "@confire/ui/list-report/Grid.tsx";
-import type { ListColumn } from "@confire/ui/types.ts";
+import { CflField } from "../cfl/CflField.tsx";
+import { cfl, type QueryScope } from "../cfl/cfl-configs.ts";
+import { Grid, type CellTemplate, type GridState } from "../list-report/Grid.tsx";
+import type { ListColumn } from "../types.ts";
 import { displayValue, rowTable } from "./formHelpers.ts";
 import { addRow, pasteRows, removeRows, setCell, type Row } from "./configTableOps.ts";
-import { money as fmtMoney } from "../../lib/money.ts";
-import { useCurrency } from "../../orpc.ts";
-import { qtyLabel, type ItemMoney } from "./itemMoney.ts";
+import { money as fmtMoney, qtyLabel, type ItemMoney } from "../money.ts";
+import { useUiSource } from "../source.tsx";
 
 /** The stored row's position, carried on the grid row: Grid hands back row objects (a cell, the
  *  selection), and both have to name the stored row they mean. Not an identifier, so no column
@@ -40,7 +39,7 @@ const header = (c: TableColumn) => c.label + (c.unit ? ` (${c.unit})` : "");
  * than stored. The cell controls follow ConfiguratorForm.control()'s branch order so a column and a
  * parameter of the same type look and behave the same.
  */
-export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPick, disabled, readOnly, querySource, money }: {
+export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPick, disabled, readOnly, querySource, money, evaluated: given }: {
   def: TableDef;
   rows: Row[];
   /** the model's current values — row formulas read these, and row cells shadow them */
@@ -57,14 +56,17 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
   /** Derived cost/price per row for an `items` grid; null = the columns with nothing in them yet.
    *  Absent = no money columns at all, which is how the builder preview stays free of cost data. */
   money?: ItemMoney | null;
+  /** Rows the server evaluated (the portal): used instead of evaluating here, and formula cells
+   *  become read-only — typing over a formula is a salesperson's override, not a client's. */
+  evaluated?: Record<string, Val>[];
 }) {
   // Off `me`, not off a prop: the currency is the tenant's, identical for every table on the page,
   // so threading it down from the model was carrying a constant through four components.
-  const currency = useCurrency();
+  const currency = useUiSource().useCurrency();
   // Same function the server runs, so a computed cell cannot disagree with the quote.
   const evaluated = useMemo(
-    () => evalTableRows(def, rows, scopeVars, lookups.tables),
-    [def, rows, scopeVars, lookups],
+    () => given ?? evalTableRows(def, rows, scopeVars, lookups.tables),
+    [given, def, rows, scopeVars, lookups],
   );
   // An items grid is never capped and never empty: its rows are the quotation's lines.
   const maxRows = def.role === "calc" ? def.maxRows : undefined;
@@ -118,7 +120,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
     const req = requiredColumn(def, c);
     const blank = req && (value === undefined || value === null || value === "");
 
-    if (readOnly) {
+    if (readOnly || (computed && given)) {
       if (computed) return <Text>{show(value ?? null)}</Text>;
       if (c.type === "boolean")
         return <Text>{displayValue(stored, [{ value: true, label: "Yes" }, { value: false, label: "No" }])}</Text>;

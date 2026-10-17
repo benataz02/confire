@@ -50,7 +50,7 @@ confire-agent (Bun, on the customer's network) ── SAP B1 Service Layer /b1s/
 The customer portal is a second process from the same image (compose service `portal`, CMD
 `start:portal`) so external traffic never shares an event loop with staff. Both are `serve.ts`:
 Better Auth on `/api/auth`, oRPC on `/rpc` with the 2 MB body cap, the SPA on the rest. The design
-record is `docs/superpowers/specs/2026-10-07-portal-redesign.md`; P0–P2 are built (see its §15).
+record is `docs/superpowers/specs/2026-10-07-portal-redesign.md`; P0–P4 are built (see its §15).
 
 The agent is a Windows service the customer installs. SAP credentials live in its `agent.json`
 and never reach the cloud. `sapConnection.agentUrl` is `http://localhost:4000` in dev and a
@@ -100,6 +100,18 @@ and the portal's (`onboarding`, `company`) therefore enforce one rule set. The r
 Ways in are an invitation (`/accept/<id>`, existing-BP from the BP Object Page's *Invite to portal*)
 or auto-join (`onboarding.join`, a verified address on a domain registered to a company).
 `bun run seed:portal` gives a dev tenant a company and an owner login.
+
+**Portal projects** (spec §7): a published model (`config_model.portal`, set by `models.publish`, not
+by `save` — publishing must not bump `updatedAt`) becomes a client's project, `config_project` with
+`portalCompanyId` set. **The engine runs on the server**: `portal/orpc/projects.ts` returns the
+projection in `portal/projection.ts` (pure, tested) and never a `ModelDef`, lookups or a candidate —
+that module is the fence in both directions (`acceptPortalInputs` is what a client may write).
+**`project-lifecycle.ts` is the only writer of `status` and `config_project_event`**, imported by
+both processes: `transition()` locks the row and writes the status and its events in one
+transaction; `assertWritable(…, actor)` + `writableBy(side)` say who may edit in which status; an
+internal read never sees a client's draft (`internalVisible`). Staff work requests in Portal →
+Requests (`orpc/routers/requests.ts`) and on the existing process page. The timeline is
+`project-timeline.ts`: events from Postgres, SAP document chains as a separate live read.
 
 The portal's sign-up, sign-in and reset request need a Cloudflare Turnstile token
 (`x-captcha-response`); dev uses Cloudflare's always-pass test keys. Its account mail wears the
@@ -163,15 +175,19 @@ selecting, so the read asks for whole rows and the cache stores them raw.
 
 **Nothing is snapshotted.** One configuration is one row: `config_project` carries its own
 `entries` + `candidates` + `selection`, and a recalculate overwrites them in place. Model and
-lookups are resolved on every read (`liveEngine` in `orpc/routers/configs.ts`), so a quoted
+lookups are resolved on every read (`liveEngine` in `config-project.ts` — the engine's server half,
+out of the router so the portal process can import it without the internal auth), so a quoted
 configuration is re-priced against what the cache says now rather than what it said then —
-`quotedValue`/`quotedCost` are the only frozen numbers, captured for the dashboard.
+`quotedValue`/`quotedCost` are the only frozen numbers, captured for the dashboard. (A portal
+submit freezes the client's inputs and indicative prices — on its append-only event row, not the
+project.)
 
 **Inputs and candidates move in one statement.** `candidates` is emptied in the same `UPDATE` that
 writes `entries`/`batches`/`tables`, so a reader sees either the old inputs with their candidates or
 the new inputs with none — never a mismatched pair. That is why there is no `calculated` status:
-`calculatedAt !== null` is the whole freshness signal. A quoted project is locked by
-`assertConfigMutable`.
+`calculatedAt !== null` is the whole freshness signal. Who may write a project's inputs is
+`assertWritable` (`project-lifecycle.ts`): an internal configuration until it is quoted, a client's
+request only in the status that is that side's (§7).
 
 **One edit is one call.** `configs.calculate` writes the inputs and recomputes in a single handler,
 and returns exactly what `configs.get` returns; `update`/`select` return the same payload.
@@ -191,6 +207,9 @@ never parses `NavigationProperty`. The *services underneath* it are what got por
 - There is deliberately **no `readAll`**. `readPages(t, set, q, { maxPages })` takes a *required*
   cap so an unbounded fetch can never hide behind an innocent-looking line.
 - `readNext` is the one method taking a B1-supplied URL; the agent origin-checks it.
+- `action(set, key, name)` is a bound document action (`Quotations(5)/Close`); the agent allowlists
+  the names again on its side. `updateEntity(…, { replaceCollections })` sends
+  `B1S-ReplaceCollectionsOnPatch` so a PATCHed `DocumentLines` replaces the stored lines.
 - `metadata.ts` parses EDMX with `fast-xml-parser` into plain JSON (SAP's parser builds `Map`s,
   which neither cache in jsonb nor cross the wire) and adds `ReferentialConstraint` parsing —
   that is what yields `CardCode → BusinessPartners` and makes the entity UI possible.
@@ -262,6 +281,11 @@ line with its cached options, and a stale cache is a page message instead of a f
   produced it, and a recalculate replaces that list. `config_project.b1DocEntry` covers a double
   click; the UDF covers the case where B1 created the document and the response never arrived.
   A missing UDF **refuses to run** rather than risk a double-post — see `docs/sap-b1-durable-writes.md`.
+  `createQuote` (`config-quote.ts`) is create-**or-modify**: a reopened request re-quotes its open
+  quotation in place (PATCH + If-Match + replaced lines + a rewritten key; a 412 whose re-read shows
+  our key is the lost-response success), and posts a new one once B1 has closed it — then the hash
+  covers the replaced `DocEntry` and the pre-check excludes it. Staff close a quotation with
+  `entities.close`. The §16 behaviours of a live B1 are marked `unverified (spec §16)` in code.
 - **Document copy** (`doc-copy.ts`): target lines carry `BaseType`/`BaseEntry`/`BaseLine` — that is
   what makes B1 close the source lines instead of creating an unlinked document. The line field
   list is an allowlist; `BaseLine` is the source `LineNum`, not the array index.
@@ -277,7 +301,11 @@ generates a page.
   through `UiSource` (`source.tsx`) — the internal router's own client and query utils, provided once in
   `apps/web/src/main.tsx`. The query keys therefore stay the app's, so the app's own cache writes
   (`QuoteCreatePage` seeding `entities.one`) still land. `global.css` (UI5 quirks the shells need) lives
-  there too. `bun run test:ui` runs its tests.
+  there too. `bun run test:ui` runs its tests. The portal provides its own (`apps/portal/src/main.tsx`):
+  value help over `projects.queryPage`, personal views only.
+- **Shared beyond the shells:** `configurator/` (`ConfiguratorForm`, `ConfigTable`: the internal page
+  computes in the browser; the portal passes server-evaluated `badges`/`evaluated` instead), `money.ts`,
+  `timeline/` (`ProjectTimeline`, `PROJECT_STATUS`) and `confirm.ts`'s `promptNote`.
 - **Features are declared.** `apps/web/src/features/b1/` (documents, business partners, items; `B1_FEATURES`
   is the registry — the `/b1/$entity` routes accept nothing else, and the side nav and search list
   it). A feature is plain object literals: list columns, filter fields, system views, header, section

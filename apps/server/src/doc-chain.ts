@@ -25,9 +25,11 @@ export type ChainDoc = {
   docDate: string;
   docTotal: number;
   docStatus: string;
+  /** the portal's fence: a client sees a document only when it is theirs (spec §8) */
+  cardCode: string;
 };
 
-const SELECT = ["DocEntry", "DocNum", "DocDate", "DocTotal", "DocumentStatus"];
+const SELECT = ["DocEntry", "DocNum", "DocDate", "DocTotal", "DocumentStatus", "CardCode"];
 
 /** `lines/BaseType eq T and (lines/BaseEntry eq a or lines/BaseEntry eq b …)` — B1's $filter has
  *  no `in` operator either, so a set of parents is an OR group. */
@@ -69,6 +71,7 @@ export function flattenChain(entity: ChainEntity, json: unknown): ChainDoc[] {
       docDate: String(d.DocDate ?? ""),
       docTotal: Number(d.DocTotal ?? 0),
       docStatus: String(d.DocumentStatus ?? ""),
+      cardCode: String(d.CardCode ?? ""),
     });
   }
   return [...seen.values()];

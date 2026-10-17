@@ -192,6 +192,19 @@ export const entitiesRouter = {
       return { entity: flow.target, docEntry: Number(row.DocEntry), docNum: row.DocNum ?? null, row };
     }),
 
+  /** Close a quotation (spec §7.3): `POST Quotations(n)/Close`. Quotations only — the one document
+   *  Confire writes — and the agent allowlists the action name again on its side. A re-quote of a
+   *  closed quotation posts a new one, so closing is how staff say "start over in SAP".
+   *  ponytail: unverified (spec §16) — what B1 answers a Close on a quotation already closed. */
+  close: adminProcedure
+    .input(z.object({ entity: z.literal("Quotations"), key: z.number().int() }))
+    .handler(async ({ input, context }) => {
+      const b1 = await b1Of(context.tenantId);
+      await viaB1(() => b1.action(input.entity, input.key, "Close"));
+      const fresh = await viaB1(() => b1.readEntity(input.entity, input.key));
+      return { row: fresh.data as Record<string, unknown>, etag: fresh.etag ?? null };
+    }),
+
   /** The document's own SAP print layout, rendered by the API Gateway on-prem and returned as
    *  base64. `/b1` is admin-only already; PRINTABLE is the second gate and the one that travels. */
   print: adminProcedure

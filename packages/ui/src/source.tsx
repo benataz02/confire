@@ -16,6 +16,7 @@ type Utils = RouterUtils<Client>;
 export type UiSource = {
   client: {
     entities: Pick<Client["entities"], "rows" | "neighbor">;
+    /** The configurator's value help pages here. The portal plugs its own `projects.queryPage` in. */
     configs: Pick<Client["configs"], "queryPage">;
   };
   orpc: {
@@ -24,6 +25,8 @@ export type UiSource = {
   };
   /** This user's role on the tenant, undefined until known. A hook: called during render. */
   useRole: () => string | undefined;
+  /** The tenant's B1 local currency for every money figure, undefined until SAP has said. A hook. */
+  useCurrency: () => string | undefined;
 };
 
 const Ctx = createContext<UiSource | null>(null);

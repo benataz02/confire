@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@confire/config-engine": "workspace:*",
     "@confire/server": "workspace:*",
     "@confire/ui": "workspace:*",
     "@orpc/client": "^1.14.6",

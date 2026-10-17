@@ -1,0 +1,141 @@
+import { describe, expect, test } from "bun:test";
+import { propagate, type ModelDef, type ResolvedLookups } from "@confire/config-engine";
+import {
+  acceptPortalInputs, toPortalBadges, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalProp, toPortalRows,
+} from "../src/portal/projection.ts";
+
+// The portal fence (spec §7.1), both directions. Pure: no database, no agent.
+
+const model: ModelDef = {
+  name: "Box",
+  description: "A box",
+  parameters: [
+    {
+      key: "grade", label: "Grade", type: "string", ui: "select", mandatory: true,
+      domain: { kind: "options", ref: { source: "table", table: "grades" } },
+      priceExpr: "grade_cost * 2",
+    },
+    { key: "secret", label: "Internal", type: "number", ui: "input", visibleWhen: "grade == \"X\"", defaultExpr: "41 + 1" },
+    { key: "locked", label: "Locked", type: "number", ui: "input", readonly: true, defaultExpr: "3" },
+  ],
+  structure: { sections: [{ key: "s", title: "S", groups: [{ key: "g", title: "G", params: ["grade", "secret", "locked"] }, { table: "items" }] }] },
+  computed: [{ key: "margin", expr: "0.4" }],
+  constraints: [{ kind: "expr", assert: "grade != \"Z\"", message: "Z is out" }],
+  bom: [{ id: "b", itemCode: '"BODY"', qty: "1" }],
+  routing: [{ id: "r", resource: "SAW", setupMin: "1", runMinPerUnit: "1", ratePerHour: "60" }],
+  tables: [{
+    key: "items", title: "Items", role: "items", basisExpr: "quantity * margin", map: { itemcode: "U_CF_ItemCode" },
+    columns: [
+      { key: "itemcode", label: "Code", type: "string", cell: { kind: "input" } },
+      { key: "quantity", label: "Qty", type: "number", cell: { kind: "input" } },
+      { key: "double", label: "Double", type: "number", cell: { kind: "formula", expr: "quantity * 2" } },
+    ],
+  }],
+  pricing: { priceExpr: "unitCost * 1.4", quoteItemCode: "CFG", priceList: 1, itemTable: "catalog" },
+  batchDefaults: [10],
+};
+
+const lookups: ResolvedLookups = {
+  domains: { grade: [{ value: "A", label: "Alpha" }, { value: "B", label: "Beta" }] },
+  tables: {
+    // `cost` is hidden: it feeds the price badge and must never reach the client
+    grades: { columns: ["code", "name", "cost"], rows: [["A", "Alpha", 5], ["B", "Beta", 7]], hidden: ["cost", "code"] },
+    catalog: { columns: ["ItemCode"], rows: [["BODY"]] },
+  },
+  prices: { BODY: 3 },
+};
+
+const tables = { items: [{ itemcode: "X1", quantity: 2, unitprice: 99 }, { itemcode: "X2", quantity: 1, double: 50 }] };
+
+describe("toPortalModelDef", () => {
+  const out = toPortalModelDef(model);
+  const json = JSON.stringify(out);
+
+  test("keeps the form, drops every expression and everything that prices", () => {
+    expect(out.parameters.map((p) => p.key)).toEqual(["grade", "secret", "locked"]);
+    expect(out.structure).toEqual(model.structure);
+    for (const leak of ["grade_cost", "41 + 1", "visibleWhen", "quantity * 2", "quantity * margin", "U_CF_ItemCode", "BODY", "SAW", "unitCost", "catalog", "Z is out"])
+      expect(json).not.toContain(leak);
+    expect(out.computed).toEqual([]);
+    expect(out.bom).toEqual([]);
+    expect(out.routing).toEqual([]);
+  });
+});
+
+describe("toPortalProp / toPortalLookups", () => {
+  const prop = propagate(model, lookups, { grade: "A" }, tables);
+  const pp = toPortalProp(model, prop, lookups, tables);
+
+  test("values are parameter keys only — no computed, no derived <param>_<column>", () => {
+    expect(prop.values.grade_cost).toBe(5); // the engine has it…
+    expect(prop.values.margin).toBe(0.4);
+    expect(Object.keys(pp.values).sort()).toEqual(["grade", "locked"]); // …the client does not
+  });
+
+  test("tables arrive evaluated, declared columns only — a typed unit price stays home", () => {
+    expect(pp.tables.items).toEqual([
+      { itemcode: "X1", quantity: 2, double: 4 },
+      { itemcode: "X2", quantity: 1, double: 50 }, // an override shows as its value
+    ]);
+  });
+
+  test("lookups: the named option tables, hidden columns out but the key kept; no prices", () => {
+    const lk = toPortalLookups(model, prop, lookups);
+    expect(lk.prices).toBeUndefined();
+    expect(Object.keys(lk.tables)).toEqual(["grades"]); // not the item-price catalog
+    expect(lk.tables.grades!.columns).toEqual(["code", "name"]); // `code` is the key: kept though hidden
+    expect(lk.tables.grades!.rows).toEqual([["A", "Alpha"], ["B", "Beta"]]);
+    expect(lk.tables.grades!.hidden).toBeUndefined();
+  });
+
+  test("a value-help page follows the same column rule", () => {
+    const page = toPortalPage(model, "grades", { columns: ["code", "name", "cost"], rows: [["C", "Gamma", 9]], hidden: ["cost"] });
+    expect(page).toEqual({ columns: ["code", "name"], rows: [["C", "Gamma"]] });
+  });
+
+  test("badges are amounts; the expression stays home", () => {
+    expect(toPortalBadges(model, prop, lookups)).toEqual({ grade: 10 });
+  });
+});
+
+describe("toPortalPrices", () => {
+  const out = (unitPrice: number, batchTotal: number) => ({ unitPrice, batchTotal }) as never;
+  test("one candidate is exact, several are 'from' the cheapest", () => {
+    expect(toPortalPrices([{ assignment: {}, perBatch: [{ batchQty: 10, outputs: out(5, 50) }] }], [10])).toEqual([
+      { batchQty: 10, unitPrice: 5, total: 50, from: false },
+    ]);
+    expect(toPortalPrices([
+      { assignment: {}, perBatch: [{ batchQty: 10, outputs: out(5, 50) }, { batchQty: 20, outputs: out(4, 80) }] },
+      { assignment: {}, perBatch: [{ batchQty: 10, outputs: out(3, 30) }, { batchQty: 20, outputs: out(6, 120) }] },
+    ], [10, 20])).toEqual([
+      { batchQty: 10, unitPrice: 3, total: 30, from: true },
+      { batchQty: 20, unitPrice: 4, total: 80, from: true },
+    ]);
+  });
+});
+
+describe("acceptPortalInputs", () => {
+  const stored = { entries: { grade: "A", locked: 7, gone: 1 }, tables };
+
+  test("a client's change to a parameter is accepted", () => {
+    expect(acceptPortalInputs(model, stored, { entries: { grade: "B", locked: 7, gone: 1 } }).entries).toEqual({ grade: "B", locked: 7, gone: 1 });
+  });
+
+  test("a change to a read-only or unknown key is refused; leaving it as stored is not", () => {
+    expect(() => acceptPortalInputs(model, stored, { entries: { grade: "A", locked: 8, gone: 1 } })).toThrow(/locked/);
+    expect(() => acceptPortalInputs(model, stored, { entries: { grade: "A", locked: 7, gone: 1, margin: 0.9 } })).toThrow(/margin/);
+  });
+
+  test("a table sent back unchanged keeps the staff's overrides", () => {
+    const r = acceptPortalInputs(model, stored, { tables: toPortalRows(model, tables) });
+    expect(r.tables).toEqual(tables);
+  });
+
+  test("a client edit replaces the table; a price or formula cell is refused", () => {
+    const edited = { items: [{ itemcode: "X1", quantity: 3 }] };
+    expect(acceptPortalInputs(model, stored, { tables: edited }).tables).toEqual(edited);
+    expect(() => acceptPortalInputs(model, stored, { tables: { items: [{ itemcode: "X1", quantity: 3, unitprice: 1 }] } })).toThrow(/unitprice/);
+    expect(() => acceptPortalInputs(model, stored, { tables: { items: [{ itemcode: "X1", double: 1 }] } })).toThrow(/double/);
+    expect(() => acceptPortalInputs(model, stored, { tables: { other: [] } })).toThrow(/other/);
+  });
+});

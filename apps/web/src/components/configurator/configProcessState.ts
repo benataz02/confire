@@ -39,12 +39,3 @@ export function sameTables(a: TableRows, b: TableRows): boolean {
     keys.map((k) => (t[k] ?? []).map((row) => Object.keys(row).sort().map((c) => [c, row[c]])));
   return JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 }
-
-/** Parse one typed quantity into the batch list: positive integers only, de-duped, ascending.
- *  A Number input still lets through "", "-3" and "2.5", so everything the guards reject here
- *  is reachable. */
-export function addBatch(batches: number[], raw: string): number[] {
-  const n = Number(raw.trim()); // "" and "  " both coerce to 0, which the n < 1 guard rejects
-  if (!Number.isInteger(n) || n < 1 || batches.includes(n)) return batches;
-  return [...batches, n].sort((a, b) => a - b);
-}

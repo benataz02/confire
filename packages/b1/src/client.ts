@@ -1,4 +1,4 @@
-import { crossJoinPath, entityPath, entitySetPath } from "./query.ts";
+import { actionPath, crossJoinPath, entityPath, entitySetPath } from "./query.ts";
 import type { ServiceLayer } from "./service-layer.ts";
 import type {
   B1MetadataParams, B1Response, B1Transport, CrossJoinSpec, Key, Prefer, QueryOptions,
@@ -63,11 +63,21 @@ export class DirectTransport implements B1Transport {
     return { status: res.status, data: res.data, etag: etagOf(res.data) };
   }
 
-  async updateEntity(entitySet: string, key: Key, data: unknown, o?: { etag?: string }): Promise<B1Response> {
+  async updateEntity(
+    entitySet: string, key: Key, data: unknown, o?: { etag?: string; replaceCollections?: boolean },
+  ): Promise<B1Response> {
     const res = await this.sl.request({
       url: entityPath(entitySet, key), method: "PATCH", data,
-      headers: o?.etag ? { "If-Match": o.etag } : undefined,
+      headers: {
+        ...(o?.etag ? { "If-Match": o.etag } : {}),
+        ...(o?.replaceCollections ? { "B1S-ReplaceCollectionsOnPatch": "true" } : {}),
+      },
     });
+    return { status: res.status, data: res.data };
+  }
+
+  async action(entitySet: string, key: Key, name: string): Promise<B1Response> {
+    const res = await this.sl.request({ url: actionPath(entitySet, key, name), method: "POST" });
     return { status: res.status, data: res.data };
   }
 

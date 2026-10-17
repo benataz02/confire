@@ -5,7 +5,7 @@
 //
 // No default currency. The old `= "EUR"` invented a unit for tenants whose books are in something
 // else; undefined now means "SAP has not said yet" and renders a bare number, which is honest.
-// The currency itself comes from useCurrency() in orpc.ts — this module stays free of the query
+// The currency itself comes from the UiSource's useCurrency() — this module stays free of the query
 // client so it can be unit-tested without a DOM.
 
 /**
@@ -24,3 +24,29 @@ export function money(n: number, currency?: string): string {
     return `${n.toFixed(2)}${currency ? ` ${currency}` : ""}`;
   }
 }
+
+// --- the items grid's money (derived by apps/web's itemMoney.ts, drawn by ConfigTable) ---------
+
+export type RowMoney = {
+  unitCost: number;
+  unitPrice: number;
+  /** pieces this row ships across every selected batch — unitCost x quantity is the line cost */
+  quantity: number;
+};
+/** One element of what the cost is made of: a BOM line under its description, an operation under
+ *  its resource. Batch totals, so these add up to the same money `rows` splits over the grid. */
+export type CostLine = { kind: "material" | "operation"; label: string; amount: number };
+export type ItemMoney = {
+  /** the batch quantity the figures are priced at — the one picked in the items section's header */
+  batchQty: number;
+  /** indexed by position in the unfiltered grid; a row that ships nothing has no share */
+  rows: (RowMoney | undefined)[];
+  /** where the cost comes from, as opposed to where `rows` lands it — same total, other axis */
+  lines: CostLine[];
+};
+
+/** Setup cost is spread across the run, so a unit figure means nothing without the quantity it was
+ *  priced at. Empty before there is any money to label. */
+export const qtyLabel = (batchQty: number | undefined) =>
+  batchQty ? ` (Quantity ${batchQty})` : "";
+

@@ -11,6 +11,7 @@ import { useFieldConstraints } from "@confire/ui/metadata.ts";
 import { useListView } from "@confire/ui/useListView.ts";
 import { useDetailView } from "@confire/ui/useDetailView.ts";
 import { PrintActions } from "../../../components/b1/PrintActions.tsx";
+import { CloseQuotations } from "../../../features/b1/documents.tsx";
 import type { EntityFeature, ListQuery, Row } from "@confire/ui/types.ts";
 
 // One declared B1 entity's list — or, with the `#create` fragment, its object page in create mode
@@ -75,10 +76,13 @@ function EntityList({ feature }: { feature: EntityFeature }) {
             disabled={refresh.isPending} onClick={() => refresh.mutate()} />
         </Toolbar>
       }
-      toolbarActions={printable ? ({ rows }) => (
-        // Unmounts with the selection, which closes any open preview — PrintActions releases the
-        // blob URL in its own cleanup.
-        rows.length === 1 ? <PrintActions entity={entity} docEntry={Number((rows[0] as Row).DocEntry)} /> : null
+      toolbarActions={printable ? ({ rows, clear }) => (
+        <>
+          {/* Unmounts with the selection, which closes any open preview — PrintActions releases
+              the blob URL in its own cleanup. */}
+          {rows.length === 1 ? <PrintActions entity={entity} docEntry={Number((rows[0] as Row).DocEntry)} /> : null}
+          {entity === "Quotations" && rows.length ? <CloseQuotations rows={rows as Row[]} onClosed={clear} /> : null}
+        </>
       ) : undefined}
     />
   );

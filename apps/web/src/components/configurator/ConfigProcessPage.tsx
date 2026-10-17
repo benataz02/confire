@@ -3,29 +3,32 @@ import { useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar, Button, BusyIndicator, DynamicSideContent, Form, FormGroup, FormItem, IllustratedMessage,
-  Input, Label, MessageStrip, MultiInput, ObjectPage, ObjectPageSection, ObjectPageTitle,
-  Option, Panel, Select, Tag, Text, Title, ToggleButton, Token, Toolbar, ToolbarButton, ToolbarItem,
+  Input, Label, MessageStrip, ObjectPage, ObjectPageSection, ObjectPageTitle,
+  Option, Panel, Select, Tag, Text, Title, ToggleButton, Toolbar, ToolbarButton, ToolbarItem,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import {
   evalTableRows, missingInputs, propagate,
   type Entries, type ItemsTable, type TableRows, type Val,
 } from "@confire/config-engine";
-import { mergeQueryPicks, setQueryPick, type QueryPicks } from "./formHelpers.ts";
+import { mergeQueryPicks, setQueryPick, type QueryPicks } from "@confire/ui/configurator/formHelpers.ts";
 import { client, meQuery, orpc, useCurrency } from "../../orpc.ts";
-import { money as formatMoney } from "../../lib/money.ts";
-import { confirm } from "@confire/ui/confirm.ts";
+import { money as formatMoney } from "@confire/ui/money.ts";
+import { confirm, promptNote } from "@confire/ui/confirm.ts";
+import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
+import { ProjectTimeline } from "@confire/ui/timeline/ProjectTimeline.tsx";
 import { toast } from "@confire/ui/toast.ts";
-import { statusUi, toPriced, unpricedItems, type Sel } from "./runView.ts";
-import { ConfiguratorForm, ConsistencyStatus } from "./ConfiguratorForm.tsx";
+import { toPriced, unpricedItems, type Sel } from "./runView.ts";
+import { ConfiguratorForm, ConsistencyStatus } from "@confire/ui/configurator/ConfiguratorForm.tsx";
 import { CflField } from "@confire/ui/cfl/CflField.tsx";
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import { PriceAnalysis } from "./PriceAnalysis.tsx";
 import { CostBody, OptionPrices } from "./InsightsRail.tsx";
 import { SimilarConfigs } from "./SimilarConfigs.tsx";
-import { paramPrices } from "./costElements.ts";
+import { paramPrices } from "@confire/config-engine";
 import { itemMoney, moneyTotals } from "./itemMoney.ts";
-import { addBatch, needsCalculation } from "./configProcessState.ts";
+import { needsCalculation } from "./configProcessState.ts";
+import { BatchQuantities } from "@confire/ui/configurator/BatchQuantities.tsx";
 import { configMessages } from "./configMessages.ts";
 import { PageMessages } from "../PageMessages.tsx";
 import { useSectionParam } from "../../lib/sectionParam.ts";
@@ -128,15 +131,35 @@ export function ConfigProcessPage({ id }: { id: string }) {
     },
   }));
 
+  // A client's request (spec §10): the company, the assignee, and the three decisions. Each one moves
+  // the status, so the page, the inbox and the timeline all refetch rather than patch.
+  const request = q.data?.request ?? null;
+  const decided = (msg: string) => () => {
+    void qc.invalidateQueries({ queryKey: orpc.configs.get.queryOptions({ input: { id } }).queryKey });
+    void qc.invalidateQueries({ queryKey: orpc.requests.rows.key() });
+    void qc.invalidateQueries({ queryKey: orpc.timeline.list.queryOptions({ input: { projectId: id } }).queryKey });
+    toast(msg);
+  };
+  const accept = useMutation(orpc.requests.accept.mutationOptions({ onSuccess: decided("Request accepted — it is yours to review") }));
+  const sendBack = useMutation(orpc.requests.sendBack.mutationOptions({ onSuccess: decided("Sent back to the client for changes") }));
+  const decline = useMutation(orpc.requests.decline.mutationOptions({ onSuccess: decided("Request declined") }));
+  const deciding = accept.isPending || sendBack.isPending || decline.isPending;
+  const timeline = useQuery({ ...orpc.timeline.list.queryOptions({ input: { projectId: id } }), enabled: !!request });
+  // Live SAP, so it may fail on its own without taking the events with it.
+  const documents = useQuery({ ...orpc.timeline.documents.queryOptions({ input: { projectId: id } }), enabled: !!request, retry: false });
+  const comment = useMutation(orpc.timeline.comment.mutationOptions({
+    onSuccess: () => void qc.invalidateQueries({ queryKey: orpc.timeline.list.queryOptions({ input: { projectId: id } }).queryKey }),
+  }));
+
   const project = q.data?.project;
   const model = q.data?.model;
   const { entries, batches, tables } = draft ?? {
     entries: project?.entries ?? {}, batches: project?.batches ?? [], tables: project?.tables ?? {},
   };
-  // Quoted is the server's lock (assertConfigMutable fences update/calculate/select; remove
-  // refuses quoted with the same CONFLICT). The page goes read-only rather than letting every
-  // edit walk into that error.
-  const locked = project?.status === "quoted";
+  // The server's lock (assertWritable fences update/calculate/select; remove refuses with the same
+  // CONFLICT): a configuration is editable until quoted, a client's request only while it is in
+  // review (spec §7). The page goes read-only rather than letting every edit walk into that error.
+  const locked = request ? project?.status !== "in_review" : project?.status === "quoted";
   const candidates = project?.candidates ?? NONE;
   const selection = selOverride ?? project?.selection ?? NONE;
   // Candidates are emptied by the same write that changes their inputs, so holding any is proof
@@ -223,7 +246,17 @@ export function ConfigProcessPage({ id }: { id: string }) {
   if (q.error)
     return <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{q.error.message}</MessageStrip>;
   if (!project || !model) return null;
-  const st = statusUi[project.status] ?? statusUi.draft;
+  const st = PROJECT_STATUS[project.status] ?? PROJECT_STATUS.draft;
+  // A request's decisions by status (§7). They finalize, so they live in the footer (Fiori), next
+  // to Create quote — never in the header toolbar.
+  const canDecide = !!request && (project.status === "submitted" || project.status === "in_review");
+  const decide = async (kind: "sendBack" | "decline") => {
+    const note = await promptNote(kind === "sendBack"
+      ? { title: "Send back for changes", actionText: "Send back", message: `${request!.cardName} can edit the request again and resubmit it. Say what should change — the client sees this note.` }
+      : { title: "Decline request", actionText: "Decline", message: `This closes the request for good. ${request!.cardName} sees the decision and this note.` });
+    if (note === null) return;
+    (kind === "sendBack" ? sendBack : decline).mutate({ id, ...(note ? { note } : {}) });
+  };
   // What the picked cells price at, before any hand-typed price in the items grid moves it — the
   // grid and the quotation, not this figure, are what the customer is charged.
   const selectedTotal = selection.reduce((n, s) =>
@@ -248,7 +281,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
   const ready = !locked && !!prop && missing.length === 0 && gaps.length === 0;
   // Under Candidates the bar waits for a ticked line: there, picking is the step in progress, and
   // the bar is what finishes it.
-  const showFooter = ready && (sectionParam.props.selectedSectionId !== "candidates" || selection.length > 0);
+  const showFooter = canDecide || (ready && (sectionParam.props.selectedSectionId !== "candidates" || selection.length > 0));
   if (showFooter && !footerUp) setFooterUp(true);
   // Several candidates: which to quote is the user's pick, made under Candidates. One leaves nothing
   // to pick, so Create quote picks every batch quantity of it on the way out. configs.quoteDraft
@@ -277,13 +310,27 @@ export function ConfigProcessPage({ id }: { id: string }) {
         </div>
       }
       endContent={
-        // The finalizing action, and the only Emphasized one on the page — the Fiori rule.
-        <Button design="Emphasized" disabled={conflicted || busy}
-          tooltip={conflicted || calc.isError || select.isError ? "Resolve the issues in the messages first"
-            : busy ? "Calculating…" : undefined}
-          onClick={finalize}>
-          {mustPick ? "Select candidate" : "Create quote"}
-        </Button>
+        <>
+          {/* The finalizing action, and the only Emphasized one on the page — the Fiori rule. A
+              request takes it once accepted; until then Accept is the positive semantic action. */}
+          {ready && (!request || project.status === "in_review") ? (
+            <Button design="Emphasized" disabled={conflicted || busy || deciding}
+              tooltip={conflicted || calc.isError || select.isError ? "Resolve the issues in the messages first"
+                : busy ? "Calculating…" : undefined}
+              onClick={finalize}>
+              {mustPick ? "Select candidate" : project.b1DocEntry !== null ? "Update quote" : "Create quote"}
+            </Button>
+          ) : null}
+          {canDecide && project.status === "submitted" ? (
+            <Button design="Positive" disabled={deciding} onClick={() => accept.mutate({ id })}>Accept</Button>
+          ) : null}
+          {canDecide ? (
+            <>
+              <Button design="Default" disabled={deciding} onClick={() => void decide("sendBack")}>Send back</Button>
+              <Button design="Negative" disabled={deciding} onClick={() => void decide("decline")}>Decline</Button>
+            </>
+          ) : null}
+        </>
       } />
   );
 
@@ -302,9 +349,19 @@ export function ConfigProcessPage({ id }: { id: string }) {
     lookupsError: lookups.error as Error | null,
     sync: lookups.data?.sync,
     syncError: sync.error as Error | null,
-    configError: (update.error ?? calc.error ?? duplicate.error ?? remove.error) as Error | null,
+    configError: (update.error ?? calc.error ?? duplicate.error ?? remove.error ?? accept.error ?? sendBack.error ?? decline.error) as Error | null,
     selectError: select.error as Error | null,
-    locked,
+    locked: !locked ? false : !request ? true : {
+      submitted: { text: "Accept the request to edit it", detail: "It stays exactly as the client submitted it until someone takes it into review." },
+      draft: { text: "", detail: "" },
+      in_review: { text: "", detail: "" },
+      returned: { text: "With the client for changes", detail: "The client edits it now; it comes back when they resubmit." },
+      declined: { text: "Declined — this request is closed", detail: "Nothing can change on it any more." },
+      quoted: {
+        text: project.quoteResponse === "accepted" ? "Quote accepted by the client" : "Quoted — waiting for the client's answer",
+        detail: project.quoteResponse === "accepted" ? "Create the sales order in SAP from the quotation." : "A decline reopens the request in review.",
+      },
+    }[project.status],
   });
 
   return (
@@ -315,7 +372,9 @@ export function ConfigProcessPage({ id }: { id: string }) {
       titleArea={
         <ObjectPageTitle
           header={<Title>{project.name.trim() || "New configuration"}</Title>}
-          subHeader={project.customer?.cardName ? <Text>{project.customer.cardName}</Text> : undefined}
+          subHeader={request ? (
+            <Text>{`${request.cardName} · ${request.assigneeName ? `Assigned to ${request.assigneeName}` : "Not accepted yet"}`}</Text>
+          ) : project.customer?.cardName ? <Text>{project.customer.cardName}</Text> : undefined}
           navigationBar={
             <Toolbar design="Transparent">
               {/* A Toolbar only measures — and overflows — its own item types: the two plain
@@ -350,7 +409,8 @@ export function ConfigProcessPage({ id }: { id: string }) {
                 tooltip={draft !== null ? "Calculate first" : "Duplicate configuration"}
                 text={duplicate.isPending ? "Duplicating…" : "Duplicate"}
                 onClick={() => duplicate.mutate({ id })} />
-              <ToolbarButton icon="delete" design="Transparent" disabled={locked || remove.isPending}
+              {/* A client's request is declined, never deleted (the server refuses it too). */}
+              {request ? null : <ToolbarButton icon="delete" design="Transparent" disabled={locked || remove.isPending}
                 tooltip={locked ? "A quoted configuration cannot be deleted" : "Delete configuration"}
                 text="Delete"
                 onClick={async () => {
@@ -360,12 +420,18 @@ export function ConfigProcessPage({ id }: { id: string }) {
                     message: `Delete "${project.name.trim() || "New configuration"}"? This can't be undone.`,
                     actionText: "Delete", destructive: true,
                   })) remove.mutate({ ids: [id] });
-                }} />
+                }} />}
             </Toolbar>
           }>
           <Tag design={st.state === "None" ? "Neutral" : st.state} style={{ alignSelf: "center" }}>
             {st.text}
           </Tag>
+          {/* The client's answer to the quotation (D20). A decline reopens the request in review. */}
+          {request && project.quoteResponse ? (
+            <Tag design={project.quoteResponse === "accepted" ? "Positive" : "Critical"} style={{ alignSelf: "center" }}>
+              {project.quoteResponse === "accepted" ? "Accepted by client" : "Declined by client"}
+            </Tag>
+          ) : null}
         </ObjectPageTitle>
       }
       footerArea={footerUp ? footer : undefined}
@@ -425,7 +491,8 @@ export function ConfigProcessPage({ id }: { id: string }) {
                   )}
                 </FormItem>
                 <FormItem labelContent={<Label required>Model</Label>}>
-                  {locked ? (
+                  {/* A request's model was the client's pick, and its customer is the company. */}
+                  {locked || request ? (
                     <Text>{(models.data ?? []).find((m) => m.id === project.modelId)?.name ?? ""}</Text>
                   ) : (
                   /* Switching the model wipes every entry, batch and table row, because a param key
@@ -449,7 +516,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
                   )}
                 </FormItem>
                 <FormItem labelContent={<Label required>Customer</Label>}>
-                  {locked ? <Text>{project.customer?.cardName ?? ""}</Text> : (
+                  {locked || request ? <Text>{project.customer?.cardName ?? ""}</Text> : (
                   /* Wrapper, not a prop: the id is only a jump target for the message popover. */
                   <div id="cfg-customer" style={{ width: "100%" }}>
                   {/* Only a customer SAP knows is saved: the row select — a pick, or a typed code the
@@ -469,25 +536,7 @@ export function ConfigProcessPage({ id }: { id: string }) {
                   )}
                 </FormItem>
                 <FormItem labelContent={<Label required>Batch quantities</Label>}>
-                  {locked ? <Text>{batches.join(", ")}</Text> : (
-                  /* Type a quantity, Enter (or leaving the field) makes it a token. Uncontrolled:
-                      the typed text is cleared by hand once it has become a token. */
-                  <MultiInput type="Number" data-param={BATCHES} style={{ width: "100%" }}
-                    placeholder="Type a quantity, press Enter"
-                    valueState={batches.length ? "None" : "Negative"}
-                    valueStateMessage={<div>Add at least one batch quantity.</div>}
-                    tokens={batches.map((b) => <Token key={b} text={String(b)} />)}
-                    onChange={(e) => {
-                      edit({ batches: addBatch(batches, e.target.value ?? "") });
-                      e.target.value = "";
-                    }}
-                    onTokenDelete={(e) => {
-                      const gone = new Set(e.detail.tokens.map((t) => Number((t as HTMLElement).getAttribute("text"))));
-                      const left = batches.filter((b) => !gone.has(b));
-                      // Deleting the last quantity falls back to 1 rather than leaving nothing to price.
-                      edit({ batches: left.length ? left : [1] });
-                    }} />
-                  )}
+                  <BatchQuantities batches={batches} readOnly={locked} anchor={BATCHES} onChange={(next) => edit({ batches: next })} />
                 </FormItem>
               </FormGroup>
             </Form>
@@ -522,6 +571,19 @@ export function ConfigProcessPage({ id }: { id: string }) {
             subtitleText="They appear here once the configuration is complete and has calculated." />
         )}
       </ObjectPageSection>
+      {/* ObjectPage's children are sections or booleans — not null. */}
+      {!!request && (
+        <ObjectPageSection id="timeline" titleText="Timeline">
+          <ProjectTimeline side="internal" currency={currency} canComment
+            events={timeline.data?.events} labels={timeline.data?.labels ?? {}}
+            loading={timeline.isPending} error={timeline.error as Error | null}
+            documents={documents.data} documentsError={documents.error as Error | null}
+            onComment={(note, internalOnly) => comment.mutateAsync({ projectId: id, note, internalOnly })}
+            onOpenDocument={me.data?.role === "admin" || me.data?.role === "owner"
+              ? (entity, key) => void navigate({ to: "/b1/$entity/$key", params: { entity, key: String(key) } })
+              : undefined} />
+        </ObjectPageSection>
+      )}
     </ObjectPage>
   );
 }

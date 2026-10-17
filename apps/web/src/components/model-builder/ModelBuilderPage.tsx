@@ -189,7 +189,7 @@ export function ModelBuilderPage({ id }: { id?: string }) {
         }
       >
         <ObjectPageSection id="settings" titleText={secTitle("settings")}>
-          <SettingsTab draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
+          <SettingsTab modelId={id} draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
             tried={m.tried} />
         </ObjectPageSection>
         {/* fitContent: the section fills what the title and tab bar leave instead of growing with the

@@ -2,8 +2,8 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, configMasterdata, configMasterdataRow, configModel, configProject, type ConfigCandidate } from "@confire/db";
 import type { Entries, ModelDef, ResolvedLookups } from "@confire/config-engine";
-import { applySelection, cachedLookups, calculateProject, createQuote, loadModel } from "../src/orpc/routers/configs.ts";
-import { buildQuoteLines, configDocumentCommandId } from "../src/config-quote.ts";
+import { cachedLookups, calculateProject, loadModel } from "../src/config-project.ts";
+import { applySelection, buildQuoteLines, configDocumentCommandId, createQuote } from "../src/config-quote.ts";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
 import type { RowCache } from "../src/lookups.ts";
@@ -424,7 +424,7 @@ describe("config tables (integration)", () => {
 
   test("createQuote refuses a header field the Quotations profile does not name", async () => {
     // Rejected before anything reaches the database or SAP, so the ids need not exist.
-    await expect(createQuote(tenantId, {
+    await expect(createQuote(tenantId, "tester", {
       projectId: crypto.randomUUID(),
       commandId: "0".repeat(64),
       header: { Comments: "fine", DocTotal: 1, DocumentLines: [] },

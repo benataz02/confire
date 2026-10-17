@@ -3,6 +3,7 @@ import {
   type ItemsTable, type ModelDef, type ResolvedLookups, type TableRows, type Val,
 } from "@confire/config-engine";
 import type { Candidate, Sel } from "./runView.ts";
+import type { CostLine, ItemMoney } from "@confire/ui/money.ts";
 
 // Per-unit cost and price for each row of the items grid, derived on every render and stored
 // nowhere.
@@ -17,29 +18,6 @@ import type { Candidate, Sel } from "./runView.ts";
 // `candidate.perBatch[].outputs` being read off the row: the server re-prices against the live
 // cache and the current table rows when it posts (nothing is snapshotted), so the stored figures
 // could show a price the quotation will not carry.
-
-export type RowMoney = {
-  unitCost: number;
-  unitPrice: number;
-  /** pieces this row ships across every selected batch — unitCost x quantity is the line cost */
-  quantity: number;
-};
-/** One element of what the cost is made of: a BOM line under its description, an operation under
- *  its resource. Batch totals, so these add up to the same money `rows` splits over the grid. */
-export type CostLine = { kind: "material" | "operation"; label: string; amount: number };
-export type ItemMoney = {
-  /** the batch quantity the figures are priced at — the one picked in the items section's header */
-  batchQty: number;
-  /** indexed by position in the unfiltered grid; a row that ships nothing has no share */
-  rows: (RowMoney | undefined)[];
-  /** where the cost comes from, as opposed to where `rows` lands it — same total, other axis */
-  lines: CostLine[];
-};
-
-/** Setup cost is spread across the run, so a unit figure means nothing without the quantity it was
- *  priced at. Empty before there is any money to label. */
-export const qtyLabel = (batchQty: number | undefined) =>
-  batchQty ? ` (Quantity ${batchQty})` : "";
 
 /** The same description twice — two BOM lines of the same part, or one line across two candidates
  *  selected at the viewed batch — is one row: this reads as a cost breakdown, not a line dump. */

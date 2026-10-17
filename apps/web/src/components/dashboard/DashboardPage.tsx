@@ -12,7 +12,7 @@ import { meQuery, orpc, useCurrency } from "../../orpc.ts";
 import {
   conversionSlices, deviationPct, greeting, monthLabel, percent, percentPoints, scaled, trendOf,
 } from "./dashboardView.ts";
-import { money } from "../../lib/money.ts";
+import { money } from "@confire/ui/money.ts";
 
 const WINDOWS = [
   { key: "month", label: "This month" },

@@ -4,6 +4,9 @@ import { db, organization, portalCompany, portalMember } from "@confire/db";
 import { isInternalMember, portalAuthedProcedure, portalBase, seatOf, tenantFromHost } from "./base.ts";
 import { onboardingRouter } from "./onboarding.ts";
 import { companyRouter } from "./company.ts";
+import { modelsRouter, projectsRouter } from "./projects.ts";
+import { timelineRouter, viewsRouter } from "./timeline.ts";
+import { tenantCurrency } from "../../b1.ts";
 
 /** Where the supplier's own staff belong: the internal app on the same tenant. The internal apex URL
  *  (BETTER_AUTH_URL) with the slug in front — the protocol and dev port come with it. */
@@ -38,6 +41,9 @@ export const portalRouter = {
       internal,
       internalAppUrl: internal ? internalAppUrl(tenant.slug) : null,
       company,
+      // What every money figure is in (the internal `me` carries it too). Never throws: a down agent
+      // costs the symbol, not the shell.
+      currency: company ? await tenantCurrency(tenant.id) : null,
     };
   }),
 
@@ -57,6 +63,10 @@ export const portalRouter = {
 
   onboarding: onboardingRouter,
   company: companyRouter,
+  models: modelsRouter,
+  projects: projectsRouter,
+  timeline: timelineRouter,
+  views: viewsRouter,
 };
 
 export type PortalRouter = typeof portalRouter;

@@ -1,8 +1,8 @@
 import { ObjectStatus, Text, Title } from "@ui5/webcomponents-react";
 import { ITEM_COL, type Val } from "@confire/config-engine";
-import type { CostElement } from "./costElements.ts";
-import { money } from "../../lib/money.ts";
-import { qtyLabel, type CostLine, type ItemMoney } from "./itemMoney.ts";
+import type { CostElement } from "@confire/config-engine";
+import { money } from "@confire/ui/money.ts";
+import { qtyLabel, type CostLine, type ItemMoney } from "@confire/ui/money.ts";
 import { margin } from "./runView.ts";
 import { percent } from "../dashboard/dashboardView.ts";
 
@@ -79,7 +79,7 @@ export function CostBody({ rows, money: m, totals, cur }: {
 }
 
 /** The per-field price badges, summed. Informational: the calculated price comes from BOM and
- *  routing and never reads these (see costElements.ts), so they keep their own total. */
+ *  routing and never reads these (see paramPrices in config-engine), so they keep their own total. */
 export function OptionPrices({ rows, cur }: { rows: CostElement[]; cur?: string }) {
   return (
     <div style={SECTION}>

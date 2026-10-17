@@ -65,6 +65,7 @@ export function AppShell() {
     return [
       page("Home", "/", "home"),
       page("Configurations", "/configs", "sales-quote"),
+      page("Portal requests", "/requests", "inbox"),
       ...(isAdmin
         ? [
             ...Object.values(B1_FEATURES).map((f) => ({
@@ -234,13 +235,15 @@ export function AppShell() {
                   </>
                 ) : null}
               </SideNavigationGroup>
-              {/* The customer portal (spec §10). Requests, for every member, land with P4. */}
-              {isAdmin ? (
-                <SideNavigationGroup text="Portal" expanded>
+              {/* The customer portal (spec §10): Requests for every member, the rest for admins. */}
+              <SideNavigationGroup text="Portal" expanded>
+                <SideNavigationItem text="Requests" icon="inbox" data-to="/requests"
+                  selected={pathname === "/requests"} />
+                {isAdmin ? (
                   <SideNavigationItem text="Invitations" icon="paper-plane" data-to="/portal/invitations"
                     selected={pathname === "/portal/invitations"} />
-                </SideNavigationGroup>
-              ) : null}
+                ) : null}
+              </SideNavigationGroup>
         </SideNavigation>
       }
     >

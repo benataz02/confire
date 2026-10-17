@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Bar, Button, BusyIndicator, MessageStrip } from "@ui5/webcomponents-react";
+import { toast } from "@confire/ui/toast.ts";
 import { meQuery, orpc } from "../../orpc.ts";
 import { b1Feature } from "../../features/b1/index.ts";
 import { useFieldConstraints } from "@confire/ui/metadata.ts";
@@ -22,6 +23,8 @@ import { PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 
 const QUOTATIONS = b1Feature("Quotations")!;
 const LOCKED = ["DocumentLines"];
+/** A client's request is quoted to the client's own business partner (spec §10). */
+const LOCKED_REQUEST = ["DocumentLines", "CardCode"];
 
 export function QuoteCreatePage({ projectId }: { projectId: string }) {
   const qc = useQueryClient();
@@ -80,9 +83,15 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
       data={d.data}
       sections={QUOTATIONS.detail.sections}
       header={{ ...QUOTATIONS.detail.header, createTitle: "New quotation" }}
-      lockedFields={LOCKED}
+      lockedFields={d.portal ? LOCKED_REQUEST : LOCKED}
       localViews
-      createLabel="Create in SAP"
+      createLabel={d.replaces ? "Update in SAP" : "Create in SAP"}
+      // A reopened request re-quotes its quotation (spec §7.3) — said before the post, not after.
+      notice={d.replaces ? (
+        <MessageStrip design="Information" hideCloseButton>
+          {`This updates quotation ${d.replaces.docEntry} in SAP with these lines. If SAP has closed it since, a new quotation is created instead.`}
+        </MessageStrip>
+      ) : undefined}
       tableActions={tableActions}
       onCancelCreate={backToConfig}
       // The draft carries the commandId it was built from, so the server refuses to post a
@@ -90,6 +99,14 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
       onSave={async (header) => {
         const r = await create.mutateAsync({ projectId, commandId: d.commandId, header });
         void qc.invalidateQueries({ queryKey: orpc.configs.get.queryOptions({ input: { id: projectId } }).queryKey });
+        void qc.invalidateQueries({ queryKey: orpc.requests.rows.key() });
+        void qc.invalidateQueries({ queryKey: orpc.timeline.list.queryOptions({ input: { projectId } }).queryKey });
+        // A request goes back to the request: its status and timeline are what moved.
+        if (d.portal) {
+          toast(r.mode === "updated" ? "Quotation updated — the client can answer it now" : "Quotation sent — the client can answer it now");
+          void backToConfig();
+          return;
+        }
         if (!canOpenInB1) {
           void draft.refetch(); // staying: the confirmation needs `quoted`
           return;

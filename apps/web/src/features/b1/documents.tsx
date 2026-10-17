@@ -1,12 +1,13 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, MessageStrip } from "@ui5/webcomponents-react";
 import { orpc } from "../../orpc.ts";
 import { toast } from "@confire/ui/toast.ts";
+import { confirm } from "@confire/ui/confirm.ts";
 import { PrintActions } from "../../components/b1/PrintActions.tsx";
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { toIsoDay } from "@confire/ui/format.ts";
-import type { EntityFeature, Facet, HeaderActionContext } from "@confire/ui/types.ts";
+import type { EntityFeature, Facet, HeaderActionContext, Row } from "@confire/ui/types.ts";
 
 // The B1 marketing documents, declared. One builder for all four: Quotations and Orders are
 // writable, DeliveryNotes and Invoices read-only — which is the server's word (entities.metadata
@@ -20,6 +21,42 @@ export const DOCUMENT_STATUS: Facet["statusMapping"] = {
   bost_Paid: { state: "Positive", text: "Paid" },
   bost_Delivered: { state: "Positive", text: "Delivered" },
 };
+
+/** Close open quotations in SAP (spec §7.3): the Object Page's header action and the List Report's
+ *  selection action. A re-quote of a client's request whose quotation is closed posts a new one,
+ *  so closing is also how staff start a quotation over. Admins and owners — the server says so. */
+export function CloseQuotations({ rows, disabled, onClosed }: { rows: Row[]; disabled?: boolean; onClosed?: () => void }) {
+  const qc = useQueryClient();
+  const close = useMutation(orpc.entities.close.mutationOptions());
+  const open = rows.filter((r) => r.DocumentStatus === undefined || r.DocumentStatus === "bost_Open");
+  const run = async () => {
+    const one = open.length === 1;
+    const ok = await confirm({
+      title: one ? "Close quotation" : "Close quotations",
+      message: `${one ? `Close quotation ${String(open[0]!.DocNum ?? open[0]!.DocEntry)}` : `Close ${open.length} quotations`} in SAP? A closed quotation can't be reopened; a client request quoted on it gets a new quotation on its next quote.`,
+      actionText: "Close", destructive: true,
+    });
+    if (!ok) return;
+    // One at a time: each is its own SAP action, and the first refusal should stop the rest.
+    let done = 0;
+    try {
+      for (const r of open) { await close.mutateAsync({ entity: "Quotations", key: Number(r.DocEntry) }); done++; }
+    } finally {
+      void qc.invalidateQueries({ queryKey: orpc.entities.one.key() });
+      void qc.invalidateQueries({ queryKey: orpc.entities.rows.key() });
+      if (done) { toast(done === 1 ? "Quotation closed" : `${done} quotations closed`); onClosed?.(); }
+    }
+  };
+  return (
+    <>
+      <Button icon="locked" design="Transparent" disabled={disabled || close.isPending || !open.length}
+        tooltip={open.length ? undefined : "Only an open quotation can be closed"} onClick={() => void run()}>
+        Close
+      </Button>
+      {close.error ? <MessageStrip design="Negative" hideCloseButton>{close.error.message}</MessageStrip> : null}
+    </>
+  );
+}
 
 /** Print, and the copy flows out of this document (Quotation -> Order -> Delivery -> Invoice). */
 function DocumentActions({ entity, ctx }: { entity: string; ctx: HeaderActionContext }) {
@@ -43,6 +80,7 @@ function DocumentActions({ entity, ctx }: { entity: string; ctx: HeaderActionCon
           {f.label}
         </Button>
       ))}
+      {entity === "Quotations" ? <CloseQuotations rows={[ctx.formData]} disabled={ctx.isEditMode} /> : null}
       {copy.error ? <MessageStrip design="Negative" hideCloseButton>{copy.error.message}</MessageStrip> : null}
     </>
   );

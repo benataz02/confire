@@ -22,13 +22,14 @@ export type MockAgent = {
   stop: () => void;
 };
 
-/** `Field eq 'value'` — the only filter shape the mock understands, which is all the dedup
- *  check-then-create needs. Anything else matches nothing. */
+/** `Field eq 'value'`, optionally `and Field ne <number>` — the only shapes the mock understands,
+ *  which is all the dedup check-then-create (and its re-quote variant) needs. Anything else
+ *  matches nothing. */
 function applyFilter(rows: Record<string, unknown>[], filter: string | undefined): Record<string, unknown>[] {
   if (!filter) return rows;
-  const m = /^([A-Za-z_][A-Za-z0-9_]*) eq '(.*)'$/.exec(filter);
+  const m = /^([A-Za-z_][A-Za-z0-9_]*) eq '(.*?)'(?: and ([A-Za-z_][A-Za-z0-9_]*) ne (\d+))?$/.exec(filter);
   if (!m) return [];
-  return rows.filter((r) => String(r[m[1]!] ?? "") === m[2]!.replace(/''/g, "'"));
+  return rows.filter((r) => String(r[m[1]!] ?? "") === m[2]!.replace(/''/g, "'") && (!m[3] || r[m[3]] !== Number(m[4])));
 }
 
 export function startMockAgent(store: MockStore = {}): MockAgent {
@@ -64,7 +65,8 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
           return Response.json({ status: 200, data: { value: applyFilter(rows, filter).slice(0, body.query?.top ?? 20) } });
         }
         case "/create": {
-          const row = { DocEntry: nextDocEntry, DocNum: 900 + nextDocEntry, "@odata.etag": `W/"${nextEtag++}"`, ...body.data };
+          // A new document is open, as B1 makes it.
+          const row = { DocEntry: nextDocEntry, DocNum: 900 + nextDocEntry, DocumentStatus: "bost_Open", "@odata.etag": `W/"${nextEtag++}"`, ...body.data };
           nextDocEntry++;
           rows.push(row);
           return Response.json({ status: 201, data: row, etag: row["@odata.etag"] });
@@ -84,7 +86,18 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
           // The whole point of If-Match: a stale tag means someone else got there first.
           if (body.etag && body.etag !== found["@odata.etag"])
             return fail(412, -2039, "Precondition failed");
+          // ponytail: unverified (spec §16) — the code and text a live B1 gives a PATCH on a closed
+          // quotation. Record the real one here once it has been seen.
+          if (found.DocumentStatus === "bost_Close") return fail(400, -5002, "Document is already closed");
           Object.assign(found, body.data, { "@odata.etag": `W/"${nextEtag++}"` });
+          return Response.json({ status: 204, data: null });
+        }
+        case "/action": {
+          const found = rows.find((r) => r.DocEntry === body.key);
+          if (!found) return fail(404, -2028, "No matching records found");
+          if (body.name !== "Close") return fail(400, null, `Unknown action '${body.name}'`);
+          if (found.DocumentStatus === "bost_Close") return fail(400, -5002, "Document is already closed");
+          Object.assign(found, { DocumentStatus: "bost_Close", "@odata.etag": `W/"${nextEtag++}"` });
           return Response.json({ status: 204, data: null });
         }
         case "/cross-join": {

@@ -16,7 +16,7 @@ import { apexUrl, authSearch, hardRedirect } from "../lib/host.ts";
 // The supplier's portal chrome (spec §9): the same NavigationLayout + ShellBar + SideNavigation
 // pattern as the internal AppShell, wearing the supplier's name and logo (D20). Fiori: no shell-bar
 // Back button (the browser's does that), the branding element leads home, the profile opens the
-// user menu. P4+ add the side-nav items (Projects, Documents) as their pages land.
+// user menu. P5 adds Documents.
 
 export const roleLabel = (role: keyof typeof ROLE_LABEL) => ROLE_LABEL[role];
 
@@ -112,6 +112,8 @@ export function PortalShell() {
           ) : undefined}
         >
           <SideNavigationItem text="Home" icon="home" data-to="/" selected={pathname === "/"} />
+          <SideNavigationItem text="Projects" icon="product" data-to="/projects"
+            selected={pathname === "/projects" || pathname.startsWith("/projects/")} />
         </SideNavigation>
       }
     >

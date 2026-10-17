@@ -298,3 +298,25 @@ export function missingInputs(
   }
   return out;
 }
+
+/** One parameter's informational price: what its `priceExpr` says for the current value. */
+export type CostElement = { key: string; label: string; amount: number };
+
+/** Priced, visible parameters with an evaluable numeric priceExpr, in model order. The single
+ *  source the per-field price badges and the process page's Costs card read — and, on the portal,
+ *  what the server evaluates so the expression never leaves it (spec §7.2). Informational only:
+ *  the calculated price still comes from computeOutputs (BOM + routing), untouched by this. */
+export function paramPrices(model: ModelDef, prop: Propagation, tables: ResolvedLookups["tables"]): CostElement[] {
+  const out: CostElement[] = [];
+  for (const p of model.parameters) {
+    // a field the rules have switched off must not bill for itself
+    if (!p.priceExpr || !prop.visible[p.key]) continue;
+    try {
+      const v = evaluate(p.priceExpr, { vars: prop.values, tables });
+      if (typeof v === "number" && Number.isFinite(v)) out.push({ key: p.key, label: p.label, amount: v });
+    } catch {
+      // undecidable while inputs are open — same silence as bindings() gives an unbound formula
+    }
+  }
+  return out;
+}

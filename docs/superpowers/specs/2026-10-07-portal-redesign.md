@@ -12,6 +12,17 @@ receives a projection (§7.1); indicative prices are live, then frozen at submit
 (§7.2); a declined quote reopens the project and a re-quote modifies the same B1 quotation (§7.3);
 `revised` is written once per round, at the next transition (§7.4); P4 takes the whole lifecycle,
 quote response included (§15). There is no `joined` event.
+**P4 built 2026-10-17.** Decided while building: the portal gets its own **views** router (personal
+views only, `ui-views.ts` shared with the internal one), so personal views and value-help layouts
+work from P4; the portal timeline shows SAP documents as **plain rows until P5** (no link, no PDF);
+documents are a separate read (`timeline.documents`) and so is the live quotation behind Prices
+(`projects.quotation`), so SAP being down never blocks a page; publishing is its own call
+(`models.publish`) so it never bumps a model's `updatedAt`. The projection keeps **no parameter
+expression at all** (not only `priceExpr`) and sends values of **visible** parameters only. A client
+may not change a read-only parameter; a table the client sends back unchanged keeps staff's
+overrides, a table the client edits becomes the client's (§7.1, `acceptPortalInputs`). Finalizing
+actions sit in the page footers (Fiori). Notifications stay P7: no event mails yet. The four §16 P4
+checks against a live B1 are **not done** — the code marks each assumption `unverified (spec §16)`.
 **Revised 2026-10-16:** onboarding is invitation-only (D7, D17, D25, D26, §5). Open
 self-registration, applications and their approval are gone.
 **Revised 2026-10-16:** this builds from the current internal-only codebase. The previous in-app

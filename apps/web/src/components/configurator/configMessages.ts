@@ -37,15 +37,19 @@ export function configMessages(a: {
   /** update / calculate / duplicate / delete — whichever failed last */
   configError?: Error | null;
   selectError?: Error | null;
-  /** quoted: the page is read-only and every action above is fenced server-side */
-  locked: boolean;
+  /** read-only, and every action above is fenced server-side: `true` is a quoted configuration; a
+   *  client's request says why in its own words (its status decides who may edit, spec §7) */
+  locked: boolean | { text: string; detail: string };
 }): PageMessage[] {
   const out: PageMessage[] = [];
 
   if (a.locked)
     out.push({
-      id: "locked", type: "Information", text: "Quoted — this configuration is read-only",
-      detail: "The quotation it produced is what SAP holds now.", ...CONFIGURE,
+      id: "locked", type: "Information",
+      ...(a.locked === true
+        ? { text: "Quoted — this configuration is read-only", detail: "The quotation it produced is what SAP holds now." }
+        : a.locked),
+      ...CONFIGURE,
     });
 
   // The same two the footer gates Calculate on. Critical, not Negative: nothing is wrong yet, the

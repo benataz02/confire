@@ -12,11 +12,17 @@ import {
   typedPrice,
   type ItemsTable,
   type ModelDef,
+  type Outputs,
   type ResolvedLookups,
   type TableRows,
   type Val,
 } from "@confire/config-engine";
+import { B1Error, rowsOf, type B1Transport } from "@confire/b1";
 import { ENTITY_PROFILES } from "./entity-profiles.ts";
+import { canonicalJson } from "./canon.ts";
+import { tenantConnector, tenantCurrency, viaB1 } from "./b1.ts";
+import { liveEngine } from "./config-project.ts";
+import { assertWritable, inputsOf, internalVisible, transition } from "./project-lifecycle.ts";
 
 export type ConfigProjectRow = typeof configProject.$inferSelect;
 
@@ -42,6 +48,10 @@ export function configDocumentCommandId(input: {
    *  item matrix has to yield a new id — otherwise the SAP pre-check finds the old quotation and
    *  createQuote reports `reused: true` for a document that no longer matches. */
   tables: TableRows;
+  /** The quotation this one modifies or replaces (a reopened project, §7.3). Absent for a first
+   *  quote, which keeps every key written before re-quotes existed. It is what stops the create
+   *  path's pre-check from finding the closed quotation and reporting it as the new one. */
+  replaces?: number;
 }): string {
   // Sorted so a pure reorder of the same picks keeps the same id.
   const sel = [...input.selection]
@@ -50,21 +60,8 @@ export function configDocumentCommandId(input: {
       assignment: input.candidates[s.candidateIdx]?.assignment ?? null,
       batchQty: s.batchQty,
     }));
-  const raw = `${input.tenantId}|${input.projectId}|${canonicalJson({ sel, tables: input.tables })}`;
+  const raw = `${input.tenantId}|${input.projectId}|${canonicalJson({ sel, tables: input.tables, replaces: input.replaces })}`;
   return createHash("sha256").update(raw).digest("hex");
-}
-
-/** JSON with object keys sorted. Plain JSON.stringify will not do: Postgres reorders jsonb object
- *  keys, so a selection read back from config_project would hash differently from the one written. */
-function canonicalJson(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
-  if (v && typeof v === "object") {
-    const entries = Object.entries(v as Record<string, unknown>)
-      .filter(([, x]) => x !== undefined)
-      .sort(([a], [b]) => (a < b ? -1 : 1));
-    return `{${entries.map(([k, x]) => `${JSON.stringify(k)}:${canonicalJson(x)}`).join(",")}}`;
-  }
-  return JSON.stringify(v ?? null);
 }
 
 /** Whole cents, the way B1 rounds a line total. */
@@ -227,22 +224,183 @@ export function validateSelectionPairs(
   }
 }
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-type DbOrTx = typeof db | Tx;
+export function applySelection(
+  model: ModelDef, lookups: ResolvedLookups,
+  candidates: ConfigCandidate[], selection: ConfigSelection[], tableRows?: TableRows,
+): { candidateIdx: number; batchQty: number; outputs: Outputs }[] {
+  return selection.map((s) => {
+    const cand = candidates[s.candidateIdx];
+    if (!cand) throw new ORPCError("BAD_REQUEST", { message: `No candidate at index ${s.candidateIdx}` });
+    try {
+      const outputs = computeOutputs(model, lookups, cand.assignment, s.batchQty, tableRows);
+      return { candidateIdx: s.candidateIdx, batchQty: s.batchQty, outputs };
+    } catch (e) {
+      if (e instanceof DslError || e instanceof RangeError) throw new ORPCError("BAD_REQUEST", { message: e.message });
+      throw e;
+    }
+  });
+}
 
-/** Reject update/calculate/select while quoted. */
-export async function assertConfigMutable(
-  tenantId: string,
-  projectId: string,
-  client: DbOrTx = db,
-): Promise<void> {
-  const [project] = await client
-    .select({ status: configProject.status })
-    .from(configProject)
-    .where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId)))
-    .limit(1);
+// ---- Quotation write-back -------------------------------------------------------------------
+// Numbers are recomputed from the persisted selection on both the draft and the post, so the
+// browser can influence *which* selection is quoted (via commandId) and nothing else.
+
+/** The project as staff may quote it: a client's draft does not exist for them. */
+async function loadQuotable(tenantId: string, projectId: string) {
+  const [project] = await db.select().from(configProject)
+    .where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId), internalVisible)).limit(1);
   if (!project) throw new ORPCError("NOT_FOUND");
-  if (project.status === "quoted") {
-    throw new ORPCError("CONFLICT", { message: "Configuration is quoted and locked" });
-  }
+  if (!project.candidates.length)
+    throw new ORPCError("BAD_REQUEST", { message: "Calculate the configuration before quoting" });
+  return project;
+}
+
+const commandIdOf = (tenantId: string, p: ConfigProjectRow) => configDocumentCommandId({
+  tenantId, projectId: p.id, candidates: p.candidates, selection: p.selection ?? [], tables: p.tables,
+  replaces: p.b1DocEntry ?? undefined,
+});
+
+export async function quoteDraft(tenantId: string, projectId: string) {
+  const project = await loadQuotable(tenantId, projectId);
+  const { model, lookups } = await liveEngine(tenantId, project);
+  const done = project.status === "quoted" && project.b1DocEntry !== null;
+  return {
+    commandId: commandIdOf(tenantId, project),
+    data: buildQuoteSeed(project, model.definition, lookups, await tenantCurrency(tenantId)),
+    totals: quotedTotals(project, model.definition, lookups),
+    quoted: done ? { docEntry: project.b1DocEntry!, quotedAt: project.quotedAt } : null,
+    // A reopened project re-quotes its quotation (§7.3): the page says so before the user posts.
+    replaces: !done && project.b1DocEntry !== null ? { docEntry: project.b1DocEntry } : null,
+    portal: project.portalCompanyId !== null,
+  };
+}
+
+/** The current quotation as the re-quote needs it. Read whole: one document, and $select on the
+ *  DocumentLines collection is not something to bet a write on. */
+async function readQuotation(b1: B1Transport, docEntry: number) {
+  const res = await b1.readEntity("Quotations", docEntry);
+  const row = res.data as Record<string, unknown>;
+  if (!(DEDUP_UDF in row))
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Cannot re-quote safely: ${DEDUP_UDF} is missing from Sales Quotation in SAP. Create it (alphanumeric, length 64) and try again.`,
+    });
+  const lines = (row.DocumentLines as Record<string, unknown>[] | undefined) ?? [];
+  return {
+    row, etag: res.etag,
+    key: row[DEDUP_UDF] as string | null,
+    // ponytail: unverified (spec §16) — a quotation whose lines were partly copied to an order may
+    // still say bost_Open, so a closed line counts as closed too. Check both against a live B1.
+    open: row.DocumentStatus === "bost_Open" && lines.every((l) => l.LineStatus !== "bost_Close"),
+  };
+}
+
+export async function createQuote(
+  tenantId: string,
+  userId: string,
+  input: { projectId: string; commandId: string; header?: Record<string, unknown> },
+) {
+  // Refuse rather than silently write less than the page asked for — the same contract
+  // entities.create honours. Checked before anything reaches SAP.
+  const rejected = Object.keys(input.header ?? {}).filter((k) => !QUOTE_HEADER.has(k));
+  if (rejected.length)
+    throw new ORPCError("BAD_REQUEST", { message: `Not settable on a quotation: ${rejected.join(", ")}` });
+
+  const project = await loadQuotable(tenantId, input.projectId);
+  // Already posted: the row IS the idempotency record for a retry that got its response.
+  if (project.status === "quoted" && project.b1DocEntry !== null)
+    return { docEntry: project.b1DocEntry, docNum: null, reused: true, row: null, etag: null, mode: "created" as const };
+  const actor = { userId, side: "internal" as const };
+  await assertWritable(tenantId, project.id, actor);
+  // The customer of a portal project is the company (spec §10) — the page cannot quote someone else.
+  if (project.portalCompanyId !== null && input.header?.CardCode !== undefined && input.header.CardCode !== project.customer?.cardCode)
+    throw new ORPCError("BAD_REQUEST", { message: "A request is quoted to the client's own business partner" });
+
+  const commandId = commandIdOf(tenantId, project);
+  if (commandId !== input.commandId)
+    throw new ORPCError("CONFLICT", { message: "STATE_CHANGED" });
+
+  const { model, lookups } = await liveEngine(tenantId, project);
+  const seed = buildQuoteSeed(project, model.definition, lookups, await tenantCurrency(tenantId));
+  const totals = quotedTotals(project, model.definition, lookups);
+  const { b1 } = await tenantConnector(tenantId);
+
+  const posted = await viaB1(async () => {
+    const current = project.b1DocEntry === null ? null : await readQuotation(b1, project.b1DocEntry);
+
+    if (current?.open) {
+      // Re-quote an open quotation in place. The same check-then-create, applied to an update: a
+      // retry after a lost response finds its own key already written.
+      const done = { docEntry: project.b1DocEntry!, docNum: Number(current.row.DocNum ?? 0) || null, reused: true, row: null, etag: null, mode: "updated" as const };
+      if (current.key === commandId) return done;
+      // CardCode/CardName stay out: the business partner of a quotation does not change on a
+      // re-quote, and asking B1 to "change" it to itself is not a request worth risking.
+      const { CardCode: _c, CardName: _n, ...body } = { ...seed, ...(input.header ?? {}) };
+      try {
+        // ponytail: unverified (spec §16) — that B1S-ReplaceCollectionsOnPatch deletes the lines
+        // it was not sent, and that U_CF_Key can be rewritten in the same PATCH.
+        await b1.updateEntity("Quotations", project.b1DocEntry!, { ...body, [DEDUP_UDF]: commandId },
+          { etag: current.etag, replaceCollections: true });
+      } catch (e) {
+        // 412: the ETag moved. If it moved because our own PATCH landed and the answer was lost,
+        // the key says so; anyone else's edit is a real conflict.
+        if (!(e instanceof B1Error && e.status === 412)) throw e;
+        if ((await readQuotation(b1, project.b1DocEntry!)).key !== commandId) throw e;
+      }
+      return { ...done, reused: false };
+    }
+
+    // Create: a first quote, or a new quotation replacing one B1 has closed. Check-then-create
+    // against the dedup UDF covers the window the DB cannot: we POSTed, B1 created the quotation,
+    // and our response never arrived. The closed predecessor is excluded by DocEntry as well as by
+    // the key (`replaces` is in it): a modify may have written this very key onto it.
+    const filter = `${DEDUP_UDF} eq '${commandId}'${project.b1DocEntry === null ? "" : ` and DocEntry ne ${project.b1DocEntry}`}`;
+    const existing = await b1.readEntitySet("Quotations", { filter, select: ["DocEntry", "DocNum"], top: 1 }).catch((e) => {
+      // Only a 400 means "no such property"; an unreachable agent or a rejected session is a
+      // different problem and must keep its own status rather than becoming setup advice.
+      if (e instanceof B1Error && e.status === 400)
+        throw new ORPCError("BAD_REQUEST", {
+          message: `Cannot check for an existing quotation: ${DEDUP_UDF} is missing from Sales Quotation in SAP. Create it (alphanumeric, length 64) and try again. (${e.message})`,
+        });
+      throw e;
+    });
+    const prior = rowsOf(existing.data)[0];
+
+    // createEntity answers with the document itself (Prefer: return-representation), not a
+    // collection — so this is `.data`, not `rowsOf(.data)[0]`.
+    // ponytail: unverified (spec §16) — that B1 accepts a Sales Quotation for a lead (cLid).
+    const created = prior ? null : await b1.createEntity("Quotations", {
+      ...seed,
+      // The page's patch lands over the seed — CardCode, currency and the dates are correctable
+      // there — but QUOTE_HEADER keeps DocumentLines and the dedup key out of it, so the lines
+      // still come from the item matrix and the key is still ours.
+      ...(input.header ?? {}),
+      [DEDUP_UDF]: commandId,
+    }, { prefer: "representation" });
+    const doc = (prior ?? created?.data ?? {}) as Record<string, unknown>;
+    const docEntry = Number(doc.DocEntry);
+    if (!Number.isFinite(docEntry))
+      throw new ORPCError("BAD_GATEWAY", { message: "SAP created the quotation but returned no DocEntry" });
+    return {
+      docEntry,
+      docNum: doc.DocNum === undefined ? null : Number(doc.DocNum),
+      reused: !!prior,
+      // The representation is the same document entities.one would read back, ETag and all, so
+      // the browser seeds that query from here and opens the quotation without a second Service
+      // Layer round trip. Null on the dedup path — that read selected two fields, not a document.
+      row: created ? doc : null,
+      etag: created?.etag ?? null,
+      mode: "created" as const,
+    };
+  });
+
+  const now = new Date();
+  await db.transaction((tx) => transition(tx, {
+    tenantId, projectId: project.id, action: "quote", actor,
+    payload: (row) => ({ docEntry: posted.docEntry, docNum: posted.docNum, value: totals.value, mode: posted.mode, inputs: inputsOf(row) }),
+    set: {
+      b1DocEntry: posted.docEntry, quotedAt: now,
+      quotedValue: totals.value.toFixed(4), quotedCost: totals.cost.toFixed(4),
+    },
+  }));
+  return posted;
 }

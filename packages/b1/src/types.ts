@@ -49,7 +49,10 @@ export interface B1Transport {
   readEntitySet(entitySet: string, q?: QueryOptions): Promise<B1Response>;
   readEntity(entitySet: string, key: Key, q?: QueryOptions): Promise<B1Response>;
   createEntity(entitySet: string, data: unknown, o?: { prefer?: Prefer }): Promise<B1Response>;
-  updateEntity(entitySet: string, key: Key, data: unknown, o?: { etag?: string }): Promise<B1Response>;
+  /** `replaceCollections`: send `B1S-ReplaceCollectionsOnPatch: true`, so a collection in `data`
+   *  (DocumentLines) replaces the stored one. Without it the Service Layer merges lines by LineNum
+   *  and keeps every line it was not sent. */
+  updateEntity(entitySet: string, key: Key, data: unknown, o?: { etag?: string; replaceCollections?: boolean }): Promise<B1Response>;
   deleteEntity(entitySet: string, key: Key, o?: { etag?: string }): Promise<B1Response>;
   metadata(p?: B1MetadataParams): Promise<string>;
   /** One page per call. There is deliberately no readAll — see packages/b1/README-less note in
@@ -58,6 +61,8 @@ export interface B1Transport {
    *  drops the page back to the Service Layer's 20-row default. */
   readNext(nextLink: string, maxPageSize?: number): Promise<B1Response>;
   crossJoin(spec: CrossJoinSpec): Promise<B1Response>;
+  /** A bound document action, `POST Quotations(5)/Close`. The agent allowlists the names. */
+  action(entitySet: string, key: Key, name: string): Promise<B1Response>;
 }
 
 /** Two methods is all the ported code ever used. */

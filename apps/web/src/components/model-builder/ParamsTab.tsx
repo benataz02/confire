@@ -14,8 +14,8 @@ import { ParamDialog } from "./ParamDialog.tsx";
 import { TableDialog, newCalcTable } from "./TableDialog.tsx";
 import { TitleDialog, type TitleIcon } from "./TitleDialog.tsx";
 import type { TableCols } from "./exprHelpers.ts";
-import { ConfiguratorForm } from "../configurator/ConfiguratorForm.tsx";
-import { mergeQueryPicks, setQueryPick, type QueryPicks } from "../configurator/formHelpers.ts";
+import { ConfiguratorForm } from "@confire/ui/configurator/ConfiguratorForm.tsx";
+import { mergeQueryPicks, setQueryPick, type QueryPicks } from "@confire/ui/configurator/formHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { applyMove, canDrop, deleteNode, duplicateParam, parseRowKey, placeParam, placeTable, rowKeyOf, tableKeyAt, type Placement, type RowRef } from "./structureOps.ts";
 

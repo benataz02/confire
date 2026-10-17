@@ -9,7 +9,7 @@ import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen.ts";
 import { RouteError, RouteNotFound } from "@confire/ui/Boundaries.tsx";
 import { UiSourceProvider, type UiSource } from "@confire/ui/source.tsx";
-import { client, meQuery, orpc } from "./orpc.ts";
+import { client, meQuery, orpc, useCurrency } from "./orpc.ts";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,7 +31,7 @@ const router = createRouter({
 
 // What the List Report / Object Page / value-help shells in @confire/ui read and write: this app's
 // own router, so their query keys are the ones the rest of the app seeds and invalidates.
-const uiSource: UiSource = { client, orpc, useRole: () => useQuery(meQuery).data?.role };
+const uiSource: UiSource = { client, orpc, useRole: () => useQuery(meQuery).data?.role, useCurrency };
 
 declare module "@tanstack/react-router" {
   interface Register {

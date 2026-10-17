@@ -1,10 +1,11 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, configProject, dashboardSnapshot } from "@confire/db";
 import { userProcedure } from "../base.ts";
 import { buildOverview, type ProjectRow } from "../../dashboard.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
 import { refreshB1Snapshot } from "../../dashboard-snapshot.ts";
+import { internalVisible } from "../../project-lifecycle.ts";
 
 async function loadProjects(tenantId: string): Promise<ProjectRow[]> {
   const rows = await db
@@ -16,7 +17,8 @@ async function loadProjects(tenantId: string): Promise<ProjectRow[]> {
       quotedValue: configProject.quotedValue, quotedCost: configProject.quotedCost,
     })
     .from(configProject)
-    .where(eq(configProject.tenantId, tenantId));
+    // A client's draft is invisible to every internal read (spec §10).
+    .where(and(eq(configProject.tenantId, tenantId), internalVisible));
   return rows.map((r) => ({
     id: r.id, name: r.name, status: r.status,
     createdBy: r.createdBy, createdAt: r.createdAt,
