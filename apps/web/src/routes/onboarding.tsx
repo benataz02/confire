@@ -6,21 +6,21 @@ import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { lobbyQuery, orpc } from "../orpc.ts";
 import {
-  apexUrl, BASE_DOMAIN, hardRedirect, isApex, isReserved, SLUG_RE, toSlug, tenantUrl,
+  authUrl, BASE_DOMAIN, hardRedirect, isAuthHost, isReserved, SLUG_RE, toSlug, tenantUrl,
 } from "../lib/tenant.ts";
 import { copyInput, generateAgentSecret } from "../lib/agent-secret.ts";
 
 export const Route = createFileRoute("/onboarding")({
-  // Auth lives on the apex. A user with a company and an agent row belongs *in* the tenant;
+  // On the sign-in host. A user with a company and an agent row belongs *in* the tenant;
   // a company without sap_connection stays here on the agent step.
   beforeLoad: async ({ context }) => {
-    if (!isApex()) return hardRedirect(apexUrl("/onboarding"));
+    if (!isAuthHost()) return hardRedirect(authUrl("/onboarding"));
     const data = await context.queryClient.ensureQueryData(sessionQuery);
     if (!data?.session) throw redirect({ to: "/login" });
-    const lobby = await context.queryClient.fetchQuery(lobbyQuery);
-    if (!lobby) return { agentSetupSlug: null as string | null };
-    if (lobby.needsAgent) return { agentSetupSlug: lobby.slug };
-    return hardRedirect(tenantUrl(lobby.slug));
+    const { workspace } = await context.queryClient.fetchQuery(lobbyQuery);
+    if (!workspace) return { agentSetupSlug: null as string | null };
+    if (workspace.needsAgent) return { agentSetupSlug: workspace.slug };
+    return hardRedirect(workspace.url);
   },
   component: Onboarding,
 });
@@ -75,8 +75,8 @@ function Onboarding() {
     onSuccess: () => hardRedirect(tenantUrl(slug)),
   }));
 
-  // The only way off this page without an org: browser-back just re-runs the apex
-  // dispatcher, which sends a 0-org user straight back here.
+  // The only way off this page without an org: browser-back just re-runs the dispatcher (/login),
+  // which sends a user with no place straight back here.
   const signOut = async () => {
     await authClient.signOut();
     queryClient.clear();

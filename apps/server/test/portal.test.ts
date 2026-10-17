@@ -1,90 +1,62 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { db, portalCompany, portalCompanyDomain, portalInvitation, portalMember, portalSession, session, user } from "@confire/db";
-import { auth } from "../src/auth.ts";
+import { db, portalCompany, portalCompanyDomain, portalInvitation, portalMember, user } from "@confire/db";
+import { auth, microsoftEmailVerified } from "../src/auth.ts";
 import { devOutbox } from "../src/mail/mailer.ts";
-import { microsoftEmailVerified, portalAuth } from "../src/portal/auth.ts";
+import { router } from "../src/orpc/router.ts";
 import { portalBuyerProcedure, portalMemberProcedure, portalOwnerProcedure, portalSessionProcedure } from "../src/portal/orpc/base.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
 import { sendInvitation } from "../src/portal/members.ts";
-import { call, makePortalSeat, makePortalUser, makeTenant, makeUser, portalHeaders, portalSignIn } from "./harness.ts";
+import { call, makePortalSeat, makePortalUser, makeTenant, makeUser, portalHeaders, portalSignIn, tenantHeaders } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
-// The customer portal's own process (spec §3–§4): a second Better Auth instance over the shared
-// user table with its own session table, and builders whose boundary is host → tenant → seat.
+// The customer portal's own process (spec §3–§4): the one Better Auth instance it shares with the
+// internal app (spec 2026-10-17-single-sign-in-design.md), and builders whose boundary is
+// host → tenant → seat.
 
 const ctx = (slug: string, cookie?: string) => ({ context: { headers: portalHeaders(slug, cookie) } });
 const codeOf = (p: Promise<unknown>) => p.then(() => "OK", (e: { code?: string }) => e.code);
 
-// Spec §16 P2: a second instance with session.modelName "portalSession" over the hand-written
-// table; sign-in on one zone creates a row only in its own session table.
-describe("portal Better Auth instance", () => {
-  test("a portal sign-in writes portal_session and nothing to session", async () => {
-    const { userId, cookie } = await makePortalUser();
-    expect(cookie).toStartWith("confire-portal.session_token=");
-    expect(await db.select().from(portalSession).where(eq(portalSession.userId, userId))).toHaveLength(1);
-    expect(await db.select().from(session).where(eq(session.userId, userId))).toHaveLength(0);
+describe("one sign-in for staff and customers", () => {
+  test("one session reaches both processes; each one's membership join still decides", async () => {
+    const { tenantId, slug } = await makeTenant();
+    const customer = await makePortalUser();
+    await makePortalSeat(tenantId, customer.userId, "buyer");
+    const staff = await makeUser("member", tenantId);
+    const probe = portalMemberProcedure.handler(({ context }) => context.role);
+    expect(await call(probe, undefined, ctx(slug, customer.cookie))).toBe("buyer");
+    expect(await codeOf(call(router.me, undefined, { context: { headers: tenantHeaders(slug, customer.cookie) } }))).toBe("FORBIDDEN");
+    expect((await call(router.me, undefined, { context: { headers: tenantHeaders(slug, staff.cookie) } })).role).toBe("member");
+    expect(await codeOf(call(probe, undefined, ctx(slug, staff.cookie)))).toBe("FORBIDDEN");
   });
 
-  test("neither zone's session authenticates the other, even replayed under the other's cookie name", async () => {
-    const internal = await makeUser();
-    const portal = await makePortalUser();
-    const portalToken = portal.cookie.split("=").slice(1).join("=");
-    const internalToken = internal.cookie.split("=").slice(1).join("=");
-    expect(await auth.api.getSession({ headers: new Headers({ cookie: portal.cookie }) })).toBeNull();
-    expect(await auth.api.getSession({ headers: new Headers({ cookie: `better-auth.session_token=${portalToken}` }) })).toBeNull();
-    expect(await portalAuth.api.getSession({ headers: new Headers({ cookie: internal.cookie }) })).toBeNull();
-    expect(await portalAuth.api.getSession({ headers: new Headers({ cookie: `confire-portal.session_token=${internalToken}` }) })).toBeNull();
-    expect((await portalAuth.api.getSession({ headers: new Headers({ cookie: portal.cookie }) }))?.user.id).toBe(portal.userId);
-  });
-
-  test("the same password signs in on both zones (one identity, spec D3)", async () => {
-    const internal = await makeUser();
-    const cookie = await portalSignIn(internal.email);
-    expect((await portalAuth.api.getSession({ headers: new Headers({ cookie }) }))?.user.id).toBe(internal.userId);
-  });
-
-  test("a password reset on either zone ends the sessions of both (the password is shared)", async () => {
-    const resetToken = async (email: string) => {
-      for (let i = 0; i < 100; i++) {
-        const mail = devOutbox.findLast((m) => m.to === email && m.subject === "Reset your password");
-        const token = mail?.text.match(/\/api\/auth\/reset-password\/([^?\s]+)/)?.[1];
-        if (token) return token;
-        await Bun.sleep(20);
-      }
-      throw new Error(`no reset mail to ${email}`);
-    };
-    for (const [resetter, label] of [[portalAuth, "portal"], [auth, "internal"]] as const) {
-      const u = await makeUser();
-      const portalCookie = await portalSignIn(u.email);
-      await resetter.api.requestPasswordReset({ body: { email: u.email, redirectTo: "/reset-password" } });
-      await resetter.api.resetPassword({ body: { newPassword: `new-${label}-1234`, token: await resetToken(u.email) } });
-      expect(await auth.api.getSession({ headers: new Headers({ cookie: u.cookie }) })).toBeNull();
-      expect(await portalAuth.api.getSession({ headers: new Headers({ cookie: portalCookie }) })).toBeNull();
+  test("a password reset ends every session of that user", async () => {
+    const u = await makeUser();
+    const second = await portalSignIn(u.email);
+    await auth.api.requestPasswordReset({ body: { email: u.email, redirectTo: "/reset-password" } });
+    let token: string | undefined;
+    for (let i = 0; i < 100 && !token; i++) {
+      const mail = devOutbox.findLast((m) => m.to === u.email && m.subject === "Reset your password");
+      token = mail?.text.match(/\/api\/auth\/reset-password\/([^?\s]+)/)?.[1];
+      if (!token) await Bun.sleep(20);
     }
+    await auth.api.resetPassword({ body: { newPassword: "new-pass-1234", token: token! } });
+    expect(await auth.api.getSession({ headers: new Headers({ cookie: u.cookie }) })).toBeNull();
+    expect(await auth.api.getSession({ headers: new Headers({ cookie: second }) })).toBeNull();
   });
 
-  test("sign-up through the HTTP endpoint needs a captcha token", async () => {
-    const res = await portalAuth.handler(new Request("http://portal.lvh.me:5180/api/auth/sign-up/email", {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: "http://portal.lvh.me:5180" },
-      body: JSON.stringify({ email: "nocaptcha@test.local", password: "test1234", name: "x" }),
-    }));
-    expect(res.status).toBe(400);
-  });
-
-  test("account mail is branded with the tenant the page named in ?t=", async () => {
+  test("account mail is always Confire's, whatever the page asked to come back to", async () => {
     const { slug } = await makeTenant();
     const email = `b${crypto.randomUUID().slice(0, 8)}@test.local`;
-    await portalAuth.api.signUpEmail({
-      body: { email, password: "test1234", name: "Bea", callbackURL: `http://portal.lvh.me:5180/login?t=${slug}` },
+    await auth.api.signUpEmail({
+      body: { email, password: "test1234", name: "Bea", callbackURL: `http://lvh.me:5173/login?t=${slug}` },
     });
     let mail;
     for (let i = 0; i < 100 && !mail; i++) {
       mail = devOutbox.find((m) => m.to === email);
       if (!mail) await Bun.sleep(20);
     }
-    expect(mail?.from).toBe(`"${slug}" <notify@${process.env.MAIL_DOMAIN ?? "mail.lvh.me"}>`);
+    expect(mail?.from).toBe(`"Confire" <notify@${process.env.MAIL_DOMAIN ?? "mail.lvh.me"}>`);
     expect(mail?.html).toContain("/api/auth/verify-email?token=");
   });
 
@@ -180,7 +152,7 @@ describe("portal router", () => {
     expect(internal.internalAppUrl).toContain(`${slug}.`);
   });
 
-  test("lobby lists the user's companies across suppliers; branding is public", async () => {
+  test("lobby lists the user's companies across suppliers", async () => {
     const a = await makeTenant();
     const b = await makeTenant();
     const { userId, cookie } = await makePortalUser();
@@ -189,10 +161,6 @@ describe("portal router", () => {
     const lobby = await call(portalRouter.lobby, undefined, { context: { headers: new Headers({ cookie }) } });
     expect(lobby.map((r) => r.slug).sort()).toEqual([a.slug, b.slug].sort());
     expect(lobby.find((r) => r.slug === b.slug)).toMatchObject({ cardName: "B-Kunde", role: "viewer" });
-
-    expect(await call(portalRouter.branding, { slug: a.slug }, { context: { headers: new Headers() } }))
-      .toEqual({ name: a.slug, logo: null });
-    expect(await call(portalRouter.branding, { slug: "nosuchsupplier" }, { context: { headers: new Headers() } })).toBeNull();
   });
 });
 

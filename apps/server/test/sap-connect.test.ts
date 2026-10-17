@@ -5,7 +5,8 @@ import { auth } from "../src/auth.ts";
 import { decryptSecret } from "../src/crypto.ts";
 import { upsertSapConnection } from "../src/seed-agent.ts";
 import { router } from "../src/orpc/router.ts";
-import { call, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
+import { appTenantUrl, portalTenantUrl } from "../src/tenant.ts";
+import { call, makePortalSeat, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
 
 const code = (p: Promise<unknown>) => p.then(() => "OK", (e) => (e as { code?: string }).code ?? "ERR");
 const apex = (cookie: string) => ({ context: { headers: new Headers({ cookie }) } });
@@ -46,7 +47,9 @@ describe.skipIf(!process.env.DATABASE_URL)("sap.connect / sap.lobby", () => {
     const owner = await makeUser("owner", tenantId);
     const ctx = apex(owner.cookie);
 
-    expect(await call(router.sap.lobby, undefined, ctx)).toEqual({ slug, needsAgent: true });
+    expect(await call(router.sap.lobby, undefined, ctx)).toEqual({
+      workspace: { slug, name: slug, url: appTenantUrl(slug), needsAgent: true }, portals: [],
+    });
 
     await call(router.sap.connect, {
       agentUrl: "http://localhost:4000",
@@ -62,7 +65,7 @@ describe.skipIf(!process.env.DATABASE_URL)("sap.connect / sap.lobby", () => {
     expect(row!.accessClientId).toBe("aid");
     expect(row!.accessClientSecret).toBe("asec");
     expect(row!.beasEnabled).toBe(true);
-    expect(await call(router.sap.lobby, undefined, ctx)).toEqual({ slug, needsAgent: false });
+    expect((await call(router.sap.lobby, undefined, ctx)).workspace?.needsAgent).toBe(false);
   });
 
   test("second connect updates agentUrl", async () => {
@@ -85,9 +88,29 @@ describe.skipIf(!process.env.DATABASE_URL)("sap.connect / sap.lobby", () => {
     expect(await code(call(router.sap.connect, body, apex(client.cookie)))).toBe("FORBIDDEN");
     expect(await code(call(router.sap.connect, body, apex(stranger.cookie)))).toBe("FORBIDDEN");
     // No agent yet, but they couldn't connect one — so the tenant, not the agent form.
-    expect(await call(router.sap.lobby, undefined, apex(member.cookie))).toEqual({ slug, needsAgent: false });
-    expect(await call(router.sap.lobby, undefined, apex(client.cookie))).toEqual({ slug, needsAgent: false });
-    expect(await call(router.sap.lobby, undefined, apex(stranger.cookie))).toBeNull();
+    expect((await call(router.sap.lobby, undefined, apex(member.cookie))).workspace).toMatchObject({ slug, needsAgent: false });
+    expect((await call(router.sap.lobby, undefined, apex(client.cookie))).workspace).toMatchObject({ slug, needsAgent: false });
+    expect(await call(router.sap.lobby, undefined, apex(stranger.cookie))).toEqual({ workspace: null, portals: [] });
+  });
+
+  // The sign-in dispatcher's four shapes (spec 2026-10-17-single-sign-in-design.md §5.1).
+  test("lobby lists every portal seat, by supplier name, next to the workspace", async () => {
+    const [a, b, c] = [await makeTenant(), await makeTenant(), await makeTenant()];
+    await db.update(organization).set({ name: "Zeta" }).where(eq(organization.id, a.tenantId));
+    await db.update(organization).set({ name: "Alpha" }).where(eq(organization.id, b.tenantId));
+    const u = await makeUser("member", c.tenantId); // staff at C, customer of A and B (spec D3)
+    await makePortalSeat(a.tenantId, u.userId, "owner", "A-Kunde");
+    await makePortalSeat(b.tenantId, u.userId, "viewer", "B-Kunde");
+    const lobby = await call(router.sap.lobby, undefined, apex(u.cookie));
+    expect(lobby.workspace?.url).toBe(appTenantUrl(c.slug));
+    expect(lobby.portals).toEqual([
+      { slug: b.slug, tenantName: "Alpha", logo: null, cardName: "B-Kunde", role: "viewer", url: portalTenantUrl(b.slug) },
+      { slug: a.slug, tenantName: "Zeta", logo: null, cardName: "A-Kunde", role: "owner", url: portalTenantUrl(a.slug) },
+    ]);
+
+    const customer = await makeUser();
+    await makePortalSeat(a.tenantId, customer.userId, "buyer");
+    expect(await call(router.sap.lobby, undefined, apex(customer.cookie))).toMatchObject({ workspace: null, portals: [{ slug: a.slug }] });
   });
 
   test("a slug the host can't resolve is refused on create and rename", async () => {

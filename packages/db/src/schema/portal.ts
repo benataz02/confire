@@ -2,32 +2,9 @@ import { sql } from "drizzle-orm";
 import { boolean, index, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 
-// The customer portal (spec docs/superpowers/specs/2026-10-07-portal-redesign.md §4, §6).
-// Hand-written: the portal's Better Auth instance has no generate target. It adds one core table
-// (portalSession); user, account and verification stay owned by the generated auth.ts and are shared.
-
-/** Better Auth's `session` columns, minus `activeOrganizationId` (the portal has no organization
- *  plugin). The portal instance sets `session.modelName: "portalSession"`, and the drizzle adapter
- *  resolves schema[modelName] — so the export key, not the SQL name, is what has to match.
- *  A separate table means a portal session can never authenticate an internal request. */
-export const portalSession = pgTable(
-  "portal_session",
-  {
-    id: text("id").primaryKey(),
-    expiresAt: timestamp("expires_at").notNull(),
-    token: text("token").notNull().unique(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at")
-      .$onUpdate(() => /* @__PURE__ */ new Date())
-      .notNull(),
-    ipAddress: text("ip_address"),
-    userAgent: text("user_agent"),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-  },
-  (t) => [index("portal_session_userId_idx").on(t.userId)],
-);
+// The customer portal (spec docs/superpowers/specs/2026-10-07-portal-redesign.md §4, §6): companies,
+// seats, domains and invitations. Hand-written. Sessions are not here: one Better Auth instance and its
+// `session` table serve both processes (spec 2026-10-17-single-sign-in-design.md).
 
 export type PortalCardType = "cCustomer" | "cLid";
 export const PORTAL_ROLES = ["owner", "buyer", "viewer"] as const;

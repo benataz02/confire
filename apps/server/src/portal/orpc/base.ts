@@ -1,11 +1,10 @@
 import { os, ORPCError } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { db, organization } from "@confire/db";
-import { portalAuth } from "../auth.ts";
+import { auth } from "../../auth.ts";
 import { portalBaseDomain, tenantSlugFromHost } from "../../tenant.ts";
 import { isInternalMember, seatOf } from "../members.ts";
 
-// Shared with the internal process, which must not import this module (it builds portalAuth).
 export { isInternalMember, seatOf };
 
 // The portal's procedure builders (spec §4.3). The boundary is the internal app's, one step longer:
@@ -19,9 +18,10 @@ export interface PortalContext {
 
 export const portalBase = os.$context<PortalContext>();
 
-/** Signed in on the portal zone — a portal_session row, read live (no cookie cache). */
+/** Signed in — the one session staff and customers share, read live (no cookie cache). Signed in is
+ *  not a seat: every tenant-scoped builder below joins one. */
 export const portalAuthedProcedure = portalBase.use(async ({ context, next }) => {
-  const data = await portalAuth.api.getSession({ headers: context.headers, query: { disableCookieCache: true } });
+  const data = await auth.api.getSession({ headers: context.headers, query: { disableCookieCache: true } });
   if (!data) throw new ORPCError("UNAUTHORIZED");
   return next({ context: { user: data.user } });
 });

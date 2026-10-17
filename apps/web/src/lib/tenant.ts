@@ -1,13 +1,14 @@
-// The internal app's zone (APP base domain). The rules themselves live in @confire/ui/host.ts,
-// shared with the customer portal, which passes its own zone.
+// The internal app's zone (APP base domain) and the sign-in host it shares with the customer portal.
+// The rules themselves live in @confire/ui/host.ts.
 import { hosts } from "@confire/ui/host.ts";
 
 export { hardRedirect, isReserved } from "@confire/ui/host.ts";
 
-// Same default as the server (apps/server/src/tenant.ts): dev needs no env; a prod build passes it.
+// Same defaults as the server (apps/server/src/tenant.ts): dev needs no env; a prod build passes them.
 export const BASE_DOMAIN = (import.meta.env.VITE_APP_BASE_DOMAIN ?? "app.lvh.me").toLowerCase();
+const AUTH_URL: string = import.meta.env.VITE_AUTH_URL ?? "http://lvh.me:5173";
 
-export const { currentSlug, isApex, apexUrl, tenantUrl, safeRedirect } = hosts(BASE_DOMAIN);
+export const { currentSlug, isAuthHost, authUrl, loginUrl, tenantUrl, safeRedirect } = hosts(BASE_DOMAIN, AUTH_URL);
 
 /** Clean a company name into a subdomain candidate (no random suffix — it's the permanent URL). */
 export const toSlug = (name: string) =>

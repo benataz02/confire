@@ -12,14 +12,15 @@ test("slugOf: one label under the zone's base; apex, reserved, deeper and the si
   expect(slugOf("acme.app.lvh.me", "portal.lvh.me")).toBeNull();
 });
 
-test("safeRedirect stays inside its own zone", () => {
-  const { safeRedirect } = hosts("portal.lvh.me");
+test("safeRedirect accepts the sign-in host and both zones under it, nothing else", () => {
+  const { safeRedirect } = hosts("portal.lvh.me", "http://lvh.me:5173");
   expect(safeRedirect("http://acme.portal.lvh.me:5180/projects?x=1")).toBe("http://acme.portal.lvh.me:5180/projects?x=1");
-  expect(safeRedirect("https://portal.lvh.me/")).toBe("https://portal.lvh.me/");
-  expect(safeRedirect("http://acme.app.lvh.me:5173/")).toBeNull(); // the internal zone is another app
-  expect(safeRedirect("https://evil.com/?portal.lvh.me")).toBeNull();
-  expect(safeRedirect("https://portal.lvh.me.evil.com/")).toBeNull();
-  expect(safeRedirect("javascript:alert(1)//portal.lvh.me")).toBeNull();
+  expect(safeRedirect("http://acme.app.lvh.me:5173/")).toBe("http://acme.app.lvh.me:5173/"); // the sign-in host sends to both
+  expect(safeRedirect("http://lvh.me:5173/login")).toBe("http://lvh.me:5173/login");
+  expect(safeRedirect("https://evil.com/?lvh.me")).toBeNull();
+  expect(safeRedirect("https://lvh.me.evil.com/")).toBeNull();
+  expect(safeRedirect("https://evillvh.me/")).toBeNull();
+  expect(safeRedirect("javascript:alert(1)//lvh.me")).toBeNull();
   expect(safeRedirect("/relative")).toBeNull();
   expect(safeRedirect(undefined)).toBeNull();
 });

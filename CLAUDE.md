@@ -12,8 +12,9 @@ Everything runs on **Bun** (no npm — see `package.json` workspaces).
 ```bash
 docker compose up -d db                 # Postgres 17 on :5432 (dev runs server/web with bun)
 bun install
-bun run dev                             # internal app http://app.lvh.me:5173 (server :3000), customer
-                                        # portal http://portal.lvh.me:5180 (server :3001), agent :4000
+bun run dev                             # sign in at http://lvh.me:5173; staff app <slug>.app.lvh.me:5173
+                                        # (server :3000), portal <slug>.portal.lvh.me:5180 (server :3001),
+                                        # agent :4000
 bun run db:push                         # drizzle-kit push — the ONLY schema migration 
 bun run auth:generate                   # regenerate schema/auth.ts after a Better Auth config change
 ```
@@ -70,18 +71,25 @@ compose that check:
 | `userProcedure` | member of this workspace; a leftover `client` role stays forbidden |
 | `adminProcedure` | admin/owner — model builder, settings |
 
-**The portal** is the same pattern on its own zone: `<slug>.<PORTAL_BASE_DOMAIN>`, parsed by the same
-`tenantSlugFromHost`, with its own Better Auth instance (`portal/auth.ts`) over the **shared** `user`,
-`account` and `verification` tables but its **own** session table (`portal_session`, export key
-`portalSession` = `session.modelName`) and cookie (`confire-portal.*` on `.portal.<domain>`), so a
-portal session can never authenticate an internal request. No organization plugin: a customer
-company is `portal_company` (one per tenant × CardCode) and a seat is `portal_member`, whose unique
-`(tenantId, userId)` index is "one company per user per tenant". Builders (`portal/orpc/base.ts`);
+**One sign-in for both** (`docs/superpowers/specs/2026-10-17-single-sign-in-design.md`): one Better Auth
+instance (`auth.ts`), one `session` table, one cookie on the sign-in host's domain (`BETTER_AUTH_URL`,
+`confire.ai`; dev `http://lvh.me:5173`), which covers both zones. Both processes mount it on `/api/auth`.
+A session says who you are, never where you may go: that is the membership join here and the seat join
+on the portal. `/login` on the sign-in host is also the **dispatcher** (`sap.lobby` lists the workspace
+and every portal seat, with server-built URLs): signed in, it follows a safe `redirect`, else sends the
+user to their one place, else renders "Where to?"; no place at all is workspace setup. A portal stays
+invite-only because a portal-originated sign-in carries `redirect` back to the portal, whose own guard
+shows the invite-only page — sign-in itself cannot know who is "a customer".
+
+**The portal** is the same tenancy pattern on its own zone: `<slug>.<PORTAL_BASE_DOMAIN>`, parsed by the
+same `tenantSlugFromHost`. No organization plugin: a customer company is `portal_company` (one per
+tenant × CardCode) and a seat is `portal_member`, whose unique `(tenantId, userId)` index is "one
+company per user per tenant". Builders (`portal/orpc/base.ts`);
 every tenant-scoped one refuses the supplier's own staff (any internal `member` of the host tenant):
 
 | Builder | Who |
 |---|---|
-| `portalAuthedProcedure` | signed in on the portal; no tenant (the apex lobby); `me` resolves the rest itself |
+| `portalAuthedProcedure` | signed in; no tenant (`lobby`); `me` resolves the rest itself |
 | `portalSessionProcedure` | + the host's tenant, maybe no seat yet |
 | `portalMemberProcedure` | + a seat: `portal_member ⋈ portal_company` on that tenant |
 | `portalBuyerProcedure` / `portalOwnerProcedure` | seat role `buyer`/`owner` / `owner` |
@@ -113,22 +121,23 @@ internal read never sees a client's draft (`internalVisible`). Staff work reques
 Requests (`orpc/routers/requests.ts`) and on the existing process page. The timeline is
 `project-timeline.ts`: events from Postgres, SAP document chains as a separate live read.
 
-The portal's sign-up, sign-in and reset request need a Cloudflare Turnstile token
-(`x-captcha-response`); dev uses Cloudflare's always-pass test keys. Its account mail wears the
-supplier named by the page's `?t=<slug>` — display only, nothing trusts it. Host rules for both
-SPAs (slug, apex URLs, `safeRedirect`, scoped to one zone) are `@confire/ui/host.ts`.
+There is no bot check and no supplier branding on sign-in: account mail is always Confire's. Host
+rules for both SPAs (slug, the sign-in host's URLs, `safeRedirect` — anything under the sign-in host's
+domain) are `@confire/ui/host.ts`; `VITE_AUTH_URL` is baked into both builds.
 
-Dev uses `app.lvh.me` (public DNS: lvh.me at any depth → 127.0.0.1; open `http://app.lvh.me:5173`).
-Not `localhost`: the browser treats it as a TLD, so a `.localhost` cookie never reaches
-`acme.localhost`. Not `confire.localhost` either — the cookie works, but Google rejects
+Dev signs in at `http://lvh.me:5173` (public DNS: lvh.me at any depth → 127.0.0.1); the staff app is
+`<slug>.app.lvh.me:5173`, the portal `<slug>.portal.lvh.me:5180`, and the `.lvh.me` cookie reaches both
+(cookies ignore ports). Not `localhost`: the browser treats it as a TLD, so a `.localhost` cookie never
+reaches `acme.localhost`. Not `confire.localhost` either — the cookie works, but Google rejects
 `http://*.localhost` OAuth redirect URIs. Not `.local`: that is mDNS, and nss-mdns answers it before
-`/etc/hosts` is read. Not bare `lvh.me`: its cookie would reach the customer portal's sibling zone
-(`portal.lvh.me`, spec `docs/superpowers/specs/2026-10-07-portal-redesign.md` §3).
+`/etc/hosts` is read.
 
-Prod is one `DOMAIN=confire.ai` in compose, split into sibling zones: `APP_BASE_DOMAIN=app.confire.ai`
-for this app and `PORTAL_BASE_DOMAIN=portal.confire.ai` for the portal (the marketing apex stays
-outside both cookie zones). Caddy: one wildcard site per zone, each with one wildcard cert via the
-Cloudflare DNS challenge (`CADDY_TLS=cloudflare`; see `docker-compose.yml`).
+Prod is one `DOMAIN=confire.ai` in compose: sign-in (and later marketing) on `confire.ai`,
+`APP_BASE_DOMAIN=app.confire.ai`, `PORTAL_BASE_DOMAIN=portal.confire.ai`; bare `app.`/`portal.`
+redirect to `confire.ai/login`. **Every `*.confire.ai` host receives the session cookie: never point a
+name under it at a service this stack does not control** (a subdomain takeover would collect sessions).
+Caddy: the apex plus one wildcard site per zone, certs via the Cloudflare DNS challenge
+(`CADDY_TLS=cloudflare`; see `docker-compose.yml`).
 
 ## Mail
 

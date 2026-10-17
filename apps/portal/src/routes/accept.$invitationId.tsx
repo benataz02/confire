@@ -1,29 +1,28 @@
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, MessageStrip } from "@ui5/webcomponents-react";
 import { ROLE_HELP, ROLE_LABEL } from "@confire/ui/portal/CompanyPeople.tsx";
 import { authClient } from "../auth-client.ts";
 import { meQuery, orpc } from "../orpc.ts";
 import { PortalAuthLayout } from "../components/AuthChrome.tsx";
-import { apexUrl, authSearch, hardRedirect, isApex, loginUrl } from "../lib/host.ts";
+import { authUrl, hardRedirect, isApex, loginUrl } from "../lib/host.ts";
 
 // The invitation link (spec §5.2): `<slug>.portal.<domain>/accept/<id>`. Not under `_authed` — the
-// invitee has no seat yet. Signed out, it goes to the apex login (or sign-up), which comes back
-// here. The server checks everything again on accept; this page only says what joining means, or
+// invitee has no seat yet. Signed out, it goes to the sign-in host (login or sign-up), which comes
+// back here. The server checks everything again on accept; this page only says what joining means, or
 // why it can't.
 export const Route = createFileRoute("/accept/$invitationId")({
   beforeLoad: async ({ context }) => {
-    if (isApex()) throw redirect({ to: "/" });
+    if (isApex()) return hardRedirect(authUrl("/login"));
     const me = await context.queryClient.ensureQueryData(meQuery).catch((e: unknown) => {
       const code = (e as { code?: string }).code;
-      if (code === "UNAUTHORIZED") return "login" as const;
-      if (code === "NOT_FOUND") return "lobby" as const;
+      if (code === "UNAUTHORIZED") return loginUrl();
+      if (code === "NOT_FOUND") return authUrl("/login");
       throw e;
     });
-    if (me === "login") return hardRedirect(loginUrl());
-    if (me === "lobby") return hardRedirect(apexUrl("/"));
-    // The supplier's own staff: the page that sends them to the internal app.
-    if (me.internal) throw redirect({ to: "/onboarding" });
+    if (typeof me === "string") return hardRedirect(me);
+    // The supplier's own staff belong in its workspace.
+    if (me.internal) return hardRedirect(me.internalAppUrl!);
     return { me };
   },
   component: Accept,
@@ -47,7 +46,7 @@ function Accept() {
   const switchAccount = async () => {
     await authClient.signOut();
     qc.clear();
-    void hardRedirect(apexUrl(`/login${authSearch(window.location.href, me.tenant.slug)}`));
+    void hardRedirect(loginUrl());
   };
   const signedInAs = (
     <p className="auth-alt">
@@ -56,12 +55,12 @@ function Accept() {
   );
 
   if (inv.isPending) {
-    return <PortalAuthLayout slug={me.tenant.slug}><p className="auth-sub">Opening your invitation…</p></PortalAuthLayout>;
+    return <PortalAuthLayout tenant={me.tenant}><p className="auth-sub">Opening your invitation…</p></PortalAuthLayout>;
   }
 
   if (inv.error) {
     return (
-      <PortalAuthLayout slug={me.tenant.slug}>
+      <PortalAuthLayout tenant={me.tenant}>
         <h2 className="auth-h1">This invitation can't be used</h2>
         <MessageStrip design="Negative" hideCloseButton>{inv.error.message}</MessageStrip>
         {me.company ? (
@@ -78,7 +77,7 @@ function Accept() {
   if (d.type === "new") {
     // ponytail: the new-client onboarding form lands with P6; until then nothing sends this type.
     return (
-      <PortalAuthLayout slug={me.tenant.slug}>
+      <PortalAuthLayout tenant={me.tenant}>
         <h2 className="auth-h1">Not available yet</h2>
         <p className="auth-sub">This invitation opens a form that {tenant}'s portal doesn't offer yet.</p>
         {signedInAs}
@@ -87,7 +86,7 @@ function Accept() {
   }
 
   return (
-    <PortalAuthLayout slug={me.tenant.slug}>
+    <PortalAuthLayout tenant={me.tenant}>
       <h2 className="auth-h1">Join {d.companyName}</h2>
       <p className="auth-sub">
         {d.inviterName ? `${d.inviterName} invited you` : "You're invited"} to {tenant}'s customer portal as

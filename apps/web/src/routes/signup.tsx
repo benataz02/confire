@@ -5,20 +5,17 @@ import { Input, Button, MessageStrip } from "@ui5/webcomponents-react";
 import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { SocialButtons } from "../components/SocialButtons.tsx";
-import { apexUrl, hardRedirect, isApex, safeRedirect } from "../lib/tenant.ts";
+import { authUrl, hardRedirect, isAuthHost } from "../lib/tenant.ts";
 
 export const Route = createFileRoute("/signup")({
   validateSearch: (s: Record<string, unknown>): { redirect?: string } => ({
     redirect: typeof s.redirect === "string" ? s.redirect : undefined,
   }),
+  // Already signed in: the dispatcher (/login) takes it from here.
   beforeLoad: async ({ context, search, location }) => {
-    if (!isApex()) return hardRedirect(apexUrl(`/signup${location.searchStr}`));
+    if (!isAuthHost()) return hardRedirect(authUrl(`/signup${location.searchStr}`));
     const data = await context.queryClient.ensureQueryData(sessionQuery);
-    if (data?.session) {
-      const to = safeRedirect(search.redirect);
-      if (to) return hardRedirect(to);
-      throw redirect({ to: "/" });
-    }
+    if (data?.session) throw redirect({ to: "/login", search });
   },
   component: Signup,
 });
@@ -35,8 +32,8 @@ function Signup() {
     mutationFn: async (vars: { name: string; email: string; password: string }) => {
       // No session comes back: the address has to be confirmed first (auth.ts). The link's
       // callbackURL is login, carrying `redirect` on: confirming signs the user in, and login then
-      // hands off to `redirect` or the apex dispatcher; a dead link lands there as ?error=<code>.
-      const callbackURL = apexUrl(`/login${redirectTo ? `?${new URLSearchParams({ redirect: redirectTo })}` : ""}`);
+      // dispatches (to `redirect`, or the user's place); a dead link lands there as ?error=<code>.
+      const callbackURL = authUrl(`/login${redirectTo ? `?${new URLSearchParams({ redirect: redirectTo })}` : ""}`);
       const res = await authClient.signUp.email({ ...vars, callbackURL });
       if (res.error) throw new Error(res.error.message ?? "Sign up failed");
       return res.data;
@@ -63,7 +60,7 @@ function Signup() {
   return (
     <AuthLayout>
       <h2 className="auth-h1">Create your account</h2>
-      <p className="auth-sub">Start syncing quotes to SAP B1.</p>
+      <p className="auth-sub">Use your work email address.</p>
       {signUp.error ? <MessageStrip design="Negative" hideCloseButton>{signUp.error.message}</MessageStrip> : null}
       <label className="auth-field">
         <span>Name</span>
@@ -86,7 +83,7 @@ function Signup() {
         {signUp.isPending ? "Creating…" : "Create account"}
       </Button>
       <div className="auth-or">or</div>
-      <SocialButtons />
+      <SocialButtons redirect={redirectTo} />
       <p className="auth-alt">
         Already have an account? <Link to="/login" search={{ redirect: redirectTo }}>Sign in</Link>
       </p>

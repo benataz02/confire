@@ -1,9 +1,16 @@
-# Two sibling zones (spec §3), one process each. The subdomain IS the tenant: each server resolves
-# it from the (preserved) Host header against its own base domain (tenant.ts) and validates it
-# against membership — orpc/base.ts internally, portal/orpc/base.ts on the portal.
-#   app.{$DOMAIN}, *.app.{$DOMAIN}         internal app   -> server:3000
-#   portal.{$DOMAIN}, *.portal.{$DOMAIN}   customer portal -> portal:3001
-# {$DOMAIN} itself (the marketing site) is not served here, and stays outside both cookie zones.
+# One sign-in host and two sibling zones, one process each (spec 2026-10-17-single-sign-in-design.md).
+# The subdomain IS the tenant: each server resolves it from the (preserved) Host header against its
+# own base domain (tenant.ts) and validates it against membership — orpc/base.ts internally,
+# portal/orpc/base.ts on the portal.
+#   {$DOMAIN}                              sign-in (and the dispatcher at /login) -> server:3000
+#   *.app.{$DOMAIN}                        staff app       -> server:3000
+#   *.portal.{$DOMAIN}                     customer portal -> portal:3001
+#   app.{$DOMAIN}, portal.{$DOMAIN}        nothing of their own -> the dispatcher
+# The session cookie is on .{$DOMAIN}, so every host under it receives it: never point a name under
+# {$DOMAIN} at a service this stack does not control.
+# ponytail: the whole apex goes to the server until a marketing site exists; then split it by path
+# (/login /signup /forgot-password /reset-password /onboarding /api/auth /rpc /assets and the mail
+# logo to the server, the rest to marketing).
 #
 # CADDY_TLS picks where certificates come from (compose defaults it to `internal`):
 #   internal    Caddy's local CA, for running the full stack on lvh.me.
@@ -21,12 +28,17 @@
 	}
 }
 
-app.{$DOMAIN}, *.app.{$DOMAIN} {
+{$DOMAIN}, *.app.{$DOMAIN} {
 	import tls-{$CADDY_TLS}
 	reverse_proxy server:3000
 }
 
-portal.{$DOMAIN}, *.portal.{$DOMAIN} {
+*.portal.{$DOMAIN} {
 	import tls-{$CADDY_TLS}
 	reverse_proxy portal:3001
+}
+
+app.{$DOMAIN}, portal.{$DOMAIN} {
+	import tls-{$CADDY_TLS}
+	redir https://{$DOMAIN}/login
 }

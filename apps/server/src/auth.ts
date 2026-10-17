@@ -5,9 +5,8 @@ import { organization } from "better-auth/plugins";
 import { and, eq } from "drizzle-orm";
 import { db } from "@confire/db/client";
 import * as schema from "@confire/db/schema";
-import { baseDomain, tenantSlugFromHost } from "./tenant.ts";
+import { baseDomain, portalBaseDomain, tenantSlugFromHost } from "./tenant.ts";
 import { authMail } from "./mail/auth-mail.tsx";
-import { CONFIRE } from "./mail/layout.tsx";
 
 /** The web's SLUG_RE is UX; this is the gate. Better Auth takes any non-empty slug, and one the host
  *  parser cannot hand back is a workspace no request can ever reach — with organizationLimit: 1 and
@@ -18,9 +17,17 @@ const assertSlug = (slug: string | undefined) => {
   }
 };
 
-// Internal mail is always Confire's: the apex has no tenant to brand it with.
-const mail = authMail(async () => CONFIRE);
+/** Spec D5/§4.4: in multi-tenant Entra apps the `email` claim is not verified, so a Microsoft email
+ *  counts as verified only on the optional `xms_edov` claim (the app registration has to emit it).
+ *  Spread after Better Auth's own value, so it can change emailVerified — never the `oid` identity. */
+export const microsoftEmailVerified = (profile: Record<string, unknown>): boolean =>
+  profile.xms_edov === true || profile.xms_edov === "1" || profile.xms_edov === 1 || profile.xms_edov === "true";
 
+const mail = authMail();
+
+// The one Better Auth instance, for staff and customers alike (spec 2026-10-17-single-sign-in-design.md).
+// Both processes mount it on /api/auth; the tenant boundary is not the session but the membership
+// join (orpc/base.ts) or the portal seat join (portal/orpc/base.ts) behind it.
 // secret and baseURL come from BETTER_AUTH_SECRET / BETTER_AUTH_URL, which Better Auth reads itself.
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "pg", schema }),
@@ -33,13 +40,8 @@ export const auth = betterAuth({
     // Existing unverified accounts are not grandfathered: sendOnSignIn mails them a fresh link.
     requireEmailVerification: true,
     sendResetPassword: mail.sendResetPassword,
-    // A reset is what someone does when a session may be in the wrong hands. This revokes this
-    // instance's sessions; the password is shared with the portal (spec §4.1), so its sessions —
-    // in their own table — go too.
+    // A reset is what someone does when a session may be in the wrong hands.
     revokeSessionsOnPasswordReset: true,
-    onPasswordReset: async ({ user }) => {
-      await db.delete(schema.portalSession).where(eq(schema.portalSession.userId, user.id));
-    },
   },
   emailVerification: {
     sendVerificationEmail: mail.sendVerificationEmail,
@@ -54,7 +56,8 @@ export const auth = betterAuth({
     microsoft: {
       clientId: process.env.MICROSOFT_CLIENT_ID ?? "",
       clientSecret: process.env.MICROSOFT_CLIENT_SECRET ?? "",
-    }
+      mapProfileToUser: (profile) => ({ emailVerified: microsoftEmailVerified(profile as unknown as Record<string, unknown>) }),
+    },
   },
   plugins: [
     organization({
@@ -90,18 +93,23 @@ export const auth = betterAuth({
   // and login's getSession would bounce the 401 interceptor back to the tenant. oRPC also
   // passes disableCookieCache so a future re-enable cannot paper over the tenant boundary.
   session: { cookieCache: { enabled: false } },
-  // Auth lives on the apex, but the app POSTs (sign-out) from every tenant subdomain, so those
-  // origins need trusting; baseURL's own origin is trusted automatically. A pattern without
-  // `://` is matched against URL.host — which includes the port — hence both forms: prod
-  // (`acme.app.confire.ai`) and dev (`acme.app.lvh.me:5173`). Anything outside the base domain — a LAN
-  // IP to open the app from a phone — is a per-machine fact, so it comes from
-  // APP_TRUSTED_ORIGINS (comma-separated) and never from a literal in here.
+  // Sign-in lives on the sign-in host (baseURL, trusted automatically), but both apps POST (sign-out)
+  // from every tenant subdomain, and a sign-in's callbackURL may be a tenant page in either zone. A
+  // pattern without `://` is matched against URL.host — which includes the port — hence both forms:
+  // prod (`acme.portal.confire.ai`) and dev (`acme.portal.lvh.me:5180`). Anything else — a LAN IP to
+  // open the app from a phone — is a per-machine fact, so it comes from APP_TRUSTED_ORIGINS
+  // (comma-separated) and never from a literal in here.
   trustedOrigins: [
     `*.${baseDomain}`,
     `*.${baseDomain}:*`,
+    `*.${portalBaseDomain}`,
+    `*.${portalBaseDomain}:*`,
     ...(process.env.APP_TRUSTED_ORIGINS ?? "").split(",").map((o) => o.trim()).filter(Boolean),
   ],
   advanced: {
-    crossSubDomainCookies: { enabled: true, domain: `.${baseDomain}` },
+    // No `domain`: Better Auth then uses baseURL's hostname — `confire.ai` (dev `lvh.me`), the parent
+    // of both zones, so one session reaches the staff app and the portal. Every `*.confire.ai` host
+    // receives this cookie: never point a confire.ai name at a service this stack does not control.
+    crossSubDomainCookies: { enabled: true },
   },
 });

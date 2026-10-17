@@ -10,9 +10,23 @@ import { portalTenantUrl } from "../tenant.ts";
 // The customer portal's write rules (spec §4.2, §5.1): seats, registered domains and invitations.
 // Both processes import this module — the internal app (an admin inviting from a BP, editing a
 // company) and the portal (accept, auto-join, an owner inviting colleagues) — so the two sides
-// cannot enforce different rules. It never touches the portal's Better Auth instance.
+// cannot enforce different rules. It never touches Better Auth.
 
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Every supplier this user has a seat at, by supplier name: the sign-in dispatcher's portal rows
+ *  (internal `sap.lobby`) and the portal shell's "Switch supplier" (portal `lobby`). */
+export const portalSeats = (userId: string) =>
+  db
+    .select({
+      slug: organization.slug, tenantName: organization.name, logo: organization.logo,
+      cardName: portalCompany.cardName, role: portalMember.role,
+    })
+    .from(portalMember)
+    .innerJoin(portalCompany, eq(portalCompany.id, portalMember.companyId))
+    .innerJoin(organization, eq(organization.id, portalCompany.tenantId))
+    .where(eq(portalMember.userId, userId))
+    .orderBy(asc(organization.name));
 
 const INVITATION_DAYS = 14;
 

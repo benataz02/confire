@@ -4,7 +4,7 @@ import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import type { AppRouter } from "@confire/server/router";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
-import { apexUrl, hardRedirect } from "./lib/tenant.ts";
+import { hardRedirect, loginUrl } from "./lib/tenant.ts";
 
 // Same-origin (dev proxy / prod static) → cookies ride along automatically. A function, so the
 // module never touches `window` at import time: the pure helpers that sit next to a hook (views.ts,
@@ -13,9 +13,7 @@ const link = new RPCLink({
   url: () => `${window.location.origin}/rpc`,
   interceptors: [
     onError((error) => {
-      if ((error as { code?: string }).code !== "UNAUTHORIZED") return;
-      const q = new URLSearchParams({ redirect: window.location.href });
-      void hardRedirect(apexUrl(`/login?${q}`));
+      if ((error as { code?: string }).code === "UNAUTHORIZED") void hardRedirect(loginUrl());
     }),
   ],
 });
@@ -30,9 +28,10 @@ export const orpc = createTanstackQueryUtils(client);
 export const meQuery = orpc.me.queryOptions({ staleTime: Infinity });
 
 /**
- * The apex dispatcher's answer: the user's workspace and whether it still needs an agent (null =
- * no company yet). Uncached on purpose — a company or an agent row can appear between visits to
- * the apex, and a cached answer would send the user back to a step they already finished.
+ * The sign-in dispatcher's answer: the user's workspace (null = no company yet; does it still need an
+ * agent?) and every supplier portal they have a seat at, each with its URL. Uncached on purpose — a
+ * company, an agent row or a seat can appear between visits, and a cached answer would send the user
+ * back to a step they already finished.
  */
 export const lobbyQuery = orpc.sap.lobby.queryOptions({ staleTime: 0, retry: false });
 

@@ -14,7 +14,7 @@ export type Brand = {
   accent?: string;
 };
 
-// The internal apex serves apps/web/public, so the logo URL is its own (BETTER_AUTH_URL).
+// The sign-in host serves apps/web/public, so the logo URL is its own (BETTER_AUTH_URL).
 const appUrl = process.env.BETTER_AUTH_URL?.replace(/\/+$/, "");
 export const CONFIRE: Brand = { name: "Confire", logoUrl: appUrl ? `${appUrl}/confire-logo.png` : null };
 

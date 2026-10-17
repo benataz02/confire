@@ -11,7 +11,7 @@ import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 import { ROLE_LABEL } from "@confire/ui/portal/CompanyPeople.tsx";
 import { authClient } from "../auth-client.ts";
 import { lobbyQuery, meQuery, type Me } from "../orpc.ts";
-import { apexUrl, authSearch, hardRedirect } from "../lib/host.ts";
+import { authUrl, hardRedirect } from "../lib/host.ts";
 
 // The supplier's portal chrome (spec §9): the same NavigationLayout + ShellBar + SideNavigation
 // pattern as the internal AppShell, wearing the supplier's name and logo (D20). Fiori: no shell-bar
@@ -50,7 +50,7 @@ export function PortalShell() {
   const signOut = async () => {
     await authClient.signOut();
     queryClient.clear();
-    void hardRedirect(apexUrl(`/login${authSearch(undefined, me.tenant.slug)}`));
+    void hardRedirect(authUrl("/login"));
   };
 
   return (
@@ -99,7 +99,7 @@ export function PortalShell() {
               <UserMenuItem text="Cozy" icon={density === "cozy" ? "sys-enter" : ""} onClick={() => setDensity("cozy")} />
             </UserMenuItem>
             {(lobby.data?.length ?? 0) > 1 ? (
-              <UserMenuItem text="Switch supplier" icon="switch-views" onClick={() => void hardRedirect(apexUrl("/"))} />
+              <UserMenuItem text="Switch supplier" icon="switch-views" onClick={() => void hardRedirect(authUrl("/login"))} />
             ) : null}
           </UserMenu>
         </>

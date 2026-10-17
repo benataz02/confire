@@ -3,8 +3,8 @@ import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 
 // The customer portal's SPA (spec §3, §9). Same shape as apps/web's config, on its own zone and port:
-// open http://portal.lvh.me:5180. The proxy keeps it same-origin with the portal process (:3001),
-// so its Better Auth cookie just works and there's no CORS to configure.
+// http://<slug>.portal.lvh.me:5180. The proxy keeps it same-origin with the portal process (:3001), so
+// the `.lvh.me` session cookie set by the sign-in host just works and there's no CORS to configure.
 export default defineConfig({
   plugins: [tanstackRouter({ target: "react", autoCodeSplitting: true }), react()],
   resolve: {

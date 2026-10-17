@@ -2,7 +2,6 @@ import { eq } from "drizzle-orm";
 import { db, member, organization, portalCompany, portalMember, user, type PortalRole } from "@confire/db";
 import type { ModelDef } from "@confire/config-engine";
 import { auth } from "../src/auth.ts";
-import { portalAuth } from "../src/portal/auth.ts";
 import { baseDomain, portalBaseDomain } from "../src/tenant.ts";
 
 export { call } from "@orpc/server";
@@ -48,15 +47,15 @@ export const tenantHeaders = (slug: string, cookie?: string): Headers =>
 
 // --- customer portal (apps/server/src/portal) ---------------------------------------------------
 
-/** Signs `email` in on the portal instance — the same user row, a portal_session row and cookie. */
+/** Another session for `email`. There is one Better Auth instance, so it works on both processes. */
 export async function portalSignIn(email: string): Promise<string> {
-  const res = await portalAuth.api.signInEmail({ body: { email, password: "test1234" }, returnHeaders: true });
+  const res = await auth.api.signInEmail({ body: { email, password: "test1234" }, returnHeaders: true });
   return res.headers.getSetCookie().map((c) => c.split(";")[0]!).join("; ");
 }
 
-/** A verified user who signed up on the portal (no internal membership anywhere). */
+/** A verified user with no internal membership anywhere: a would-be customer. */
 export async function makePortalUser(email = `p${uid()}@test.local`): Promise<{ userId: string; email: string; cookie: string }> {
-  const { user: u } = await portalAuth.api.signUpEmail({ body: { email, password: "test1234", name: email } });
+  const { user: u } = await auth.api.signUpEmail({ body: { email, password: "test1234", name: email } });
   await db.update(user).set({ emailVerified: true }).where(eq(user.id, u.id));
   return { userId: u.id, email, cookie: await portalSignIn(email) };
 }

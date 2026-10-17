@@ -12,7 +12,7 @@
  */
 import { and, eq } from "drizzle-orm";
 import { db, organization, pool, portalCompany, user as userTable } from "@confire/db";
-import { portalAuth } from "../apps/server/src/portal/auth.ts";
+import { auth } from "../apps/server/src/auth.ts";
 import { addPortalMember, claimDomain, emailDomain } from "../apps/server/src/portal/members.ts";
 import { portalTenantUrl } from "../apps/server/src/tenant.ts";
 
@@ -36,8 +36,7 @@ async function main(): Promise<void> {
 
   const [existing] = await db.select({ id: userTable.id }).from(userTable).where(eq(userTable.email, email)).limit(1);
   // A seeded login is verified at birth, as in seed-dev: whoever runs the seed owns the address.
-  // The server API skips the captcha, which only guards the HTTP endpoints.
-  const userId = existing?.id ?? (await portalAuth.api.signUpEmail({ body: { email, password, name: "Dev Kunde" } })).user.id;
+  const userId = existing?.id ?? (await auth.api.signUpEmail({ body: { email, password, name: "Dev Kunde" } })).user.id;
   await db.update(userTable).set({ emailVerified: true }).where(eq(userTable.id, userId));
   console.log(`user    ${email} / ${existing ? "(existing password)" : password}`);
 
@@ -47,7 +46,7 @@ async function main(): Promise<void> {
   });
   console.log(`domain  ${emailDomain(email)}: ${typeof domain === "object" ? `registered to ${domain.takenBy}` : domain}`);
 
-  console.log(`\nsign in: ${portalTenantUrl(slug)}`);
+  console.log(`\nopen: ${portalTenantUrl(slug)} (sign-in sends you back there)`);
 }
 
 await main();

@@ -4,12 +4,12 @@ import { useMutation } from "@tanstack/react-query";
 import { Input, Button, MessageStrip } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
-import { apexUrl, hardRedirect, isApex } from "../lib/tenant.ts";
+import { authUrl, hardRedirect, isAuthHost } from "../lib/tenant.ts";
 
 export const Route = createFileRoute("/forgot-password")({
-  // Auth lives on the apex, and the reset link comes back to it (redirectTo below).
+  // Auth lives on the sign-in host, and the reset link comes back to it (redirectTo below).
   beforeLoad: ({ location }) => {
-    if (!isApex()) return hardRedirect(apexUrl(`/forgot-password${location.searchStr}`));
+    if (!isAuthHost()) return hardRedirect(authUrl(`/forgot-password${location.searchStr}`));
   },
   component: ForgotPassword,
 });
@@ -19,7 +19,7 @@ function ForgotPassword() {
   const request = useMutation({
     mutationFn: async (address: string) => {
       // Better Auth answers the same for an unknown address, so the page can only ever say "if".
-      const res = await authClient.requestPasswordReset({ email: address, redirectTo: apexUrl("/reset-password") });
+      const res = await authClient.requestPasswordReset({ email: address, redirectTo: authUrl("/reset-password") });
       if (res.error) throw new Error(res.error.message ?? "Could not send the link");
     },
   });

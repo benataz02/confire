@@ -5,11 +5,13 @@ import { db, member, organization, sapConnection } from "@confire/db";
 import { adminProcedure, sessionProcedure } from "../base.ts";
 import { sapConnectionExists, upsertSapConnection } from "../../seed-agent.ts";
 import { encryptSecret } from "../../crypto.ts";
+import { portalSeats } from "../../portal/members.ts";
+import { appTenantUrl, portalTenantUrl } from "../../tenant.ts";
 
 /** Apex onboarding has no tenant Host — the user's one org is the tenant. */
 async function oneMembership(userId: string) {
   const [row] = await db
-    .select({ tenantId: organization.id, slug: organization.slug, role: member.role })
+    .select({ tenantId: organization.id, slug: organization.slug, name: organization.name, role: member.role })
     .from(member)
     .innerJoin(organization, eq(organization.id, member.organizationId))
     .where(eq(member.userId, userId))
@@ -26,13 +28,22 @@ async function ownedTenant(userId: string): Promise<string> {
 }
 
 export const sapRouter = {
-  // The apex dispatcher's one call: which workspace, and does it still need an agent? null = no
-  // company yet. Only an owner/admin can connect one, so a member — or a leftover client, whom the
-  // tenant shell turns away — goes straight to the tenant whether or not the row exists.
+  // The sign-in dispatcher's one call (/login, signed in): every place this user can go — their
+  // workspace (null = no company yet; does it still need an agent?) and every supplier portal they
+  // have a seat at. Only an owner/admin can connect an agent, so a member — or a leftover client, whom
+  // the tenant shell turns away with its own page — goes straight to the tenant whether or not the row
+  // exists. The URLs are built here so the browser never guesses a zone's port.
   lobby: sessionProcedure.handler(async ({ context }) => {
-    const row = await oneMembership(context.user.id);
-    if (!row) return null;
-    return { slug: row.slug, needsAgent: isAdmin(row.role) && !(await sapConnectionExists(row.tenantId)) };
+    const [row, seats] = await Promise.all([oneMembership(context.user.id), portalSeats(context.user.id)]);
+    return {
+      workspace: row
+        ? {
+          slug: row.slug, name: row.name, url: appTenantUrl(row.slug),
+          needsAgent: isAdmin(row.role) && !(await sapConnectionExists(row.tenantId)),
+        }
+        : null,
+      portals: seats.map((s) => ({ ...s, url: portalTenantUrl(s.slug) })),
+    };
   }),
   connect: sessionProcedure
     .input(z.object({

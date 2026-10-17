@@ -16,8 +16,9 @@ export default defineConfig({
     // Bind IPv4 (0.0.0.0) — lvh.me resolves to 127.0.0.1; Vite's default `localhost` bind is
     // IPv6-only (::1) on Windows, which lvh.me can't reach (connection refused).
     host: true,
-    // Tenant subdomains: acme.app.lvh.me:5173 (lvh.me resolves to 127.0.0.1 at any depth, and unlike
-    // localhost a `.app.lvh.me` cookie is shared across subdomains). Vite blocks unknown hosts.
+    // The sign-in host lvh.me:5173 and tenant subdomains acme.app.lvh.me:5173 (lvh.me resolves to
+    // 127.0.0.1 at any depth, and unlike localhost a `.lvh.me` cookie is shared across subdomains).
+    // Vite blocks unknown hosts.
     allowedHosts: [".lvh.me", ".localhost"],
     proxy: {
       // changeOrigin:false keeps the tenant Host (acme.app.lvh.me) so the server resolves

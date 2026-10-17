@@ -1,25 +1,14 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { sessionQuery } from "../auth-client.ts";
-import { lobbyQuery, meQuery } from "../orpc.ts";
-import { apexUrl, currentSlug, hardRedirect, tenantUrl } from "../lib/tenant.ts";
+import { meQuery } from "../orpc.ts";
+import { authUrl, currentSlug, hardRedirect, loginUrl } from "../lib/tenant.ts";
 import { AppShell } from "../components/AppShell.tsx";
 
-// The app shell for every signed-in page. The tenant is the subdomain; on the apex this
-// route is just the lobby dispatcher (it never renders the app there).
+// The app shell for every signed-in page. The tenant is the subdomain; anywhere else — the
+// sign-in host, the bare zone apex — this route never renders: the dispatcher (/login) decides.
 export const Route = createFileRoute("/_authed")({
   beforeLoad: async ({ context, location }) => {
     const slug = currentSlug();
-
-    if (!slug) {
-      // Apex lobby: no tenant to resolve, so this is the one branch that reads the session
-      // directly. A user belongs to exactly one company, so there is nothing to pick:
-      // it's their workspace, or onboarding to create one or connect its agent.
-      const data = await context.queryClient.ensureQueryData(sessionQuery);
-      if (!data?.session) throw redirect({ to: "/login" });
-      const lobby = await context.queryClient.fetchQuery(lobbyQuery);
-      if (!lobby || lobby.needsAgent) throw redirect({ to: "/onboarding" });
-      return hardRedirect(tenantUrl(lobby.slug));
-    }
+    if (!slug) return hardRedirect(authUrl("/login"));
 
     // Tenant subdomain: one call covers signed-in, member-of-this-workspace, and role.
     // beforeLoad re-runs on every navigation, so it's cached — an in-app route change costs
@@ -29,15 +18,15 @@ export const Route = createFileRoute("/_authed")({
       .ensureQueryData({ ...meQuery, retry: false })
       .catch((e: unknown) => {
         const code = (e as { code?: string }).code;
-        // Auth lives on the apex. FORBIDDEN means this workspace isn't theirs, so the apex
-        // dispatcher sends them to the one that is — it can only ever pick a *different*
-        // slug, which is what keeps this from ping-ponging. Anything else (a 500, a dead
-        // server) is a real failure: let it hit the error boundary rather than loop.
-        if (code === "UNAUTHORIZED") return "/login";
-        if (code === "FORBIDDEN") return "/";
+        // Auth lives on the sign-in host. FORBIDDEN means this workspace isn't theirs (a customer
+        // of it, say), so the dispatcher sends them to a place that is — it only ever picks a
+        // workspace they are a member of, which is what keeps this from ping-ponging. Anything else
+        // (a 500, a dead server) is a real failure: let it hit the error boundary rather than loop.
+        if (code === "UNAUTHORIZED") return loginUrl();
+        if (code === "FORBIDDEN") return authUrl("/login");
         throw e;
       });
-    if (typeof me === "string") return hardRedirect(apexUrl(me));
+    if (typeof me === "string") return hardRedirect(me);
 
     // Role decides which pages this shell renders. UX only — the server procedures are the boundary.
     const path = location.pathname;

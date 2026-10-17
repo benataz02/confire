@@ -2,20 +2,19 @@
 # Prod: docker compose --profile full up  (Postgres + server + Caddy wildcard subdomains)
 #
 # A real domain is .env only, no code change:
-#   DOMAIN=confire.ai                 internal on app.confire.ai + <slug>.app.confire.ai, the customer
-#                                     portal on portal.confire.ai + <slug>.portal.confire.ai (sibling
-#                                     cookie zones, spec §3); the SPAs are rebuilt for it
+#   DOMAIN=confire.ai                 sign-in on confire.ai, staff on <slug>.app.confire.ai, the customer
+#                                     portal on <slug>.portal.confire.ai; one session cookie on
+#                                     .confire.ai (spec 2026-10-17-single-sign-in); the SPAs are rebuilt for it
 #   CADDY_TLS=cloudflare              + CLOUDFLARE_API_TOKEN (Zone:Zone:Read + Zone:DNS:Edit)
 #   BETTER_AUTH_SECRET=...            openssl rand -base64 32
 #   RESEND_API_KEY=re_...             a sending_access key; unset = mail is printed to the server log
-# Cloudflare DNS: A records for app, *.app, portal and *.portal, DNS only (grey cloud) — Caddy
-# terminates TLS, and Cloudflare's free edge cert does not cover a two-level wildcard.
+# Cloudflare DNS: A records for the apex, app, *.app, portal and *.portal, DNS only (grey cloud) —
+# Caddy terminates TLS, and Cloudflare's free edge cert does not cover a two-level wildcard. Every
+# *.<DOMAIN> host receives the session cookie: never point a name at a service you don't control.
 # Resend: verify mail.<DOMAIN> (SPF, DKIM, MX for the return path). Its region is fixed when the
 # domain is added, so pick EU vs US first.
-# OAuth consoles: redirect URIs https://app.<DOMAIN>/api/auth/callback/{google,microsoft} and
-# https://portal.<DOMAIN>/api/auth/callback/{google,microsoft} — same clients, one callback per zone.
-# Microsoft: emit the optional `xms_edov` claim (the portal trusts a Microsoft email only on it).
-# Turnstile: one widget for portal.<DOMAIN> — TURNSTILE_SITE_KEY (built in) + TURNSTILE_SECRET_KEY.
+# OAuth consoles: one redirect URI per provider, https://<DOMAIN>/api/auth/callback/{google,microsoft}.
+# Microsoft: emit the optional `xms_edov` claim (a Microsoft email counts as verified only on it).
 services:
   db:
     image: postgres:17
@@ -39,23 +38,23 @@ services:
     build:
       context: .
       dockerfile: apps/server/Dockerfile
-      # Each SPA's zone (and the portal's Turnstile site key) is baked in at build time.
+      # Each SPA's zone and the sign-in host are baked in at build time.
       args:
+        VITE_AUTH_URL: https://${DOMAIN:-lvh.me}
         VITE_APP_BASE_DOMAIN: app.${DOMAIN:-lvh.me}
         VITE_PORTAL_BASE_DOMAIN: portal.${DOMAIN:-lvh.me}
-        VITE_TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     environment: &app-env
       DATABASE_URL: postgres://confire:confire@db:5432/confire
       # Fail fast: a placeholder here would sign cookies AND (via crypto.ts' fallback) encrypt SAP
       # secrets with a string that is in git. Better Auth only rejects its own default secret.
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET (openssl rand -base64 32)}
-      # The apex as the browser sees it (Caddy, HTTPS) — the OAuth redirect URI and the
-      # `.app.${DOMAIN}` session cookie are both derived from it, so :3000 would break both.
-      # The portal reads it too: the Confire logo in mail, and where to send a supplier's staff.
-      BETTER_AUTH_URL: https://app.${DOMAIN:-lvh.me}
+      # The sign-in host as the browser sees it (Caddy, HTTPS) — the OAuth redirect URI and the
+      # `.${DOMAIN}` session cookie are both derived from it, so :3000 would break both. Both
+      # processes read it: the Confire logo in mail, and every staff URL.
+      BETTER_AUTH_URL: https://${DOMAIN:-lvh.me}
       APP_BASE_DOMAIN: app.${DOMAIN:-lvh.me}
-      # The portal's apex and zone (spec §3): its own OAuth callback and `.portal.${DOMAIN}` cookie.
-      PORTAL_AUTH_URL: https://portal.${DOMAIN:-lvh.me}
+      # The portal's zone, and the origin its links are built on.
+      PORTAL_URL: https://portal.${DOMAIN:-lvh.me}
       PORTAL_BASE_DOMAIN: portal.${DOMAIN:-lvh.me}
       # Mail (apps/server/src/mail): sender notify@mail.<DOMAIN>. No key = the console mailer.
       RESEND_API_KEY: ${RESEND_API_KEY:-}
@@ -82,8 +81,6 @@ services:
     environment:
       <<: *app-env
       PORTAL_PORT: 3001
-      # Required here: without it every sign-up / sign-in / reset request fails closed (500).
-      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:?set TURNSTILE_SECRET_KEY (Cloudflare Turnstile widget secret)}
     ports:
       - "127.0.0.1:3001:3001"
 

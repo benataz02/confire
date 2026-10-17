@@ -35,17 +35,14 @@ export function ResetPassword({ brand, name, url }: AuthMailProps) {
 type User = { name: string; email: string };
 
 /**
- * The two Better Auth senders, drawn in `brandOf(url)`'s colours. `url` is Better Auth's own link,
- * whose callbackURL is what the page asked to come back to — the portal reads its `t` from there.
- * Both return at once: a send is never awaited by the endpoint, so the response time of sign-up or
- * reset-request cannot tell anyone whether an address has an account.
+ * The two Better Auth senders, always in Confire's colours: the sign-in host serves every tenant, so
+ * there is no supplier to brand them with. Both return at once: a send is never awaited by the
+ * endpoint, so the response time of sign-up or reset-request cannot tell anyone whether an address
+ * has an account.
  */
-export function authMail(brandOf: (url: string) => Promise<Brand>) {
+export function authMail() {
   const send = (subject: string, Template: typeof VerifyEmail) => async ({ user, url }: { user: User; url: string }) => {
-    // A tenant that cannot be read still gets its user the mail, in Confire's colours.
-    void brandOf(url).catch(() => CONFIRE).then((brand) =>
-      sendMailInBackground({ to: user.email, subject, fromName: brand.name, body: <Template brand={brand} name={user.name} url={url} /> }),
-    );
+    sendMailInBackground({ to: user.email, subject, fromName: CONFIRE.name, body: <Template brand={CONFIRE} name={user.name} url={url} /> });
   };
   return {
     sendVerificationEmail: send("Verify your email address", VerifyEmail),

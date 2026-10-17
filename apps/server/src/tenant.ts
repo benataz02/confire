@@ -5,26 +5,34 @@ import assert from "node:assert/strict";
 const RESERVED = new Set(["app", "www", "api", "auth", "admin", "static", "assets"]);
 
 /** Prod sets APP_BASE_DOMAIN (e.g. `app.confire.ai`). Dev is `app.lvh.me`: public DNS sends lvh.me
- *  and every subdomain, at any depth, to 127.0.0.1, a `.app.lvh.me` cookie spans subdomains (bare
- *  `localhost` is a TLD to the browser), and Google accepts its OAuth redirect URI.
- *  `confire.localhost` was tried: the cookie works, but Google rejects `http://*.localhost` redirect
- *  URIs. Not bare `lvh.me` either: its cookie would reach the portal's sibling zone. */
+ *  and every subdomain, at any depth, to 127.0.0.1 (bare `localhost` is a TLD to the browser, so its
+ *  cookie spans nothing), and Google accepts its OAuth redirect URI. `confire.localhost` was tried:
+ *  the cookie works, but Google rejects `http://*.localhost` redirect URIs. */
 export const baseDomain = (process.env.APP_BASE_DOMAIN ?? "app.lvh.me").toLowerCase();
 
-/** The portal process's zone (spec §3), a sibling of baseDomain, never a child: a `.app.<domain>`
- *  session cookie must never be sent to `*.portal.<domain>`, and the other way round. */
+/** The portal process's zone, a sibling of baseDomain. Both sit under the sign-in host, whose
+ *  hostname is the one session cookie's domain (auth.ts). */
 export const portalBaseDomain = (process.env.PORTAL_BASE_DOMAIN ?? "portal.lvh.me").toLowerCase();
 
-/** The portal apex as the browser sees it. Both processes read it: the portal's Better Auth
- *  baseURL, and the links an internal invitation mails out. */
-export const portalAuthUrl = (process.env.PORTAL_AUTH_URL ?? `http://${portalBaseDomain}:5180`).replace(/\/+$/, "");
+/** The sign-in host as the browser sees it: Better Auth's baseURL (it reads BETTER_AUTH_URL itself),
+ *  so its OAuth callbacks, its mailed links and the cookie domain. Staff URLs take its protocol and port. */
+export const authUrl = (process.env.BETTER_AUTH_URL ?? "http://lvh.me:5173").replace(/\/+$/, "");
 
-/** A supplier's portal page: the apex URL with the slug in front, protocol and dev port included. */
-export function portalTenantUrl(slug: string, path = "/"): string {
-  const url = new URL(path, portalAuthUrl);
-  url.hostname = `${slug}.${url.hostname}`;
+/** The portal zone's apex as the browser sees it. Only its protocol and port are used: dev serves the
+ *  portal on :5180, the sign-in host and the staff app on :5173. */
+export const portalUrl = (process.env.PORTAL_URL ?? `http://${portalBaseDomain}:5180`).replace(/\/+$/, "");
+
+const zoneUrl = (origin: string, hostname: string, path: string) => {
+  const url = new URL(path, origin);
+  url.hostname = hostname;
   return url.toString();
-}
+};
+
+/** A workspace page: `<slug>.<APP_BASE_DOMAIN>`, protocol and dev port included. */
+export const appTenantUrl = (slug: string, path = "/") => zoneUrl(authUrl, `${slug}.${baseDomain}`, path);
+
+/** A supplier's portal page: `<slug>.<PORTAL_BASE_DOMAIN>`, protocol and dev port included. */
+export const portalTenantUrl = (slug: string, path = "/") => zoneUrl(portalUrl, `${slug}.${portalBaseDomain}`, path);
 
 /** `acme.app.lvh.me` + base `app.lvh.me` -> "acme"; apex/reserved/deeper -> null. */
 export function tenantSlugFromHost(
@@ -54,7 +62,7 @@ if (import.meta.main) {
   assert.equal(t("a.b.confire.local", "confire.local"), null); // deeper subdomain
   assert.equal(t("acme.evil.com", "confire.local"), null); // wrong base
   assert.equal(t(null, "confire.local"), null);
-  // Two sibling zones (spec §3): each process parses only its own, and neither swallows the other.
+  // Two sibling zones: each process parses only its own, and neither swallows the other.
   assert.equal(t("acme.app.lvh.me:5173", "app.lvh.me"), "acme");
   assert.equal(t("acme.portal.lvh.me:5180", "portal.lvh.me"), "acme");
   assert.equal(t("acme.portal.lvh.me", "app.lvh.me"), null);
@@ -62,5 +70,9 @@ if (import.meta.main) {
   assert.equal(t("portal.lvh.me", "portal.lvh.me"), null); // portal apex
   assert.notEqual(portalBaseDomain, baseDomain);
   assert.equal(tenantSlugFromHost(new URL(portalTenantUrl("acme", "/accept/x")).host, portalBaseDomain), "acme");
+  assert.equal(tenantSlugFromHost(new URL(appTenantUrl("acme")).host, baseDomain), "acme");
+  // The sign-in host is a tenant in neither zone.
+  assert.equal(tenantSlugFromHost(new URL(authUrl).host, baseDomain), null);
+  assert.equal(tenantSlugFromHost(new URL(authUrl).host, portalBaseDomain), null);
   console.log("tenant.ts ok");
 }
