@@ -7,6 +7,11 @@
 last-owner guard applies on both sides; owners list and cancel their own pending invitations;
 invitation Reply-To is the inviter until P7. P4–P7 are not built yet. §16 lists what must be checked
 against a live B1 and Better Auth before the matching phase starts.
+**P4 decided 2026-10-17** through Q&A: the portal configurator runs the engine on the server and
+receives a projection (§7.1); indicative prices are live, then frozen at submit, then the quotation's
+(§7.2); a declined quote reopens the project and a re-quote modifies the same B1 quotation (§7.3);
+`revised` is written once per round, at the next transition (§7.4); P4 takes the whole lifecycle,
+quote response included (§15). There is no `joined` event.
 **Revised 2026-10-16:** onboarding is invitation-only (D7, D17, D25, D26, §5). Open
 self-registration, applications and their approval are gone.
 **Revised 2026-10-16:** this builds from the current internal-only codebase. The previous in-app
@@ -46,17 +51,17 @@ Internal users accept requests, then quote them, send them back for changes, or 
 | D7 | Lead timing | There is **no open self-registration**. A new-client invitation leads to the onboarding form, and submitting it **creates the B1 lead** (`CardType = cLid`) at once. The invitation is the tenant's approval; nobody reviews the form in between. |
 | D8 | SAP load | Portal document reads stay **live, with no rate limit**. `ponytail:` see §13. |
 | D9 | Project | **One project = one configuration** (`config_project`, as today). |
-| D10 | Internal outcomes | Accept (in review), Quote, Send back for changes, Decline (final). The quotation and its linked orders, deliveries and invoices, with their PDFs, appear on the timeline. |
-| D11 | Internal edits | Internal users may change entries and batches before quoting. The timeline records each change **with a diff**, and the client sees it. |
+| D10 | Internal outcomes | Accept (in review), Quote, Send back for changes, Decline (final). The quotation and its linked orders, deliveries and invoices, with their PDFs, appear on the timeline. A quote the client declines **reopens** the project in review; a re-quote **modifies the same B1 quotation**, or posts a new one when B1 has it closed (§7.3). Internal users can close a B1 quotation from Confire. |
+| D11 | Internal edits | Internal users may change entries, batches and tables while the project is in review. The client sees the changes as **one `revised` event per round**, a diff against the inputs frozen at submit, written at the next transition (§7.4). |
 | D12 | Timeline extras | Comments both ways (with internal-only notes), file attachments, email notifications. |
 | D13 | Mail | **Resend**, behind a `Mailer` seam (Resend in production, a console logger in dev). Sender `notify@mail.<domain>`, the tenant's name as display name, the tenant's sales address as `Reply-To`. Because a mailer now exists, **email verification is switched on for internal sign-ups too** (this removes the `ponytail` in `signup.tsx`). |
 | D14 | Files | Attachments in **Postgres `bytea`** (`project_file`), with a per-file size cap. Upload and download are plain Hono routes, not oRPC: the RPC body cap is 2 MB. `ponytail:` move to S3-compatible storage (Bun's `S3Client`) when DB size or backups hurt. |
-| D15 | Prices | **Per published model**: `portalPricing = "indicative"` (unit price and total per batch after calculate) or `"request"` (no numbers until quoted). The server omits the numbers, not the page. |
+| D15 | Prices | **Per published model**: `portalPricing = "indicative"` (unit price and total per batch after calculate) or `"request"` (no numbers until quoted). The server omits the numbers, not the page. Indicative figures are live while the client edits, frozen at submit, and replaced by the quotation's once quoted; per-option price badges show on indicative models only (§7.2). |
 | D16 | Lead CardCode | A **B1 numbering series**: an admin picks the BP `Series` in portal settings, and the create payload sends `Series` and omits `CardCode`. |
 | D17 | Onboarding form | The **BP-create ObjectPage** with an onboarding section tree: **code-default** header fields plus **admin extras** (`BusinessPartners` fields from metadata, UDFs included, each required or optional), **addresses** (bill-to and ship-to → `BPAddresses`) and a **contact person** (the user → `ContactEmployees`). A hard denylist in code no extra can expose (§5.3). |
 | D18 | UI code | **Extract `packages/ui`**: ListReport, ObjectPage, CFL, views and metadata merge, shared by `apps/web` and `apps/portal`. The portal declares its own external-user features. |
 | D19 | Doc fields | **Admin-configurable** per entity (header and line fields, UDFs included), stored per tenant and enforced server-side. A new `portalSchema` projects B1 metadata down to that list. A **hard denylist** in code (cost, gross profit, margins, purchase prices) that no setting can expose. |
-| D20 | v1 scope | Portal home overview; online quote acceptance (accept or decline the B1 quotation: a timeline event plus an internal notification, and internal staff create the order); tenant branding (logo, name, accent colour on the portal and in emails). **Not in v1:** multiple languages. |
+| D20 | v1 scope | Portal home overview; online quote acceptance (accept or decline the B1 quotation: a timeline event plus an internal notification; on accept internal staff create the order, a decline reopens the project, §7.3); tenant branding (logo, name, accent colour on the portal and in emails). **Not in v1:** multiple languages. |
 | D21 | Models | **Every published model** (`config_model.portal = true`) is available to every company on the tenant. |
 | D22 | Notify | Internal notifications go to the **BP's B1 sales employee** (`SalesPersonCode` → `SalesPersons` email → Confire user). If that resolves to nothing, they go to a tenant fallback list. |
 | D23 | Old memberships | Leftover `member.role = "client"` rows are **not migrated**. No script turns them into portal companies. They stay locked out of the internal app. |
@@ -210,7 +215,8 @@ user with no company there. `portal.onboarding.join` then:
 1. requires `user.emailVerified`;
 2. rejects free-mail domains (a list in code);
 3. looks up `portal_company_domain (hostTenant, domain(user.email))`;
-4. calls `addPortalMember` with role `viewer` (§4.2) and writes a `joined` audit event.
+4. calls `addPortalMember` with role `viewer` (§4.2). There is no audit event:
+   `portal_member.createdAt` records the join, and the Company page lists it.
 
 If nothing matches, the user sees an "ask your supplier for an invitation" page. Auto-join and an
 invitation (§5) are the only two ways into a company.
@@ -380,40 +386,200 @@ Changed:
   `draft` and `quoted`.
 - `config_project`: **add** `portalCompanyId` (nullable, indexed; the portal fence),
   `assigneeId`, `quoteResponse` (`accepted | declined | null`) and `quoteRespondedAt`.
-  **Drop** `events`. The jsonb list (`created`, `quoted`) is replaced by `config_project_event`.
+  **Drop** `events`. The jsonb list (`created`, `quoted`) is replaced by `config_project_event`,
+  with no backfill (`quotedAt` already dates an old quote). A portal project's `customer` is set from
+  its company on create, so `createQuote` and the internal lists read it the way they do today.
+  `b1DocEntry` is **the current quotation**: a re-quote modifies it, or replaces it when B1 has it
+  closed (§7.3). Each `quoted` event keeps its own `docEntry`, so earlier quotations stay findable.
 - `config_model`: **add** `portal` (boolean, default false; D21) and `portalPricing`
-  (`"indicative" | "request"`, default `"request"`).
+  (`"indicative" | "request"`, default `"request"`). Unpublishing hides a model from the catalog;
+  projects already created from it keep working.
 
-`config_project_event.kind`: `created`, `submitted`, `withdrawn`, `accepted`, `revised` (payload =
-diff), `returned`, `resubmitted`, `declined`, `quoted`, `quote_accepted`, `quote_declined`, `comment`,
-`file`, `joined`.
+`config_project_event.kind`, and its `payload`:
+
+| Kind | Payload | Notes |
+|---|---|---|
+| `created` | — | internal projects too |
+| `submitted`, `resubmitted` | `{ inputs: { entries, batches, tables }, prices? }` | the snapshot §7.2 and §7.4 read; `prices` only for `indicative` models |
+| `withdrawn`, `accepted`, `returned`, `declined` | — | `note` carries the reason where there is one |
+| `revised` | `{ entries: { [key]: [old, new] }, batches?: [old, new], tables: { [key]: [oldRows, newRows] } }` | row counts for tables; written by §7.4 |
+| `quoted` | `{ docEntry, docNum, value, mode: "created" \| "updated", inputs }` | internal projects too; `inputs` is the next round's §7.4 baseline |
+| `quote_accepted`, `quote_declined` | — | `note` is the client's |
+| `comment` | — | `note` is the text |
+| `file` | `{ fileId }` | P7 |
+
+Internal-only projects write `created` and `quoted` and nothing else.
 
 ## 7. Project lifecycle
 
 ```
-                 submit                  accept
-   draft ───────────────▶ submitted ─────────────▶ in_review ─── quote ───▶ quoted ──▶ accept / decline quote
-     ▲   ◀── withdraw ───    │   │                   │   │                    │
-     │                       │   └──── decline ──────┼───┴── decline ──▶ declined (final)
-     │                       │ send back             │ send back
-     └── edit, resubmit ── returned ◀────────────────┘
+                submit                accept                 quote
+  draft ──────────────▶ submitted ─────────────▶ in_review ─────────────▶ quoted ── quote accepted ──▶ (final)
+        ◀── withdraw ──   ▲  │  │                 ▲  │  │ ◀─ quote declined ─┘
+                resubmit  │  │  └──── decline ────┼──┼──┴──── decline ────▶ declined (final)
+                          │  │ send back          │  │ send back
+                       returned ◀─────────────────┼──┘
+                                                  └── (re-quote modifies the same quotation, §7.3)
 ```
 
-- Every arrow is one guarded `UPDATE` on `status` (and on `calculatedAt` for submit and resubmit,
-  as today), written in the same transaction as its `config_project_event` row. The side that
-  loses a race gets a clear error instead of a lost write.
+| Action | From → to | Who | Events (all `external`) |
+|---|---|---|---|
+| create | — → `draft` | buyer | `created` |
+| submit | `draft` → `submitted` | buyer | `submitted` (snapshot, §7.2) |
+| withdraw | `submitted` → `draft` | buyer | `withdrawn` |
+| accept | `submitted` → `in_review` | internal member; sets `assigneeId` | `accepted` |
+| send back | `submitted`, `in_review` → `returned` | internal member | `revised` (if any, §7.4), `returned` |
+| resubmit | `returned` → `submitted` | buyer | `resubmitted` (snapshot) |
+| decline | `submitted`, `in_review` → `declined` | internal member | `revised` (if any), `declined` |
+| quote | `in_review` → `quoted` | internal member | `revised` (if any), `quoted` |
+| quote accepted | `quoted` (stays), `quoteResponse = accepted` | buyer | `quote_accepted` |
+| quote declined | `quoted` → `in_review`, `quoteResponse = declined` | buyer | `quote_declined` |
+
+- Every action is one guarded `UPDATE` on `status` (and on `calculatedAt` for submit and resubmit,
+  as today), written in the same transaction as its event rows. The side that loses a race gets a
+  clear error instead of a lost write.
+- **Submit and resubmit gates:** a name, at least one batch, a calculation (`calculatedAt` not
+  null) and no `missingInputs`, the same rule the internal *Create quote* button follows.
 - `withdraw` only from `submitted`. Once accepted, the client comments instead.
 - `accept` sets `assigneeId`. The client sees "In review" and the assignee's name.
-- **Internal edits (D11)** are allowed in `in_review` through the existing `configs.calculate`. When
-  the project is a portal one, the handler diffs old and new `entries`/`batches` (and `tables`
-  row counts) and writes a `revised` event that the client can see.
-- `quote` is today's `createQuote` (dedup UDF, `b1DocEntry`), plus the event. The CardCode is the
-  company's, lead or customer.
-- **Quote response (D20):** on `quoted`, a buyer or owner accepts or declines with an optional
-  note. That sets `quoteResponse` and writes the event, and the sales employee is notified. Nothing
-  is written to SAP; internal staff create the order.
+  `ponytail: no reassignment — add a "Reassign" action when a sales team asks for one.`
+- A declined quote reopens with the same assignee. A re-quote clears `quoteResponse`.
 - Client-facing labels: Draft, Submitted, In review, Changes requested, Declined, Quoted
   (+ "Accepted" / "Declined by you").
+
+**One writer per status.** `assertConfigMutable` becomes `assertWritable(tenantId, projectId, side)`,
+and every handler that writes a project's inputs (`configs.update`, `calculate`, `select`, `remove`,
+and their portal counterparts) goes through it:
+
+| Status | Client (buyer, owner) | Internal |
+|---|---|---|
+| `draft` | edit, delete, submit | — (a portal draft is invisible, §10) |
+| `submitted` | withdraw | accept, send back, decline |
+| `in_review` | comment | edit (D11), quote, send back, decline |
+| `returned` | edit, resubmit | read |
+| `declined` | read | read |
+| `quoted` | read, respond to the quote | read |
+
+An internal-only project (`portalCompanyId` null) keeps today's rule: editable until `quoted`. On
+a portal project, `configs.update` also refuses `modelId` and `customer`: the model was the
+client's pick, and the customer is the company.
+
+### 7.1 The portal configurator
+
+**The engine runs on the server.** `apps/portal` never receives a `ModelDef`, `ResolvedLookups` or a
+candidate's `outputs`, and never runs `propagate`. `projects.get` and `projects.calculate` return one
+payload: the project's portal fields, `toPortalModelDef(model)`, `toPortalProp(prop)`,
+`toPortalLookups(…)`, `missing` (from `missingInputs`), `badges` and `prices` (§7.2). One edit is one
+call: `projects.calculate({ id, entries?, batches?, tables? })` writes the inputs and empties the
+candidates in one statement, recalculates when the inputs are complete, and returns that payload,
+the contract `configs.calculate` already keeps. The page debounces like the internal one.
+
+The projection is `portal/projection.ts`, pure and unit-tested. It is the fence, so each function
+names what it keeps:
+
+- `toPortalModelDef`: `name`, `description`, `parameters` without `priceExpr`, `structure`, and
+  `tables` without the items grid's `unitcost`/`unitprice` and with formula `expr` blanked.
+  `computed`, `constraints`, `bom`, `routing`, `history` and `pricing` stay out.
+- `toPortalProp`: `values` filtered to parameter keys (no computed, no `<param>_<column>` derived
+  keys), `domains`, `visible`, `required`, `defaulted`, `open`, `conflicts` (the author's messages),
+  plus `tables`: each table's rows **evaluated on the server**, which is how a formula column shows a
+  value without its expression.
+- `toPortalLookups`: only the option tables a visible parameter or table column names, and only
+  their non-`hidden` columns. `prices` never goes.
+
+`ConfiguratorForm` and `ConfigTable` render this unchanged, with two optional props: `badges`
+replaces the local `paramPrices`, and `evaluated` replaces the local `evalTableRows`. The internal
+page passes neither and keeps computing in the browser. On the portal, `money` is absent, so the
+items grid has no cost or price columns. Formula cells are read-only there: typing over a formula
+is a salesperson's override.
+
+**Portal input is checked on the server:** an entry key outside `model.parameters` is refused, and
+so is a table cell on `unitcost`, `unitprice` or a formula column.
+
+**Value help:** `projects.queryPage` pages a table only when the model is published and names it
+(`referencedTables`), and leaves out the `hidden` columns. The portal's `UiSource.client.configs.queryPage`
+calls it, so `CflField` works unchanged.
+
+**What the client sees:** every parameter and table of the model, plus *General* with only Name and
+Batch quantities. The model is picked from the catalog at create and cannot change; the customer is
+the company. There are no candidates on the portal. Staff pick them during review, as today.
+`ponytail: no "internal only" field flag — a model with salesperson-only fields is not published, and
+the §7.4 diff shows every changed field. Add a flag on ParamZ/TableColumnZ when a tenant needs both.`
+
+### 7.2 Prices
+
+The first matching row wins:
+
+| When | What the Prices section shows | Models |
+|---|---|---|
+| the project has a `b1DocEntry` (quoted, or reopened in review) | the current B1 quotation's lines and total, read live, after its CardCode matches the company; marked "declined by you" while reopened | both |
+| `draft`, `returned` | live: per batch, unit price and total from the current candidates. One candidate gives exact figures; several give "from" (the minimum) | `indicative` |
+| `submitted`, `in_review` | the figures **frozen in the latest `submitted`/`resubmitted` event**, labelled "indicative at submission" | `indicative` |
+
+`request` models show no number before the quotation, and no badges.
+
+The freeze lives on the append-only event row, so the project row stays live ("nothing is
+snapshotted") and needs no new column. `toPortalPrices` computes the live figures from the
+candidates on the server and sends only these numbers. Item split prices never go.
+
+**Badges:** the per-option price a parameter's `priceExpr` gives (`paramPrices`), evaluated on the
+server and sent as amounts. The expression never leaves the server.
+
+### 7.3 Quote and re-quote
+
+`quote` is `createQuote` (dedup UDF, `b1DocEntry`) plus the events. The CardCode is the company's,
+lead or customer. With no `b1DocEntry`, it creates, as today. With one (a reopened project), it
+reads the quotation first:
+
+- **Open → modify.** `PATCH Quotations(n)` with `If-Match`, the new header and `DocumentLines`, and
+  `B1S-ReplaceCollectionsOnPatch: true`. Without that header the Service Layer merges lines by
+  `LineNum` and keeps the ones it was not sent. `U_CF_Key` is rewritten to the new `commandId`. A
+  lost response means the retry gets a 412 (the ETag moved). The handler then re-reads, and if
+  `U_CF_Key` already equals this `commandId`, the update landed and it is a success. This is
+  check-then-create applied to an update. The `quoted` event says `mode: "updated"`.
+- **Closed → create a new one.** Closed by hand or by B1 (lines copied to an order): post a new
+  quotation and move `b1DocEntry` to it. For this create, the dedup hash also covers the previous
+  `docEntry`, or the pre-check would find the closed quotation and report it as the new one. The old
+  `docEntry` stays on its `quoted` event, and the timeline shows both chains.
+
+`quotedValue`/`quotedCost`/`quotedAt` are overwritten on every quote.
+
+**Close a quotation from Confire.** `entities.close({ entity: "Quotations", key })`, admin/owner like the
+rest of `/b1`: a *Close* header action on the Quotations Object Page and a *Close* action on the
+List Report's selected rows. It calls `POST Quotations(n)/Close` through a new transport method,
+`action(entitySet, key, name)`, with an allowlist of action names on the agent route as well.
+
+**Quote response (D20):** on `quoted`, a buyer or owner accepts or declines with an optional note.
+That sets `quoteResponse`/`quoteRespondedAt` and writes the event. Accepted is final, and internal
+staff create the order. Declined reopens the project in review (§7). Nothing is written to SAP.
+
+### 7.4 Revisions
+
+Internal edits in `in_review` go through `configs.calculate` and write no event on their own. The
+page auto-calculates about 1 s after every edit, so an event per call would be one per keystroke.
+Instead, the next transition (quote, send back or decline) compares the current inputs with the
+`inputs` frozen in the latest event that carries them (`submitted`, `resubmitted` or `quoted`). If
+anything differs, it writes one `revised` event first (payload in §6). `quoted` carries them so a
+reopened project's next revision shows only what changed since the declined quote. Keys are stored, and labels are resolved from the model when
+the timeline is read. One revision per round, and half-done edits never reach the client.
+
+### 7.5 Code layout (P4)
+
+| Path | What |
+|---|---|
+| `apps/server/src/config-project.ts` | **moved** out of `orpc/routers/configs.ts`: `loadModel`, `cachedLookups`, `liveEngine`, `calculateProject`, `queryTablePage`. The router module imports `orpc/base.ts` → the internal `auth.ts`, which the portal process must not build |
+| `apps/server/src/config-quote.ts` | + `quoteDraft`, `createQuote` (create or modify, §7.3) |
+| `apps/server/src/project-lifecycle.ts` | **new**, the only writer of `status` and `config_project_event`: `transition()`, `assertWritable(side)`, `revisionDiff()`. Both processes import it (the `portal/members.ts` pattern) |
+| `apps/server/src/portal/projection.ts` | **new**, pure: `toPortalModelDef`, `toPortalProp`, `toPortalLookups`, `toPortalPrices`, with a test |
+| `apps/server/src/portal/orpc/projects.ts`, `timeline.ts` | **new** portal routers (§11) |
+| `apps/server/src/orpc/routers/requests.ts`, `timeline.ts` | **new** internal routers (§11) |
+| `apps/server/src/orpc/routers/entities.ts` | + `close` |
+| `packages/b1`, `apps/agent` | + `action()` and the `/action` route; `updateEntity` + `replaceCollections` |
+| `packages/db/src/schema/configurator.ts` | status widened, the §6 columns, `configProjectEvent` |
+| `packages/ui/src/configurator/` | **moved** from `apps/web`: `ConfiguratorForm`, `ConfigTable`, `formHelpers`, `configTableOps`, `costElements`; currency through `UiSource` (a `useCurrency` hook next to `useRole`) |
+| `packages/ui/src/timeline/ProjectTimeline.tsx` | **new**, props-driven: each app passes its own events and comment mutation |
+| `apps/portal/src/routes/_authed/projects/` | **new**: `index.tsx`, `new.tsx`, `$id.tsx` |
+| `apps/web/src/routes/_authed/requests/index.tsx` | **new**: Portal → Requests |
 
 ## 8. Timeline
 
@@ -422,12 +588,15 @@ One merged, time-ordered feed per project:
 - **Events** from `config_project_event`. The portal reads `visibility = 'external'` only; the SQL
   filter is the fence, and nothing is hidden by the page. Revisions render their diff, comments their
   text, files a download link.
-- **SAP documents**: `documentChain(b1DocEntry)`, live (quotation → orders → deliveries → invoices),
-  each entry linking to its portal Object Page and its PDF. The portal print handler calls
+- **SAP documents**: `documentChain(docEntry)`, live (quotation → orders → deliveries → invoices),
+  for each distinct `docEntry` in the project's `quoted` events. Usually that is one quotation; a
+  quotation replaced because it was closed (§7.3) keeps its own chain, marked superseded. Each
+  entry links to its portal Object Page and its PDF. The portal print handler calls
   `printDocument` only after the document's CardCode matches the company. `printDocument` itself
-  stays the printable-entity allowlist. Before `quoted` there is no chain.
-- Rendered with the UI5 `Timeline` component on the project Object Page, with a comment box and an
-  upload button (buyer, owner and viewer can comment; buyer and owner can upload).
+  stays the printable-entity allowlist. Before the first `quoted` there is no chain.
+- Rendered by `ProjectTimeline` (UI5 `Timeline`) on both project pages, with a comment box. Buyer,
+  owner and viewer can comment, and a portal comment is always `external`. Internal comments carry
+  an internal-only toggle. Upload is P7 (buyer and owner).
 
 ## 9. Portal app UI (`apps/portal`)
 
@@ -440,7 +609,7 @@ The ShellBar shows the tenant's logo and name (D20). The user menu has account, 
 | Home | `/` | overview cards: open requests by status, quotes awaiting your response, recent documents, open invoices |
 | Projects | `/projects` | List Report over `portal.projects.rows`, with system views All / Drafts / In progress / Changes requested / Quoted; **New project** opens the model catalog |
 | | `/projects/new` | published-model catalog (cards) → name → create |
-| | `/projects/$id` | Object Page: header (status, model, assignee, actions), sections **Configuration** (configurator form or read-only summary), **Prices** (only for `indicative` models or once quoted), **Timeline** |
+| | `/projects/$id` | Object Page: header (status, model, assignee, actions by status and role: Submit, Withdraw, Resubmit, Delete, Accept / Decline quote), sections **Configuration** (*General* with Name and Batch quantities, then the configurator form from §7.1, read-only outside `draft`/`returned`), **Prices** (§7.2: `indicative` models, or once quoted), **Timeline** |
 | Documents ▸ Quotations / Sales orders / Deliveries / Invoices | `/docs/$entity` | List Report over `portal.docs.rows`, columns from the tenant's `docFields` |
 | | `/docs/$entity/$key` | Object Page, read-only, **Print** action, plus a "Project" link when the document belongs to one |
 | Company (fixed item, owner only) | `/company` | members (invite on company domains, role, remove), registered domains (read-only), BP summary |
@@ -458,7 +627,10 @@ their own `userId`). There are no shared views on the portal side.
 - **Side nav group "Portal"** (any member sees Requests; admins and owners see the rest):
   - **Requests**: List Report over portal projects, with system views New (submitted), Mine
     (in review, assignee = me), Changes requested, Declined, Quoted, Quote responses. It opens the
-    existing configuration process page.
+    existing configuration process page. A portal project shows here **from its first submit** and
+    nowhere else: a client's draft is private (`status = 'draft'` with a `portalCompanyId` is
+    invisible to every internal read), and **Configurations** (`configs.rows`) lists internal-only
+    projects, the staff's own work list.
   - **Invitations**: List Report over `portal_invitation`, both types, with status, CardCode (empty
     for a pending new-client one), email, inviter and expiry; **Cancel**. The only place a pending
     new-client invitation shows.
@@ -470,7 +642,14 @@ their own `userId`). There are no shared views on the portal side.
     whether a BP is already on the portal before inviting. It also holds **Email notifications**:
     the §12 configurable events, each set to *Tenant default (…)*, `off`, `creator` or `buyers`.
 - **ConfigProcessPage**, for portal projects: header actions Accept / Send back / Decline / Create
-  quote by status; a Timeline section with comment box, internal-only toggle and upload.
+  quote by status (§7); editable only in `in_review` (§7's side table); Model and Customer
+  read-only (the customer is the company); the client's quote response in the header; a Timeline
+  section (§8) with comment box and internal-only toggle (upload in P7). Create quote on a reopened
+  project modifies the quotation (§7.3), and the quote page says so.
+- **Quotations** (the `documents` feature): a **Close** action on the Object Page header and on the
+  List Report's selected rows (§7.3), admins and owners.
+- **Model builder → Settings tab** (admins): *Publish on the portal* (`config_model.portal`) and
+  *Portal pricing* (`indicative` / `request`).
 - **Settings → Portal tab** (admins): onboarding extras (pick `BusinessPartners` fields from
   metadata, filtered by the §5.3 denylist, and mark each required or optional);
   lead numbering series (value help over the BP series); document field pickers per entity (filtered
@@ -489,7 +668,7 @@ their own `userId`). There are no shared views on the portal side.
 | `onboarding` | `join`, `invitation`, `accept`, `formSchema`, `submit` | session |
 | `company` | `get`, `members.list`, `members.invite`, `members.setRole`, `members.remove`, `domains.list` | member / owner |
 | `models` | `list` (published, with `portalPricing`) | member |
-| `projects` | `rows`, `get`, `create`, `update`, `remove`, `run`, `lookups`, `queryPage`, `submit`, `withdraw`, `resubmit`, `respondQuote` | member (read) / buyer (write) |
+| `projects` | `rows`, `get`, `create`, `update` (name), `remove` (draft only), `calculate`, `queryPage`, `submit`, `withdraw`, `resubmit`, `respondQuote` | member (read) / buyer (write) |
 | `timeline` | `list`, `comment` | member |
 | `docs` | `metadata`, `rows`, `one`, `print`, `chain` | member |
 | `home` | `overview` | member |
@@ -497,13 +676,14 @@ their own `userId`). There are no shared views on the portal side.
 The Hono routes `POST /files/:projectId` and `GET /files/:id` use the same session and fence, with
 a size cap on the stream.
 
-Portal responses name their fields in mappers, the same way the internal routers do.
-`toPortalModelDef` is new: it projects a published model down to what an external user may see
-(parameters, lookups, batches; cost expressions stay out). `toPortalCandidate` names the candidate
-fields the page reads and omits prices when `portalPricing` is `"request"`.
+Portal responses name their fields in mappers, the same way the internal routers do. Every
+`projects` read and write is fenced on `portalCompanyId = seat.companyId`. `get` and `calculate`
+return the §7.1 projection. There is no `lookups` procedure and no candidate list: the engine stays
+on the server, and `toPortalPrices` (§7.2) is the only path a number takes to the page.
 
-**Internal server** additions: `requests.{rows, accept, sendBack, decline}`,
-`timeline.{list, comment}` (with `visibility`), `portalInvitations.{rows, inviteExisting, inviteNew,
+**Internal server** additions: `requests.{rows, accept, sendBack, decline}` (quote stays
+`configs.createQuote`, now create-or-modify), `timeline.{list, comment}` (with `visibility`),
+`entities.close` (Quotations, admin), `portalInvitations.{rows, inviteExisting, inviteNew,
 cancel}`, `portalCompanies.{get (by CardCode: members, invitations, domains, notify), setRole, removeMember,
 addDomain, removeDomain, setNotify}`, `portalSettings.{get, save, senderDomain.{add, verify,
 remove}}`. Settings, invitations and companies are
@@ -579,8 +759,10 @@ fails (agent down, no email, no match) falls back to the list.
   `CardCode eq '<company cardCode>'` after `compileList`, so a saved view cannot widen the result.
   The denylist is code (exact names and name patterns, for example `GrossProfit*`,
   `GrossBuyPrice`, `*Cost*`) and applies to the settings picker and to the server alike.
-- **Writes:** the quotation (unchanged path) and the lead BP create (§5.4). `ENTITY_PROFILES` stays
-  the rule for internal entity edits. The lead create is its own handler with its own field list,
+- **Writes:** the quotation (create as today, or modify on a re-quote, §7.3), the quotation
+  *Close* action (§7.3) and the lead BP create (§5.4). `ENTITY_PROFILES` stays the rule for
+  internal entity edits; the re-quote PATCH is the server's own, built from the item matrix like the
+  create, not an `entities.update`. The lead create is its own handler with its own field list,
   `formSchema` (code defaults ∪ admin extras, ∩ BP metadata, minus the denylist), plus the
   server-set `CardType`, `Series`, `BPAddresses`, `ContactEmployees` and `U_CF_Key`.
 
@@ -601,6 +783,13 @@ What the build sits on:
   portal data source to unpick; the seam is only so the portal can plug in later.
 - `config_project.status` is `draft | quoted`. Events are a jsonb list of `created` and `quoted`.
   `config_model` has no `portal` flag. Those columns are added in §6.
+- `calculateProject`, `liveEngine`, `quoteDraft` and `createQuote` are exported from
+  `orpc/routers/configs.ts`, which imports the internal `auth.ts` through `orpc/base.ts`. P4 moves
+  them out (§7.5) before the portal imports any of them.
+- `ConfiguratorForm`, `ConfigTable` and their helpers live in `apps/web/src/components/configurator/`
+  and read web's `useCurrency`. P4 moves them to `packages/ui` (§7.5).
+- `B1Transport` has no document-action method, and `updateEntity` sends no
+  `B1S-ReplaceCollectionsOnPatch`. Both are added in P4 (§7.3).
 - `printDocument` checks the printable-entity allowlist and nothing else. The CardCode check is
   new, in the portal handler (§8). Document lists have no customer fence; the portal appends one
   after `compileList` (§13).
@@ -619,11 +808,11 @@ Each phase ends type-checked per project, with its tests green, and is usable on
 | P1 `packages/ui` | Move `apps/web/src/shared/*` into `packages/ui`. The data-source seam is the plug the portal uses from P2 on; `apps/web` behaves identically. |
 | P2 Portal skeleton | Portal entrypoint, portal Better Auth instance (`portal_session`, captcha), `schema/portal.ts`, builders, `me`, apex login / signup / lobby, `apps/portal` shell with NavigationLayout and branding. |
 | P3 Invites & companies | Existing-BP invitations: *Invite to portal* + Portal section on the BP Object Page, guard, Portal → Invitations, accept page, company page (colleague invites on domains), domains, auto-join. Dev seed `scripts/seed-portal-company.ts`. |
-| P4 Projects & lifecycle | Widen `config_project.status`, `config_project_event`, portal projects + configurator + pricing modes, internal Requests inbox + Accept / Send back / Decline, revisions with diff, Timeline (events + doc chain), comments. |
+| P4 Projects & lifecycle | Move the engine core out of the router and the configurator UI into `packages/ui` (§7.5). Widen `config_project.status`, `config_project_event`, `assertWritable`, model publish settings. Portal projects + server-side configurator + projection + pricing phases (§7.1–7.2), internal Requests inbox + Accept / Send back / Decline, revisions at transition (§7.4), Timeline (events + doc chains), comments. Quote response, reopen, re-quote (modify or new) and the quotation Close action (§7.3). |
 | P5 Documents | Portal List Report / Object Page for the four entities, `docFields` settings + denylist, print, project link. |
 | P6 New-client onboarding | *Invite new client* on the BP List Report + guard, onboarding section tree + `formSchema` (Countries, denylist), settings extras picker, submit → lead create (Series, `U_CF_Key`, addresses, contact). |
 | P7 Files, mail, home | `project_file` + upload routes, notification routing (sales employee), client notification settings (tenant tab + per-company override, D27), tenant sender domain
-(D29), quote response, home overview, logo upload. |
+(D29), home overview, logo upload. The quote response moved to P4. |
 
 ## 16. Verify before building
 
@@ -635,6 +824,9 @@ them. Record any verified error strings in code comments, as the repo already do
 | P2 | Better Auth 1.7.7: a second instance with `session.modelName: "portalSession"` over the hand-written table, sharing `user`, `account` and `verification`; sign-in on one zone creates a row only in its own session table. |
 | P2 | `xms_edov` arrives in the Microsoft profile once configured as an optional claim. |
 | P4 | `createQuote` for a `cLid` BP: B1 accepts a Sales Quotation for a lead (and which later documents it refuses until conversion). |
+| P4 | `PATCH Quotations(n)` with `B1S-ReplaceCollectionsOnPatch: true` replaces `DocumentLines` (omitted lines are deleted, not kept), and `U_CF_Key` can be rewritten in the same PATCH. |
+| P4 | The error a PATCH gets on a quotation that is closed, and on one whose lines were copied to an order (record both strings; the second may not show as `DocumentStatus = bost_Close`, so the open check must cover it). |
+| P4 | `POST Quotations(n)/Close` on an open quotation, and what it answers for one already closed. |
 | P6 | BP POST with `Series` and no `CardCode` returns the generated `CardCode`; `BPAddresses` and `ContactEmployees` are accepted inline in the same POST, and which keys each needs (`AddressName` + `AddressType`, contact `Name`); `U_CF_Key` on OCRD (alphanumeric, 64) filters as on quotations; `Countries` reads `Code` and `Name`. |
 | P0 | Resend: `mail.<domain>` verifies (SPF, DKIM, MX for the return path), and `from` must match it exactly. The domain's **region is fixed when it is added**, so decide EU vs US first. A tenant display name with `&`, `,`, `"` or umlauts (`Müller & Söhne GmbH`) arrives intact once quoted in `from`. |
 | P7 | Resend sender domains (D29): the plan's `domains.limit` (usage endpoint) covers the tenant count; a `sending_access` key with no `domainId` can send from every domain on the account; the exact 403 body for an unverified or removed domain, so the fallback matches on its code, not its message; what `domains.create` returns for a name another Resend account already holds (claiming it would break the tenant's own sending, so the handler must refuse and say so). |
