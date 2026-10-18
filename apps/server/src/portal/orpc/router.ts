@@ -4,6 +4,7 @@ import { onboardingRouter } from "./onboarding.ts";
 import { companyRouter } from "./company.ts";
 import { modelsRouter, projectsRouter } from "./projects.ts";
 import { timelineRouter, viewsRouter } from "./timeline.ts";
+import { docsRouter } from "./docs.ts";
 import { tenantCurrency } from "../../b1.ts";
 import { appTenantUrl } from "../../tenant.ts";
 
@@ -39,6 +40,7 @@ export const portalRouter = {
   projects: projectsRouter,
   timeline: timelineRouter,
   views: viewsRouter,
+  docs: docsRouter,
 };
 
 export type PortalRouter = typeof portalRouter;

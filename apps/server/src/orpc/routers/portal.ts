@@ -1,11 +1,19 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { db, PORTAL_ROLES, portalCompany, portalCompanyDomain, portalInvitation, user, type PortalCardType } from "@confire/db";
+import {
+  db, PORTAL_ROLES, portalCompany, portalCompanyDomain, portalInvitation, user,
+  type PortalCardType, type PortalDocFields,
+} from "@confire/db";
+import type { B1EntitySchema, B1Field } from "@confire/b1";
 import { adminProcedure } from "../base.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { cancelInvitations, changeMember, claimDomain, companyPeople, isFreeMail, sendInvitation } from "../../portal/members.ts";
+import { DOC_DEFAULTS, DOC_ENTITIES, DocEntityZ, pickable, type DocEntity } from "../../portal/doc-fields.ts";
+import { loadPortalSettings, savePortalSettings } from "../../portal/settings.ts";
+import { entitySchema } from "../../entity-meta.ts";
+import { bad } from "../../entity-read.ts";
 
 // The internal app's side of the customer portal (spec §5.1, §10, §11): invite a business partner's
 // people (existing-BP invitations, from its Object Page), list and cancel invitations, and edit who
@@ -143,5 +151,59 @@ export const portalCompaniesRouter = {
         eq(portalCompanyDomain.tenantId, context.tenantId), eq(portalCompanyDomain.domain, input.domain),
         eq(portalCompanyDomain.companyId, c.id),
       ));
+    }),
+};
+
+/** The SAP fields an entity can offer the portal, as the picker lists them. */
+const optionsOf = (fields: B1Field[]) => fields.map((f) => ({ key: f.name, label: f.label ?? f.name }));
+
+async function docSchemas(tenantId: string) {
+  const { b1 } = await tenantConnector(tenantId);
+  const entries = await Promise.all(DOC_ENTITIES.map(async (e) =>
+    [e, await viaB1(() => entitySchema(tenantId, b1, e)).catch(bad)] as const));
+  return Object.fromEntries(entries) as Record<DocEntity, B1EntitySchema>;
+}
+
+const DocFieldsZ = z.object({ header: z.array(z.string()).max(200), lines: z.array(z.string()).max(200) });
+
+/** Settings → Portal (spec §10, §13.1). P5: which document fields clients see. The picker's options
+ *  are `pickable` — doc-fields.ts' one rule — so the page cannot offer what save would refuse. */
+export const portalSettingsRouter = {
+  get: adminProcedure.handler(async ({ context }) => {
+    const [settings, schemas] = await Promise.all([loadPortalSettings(context.tenantId), docSchemas(context.tenantId)]);
+    // Only what pickable still offers, in stored order: a UDF removed from B1 or a field denied since
+    // it was picked would otherwise ride along in the page's draft and make every save refuse.
+    const docFields: Partial<Record<DocEntity, PortalDocFields>> = {};
+    for (const [entity, fields] of Object.entries(settings.docFields ?? {}) as [DocEntity, PortalDocFields][]) {
+      if (!schemas[entity] || !fields) continue;
+      const p = pickable(schemas[entity]);
+      const keep = (names: string[], offered: B1Field[]) => names.filter((n) => offered.some((f) => f.name === n));
+      docFields[entity] = { header: keep(fields.header, p.header), lines: keep(fields.lines, p.lines) };
+    }
+    return {
+      docFields,
+      defaults: DOC_DEFAULTS,
+      options: Object.fromEntries(DOC_ENTITIES.map((e) => {
+        const p = pickable(schemas[e]);
+        return [e, { header: optionsOf(p.header), lines: optionsOf(p.lines) }];
+      })) as Record<DocEntity, { header: { key: string; label: string }[]; lines: { key: string; label: string }[] }>,
+    };
+  }),
+
+  save: adminProcedure
+    .input(z.object({ docFields: z.partialRecord(DocEntityZ, DocFieldsZ) }))
+    .handler(async ({ input, context }) => {
+      const schemas = await docSchemas(context.tenantId);
+      for (const [entity, fields] of Object.entries(input.docFields) as [DocEntity, PortalDocFields][]) {
+        const p = pickable(schemas[entity]);
+        const allowed = { header: new Set(p.header.map((f) => f.name)), lines: new Set(p.lines.map((f) => f.name)) };
+        for (const part of ["header", "lines"] as const) {
+          const refused = fields[part].find((n) => !allowed[part].has(n));
+          if (refused) throw new ORPCError("BAD_REQUEST", { message: `${refused} can't be shown on the portal (${entity})` });
+        }
+      }
+      const current = await loadPortalSettings(context.tenantId);
+      await savePortalSettings(context.tenantId, { ...current, docFields: input.docFields });
+      return { ok: true as const };
     }),
 };

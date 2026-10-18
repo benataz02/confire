@@ -3,18 +3,30 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BusyIndicator, Card, CardHeader, CheckBox, Form, FormItem, Input, Button, Label,
-  MessageStrip, FlexBox, Toast, type InputDomRef,
+  MessageStrip, FlexBox, Tab, TabContainer, Toast, type InputDomRef,
 } from "@ui5/webcomponents-react";
 import { orpc } from "../../orpc.ts";
 import { copyInput, generateAgentSecret } from "../../lib/agent-secret.ts";
+import { PortalDocFields } from "../../components/settings/PortalDocFields.tsx";
 
 export const Route = createFileRoute("/_authed/settings")({ component: Settings });
 
+const PAGE = { padding: "1rem", maxWidth: 720, margin: "0 auto", display: "flex", flexDirection: "column", gap: "1rem" } as const;
+
+/** Admin settings: how Confire reaches SAP, and what the customer portal shows (spec §10). */
 function Settings() {
+  // A tab's content mounts only while it is selected: the Portal tab reads four SAP schemas.
+  const [tab, setTab] = useState("agent");
   return (
-    <div style={{ padding: "1rem", maxWidth: 720, margin: "0 auto", display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <AgentCard />
-    </div>
+    <TabContainer contentBackgroundDesign="Transparent"
+      onTabSelect={(e) => setTab((e.detail.tab as HTMLElement).dataset.key ?? "agent")}>
+      <Tab text="SAP agent" data-key="agent" selected={tab === "agent"}>
+        {tab === "agent" ? <div style={PAGE}><AgentCard /></div> : null}
+      </Tab>
+      <Tab text="Portal" data-key="portal" selected={tab === "portal"}>
+        {tab === "portal" ? <div style={PAGE}><PortalDocFields /></div> : null}
+      </Tab>
+    </TabContainer>
   );
 }
 

@@ -3,24 +3,17 @@ import { Button, MessageStrip } from "@ui5/webcomponents-react";
 import { orpc } from "../../orpc.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { confirm } from "@confire/ui/confirm.ts";
-import { PrintActions } from "../../components/b1/PrintActions.tsx";
+import { PrintActions } from "@confire/ui/PrintActions.tsx";
+import { DOCUMENT_STATUS } from "@confire/ui/documentStatus.ts";
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { toIsoDay } from "@confire/ui/format.ts";
-import type { EntityFeature, Facet, HeaderActionContext, Row } from "@confire/ui/types.ts";
+import type { EntityFeature, HeaderActionContext, Row } from "@confire/ui/types.ts";
 
 // The B1 marketing documents, declared. One builder for all four: Quotations and Orders are
 // writable, DeliveryNotes and Invoices read-only — which is the server's word (entities.metadata
 // `writable`/`Editable`), not a flag here. Labels, types and options come from metadata; this file
 // says which fields, in what layout, with which value helps and links.
-
-/** B1's BoStatus member names (what the Service Layer sends) -> a status colour. */
-export const DOCUMENT_STATUS: Facet["statusMapping"] = {
-  bost_Open: { state: "Information", text: "Open" },
-  bost_Close: { state: "None", text: "Closed" },
-  bost_Paid: { state: "Positive", text: "Paid" },
-  bost_Delivered: { state: "Positive", text: "Delivered" },
-};
 
 /** Close open quotations in SAP (spec §7.3): the Object Page's header action and the List Report's
  *  selection action. A re-quote of a client's request whose quotation is closed posts a new one,

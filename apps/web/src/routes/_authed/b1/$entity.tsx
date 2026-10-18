@@ -10,7 +10,7 @@ import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPag
 import { useFieldConstraints } from "@confire/ui/metadata.ts";
 import { useListView } from "@confire/ui/useListView.ts";
 import { useDetailView } from "@confire/ui/useDetailView.ts";
-import { PrintActions } from "../../../components/b1/PrintActions.tsx";
+import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import { CloseQuotations } from "../../../features/b1/documents.tsx";
 import type { EntityFeature, ListQuery, Row } from "@confire/ui/types.ts";
 

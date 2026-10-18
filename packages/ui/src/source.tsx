@@ -15,7 +15,7 @@ type Utils = RouterUtils<Client>;
  */
 export type UiSource = {
   client: {
-    entities: Pick<Client["entities"], "rows" | "neighbor">;
+    entities: Pick<Client["entities"], "rows" | "neighbor" | "print">;
     /** The configurator's value help pages here. The portal plugs its own `projects.queryPage` in. */
     configs: Pick<Client["configs"], "queryPage">;
   };

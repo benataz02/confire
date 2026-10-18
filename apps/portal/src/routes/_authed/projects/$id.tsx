@@ -281,7 +281,9 @@ function ProjectPage({ id }: { id: string }) {
           events={timeline.data?.events} labels={timeline.data?.labels ?? {}}
           loading={timeline.isPending} error={timeline.error as Error | null}
           documents={documents.data} documentsError={documents.error as Error | null}
-          onComment={(note) => comment.mutateAsync({ projectId: id, note })} />
+          onComment={(note) => comment.mutateAsync({ projectId: id, note })}
+          onOpenDocument={(entity, key) => void navigate({ to: "/docs/$entity/$key", params: { entity, key: String(key) } })}
+          canPreview />
       </ObjectPageSection>
     </ObjectPage>
   );

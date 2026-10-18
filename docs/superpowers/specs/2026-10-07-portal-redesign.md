@@ -26,6 +26,16 @@ may not change a read-only parameter; a table the client sends back unchanged ke
 overrides, a table the client edits becomes the client's (§7.1, `acceptPortalInputs`). Finalizing
 actions sit in the page footers (Fiori). Notifications stay P7: no event mails yet. The four §16 P4
 checks against a live B1 are **not done** — the code marks each assumption `unverified (spec §16)`.
+**P5 decided 2026-10-18** through Q&A (§13.1): an entity with no `docFields` setting shows **code
+defaults**; the "Project" link is on **all four** documents (a walk back through the lines'
+`BaseType`/`BaseEntry` to the quotation); a timeline document row offers **Open + Preview**;
+**Download is removed** from both apps (Preview only: the browser's PDF viewer still saves); Invoices
+are on the portal; the settings picker is a table of entities whose *Edit* opens the existing column
+p13n panel. `docs.chain` (§11) is not built: §9 never uses it and `timeline.documents` is the chain.
+**P5 built 2026-10-18** (plan: `docs/superpowers/plans/2026-10-18-portal-p5.md`). Decided while
+building: Settings' tabs mount only while selected (the Portal tab reads four SAP schemas); the portal's
+`UiSource` keeps the raw `docs.*` functions on its `client` side, because `PrintActions` calls
+`client.entities.print` directly.
 **Revised 2026-10-16:** onboarding is invitation-only (D7, D17, D25, D26, §5). Open
 self-registration, applications and their approval are gone.
 **Revised 2026-10-16:** this builds from the current internal-only codebase. The previous in-app
@@ -779,6 +789,73 @@ fails (agent down, no email, no match) falls back to the list.
   create, not an `entities.update`. The lead create is its own handler with its own field list,
   `formSchema` (code defaults ∪ admin extras, ∩ BP metadata, minus the denylist), plus the
   server-set `CardType`, `Series`, `BPAddresses`, `ContactEmployees` and `U_CF_Key`.
+
+### 13.1 Portal documents (P5)
+
+**Entities:** `Quotations`, `Orders`, `DeliveryNotes`, `Invoices`, and nothing else; the portal router
+refuses any other name.
+
+**The field rule, one pure module** (`portal/doc-fields.ts`, tested), read by both processes:
+
+- `ALWAYS = DocEntry, DocNum, DocDate, DocumentStatus, DocTotal, DocCurrency`. The page header needs
+  them, and the timeline already shows total and status to the client. They are in every portal
+  schema and are not offered by the picker.
+- `NEVER = CardCode`: the fence field, never in a portal schema (§13).
+- `DENYLIST`: patterns, case-insensitive, matched on header and line fields alike: `*Cost*`,
+  `*Profit*`, `GrossBuyPrice`, `Stock*` (the row's inventory value), `LastBuy*` (last purchase
+  price), `*Margin*`, `*Commis*`, `U_CF_Key`. Checked against a live tenant's cached schemas
+  (OperatingProfit*, StockInmPrice, LastBuyInmPrice, CommisionPercent… are real B1 fields).
+- `DOC_DEFAULTS`, used when `settings.docFields[entity]` is absent: header `DocDueDate`, `NumAtCard`;
+  lines `ItemCode`, `ItemDescription`, `Quantity`, `UnitPrice`, `LineTotal`. Not `Comments`: B1's
+  Remarks often hold internal notes, so an admin opts it in.
+- `portalSchema(schema, docFields)`: `ALWAYS` ∪ the header list, then a `DocumentLines` collection
+  holding the line list. Fields come in setting order, so the list's columns and the form follow the
+  admin's order. Anything denylisted, unknown to the schema, or a collection other than
+  `DocumentLines` is dropped **on read**, so a stale setting cannot expose a field later added to the
+  denylist.
+- `pickable(schema)`: the picker's candidates, i.e. scalar header fields and `DocumentLines` fields,
+  minus `ALWAYS`, `NEVER` and the denylist.
+
+**Settings** (`portal_settings`, §6): P5 creates the table and writes only `docFields`. A module
+`portal/settings.ts` loads it (absent row = `{}`) and saves the whole document. Internal
+`portalSettings.get` (admin) returns the settings — each stored list cut to what `pickable` still
+offers, so a removed UDF or a newly denied field cannot block the next save — plus, per entity, its
+`pickable` header and line fields (label from metadata); `portalSettings.save` refuses an entity outside the four and any field
+`pickable` does not offer. In `apps/web` Settings becomes two tabs, *SAP agent* and *Portal*. The
+Portal tab holds the *Document fields* table: one row per entity, header and line counts ("Default"
+while unset), *Edit* opening `ColumnsTab` (search, tick, reorder) in a dialog, *Reset* removing the
+entity's entry, and one *Save*.
+
+**Portal `docs` router** (member). Every read uses `portalSchema(entitySchema(…), settings)`:
+
+- `metadata(entity)`: `toConstraints(portalSchema, undefined)` (read-only) plus `printable`.
+- `rows(entity, query, cursor?, count?)`: `readRows` with `CardCode eq '<company>'` as its
+  `extraFilter` and the cursor sealed to `portal:<companyId>`.
+- `one(entity, key)`: the row with `CardCode` read alongside, `NOT_FOUND` unless it is the
+  company's, then cut down to the schema (header fields and each line's fields). No ETag goes back.
+- `print(entity, docEntry)`: the same CardCode check, then `printDocument`.
+- `project(entity, docEntry)`: the project this document came from, or null. It walks back through
+  the lines' `BaseType`/`BaseEntry` (17 → Orders, 15 → DeliveryNotes, 23 → Quotations), reading only
+  `DocumentLines` per hop, three hops at most, until it reaches quotation DocEntries. Then it finds a
+  `quoted` event carrying one of them, on a project with `portalCompanyId` = the seat's company. The
+  first document is CardCode-checked. It is a separate call, so a slow walk never delays the page.
+
+**Portal UI:**
+
+- Side nav group *Documents* with the four entities, `/docs/$entity` and `/docs/$entity/$key`.
+- `features/documents.ts` builds each page from the metadata the server sends: the list's columns
+  and the form's fields are the schema's header fields in order, the Lines table its `DocumentLines`
+  fields. This is D19's admin list deciding the page, not B1 metadata, so CLAUDE.md's "metadata never
+  generates a page" still holds. Filters: `DocNum` (exact), `DocDate`, `DocumentStatus`. System
+  views: Standard (newest first), Open.
+- The Object Page is read-only (`writable: false`), with no record navigation. Header facets are
+  status and total; header actions are **Preview** and, when `docs.project` answers, a **Project**
+  link to `/projects/$id`.
+- `UiSource` gains `client.entities.print`. The portal builds its `entities` source from `docs.*`, which
+  replaces P4's throwing stub. `PrintActions` (Preview only) moves to `packages/ui` and prints
+  through the source.
+- `ProjectTimeline` document rows: *Open* (`onOpenDocument`) and *Preview* (a `canPreview` prop),
+  on the portal for every seat, and on the internal page for admins, matching `entities.print`.
 
 ## 14. Starting point
 

@@ -660,7 +660,8 @@ function RequestTimeline({ id }: { id: string }) {
       onComment={(note, internalOnly) => comment.mutateAsync({ projectId: id, note, internalOnly })}
       onOpenDocument={isAdmin
         ? (entity, key) => void navigate({ to: "/b1/$entity/$key", params: { entity, key: String(key) } })
-        : undefined} />
+        : undefined}
+      canPreview={isAdmin} />
   );
 }
 

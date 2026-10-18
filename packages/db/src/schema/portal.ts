@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 
 // The customer portal (spec docs/superpowers/specs/2026-10-07-portal-redesign.md §4, §6): companies,
@@ -10,6 +10,11 @@ export type PortalCardType = "cCustomer" | "cLid";
 export const PORTAL_ROLES = ["owner", "buyer", "viewer"] as const;
 export type PortalRole = (typeof PORTAL_ROLES)[number];
 export type PortalInviteStatus = "pending" | "accepted" | "canceled";
+/** The SAP document fields a tenant shows its clients (D19), per entity, in display order. */
+export type PortalDocFields = { header: string[]; lines: string[] };
+/** `portal_settings.settings` (spec §6): one document, loaded and saved whole. P5 writes `docFields`;
+ *  P6/P7 add their keys beside it. */
+export type PortalSettings = { docFields?: Partial<Record<string, PortalDocFields>> };
 
 /** A customer company: one per tenant × CardCode, the register of which CardCodes are on the portal
  *  (§4.2). Created server-side only — by an invitation or an onboarding submit — never by a call a
@@ -95,3 +100,11 @@ export const portalCompanyDomain = pgTable(
     index("portal_company_domain_company_idx").on(t.companyId),
   ],
 );
+
+/** The tenant's portal settings (spec §6): one jsonb document loaded and saved whole, the CLAUDE.md
+ *  convention for configuration. Written only through apps/server/src/portal/settings.ts. */
+export const portalSettings = pgTable("portal_settings", {
+  tenantId: text("tenant_id").primaryKey(),
+  settings: jsonb("settings").$type<PortalSettings>().notNull().default({}),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

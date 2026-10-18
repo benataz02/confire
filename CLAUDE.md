@@ -51,7 +51,7 @@ confire-agent (Bun, on the customer's network) ── SAP B1 Service Layer /b1s/
 The customer portal is a second process from the same image (compose service `portal`, CMD
 `start:portal`) so external traffic never shares an event loop with staff. Both are `serve.ts`:
 Better Auth on `/api/auth`, oRPC on `/rpc` with the 2 MB body cap, the SPA on the rest. The design
-record is `docs/superpowers/specs/2026-10-07-portal-redesign.md`; P0–P4 are built (see its §15).
+record is `docs/superpowers/specs/2026-10-07-portal-redesign.md`; P0–P5 are built (see its §15).
 
 The agent is a Windows service the customer installs. SAP credentials live in its `agent.json`
 and never reach the cloud. `sapConnection.agentUrl` is `http://localhost:4000` in dev and a
@@ -120,6 +120,17 @@ transaction; `assertWritable(…, actor)` + `writableBy(side)` say who may edit 
 internal read never sees a client's draft (`internalVisible`). Staff work requests in Portal →
 Requests (`orpc/routers/requests.ts`) and on the existing process page. The timeline is
 `project-timeline.ts`: events from Postgres, SAP document chains as a separate live read.
+
+**Portal documents** (spec §13.1): a client's own quotations, orders, deliveries and invoices.
+`portal/doc-fields.ts` is the one field rule — `ALWAYS` (DocNum, status, total…), `NEVER` (CardCode),
+a cost/margin/purchase-price denylist and code defaults — and `portalSchema` applies it **on read**,
+so a stale setting cannot expose a field. `portal/orpc/docs.ts` fences every read: `rows` passes
+`CardCode eq '<company>'` as `readRows`' `extraFilter` and seals its cursor to `portal:<companyId>`;
+`one`, `print` and `project` read the document's CardCode before returning anything. `docs.project`
+walks back through the lines' `BaseType`/`BaseEntry` to the quotation a project quoted. Admins pick
+fields in Settings → Portal (`portalSettings`, one jsonb `portal_settings` document; P5 writes
+`docFields`). The portal plugs `docs.*` into `UiSource`, so the shells run unchanged. Print is Preview
+only, in both apps (`@confire/ui/PrintActions.tsx`).
 
 There is no bot check and no supplier branding on sign-in: account mail is always Confire's. Host
 rules for both SPAs (slug, the sign-in host's URLs, `safeRedirect` — anything under the sign-in host's

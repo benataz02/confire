@@ -4,6 +4,7 @@ import {
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoActivities.js";
 import { money } from "../money.ts";
+import { PrintActions } from "../PrintActions.tsx";
 
 // A project's timeline (spec §8), for both apps: one merged, time-ordered feed of the project's
 // events and the SAP documents its quotations became, with a comment box. Props-driven — each app
@@ -84,7 +85,7 @@ type Entry =
   | { at: number; kind: "doc"; d: TimelineDoc; superseded: boolean };
 
 export function ProjectTimeline({
-  events, labels, loading, error, documents, documentsError, side, currency, canComment, onComment, onOpenDocument,
+  events, labels, loading, error, documents, documentsError, side, currency, canComment, onComment, onOpenDocument, canPreview,
 }: {
   events: TimelineEvent[] | undefined;
   labels: Record<string, string>;
@@ -98,8 +99,11 @@ export function ProjectTimeline({
   currency?: string;
   canComment: boolean;
   onComment: (note: string, internalOnly: boolean) => Promise<unknown>;
-  /** opens a document; omit and documents render without a link (the portal until P5) */
+  /** opens a document's object page; omit and documents render without a link */
   onOpenDocument?: (entity: string, docEntry: number) => void;
+  /** a Preview of each document's SAP print layout, through the app's source — only for a reader the
+   *  server lets print (any seat on the portal, admins internally) */
+  canPreview?: boolean;
 }) {
   const [note, setNote] = useState("");
   const [internalOnly, setInternalOnly] = useState(false);
@@ -175,6 +179,7 @@ export function ProjectTimeline({
                     {onOpenDocument ? (
                       <Link onClick={() => onOpenDocument(x.d.entity, x.d.docEntry)}>Open</Link>
                     ) : null}
+                    {canPreview ? <PrintActions entity={x.d.entity} docEntry={x.d.docEntry} /> : null}
                   </div>
                 </TimelineItem>
               );

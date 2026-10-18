@@ -28,19 +28,22 @@ const router = createRouter({
 });
 
 // What the @confire/ui shells read and write, over the portal's own procedures (spec P1's seam): the
-// configurator's value help pages `projects.queryPage` (fenced to the client's models), and views
-// are the portal's — personal only.
-// ponytail: no B1 entity source until P5's documents; the stub answers every entity read with an
-// error, and nothing in P4 asks (the configurator's value helps are masterdata sources).
-const noEntities = createTanstackQueryUtils({
-  entities: Object.fromEntries(["metadata", "one", "create", "update", "rows", "neighbor"].map((k) => [k, () => {
-    throw new Error("SAP documents arrive on the portal with P5");
-  }])),
-} as never) as unknown as { entities: UiSource["orpc"]["entities"] & UiSource["client"]["entities"] };
+// configurator's value help pages `projects.queryPage` (fenced to the client's models), views are
+// the portal's — personal only — and the B1 entity reads are `docs.*` (§13.1), the company's own
+// documents cut to the tenant's field list. The shapes mirror entities.*, so ListReport, ObjectPage
+// and useDetailView run unchanged; nothing on the portal writes to SAP.
+const readOnly = () => { throw new Error("Documents are read-only on the portal"); };
+const docsClient = {
+  metadata: client.docs.metadata, one: client.docs.one, rows: client.docs.rows, print: client.docs.print,
+  create: readOnly, update: readOnly, neighbor: readOnly,
+};
+// The client side is called directly (PrintActions, record navigation); the orpc side builds query
+// options and keys. Cast: docs.one takes a number key where entities.one takes any Key.
+const docs = createTanstackQueryUtils({ entities: docsClient } as never) as unknown as { entities: UiSource["orpc"]["entities"] };
 
 const uiSource: UiSource = {
-  client: { entities: noEntities.entities, configs: { queryPage: client.projects.queryPage } },
-  orpc: { entities: noEntities.entities, views: orpc.views },
+  client: { entities: docsClient as unknown as UiSource["client"]["entities"], configs: { queryPage: client.projects.queryPage } },
+  orpc: { entities: docs.entities, views: orpc.views },
   useRole: () => useQuery(meQuery).data?.company?.role,
   useCurrency: () => useQuery(meQuery).data?.currency ?? undefined,
 };

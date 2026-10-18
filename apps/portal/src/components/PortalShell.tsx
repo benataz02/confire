@@ -3,7 +3,7 @@ import type { MouseEvent } from "react";
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Avatar, Button, NavigationLayout, ShellBar, ShellBarBranding, SideNavigation, SideNavigationItem,
+  Avatar, Button, NavigationLayout, ShellBar, ShellBarBranding, SideNavigation, SideNavigationGroup, SideNavigationItem,
   UserMenu, UserMenuAccount, UserMenuItem,
 } from "@ui5/webcomponents-react";
 import type { NavigationLayoutDomRef, NavigationLayoutPropTypes, SideNavigationPropTypes } from "@ui5/webcomponents-react";
@@ -12,11 +12,12 @@ import { ROLE_LABEL } from "@confire/ui/portal/CompanyPeople.tsx";
 import { authClient } from "../auth-client.ts";
 import { lobbyQuery, meQuery, type Me } from "../orpc.ts";
 import { authUrl, hardRedirect } from "../lib/host.ts";
+import { DOC_PAGES } from "../features/documents.ts";
 
 // The supplier's portal chrome (spec §9): the same NavigationLayout + ShellBar + SideNavigation
 // pattern as the internal AppShell, wearing the supplier's name and logo (D20). Fiori: no shell-bar
 // Back button (the browser's does that), the branding element leads home, the profile opens the
-// user menu. P5 adds Documents.
+// user menu.
 
 export const roleLabel = (role: keyof typeof ROLE_LABEL) => ROLE_LABEL[role];
 
@@ -114,6 +115,12 @@ export function PortalShell() {
           <SideNavigationItem text="Home" icon="home" data-to="/" selected={pathname === "/"} />
           <SideNavigationItem text="Projects" icon="product" data-to="/projects"
             selected={pathname === "/projects" || pathname.startsWith("/projects/")} />
+          <SideNavigationGroup text="Documents" expanded>
+            {Object.entries(DOC_PAGES).map(([entity, p]) => (
+              <SideNavigationItem key={entity} text={p.label} icon={p.icon} data-to={`/docs/${entity}`}
+                selected={pathname === `/docs/${entity}` || pathname.startsWith(`/docs/${entity}/`)} />
+            ))}
+          </SideNavigationGroup>
         </SideNavigation>
       }
     >
