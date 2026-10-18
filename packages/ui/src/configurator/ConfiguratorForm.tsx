@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import {
   CheckBox, Form, FormGroup, FormItem, Icon, Input, Label, MultiComboBox, MultiComboBoxItem,
-  ObjectStatus, Option, RadioButton, SegmentedButton, SegmentedButtonItem, Select, StepInput, Text, Title,
+  ObjectStatus, Option, Panel, RadioButton, SegmentedButton, SegmentedButtonItem, Select, StepInput, Text, Title,
 } from "@ui5/webcomponents-react";
 import {
   displayColumns, domainOf, isTableGroup, paramPrices, placedTables, refKeyCols,
@@ -58,7 +58,7 @@ function formSections(model: ModelDef): { key: string; title: string; icon?: str
 }
 
 // labelSpan 12 everywhere = labels on top of their fields (natively left-aligned), field takes the full column.
-const FORM_PROPS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2", headerLevel: "H5" } as const;
+const FORM_PROPS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2" } as const;
 
 // A table group holds exactly one FormItem, and it must not be one column wide: the group spans
 // the whole Form (colSpan mirrors FORM_PROPS.layout) and the item breaks out of the column flow
@@ -235,11 +235,10 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     );
   };
 
-  // One Form per model section. UI5's Form is the layout container and supports exactly one level
-  // of grouping (Form > FormGroup), so section→Form / group→FormGroup is the only mapping that keeps
-  // both titles; a single Form for everything would flatten sections away. The Form header is the
-  // section's one title everywhere, and a section's only group drops its own header, which would
-  // just repeat it.
+  // One Panel per model section, each holding one headerless Form. The Panel is the container — the
+  // section's one title, and collapsible; the Form only lays out label/field pairs, and supports
+  // exactly one level of grouping (Form > FormGroup), so section→Panel+Form / group→FormGroup keeps
+  // both titles. A section's only group drops its own header, which would just repeat the Panel's.
   //
   // A section's groups are of two kinds: a table group renders as one full-width, headerless
   // FormGroup — the Grid's toolbar titles it from its TableDef (so a rename in TableDialog cannot
@@ -279,16 +278,19 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
           </SegmentedButton>
         ) : null;
       return (
-        // A custom header takes the Form's aria name with it, hence accessibleName.
-        <Form key={`${sec.key}:${si}`} headerText={sec.title} accessibleName={sec.title} {...FORM_PROPS} {...formMode}
+        // Unnamed on purpose: a Panel takes its aria-label from accessibleName only, and an unnamed
+        // region is no landmark — the Form below is the named region, its groups the form roles.
+        // A custom header is not clickable (only its arrow toggles), which lets the batch picker live in it.
+        <Panel key={`${sec.key}:${si}`} accessibleRole="Region" headerText={sec.title} headerLevel="H5"
           header={sec.icon || batchPick ? (
             // flex: 1 — the header slot sits in a flex row, and the picker needs the room to sit right.
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flex: 1 }}>
               {sec.icon ? <Icon name={sec.icon} /> : null}
-              <Title level={FORM_PROPS.headerLevel}>{sec.title}</Title>
+              <Title level="H5">{sec.title}</Title>
               {batchPick}
             </div>
           ) : undefined}>
+        <Form accessibleName={sec.title} {...FORM_PROPS} {...formMode}>
           {groups.map((g, gi) => {
           if (isTableGroup(g)) {
             const def = defOf(g.table)!;
@@ -355,6 +357,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
           );
           })}
         </Form>
+        </Panel>
       );
       })}
     </div>

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { displayValue } from "./formHelpers.ts";
+import { addBatch, displayValue } from "./formHelpers.ts";
 
 const yn = [
   { value: true, label: "Yes" },
@@ -24,4 +24,9 @@ test("displayValue: domain label, else the raw string; 0 is a value", () => {
 
 test("displayValue: multicombo joins labels", () => {
   expect(displayValue(["red", "blue"], colors)).toBe("Crimson, Azure");
+});
+
+test("addBatch: positive integers only, de-duped, ascending", () => {
+  expect(addBatch([10], " 5 ")).toEqual([5, 10]);
+  for (const raw of ["", "  ", "-3", "0", "2.5", "abc", "10"]) expect(addBatch([10], raw)).toEqual([10]);
 });

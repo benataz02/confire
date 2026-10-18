@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Bar, Button, BusyIndicator, MessageStrip } from "@ui5/webcomponents-react";
 import { toast } from "@confire/ui/toast.ts";
-import { meQuery, orpc } from "../../orpc.ts";
+import { orpc, useIsAdmin } from "../../orpc.ts";
 import { b1Feature } from "../../features/b1/index.ts";
 import { useFieldConstraints } from "@confire/ui/metadata.ts";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
@@ -31,8 +31,7 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   // The B1 pages are admin/owner only — _authed bounces everyone else off /b1 — so a plain member
   // stays here and reads the confirmation rather than being thrown back to the dashboard.
-  const me = useQuery(meQuery);
-  const canOpenInB1 = me.data?.role === "admin" || me.data?.role === "owner";
+  const canOpenInB1 = useIsAdmin();
   const meta = useFieldConstraints("Quotations");
   const draft = useQuery({ ...orpc.configs.quoteDraft.queryOptions({ input: { projectId } }), retry: false });
   const backToConfig = () => navigate({ to: "/configs/$id", params: { id: projectId } });

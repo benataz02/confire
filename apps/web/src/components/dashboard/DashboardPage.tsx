@@ -8,7 +8,7 @@ import {
 } from "@ui5/webcomponents-react";
 import { BulletChart, ColumnChart, DonutChart, LineChart } from "@ui5/webcomponents-react-charts";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
-import { meQuery, orpc, useCurrency } from "../../orpc.ts";
+import { meQuery, orpc, useCurrency, useIsAdmin } from "../../orpc.ts";
 import {
   conversionSlices, deviationPct, greeting, monthLabel, percent, percentPoints, scaled, trendOf,
 } from "./dashboardView.ts";
@@ -37,7 +37,7 @@ export function DashboardPage() {
   }));
 
   const firstName = (me?.user?.name ?? me?.user?.email ?? "there").split(/[ @]/)[0]!;
-  const isAdmin = me?.role === "admin" || me?.role === "owner";
+  const isAdmin = useIsAdmin();
   const busy = o.isFetching || refresh.isPending;
   const d = o.data;
   // undefined until SAP has answered once for this tenant; the cards then read as bare numbers

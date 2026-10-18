@@ -62,3 +62,16 @@ test("what the quote waits on is listed, each jumping to its field", () => {
   const msgs = configMessages({ ...base, missing: [{ key: "items", message: "Items: add at least one row" }] });
   expect(msgs.map((m) => [m.type, m.text, m.anchor])).toEqual([["Critical", "Items: add at least one row", '[data-param="items"]']]);
 });
+
+test("read-only says why: quoted internally, or the request's status — the client's answer once given", () => {
+  const lock = (locked: Parameters<typeof configMessages>[0]["locked"]) => configMessages({ ...base, locked })[0]?.text;
+  expect(lock({ request: false, status: "quoted" })).toBe("Quoted — this configuration is read-only");
+  expect(lock({ request: true, status: "submitted" })).toBe("Accept the request to edit it");
+  expect(lock({ request: true, status: "quoted", quoteResponse: null })).toBe("Quoted — waiting for the client's answer");
+  expect(lock({ request: true, status: "quoted", quoteResponse: "accepted" })).toBe("Quote accepted by the client");
+});
+
+test("every failed change is its own message, so an old one cannot hide a newer one", () => {
+  const msgs = configMessages({ ...base, configErrors: [new Error("rename"), null, new Error("calc")] });
+  expect(msgs.map((m) => m.text)).toEqual(["rename", "calc"]);
+});

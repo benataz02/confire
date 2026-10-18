@@ -274,12 +274,15 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
     // flex:1 + minHeight:0 is fitContent's contract (see the params section): fill the page height.
     // A drag writes px straight onto the panes, so a new arrangement — or a resized page, where
     // those px would leave a gap — resets to the declared sizes.
+    // The inset is the splitter's margin, not padding on either pane: the section already pads
+    // the top, and a pane padding would drop the structure card below the first preview Form.
     <SplitterLayout vertical={previewAt === "top" || previewAt === "bottom"}
-      style={{ flex: 1, minHeight: 0 }} options={{ resetOnCustomDepsChange: [previewAt], resetOnSizeChange: true }}>
+      style={{ flex: 1, minHeight: 0, margin: "0 1rem 1rem" }}
+      options={{ resetOnCustomDepsChange: [previewAt], resetOnSizeChange: true }}>
       {previewFirst ? preview : null}
       <SplitterElement key="tree" size={previewAt === "hidden" ? "100%" : "50%"} minSize={280}>
     <div style={{
-      display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1rem",
+      display: "flex", flexDirection: "column", gap: "0.75rem",
       flex: "1 1 auto", minInlineSize: 0, overflowY: "auto",
     }}>
       {/* Form's shell (.ui5-form-root) is the rounded card: 0.75rem and the group background.
@@ -292,7 +295,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       }}>
       {/* Every other add lives on the row it adds into, so this is the only action with no row to
           hang it on. marginTop cancels the Subheader's -1px overlap, which the clip would shave. */}
-      <Bar design="Subheader" style={{ borderBlockEnd: "none"}}
+      <Bar design="Subheader" style={{ borderBlockEnd: "none", marginTop: 0 }}
         startContent={<Title level="H5">Form structure</Title>}
         endContent={<Button icon="add" onClick={addSection}>Add section</Button>}
       />
@@ -481,7 +484,7 @@ function PreviewPane({ modelId, draft, issues, lookups, lookupsFailed, onRetryLo
           <Button icon="refresh" onClick={onRetryLookups}>Retry loading options</Button>
         </div>
       ) : null}
-      <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "0 1rem 1rem" }}>
+      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
         {lookups && lk && prop ? (
           <ConfiguratorForm model={previewModel} lookups={lookups} lk={lk} prop={prop} entries={entries} onChange={setEntries}
             onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}

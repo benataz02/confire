@@ -47,6 +47,13 @@ export function useCurrency(): string | undefined {
   return useQuery(meQuery).data?.currency ?? undefined;
 }
 
+/** admin/owner: who may open the /b1 pages and the model builder. Hides links only — `_authed`
+ *  and the server enforce it. */
+export function useIsAdmin(): boolean {
+  const role = useQuery(meQuery).data?.role;
+  return role === "admin" || role === "owner";
+}
+
 export type RouterOutputs = {
   dashboard: { overview: Awaited<ReturnType<typeof client.dashboard.overview>> };
 };

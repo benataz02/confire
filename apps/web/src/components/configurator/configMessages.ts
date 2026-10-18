@@ -12,6 +12,19 @@ const conflictParam = (path: string) => /^parameters\.(.+)$/.exec(path)?.[1];
 const labelOf = (model: ModelDef | undefined, key: string) =>
   model?.parameters.find((p) => p.key === key)?.label ?? key;
 
+type Lock = { text: string; detail: string };
+const QUOTED: Lock = { text: "Quoted — this configuration is read-only", detail: "The quotation it produced is what SAP holds now." };
+/** Why a client's request is read-only, in its status's own words (spec §7). A quoted request reads
+ *  the client's answer, so `accepted` stands in for quoted once they gave it. Statuses missing here
+ *  are never read-only on this page. */
+const REQUEST_LOCK: Record<string, Lock> = {
+  submitted: { text: "Accept the request to edit it", detail: "It stays exactly as the client submitted it until someone takes it into review." },
+  returned: { text: "With the client for changes", detail: "The client edits it now; it comes back when they resubmit." },
+  declined: { text: "Declined — this request is closed", detail: "Nothing can change on it any more." },
+  quoted: { text: "Quoted — waiting for the client's answer", detail: "A decline reopens the request in review." },
+  accepted: { text: "Quote accepted by the client", detail: "Create the sales order in SAP from the quotation." },
+};
+
 /** Everything the configuration has to say about itself, as one list for the title's message
  *  popover: what blocks the calculation, what the engine could not reconcile, and whatever the
  *  last server round trip refused. */
@@ -34,35 +47,31 @@ export function configMessages(a: {
   syncError?: Error | null;
   /** BOM item codes the calculation costed at 0 — see unpricedItems */
   unpriced?: string[];
-  /** update / calculate / duplicate / delete — whichever failed last */
-  configError?: Error | null;
+  /** update / calculate / duplicate / delete / a request decision — every one that failed */
+  configErrors?: (Error | null)[];
   selectError?: Error | null;
-  /** read-only, and every action above is fenced server-side: `true` is a quoted configuration; a
-   *  client's request says why in its own words (its status decides who may edit, spec §7) */
-  locked: boolean | { text: string; detail: string };
+  /** read-only, and every action above is fenced server-side: an internal configuration once
+   *  quoted, a client's request in every status but in review */
+  locked: false | { request: boolean; status: string; quoteResponse?: string | null };
 }): PageMessage[] {
   const out: PageMessage[] = [];
 
-  if (a.locked)
-    out.push({
-      id: "locked", type: "Information",
-      ...(a.locked === true
-        ? { text: "Quoted — this configuration is read-only", detail: "The quotation it produced is what SAP holds now." }
-        : a.locked),
-      ...CONFIGURE,
-    });
+  const lock = !a.locked ? undefined
+    : !a.locked.request ? QUOTED
+    : REQUEST_LOCK[a.locked.quoteResponse === "accepted" ? "accepted" : a.locked.status];
+  if (lock) out.push({ id: "locked", type: "Information", ...lock, ...CONFIGURE });
 
-  // The same two the footer gates Calculate on. Critical, not Negative: nothing is wrong yet, the
-  // configuration just cannot run until they are filled.
+  // Two of the General fields the configurator waits for (batch quantities come through `missing`).
+  // Critical, not Negative: nothing is wrong yet, the configuration just cannot start until they are filled.
   if (!a.name.trim())
     out.push({
       id: "name", type: "Critical", text: "Enter a name",
-      detail: "Required before the configuration can calculate.", ...CONFIGURE, anchor: "#cfg-name",
+      detail: "Required before the configurator opens.", ...CONFIGURE, anchor: "#cfg-name",
     });
   if (!a.customer)
     out.push({
       id: "customer", type: "Critical", text: "Pick a business partner",
-      detail: "Required before the configuration can calculate.", ...CONFIGURE, anchor: "#cfg-customer",
+      detail: "Required before the configurator opens.", ...CONFIGURE, anchor: "#cfg-customer",
     });
 
   // Why Create quote has not appeared yet. Critical for the same reason as the two above.
@@ -86,11 +95,14 @@ export function configMessages(a: {
       id: "lookups", type: "Negative", text: a.lookupsError.message,
       detail: "Option lists could not be loaded", ...CONFIGURE,
     });
-  if (a.configError)
-    out.push({
-      id: "config", type: "Negative", text: a.configError.message,
-      detail: "The last change did not go through", ...CONFIGURE,
-    });
+  // Each failure its own message: one long-past error must not hide a newer one.
+  (a.configErrors ?? []).forEach((e, i) => {
+    if (e)
+      out.push({
+        id: `config:${i}`, type: "Negative", text: e.message,
+        detail: "The last change did not go through", ...CONFIGURE,
+      });
+  });
 
   // Option lists come from a cache now, so the page always renders — but it owes the user the
   // truth about how old the data is. Never-synced is Critical (the lists are empty and that is

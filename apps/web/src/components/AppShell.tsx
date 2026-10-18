@@ -11,7 +11,7 @@ import {
 import "@ui5/webcomponents-fiori/dist/illustrations/ErrorScreen.js";
 import type { SideNavigationPropTypes, NavigationLayoutDomRef, NavigationLayoutPropTypes } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
-import { meQuery } from "../orpc.ts";
+import { meQuery, useIsAdmin } from "../orpc.ts";
 import { B1_FEATURES } from "../features/b1/index.ts";
 import { GlobalSearch, type SearchEntry } from "./GlobalSearch.tsx";
 import { useRef, useState, useMemo } from "react";
@@ -45,7 +45,7 @@ export function AppShell() {
   // Role decides whether the Settings item shows; the server gates it too.
   const me = useQuery(meQuery);
   const user = me.data?.user;
-  const isAdmin = me.data?.role === "admin" || me.data?.role === "owner";
+  const isAdmin = useIsAdmin();
   const isClient = me.data?.role === "client";
   const queryClient = useQueryClient();
 

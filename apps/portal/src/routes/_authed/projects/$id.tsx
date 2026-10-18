@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Bar, BusyIndicator, Button, Form, FormGroup, FormItem, Input, Label, MessageStrip, ObjectPage, ObjectPageSection,
-  ObjectPageTitle, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Text, Title, Toolbar, ToolbarButton,
+  Bar, BusyIndicator, Button, Form, FormGroup, FormItem, Input, Label, MessageStrip, MultiInput, ObjectPage, ObjectPageSection,
+  ObjectPageTitle, Panel, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Text, Title, Token, Toolbar, ToolbarButton,
 } from "@ui5/webcomponents-react";
 import type { Entries, TableRows, Val } from "@confire/config-engine";
 import { ConfiguratorForm, ConsistencyStatus } from "@confire/ui/configurator/ConfiguratorForm.tsx";
-import { BatchQuantities } from "@confire/ui/configurator/BatchQuantities.tsx";
+import { addBatch } from "@confire/ui/configurator/formHelpers.ts";
 import { ProjectTimeline } from "@confire/ui/timeline/ProjectTimeline.tsx";
 import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
@@ -55,7 +55,13 @@ function ProjectPage({ id }: { id: string }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const setPayload = (p: Payload) => qc.setQueryData(getKey, p);
   const calc = useMutation(orpc.projects.calculate.mutationOptions({
-    onSuccess: (p) => { setDraft(null); setPayload(p); },
+    // Only the draft that was sent: an edit typed while this call was in flight stays, and the
+    // effect sends it next. `{ id, ...draft }` keeps each field's reference — see the internal page.
+    onSuccess: (p, vars) => {
+      setDraft((cur) => (cur && cur.entries === vars.entries && cur.batches === vars.batches
+        && cur.tables === vars.tables ? null : cur));
+      setPayload(p);
+    },
   }));
   // A status move: the list, the timeline and the documents all moved with it.
   const moved = (msg: string) => (p: Payload) => {
@@ -90,7 +96,9 @@ function ProjectPage({ id }: { id: string }) {
     entries: p?.project.entries ?? {}, batches: p?.project.batches ?? NONE, tables: p?.project.tables ?? {},
   };
   const edit = (patch: Partial<Draft>) => {
-    calc.reset(); // reopens the debounce after a refused edit — see the effect below
+    // Reopens the debounce after a refused edit — see the effect below. Only then: a reset detaches
+    // a pending call, and the effect would send a second calculate to race it.
+    if (calc.isError) calc.reset();
     setDraft({ entries, batches, tables, ...patch });
   };
 
@@ -214,7 +222,8 @@ function ProjectPage({ id }: { id: string }) {
           {error ? <MessageStrip design="Negative" hideCloseButton>{error.message}</MessageStrip> : null}
           {p.calcError ? <MessageStrip design="Negative" hideCloseButton>{p.calcError}</MessageStrip> : null}
           {STATUS_NOTE[status] ? <MessageStrip design="Information" hideCloseButton>{STATUS_NOTE[status]}</MessageStrip> : null}
-          <Form headerText="General" headerLevel="H5" labelSpan="S12 M12 L12 XL12" layout="S1 M2 L3 XL3"
+          <Panel accessibleRole="Region" headerText="General" headerLevel="H5">
+          <Form accessibleName="General" labelSpan="S12 M12 L12 XL12" layout="S1 M2 L3 XL3"
             accessibleMode={editable ? "Edit" : "Display"} itemSpacing={editable ? "Normal" : "Large"}>
             <FormGroup>
               <FormItem labelContent={<Label for={editable ? "project-name" : undefined} required>Name</Label>}>
@@ -230,10 +239,28 @@ function ProjectPage({ id }: { id: string }) {
                 <Text>{p.model.name}</Text>
               </FormItem>
               <FormItem labelContent={<Label required>Batch quantities</Label>}>
-                <BatchQuantities batches={batches} readOnly={!editable} anchor={BATCHES} onChange={(next) => edit({ batches: next })} />
+                {editable ? (
+                  // Same field as the internal page: Enter (or blur) turns the typed quantity into a token.
+                  <MultiInput type="Number" data-param={BATCHES} style={{ width: "100%" }}
+                    placeholder="Type a quantity, press Enter" accessibleName="Batch quantities"
+                    valueState={batches.length ? "None" : "Negative"}
+                    valueStateMessage={<div>Add at least one batch quantity.</div>}
+                    tokens={batches.map((b) => <Token key={b} text={String(b)} />)}
+                    onChange={(e) => {
+                      edit({ batches: addBatch(batches, e.target.value ?? "") });
+                      e.target.value = "";
+                    }}
+                    onTokenDelete={(e) => {
+                      const gone = new Set(e.detail.tokens.map((t) => Number((t as HTMLElement).getAttribute("text"))));
+                      const left = batches.filter((b) => !gone.has(b));
+                      // Deleting the last quantity falls back to 1 rather than leaving nothing to price.
+                      edit({ batches: left.length ? left : [1] });
+                    }} />
+                ) : <Text>{batches.join(", ")}</Text>}
               </FormItem>
             </FormGroup>
           </Form>
+          </Panel>
           <ConfiguratorForm model={p.model.definition} lookups={p.lookups} lk={p.lookups} prop={prop}
             entries={entries} readOnly={!editable} querySource={{ modelId: p.project.modelId }}
             onChange={(next) => edit({ entries: next })}
