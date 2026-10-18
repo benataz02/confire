@@ -8,6 +8,7 @@ import {
 import { orpc } from "../../orpc.ts";
 import { copyInput, generateAgentSecret } from "../../lib/agent-secret.ts";
 import { PortalDocFields } from "../../components/settings/PortalDocFields.tsx";
+import { PortalOnboarding } from "../../components/settings/PortalOnboarding.tsx";
 
 export const Route = createFileRoute("/_authed/settings")({ component: Settings });
 
@@ -24,7 +25,7 @@ function Settings() {
         {tab === "agent" ? <div style={PAGE}><AgentCard /></div> : null}
       </Tab>
       <Tab text="Portal" data-key="portal" selected={tab === "portal"}>
-        {tab === "portal" ? <div style={PAGE}><PortalDocFields /></div> : null}
+        {tab === "portal" ? <div style={PAGE}><PortalDocFields /><PortalOnboarding /></div> : null}
       </Tab>
     </TabContainer>
   );

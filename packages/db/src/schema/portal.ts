@@ -12,9 +12,16 @@ export type PortalRole = (typeof PORTAL_ROLES)[number];
 export type PortalInviteStatus = "pending" | "accepted" | "canceled";
 /** The SAP document fields a tenant shows its clients (D19), per entity, in display order. */
 export type PortalDocFields = { header: string[]; lines: string[] };
-/** `portal_settings.settings` (spec §6): one document, loaded and saved whole. P5 writes `docFields`;
- *  P6/P7 add their keys beside it. */
-export type PortalSettings = { docFields?: Partial<Record<string, PortalDocFields>> };
+/** A BusinessPartners field an admin adds to the new-client onboarding form (§5.3), in form order. */
+export type PortalExtraField = { key: string; required: boolean };
+/** `portal_settings.settings` (spec §6): one document, loaded and saved whole. P5 writes `docFields`,
+ *  P6 `onboarding` and `leadSeries` (a B1 BP numbering series; absent = B1's default for leads); P7
+ *  adds its keys beside them. */
+export type PortalSettings = {
+  docFields?: Partial<Record<string, PortalDocFields>>;
+  onboarding?: { extraFields: PortalExtraField[] };
+  leadSeries?: number;
+};
 
 /** A customer company: one per tenant × CardCode, the register of which CardCodes are on the portal
  *  (§4.2). Created server-side only — by an invitation or an onboarding submit — never by a call a

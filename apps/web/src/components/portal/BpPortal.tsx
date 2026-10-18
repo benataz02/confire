@@ -62,6 +62,29 @@ export function InviteToPortal({ cardCode, cardName }: { cardCode: string; cardN
   );
 }
 
+/** *Invite new client* (spec §5.1, D25), from the BP List Report header: no CardCode yet. The
+ *  invitee fills the onboarding form, whose submit creates the lead in SAP; they are its owner. */
+export function InviteNewClientDialog({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient();
+  const invite = useMutation(orpc.portalInvitations.inviteNew.mutationOptions({
+    onSuccess: (_r, v) => {
+      void qc.invalidateQueries({ queryKey: orpc.portalInvitations.rows.key() });
+      onClose();
+      toast(`Invitation sent to ${v.email}`);
+    },
+  }));
+  return (
+    <InviteDialog
+      headerText="Invite new client"
+      intro={<Text>They fill in their company's details on your customer portal. Submitting creates a lead in SAP, and they become its owner on the portal.</Text>}
+      registerDomainFor="their company"
+      busy={invite.isPending}
+      error={invite.error?.message}
+      onSubmit={({ email, registerDomain }) => invite.mutate({ email, registerDomain })}
+      onClose={onClose} />
+  );
+}
+
 const rowKeyOf = (row: unknown) => (row as { rowKey: string }).rowKey;
 
 export function BpPortalSection({ cardCode, cardName }: { cardCode: string; cardName: string }) {

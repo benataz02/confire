@@ -21,7 +21,8 @@ export const Route = createFileRoute("/onboarding")({
     if (me.company) throw redirect({ to: "/" });
     // A failed join is the same as no match: the page below still says how to get in.
     if (await client.onboarding.join().catch(() => null)) {
-      await context.queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
+      // Reset, not invalidate: an unobserved query is not refetched, and _authed reads the cache.
+      await context.queryClient.resetQueries({ queryKey: meQuery.queryKey });
       throw redirect({ to: "/" });
     }
     return { me };

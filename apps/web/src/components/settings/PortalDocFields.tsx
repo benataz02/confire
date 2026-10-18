@@ -105,7 +105,7 @@ function DocFieldsForm({ current }: { current: Get }) {
 
 /** The grids' own p13n panel (search, tick, reorder): the picked fields first, in order, then the
  *  rest in SAP's order. A picked key the options no longer offer (a UDF since removed) is dropped. */
-function FieldPicker({ title, selected, options, onConfirm, onClose }: {
+export function FieldPicker({ title, selected, options, onConfirm, onClose }: {
   title: string;
   selected: string[];
   options: { key: string; label: string }[];

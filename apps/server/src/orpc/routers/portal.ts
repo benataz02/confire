@@ -3,14 +3,15 @@ import { z } from "zod";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
   db, PORTAL_ROLES, portalCompany, portalCompanyDomain, portalInvitation, user,
-  type PortalCardType, type PortalDocFields,
+  type PortalCardType, type PortalDocFields, type PortalSettings,
 } from "@confire/db";
-import type { B1EntitySchema, B1Field } from "@confire/b1";
+import { rowsOf, type B1EntitySchema, type B1Field } from "@confire/b1";
 import { adminProcedure } from "../base.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { cancelInvitations, changeMember, claimDomain, companyPeople, isFreeMail, sendInvitation } from "../../portal/members.ts";
 import { DOC_DEFAULTS, DOC_ENTITIES, DocEntityZ, pickable, type DocEntity } from "../../portal/doc-fields.ts";
+import { extraPickable } from "../../portal/onboarding-form.ts";
 import { loadPortalSettings, savePortalSettings } from "../../portal/settings.ts";
 import { entitySchema } from "../../entity-meta.ts";
 import { bad } from "../../entity-read.ts";
@@ -98,6 +99,16 @@ export const portalInvitationsRouter = {
       });
     }),
 
+  /** *Invite new client* on the BP List Report (spec §5.1, D25): no CardCode yet. The invitee fills
+   *  the onboarding form, whose submit creates the lead and makes them its owner. Refused for an
+   *  address already in a company here — the refusal names its CardCode — or with an open invitation. */
+  inviteNew: adminProcedure
+    .input(z.object({ email: z.email(), registerDomain: z.boolean() }))
+    .handler(({ input, context }) => sendInvitation({
+      tenantId: context.tenantId, companyId: null, email: input.email, role: "owner", registerDomain: input.registerDomain,
+      inviter: { id: context.user.id, name: context.user.name, email: context.user.email },
+    })),
+
   cancel: adminProcedure
     .input(z.object({ ids: z.array(z.uuid()).min(1).max(500) }))
     .handler(async ({ input, context }) => ({ canceled: await cancelInvitations(context.tenantId, input.ids) })),
@@ -164,13 +175,24 @@ async function docSchemas(tenantId: string) {
   return Object.fromEntries(entries) as Record<DocEntity, B1EntitySchema>;
 }
 
-const DocFieldsZ = z.object({ header: z.array(z.string()).max(200), lines: z.array(z.string()).max(200) });
+const bpSchema = async (tenantId: string) => {
+  const { b1 } = await tenantConnector(tenantId);
+  return viaB1(() => entitySchema(tenantId, b1, "BusinessPartners")).catch(bad);
+};
 
-/** Settings → Portal (spec §10, §13.1). P5: which document fields clients see. The picker's options
- *  are `pickable` — doc-fields.ts' one rule — so the page cannot offer what save would refuse. */
+const DocFieldsZ = z.object({ header: z.array(z.string()).max(200), lines: z.array(z.string()).max(200) });
+const ExtraFieldsZ = z.array(z.object({ key: z.string().min(1), required: z.boolean() })).max(100);
+
+/** Settings → Portal (spec §10, §13.1, §5.3): which document fields clients see (P5), and the
+ *  new-client onboarding form's extras and lead numbering series (P6). The pickers' options are
+ *  `pickable` / `extraPickable` — the modules' one rule each — so the page cannot offer what save
+ *  would refuse. */
 export const portalSettingsRouter = {
   get: adminProcedure.handler(async ({ context }) => {
-    const [settings, schemas] = await Promise.all([loadPortalSettings(context.tenantId), docSchemas(context.tenantId)]);
+    const [settings, schemas, bp] = await Promise.all([
+      loadPortalSettings(context.tenantId), docSchemas(context.tenantId), bpSchema(context.tenantId),
+    ]);
+    const extras = extraPickable(bp);
     // Only what pickable still offers, in stored order: a UDF removed from B1 or a field denied since
     // it was picked would otherwise ride along in the page's draft and make every save refuse.
     const docFields: Partial<Record<DocEntity, PortalDocFields>> = {};
@@ -183,6 +205,10 @@ export const portalSettingsRouter = {
     return {
       docFields,
       defaults: DOC_DEFAULTS,
+      // The same cut as docFields: an extra the picker no longer offers never rides along into a save.
+      extraFields: (settings.onboarding?.extraFields ?? []).filter((x) => extras.some((f) => f.name === x.key)),
+      extraOptions: optionsOf(extras),
+      leadSeries: settings.leadSeries ?? null,
       options: Object.fromEntries(DOC_ENTITIES.map((e) => {
         const p = pickable(schemas[e]);
         return [e, { header: optionsOf(p.header), lines: optionsOf(p.lines) }];
@@ -190,20 +216,54 @@ export const portalSettingsRouter = {
     };
   }),
 
+  /** The BP numbering series B1 offers for leads, for the lead-series select. Live, and its own call:
+   *  SAP being down costs this select, not the rest of the tab. SeriesService is an action, so it
+   *  goes out as a POST through createEntity — the URL is the same `<base>/<name>` either way.
+   *  ponytail: unverified (spec §16) — the body and the answer's shape (`value: [{ Series, Name,
+   *  Locked }]`); check against a live B1. */
+  leadSeries: adminProcedure.handler(async ({ context }) => {
+    const { b1 } = await tenantConnector(context.tenantId);
+    const { data } = await viaB1(() =>
+      b1.createEntity("SeriesService_GetDocumentSeries", { DocumentTypeParams: { Document: "2", DocumentSubType: "L" } }));
+    return rowsOf(data)
+      .filter((r) => r.Locked !== "tYES")
+      .map((r) => ({ series: Number(r.Series), name: String(r.Name ?? r.Series) }))
+      .filter((r) => Number.isInteger(r.series));
+  }),
+
+  /** Each part is optional and saved over the stored document, so each card of the tab saves only
+   *  its own. `leadSeries: null` is "B1's default lead series". */
   save: adminProcedure
-    .input(z.object({ docFields: z.partialRecord(DocEntityZ, DocFieldsZ) }))
+    .input(z.object({
+      docFields: z.partialRecord(DocEntityZ, DocFieldsZ).optional(),
+      extraFields: ExtraFieldsZ.optional(),
+      leadSeries: z.number().int().positive().nullable().optional(),
+    }))
     .handler(async ({ input, context }) => {
-      const schemas = await docSchemas(context.tenantId);
-      for (const [entity, fields] of Object.entries(input.docFields) as [DocEntity, PortalDocFields][]) {
-        const p = pickable(schemas[entity]);
-        const allowed = { header: new Set(p.header.map((f) => f.name)), lines: new Set(p.lines.map((f) => f.name)) };
-        for (const part of ["header", "lines"] as const) {
-          const refused = fields[part].find((n) => !allowed[part].has(n));
-          if (refused) throw new ORPCError("BAD_REQUEST", { message: `${refused} can't be shown on the portal (${entity})` });
+      if (input.docFields) {
+        const schemas = await docSchemas(context.tenantId);
+        for (const [entity, fields] of Object.entries(input.docFields) as [DocEntity, PortalDocFields][]) {
+          const p = pickable(schemas[entity]);
+          const allowed = { header: new Set(p.header.map((f) => f.name)), lines: new Set(p.lines.map((f) => f.name)) };
+          for (const part of ["header", "lines"] as const) {
+            const refused = fields[part].find((n) => !allowed[part].has(n));
+            if (refused) throw new ORPCError("BAD_REQUEST", { message: `${refused} can't be shown on the portal (${entity})` });
+          }
         }
       }
-      const current = await loadPortalSettings(context.tenantId);
-      await savePortalSettings(context.tenantId, { ...current, docFields: input.docFields });
+      if (input.extraFields) {
+        const offered = new Set(extraPickable(await bpSchema(context.tenantId)).map((f) => f.name));
+        const refused = input.extraFields.find((x) => !offered.has(x.key));
+        if (refused) throw new ORPCError("BAD_REQUEST", { message: `${refused.key} can't be on the onboarding form` });
+        if (new Set(input.extraFields.map((x) => x.key)).size !== input.extraFields.length)
+          throw new ORPCError("BAD_REQUEST", { message: "A field is on the onboarding form twice" });
+      }
+      const next: PortalSettings = { ...(await loadPortalSettings(context.tenantId)) };
+      if (input.docFields) next.docFields = input.docFields;
+      if (input.extraFields) next.onboarding = { extraFields: input.extraFields };
+      if (input.leadSeries === null) delete next.leadSeries;
+      else if (input.leadSeries !== undefined) next.leadSeries = input.leadSeries;
+      await savePortalSettings(context.tenantId, next);
       return { ok: true as const };
     }),
 };

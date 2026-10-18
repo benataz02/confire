@@ -7,8 +7,9 @@ export type InvitationProps = {
   /** the supplier: its name and logo, the portal's own branding (D20) */
   brand: Brand;
   inviterName: string;
-  /** the customer company the invitee joins (the B1 business partner's name) */
-  companyName: string;
+  /** the customer company the invitee joins (the B1 business partner's name); null for a new
+   *  client, who tells the supplier about their company first (spec §5.3) */
+  companyName: string | null;
   url: string;
   expiresAt: Date;
 };
@@ -17,10 +18,19 @@ export function PortalInvitation({ brand, inviterName, companyName, url, expires
   const until = expiresAt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
   return (
     <Layout brand={brand} preview={`${inviterName} invited you to ${brand.name}'s customer portal`}>
-      <H1>Join {companyName} on {brand.name}'s portal</H1>
-      <P>{inviterName} invited you to {brand.name}'s customer portal, as part of {companyName}.</P>
+      {companyName ? (
+        <>
+          <H1>Join {companyName} on {brand.name}'s portal</H1>
+          <P>{inviterName} invited you to {brand.name}'s customer portal, as part of {companyName}.</P>
+        </>
+      ) : (
+        <>
+          <H1>Set up your company on {brand.name}'s portal</H1>
+          <P>{inviterName} invited you to {brand.name}'s customer portal. Tell them about your company — name, address and contact — and your account is ready.</P>
+        </>
+      )}
       <P>There you can request quotes and follow your orders, deliveries and invoices with {brand.name}.</P>
-      <Action brand={brand} href={url}>Accept the invitation</Action>
+      <Action brand={brand} href={url}>{companyName ? "Accept the invitation" : "Set up your company"}</Action>
       <Fine>Or open this link: {url}</Fine>
       <Fine>The invitation is valid until {until}. Sign in or create an account with this email address to accept it. If you weren't expecting it, you can ignore this email.</Fine>
     </Layout>

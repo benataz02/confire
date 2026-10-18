@@ -36,6 +36,20 @@ p13n panel. `docs.chain` (§11) is not built: §9 never uses it and `timeline.do
 building: Settings' tabs mount only while selected (the Portal tab reads four SAP schemas); the portal's
 `UiSource` keeps the raw `docs.*` functions on its `client` side, because `PrintActions` calls
 `client.entities.print` directly.
+**P6 decided and built 2026-10-18** (no plan document: built directly). Decided: the lead series is a
+Select filled from `SeriesService_GetDocumentSeries` (`Document: "2"`, `DocumentSubType: "L"`, locked
+series left out), sent as a POST through `createEntity`, so no new transport method; with **no series
+set**, the lead POST omits `Series` and B1 uses its default lead series (invites are not refused); the
+inviter's "new client onboarded" mail (§5.4 step 6, §12) **moves to P7**. Built: the form rule is one
+pure module, `portal/onboarding-form.ts` (denylist, `extraPickable`, `onboardingSchema`,
+`formProblems`, `leadPayload`, `leadKey`), read by the settings picker, `formSchema` and `submit`.
+`formSchema` also returns the page's **seed**, and submit lays the form over the same seed, because
+ObjectPage's create diff never sends a value equal to its seed. Fixed `AddressName`s "Bill to" / "Ship
+to"; the contact's `Name` is first + last name, cut to 50. The form lives at
+`/onboarding/$invitationId` (file `onboarding_.$invitationId.tsx`, outside `/onboarding`'s auto-join).
+The §16 P6 checks are **not done** (the Service Layer was unreachable): the code marks each
+assumption `unverified (spec §16)`. A tenant needs the `U_CF_Key` UDF (alphanumeric, 64) on OCRD
+(Business Partners) as well as on OQUT; without it, submit refuses to run.
 **Revised 2026-10-16:** onboarding is invitation-only (D7, D17, D25, D26, §5). Open
 self-registration, applications and their approval are gone.
 **Revised 2026-10-16:** this builds from the current internal-only codebase. The previous in-app

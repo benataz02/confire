@@ -33,10 +33,14 @@ const fixtureSchema = (name: string): B1EntitySchema => ({
 });
 
 /** A cached schema is read from Postgres before any agent call (entity-meta.ts), so seeding it is
- *  the whole $metadata setup. */
+ *  the whole $metadata setup. Settings → Portal also reads BusinessPartners (the onboarding extras). */
 async function seedDocSchemas(tenantId: string) {
   for (const name of ["Quotations", "Orders", "DeliveryNotes", "Invoices"])
     await db.insert(entityMeta).values({ tenantId, entityName: name, json: fixtureSchema(name), fetchedAt: new Date() });
+  await db.insert(entityMeta).values({
+    tenantId, entityName: "BusinessPartners", fetchedAt: new Date(),
+    json: { name: "BusinessPartners", label: "Business partners", keys: ["CardCode"], fields: [f("CardCode"), f("CardName")] },
+  });
 }
 
 let agent: MockAgent;

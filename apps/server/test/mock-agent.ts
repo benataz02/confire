@@ -65,6 +65,14 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
           return Response.json({ status: 200, data: { value: applyFilter(rows, filter).slice(0, body.query?.top ?? 20) } });
         }
         case "/create": {
+          // A service action (SeriesService_GetDocumentSeries) answers with its fixture rows.
+          if (/Service_/.test(body.entitySet)) return Response.json({ status: 200, data: { value: rows } });
+          // A business partner sent without a CardCode is numbered, as B1 does from its series.
+          if (body.entitySet === "BusinessPartners") {
+            const bp = { CardCode: `L${String(nextDocEntry++).padStart(5, "0")}`, ...body.data };
+            rows.push(bp);
+            return Response.json({ status: 201, data: bp });
+          }
           // A new document is open, as B1 makes it.
           const row = { DocEntry: nextDocEntry, DocNum: 900 + nextDocEntry, DocumentStatus: "bost_Open", "@odata.etag": `W/"${nextEtag++}"`, ...body.data };
           nextDocEntry++;

@@ -1,30 +1,18 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, MessageStrip } from "@ui5/webcomponents-react";
 import { ROLE_HELP, ROLE_LABEL } from "@confire/ui/portal/CompanyPeople.tsx";
 import { authClient } from "../auth-client.ts";
 import { meQuery, orpc } from "../orpc.ts";
 import { PortalAuthLayout } from "../components/AuthChrome.tsx";
-import { authUrl, hardRedirect, isApex, loginUrl } from "../lib/host.ts";
+import { hardRedirect, loginUrl } from "../lib/host.ts";
+import { invitationGuard } from "../lib/invitation.ts";
 
-// The invitation link (spec §5.2): `<slug>.portal.<domain>/accept/<id>`. Not under `_authed` — the
-// invitee has no seat yet. Signed out, it goes to the sign-in host (login or sign-up), which comes
-// back here. The server checks everything again on accept; this page only says what joining means, or
-// why it can't.
+// The invitation link (spec §5.2): `<slug>.portal.<domain>/accept/<id>`. The server checks everything
+// again on accept; this page only says what joining means, or why it can't. A new-client invitation
+// goes on to its form (§5.3).
 export const Route = createFileRoute("/accept/$invitationId")({
-  beforeLoad: async ({ context }) => {
-    if (isApex()) return hardRedirect(authUrl("/login"));
-    const me = await context.queryClient.ensureQueryData(meQuery).catch((e: unknown) => {
-      const code = (e as { code?: string }).code;
-      if (code === "UNAUTHORIZED") return loginUrl();
-      if (code === "NOT_FOUND") return authUrl("/login");
-      throw e;
-    });
-    if (typeof me === "string") return hardRedirect(me);
-    // The supplier's own staff belong in its workspace.
-    if (me.internal) return hardRedirect(me.internalAppUrl!);
-    return { me };
-  },
+  beforeLoad: invitationGuard,
   component: Accept,
 });
 
@@ -36,7 +24,9 @@ function Accept() {
   const inv = useQuery(orpc.onboarding.invitation.queryOptions({ input: { id: invitationId }, retry: false }));
   const accept = useMutation(orpc.onboarding.accept.mutationOptions({
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: meQuery.queryKey });
+      // Reset, not invalidate: nothing observes `me` here, so an invalidate refetches nothing and
+      // _authed would read the seat-less `me` still in the cache.
+      await qc.resetQueries({ queryKey: meQuery.queryKey });
       void navigate({ to: "/" });
     },
   }));
@@ -74,16 +64,7 @@ function Accept() {
   }
 
   const d = inv.data;
-  if (d.type === "new") {
-    // ponytail: the new-client onboarding form lands with P6; until then nothing sends this type.
-    return (
-      <PortalAuthLayout tenant={me.tenant}>
-        <h2 className="auth-h1">Not available yet</h2>
-        <p className="auth-sub">This invitation opens a form that {tenant}'s portal doesn't offer yet.</p>
-        {signedInAs}
-      </PortalAuthLayout>
-    );
-  }
+  if (d.type === "new") return <Navigate to="/onboarding/$invitationId" params={{ invitationId }} replace />;
 
   return (
     <PortalAuthLayout tenant={me.tenant}>

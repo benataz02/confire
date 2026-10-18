@@ -144,8 +144,10 @@ export async function changeMember(c: { tenantId: string; companyId: string; use
 }
 
 /** Spec §5.1's guard, checked on send against Confire's own tables: not the supplier's staff, not in
- *  another company here (accept would fail on the unique index anyway), not already in this one. */
-async function inviteGuard(tenantId: string, companyId: string, email: string) {
+ *  another company here (accept would fail on the unique index anyway), not already in this one. A
+ *  new-client invitation (`companyId` null) is refused for anyone in a company here: the message
+ *  names its CardCode, so the sender uses *Invite to portal* on that BP instead. */
+async function inviteGuard(tenantId: string, companyId: string | null, email: string) {
   const [u] = await db.select({ id: user.id }).from(user).where(sql`lower(${user.email}) = ${email}`).limit(1);
   if (!u) return;
   if (await isInternalMember(tenantId, u.id)) {
@@ -172,22 +174,22 @@ async function openInvitation(tenantId: string, email: string) {
 }
 
 /**
- * An existing-BP invitation (spec §5.1): guard → cancel this address's expired invitations (they
- * are still `pending`, and the partial unique index would block every re-invite) → insert → mail,
- * after commit and off the request path. Re-sending is cancel + a new invitation: the index allows
- * one open invitation per address and tenant, and is the backstop when two sends race.
+ * An invitation (spec §5.1): guard → cancel this address's expired invitations (they are still
+ * `pending`, and the partial unique index would block every re-invite) → insert → mail, after commit
+ * and off the request path. Re-sending is cancel + a new invitation: the index allows one open
+ * invitation per address and tenant, and is the backstop when two sends race. `companyId` null is a
+ * new-client invitation (D25): its invitee fills the onboarding form, and its submit sets the company.
  */
 export async function sendInvitation(i: {
-  tenantId: string; companyId: string; email: string; role: PortalRole; registerDomain: boolean;
+  tenantId: string; companyId: string | null; email: string; role: PortalRole; registerDomain: boolean;
   inviter: { id: string; name: string; email: string };
 }): Promise<{ id: string; expiresAt: Date }> {
   const email = i.email.trim().toLowerCase();
-  const [target] = await db
-    .select({ cardName: portalCompany.cardName, slug: organization.slug, tenantName: organization.name, logo: organization.logo })
-    .from(portalCompany)
-    .innerJoin(organization, eq(organization.id, portalCompany.tenantId))
+  const [tenant] = await db.select({ slug: organization.slug, name: organization.name, logo: organization.logo })
+    .from(organization).where(eq(organization.id, i.tenantId));
+  const [company] = i.companyId === null ? [null] : await db.select({ cardName: portalCompany.cardName }).from(portalCompany)
     .where(and(eq(portalCompany.id, i.companyId), eq(portalCompany.tenantId, i.tenantId)));
-  if (!target) throw new ORPCError("NOT_FOUND", { message: "No such company on this portal" });
+  if (!tenant || company === undefined) throw new ORPCError("NOT_FOUND", { message: "No such company on this portal" });
   await inviteGuard(i.tenantId, i.companyId, email);
 
   const expiresAt = new Date(Date.now() + INVITATION_DAYS * 86_400_000);
@@ -212,8 +214,8 @@ export async function sendInvitation(i: {
   }
 
   sendMailInBackground(invitationMail({
-    id, to: email, inviterEmail: i.inviter.email, inviterName: i.inviter.name, companyName: target.cardName,
-    brand: { name: target.tenantName, logoUrl: target.logo }, url: portalTenantUrl(target.slug, `/accept/${id}`), expiresAt,
+    id, to: email, inviterEmail: i.inviter.email, inviterName: i.inviter.name, companyName: company?.cardName ?? null,
+    brand: { name: tenant.name, logoUrl: tenant.logo }, url: portalTenantUrl(tenant.slug, `/accept/${id}`), expiresAt,
   }));
   return { id, expiresAt };
 }

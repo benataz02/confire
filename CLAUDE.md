@@ -51,7 +51,7 @@ confire-agent (Bun, on the customer's network) ── SAP B1 Service Layer /b1s/
 The customer portal is a second process from the same image (compose service `portal`, CMD
 `start:portal`) so external traffic never shares an event loop with staff. Both are `serve.ts`:
 Better Auth on `/api/auth`, oRPC on `/rpc` with the 2 MB body cap, the SPA on the rest. The design
-record is `docs/superpowers/specs/2026-10-07-portal-redesign.md`; P0–P5 are built (see its §15).
+record is `docs/superpowers/specs/2026-10-07-portal-redesign.md`; P0–P6 are built (see its §15).
 
 The agent is a Windows service the customer installs. SAP credentials live in its `agent.json`
 and never reach the cloud. `sapConnection.agentUrl` is `http://localhost:4000` in dev and a
@@ -108,6 +108,17 @@ and the portal's (`onboarding`, `company`) therefore enforce one rule set. The r
 Ways in are an invitation (`/accept/<id>`, existing-BP from the BP Object Page's *Invite to portal*)
 or auto-join (`onboarding.join`, a verified address on a domain registered to a company).
 `bun run seed:portal` gives a dev tenant a company and an owner login.
+
+**New-client onboarding** (spec §5.3–5.4): *Invite new client* on the BP List Report sends an invitation
+with `companyId` null; its link goes on to `/onboarding/<id>`, the BP-create `ObjectPage` unchanged over
+`apps/portal/src/features/onboarding.ts`. `portal/onboarding-form.ts` is the one form rule (pure,
+tested): the denylist, what the settings picker offers, the form's fields (addresses and contact as flat
+`BillTo.*`/`ShipTo.*`/`Contact.*` keys), validation and the lead payload. `onboarding.formSchema` returns
+it as `EntityConstraints` plus a **seed**, and `submit` validates the form laid over that same seed
+(ObjectPage's create diff never sends a value equal to the seed). Submit is check-then-create on
+`U_CF_Key` over OCRD, keyed per invitation, then one transaction: company (`cLid`), invitation accepted,
+the invitee its owner. Settings → Portal holds the extras and the lead series (`SeriesService`, empty =
+B1's default lead series).
 
 **Portal projects** (spec §7): a published model (`config_model.portal`, set by `models.publish`, not
 by `save` — publishing must not bump `updatedAt`) becomes a client's project, `config_project` with

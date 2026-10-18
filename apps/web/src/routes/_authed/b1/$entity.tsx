@@ -12,6 +12,7 @@ import { useListView } from "@confire/ui/useListView.ts";
 import { useDetailView } from "@confire/ui/useDetailView.ts";
 import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import { CloseQuotations } from "../../../features/b1/documents.tsx";
+import { InviteNewClientDialog } from "../../../components/portal/BpPortal.tsx";
 import type { EntityFeature, ListQuery, Row } from "@confire/ui/types.ts";
 
 // One declared B1 entity's list — or, with the `#create` fragment, its object page in create mode
@@ -56,35 +57,43 @@ function EntityList({ feature }: { feature: EntityFeature }) {
     mutationFn: () => client.entities.metadata({ entity, refresh: true }),
     onSuccess: (fresh) => qc.setQueryData(orpc.entities.metadata.queryOptions({ input: { entity } }).queryKey, fresh),
   });
+  const [inviting, setInviting] = useState(false);
 
   if (meta.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
   if (meta.error) return <PageError error={meta.error} />;
   const printable = meta.data.printable;
 
   return (
-    <ListReport
-      feature={feature.list}
-      constraints={meta.data.fields}
-      data={data}
-      onQuery={setQuery}
-      keyOf={(r) => String(r[feature.keyField] ?? "")}
-      readOnly={!meta.data.writable}
-      error={refresh.error}
-      headerActions={
-        <Toolbar design="Transparent">
-          <ToolbarButton design="Transparent" icon="refresh" tooltip="Refresh SAP fields" accessibleName="Refresh SAP fields"
-            disabled={refresh.isPending} onClick={() => refresh.mutate()} />
-        </Toolbar>
-      }
-      toolbarActions={printable ? ({ rows, clear }) => (
-        <>
-          {/* Unmounts with the selection, which closes any open preview — PrintActions releases
-              the blob URL in its own cleanup. */}
-          {rows.length === 1 ? <PrintActions entity={entity} docEntry={Number((rows[0] as Row).DocEntry)} /> : null}
-          {entity === "Quotations" && rows.length ? <CloseQuotations rows={rows as Row[]} onClosed={clear} /> : null}
-        </>
-      ) : undefined}
-    />
+    <>
+      <ListReport
+        feature={feature.list}
+        constraints={meta.data.fields}
+        data={data}
+        onQuery={setQuery}
+        keyOf={(r) => String(r[feature.keyField] ?? "")}
+        readOnly={!meta.data.writable}
+        error={refresh.error}
+        headerActions={
+          <Toolbar design="Transparent">
+            {/* A new client, no CardCode yet (spec §5.1). /b1 is admin/owner only, as is the call. */}
+            {entity === "BusinessPartners" ? (
+              <ToolbarButton design="Transparent" icon="paper-plane" text="Invite new client" onClick={() => setInviting(true)} />
+            ) : null}
+            <ToolbarButton design="Transparent" icon="refresh" tooltip="Refresh SAP fields" accessibleName="Refresh SAP fields"
+              disabled={refresh.isPending} onClick={() => refresh.mutate()} />
+          </Toolbar>
+        }
+        toolbarActions={printable ? ({ rows, clear }) => (
+          <>
+            {/* Unmounts with the selection, which closes any open preview — PrintActions releases
+                the blob URL in its own cleanup. */}
+            {rows.length === 1 ? <PrintActions entity={entity} docEntry={Number((rows[0] as Row).DocEntry)} /> : null}
+            {entity === "Quotations" && rows.length ? <CloseQuotations rows={rows as Row[]} onClosed={clear} /> : null}
+          </>
+        ) : undefined}
+      />
+      {inviting ? <InviteNewClientDialog onClose={() => setInviting(false)} /> : null}
+    </>
   );
 }
 

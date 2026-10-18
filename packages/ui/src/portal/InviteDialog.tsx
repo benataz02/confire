@@ -16,7 +16,9 @@ export function InviteDialog(p: {
   headerText: string;
   /** who this invites into what */
   intro?: ReactNode;
-  defaultRole: PortalRole;
+  /** omitted: the role is not the sender's to choose (a new client's first user is its owner), so
+   *  there is no Role select and `role` comes back as owner */
+  defaultRole?: PortalRole;
   /** the company name, to offer "let everyone on this domain join" — the internal side only */
   registerDomainFor?: string;
   busy: boolean;
@@ -25,7 +27,7 @@ export function InviteDialog(p: {
   onClose: () => void;
 }) {
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<PortalRole>(p.defaultRole);
+  const [role, setRole] = useState<PortalRole>(p.defaultRole ?? "owner");
   const [registerDomain, setRegisterDomain] = useState(false);
   const domain = email.includes("@") ? email.slice(email.lastIndexOf("@") + 1).trim().toLowerCase() : "";
   const ok = looksLikeEmail(email) && !p.busy;
@@ -47,11 +49,15 @@ export function InviteDialog(p: {
         <Label for="invite-email" required showColon>Email</Label>
         <Input id="invite-email" type="Email" value={email} style={{ width: "100%" }}
           onInput={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
-        <Label for="invite-role" showColon>Role</Label>
-        <Select id="invite-role" value={role} style={{ width: "100%" }}
-          onChange={(e) => setRole(e.detail.selectedOption.value as PortalRole)}>
-          {ROLES.map((r) => <Option key={r} value={r} additionalText={ROLE_HELP[r]}>{ROLE_LABEL[r]}</Option>)}
-        </Select>
+        {p.defaultRole ? (
+          <>
+            <Label for="invite-role" showColon>Role</Label>
+            <Select id="invite-role" value={role} style={{ width: "100%" }}
+              onChange={(e) => setRole(e.detail.selectedOption.value as PortalRole)}>
+              {ROLES.map((r) => <Option key={r} value={r} additionalText={ROLE_HELP[r]}>{ROLE_LABEL[r]}</Option>)}
+            </Select>
+          </>
+        ) : null}
         {p.registerDomainFor ? (
           <CheckBox checked={registerDomain} wrappingType="Normal" onChange={(e) => setRegisterDomain(e.target.checked)}
             text={domain
