@@ -1,15 +1,16 @@
 # Deploying Confire
 
 One host, one `docker compose --profile full up`, one domain. Everything below uses `confire.ai` as
-the example; substitute your own. Nothing in the code changes per environment — the domain is `.env`
-plus DNS (see `docker-compose.yml`'s header and `Caddyfile`).
+the example; substitute your own. Nothing in the code changes per environment, and nothing is baked
+into the image — the domain is one `.env` line plus DNS (see `docker-compose.yml`'s header and
+`Caddyfile`).
 
 ```
-                         Cloudflare DNS (grey cloud, DNS only)
+                               DNS (three A records)
                                         │
-            confire.ai  ─┐              │
-      <slug>.app.confire.ai ─┤  :443  ┌─────────── your VPS ──────────────────────────┐
-   <slug>.portal.confire.ai ─┴──────▶ │ Caddy ──▶ server :3000  (sign-in + staff app) │
+             confire.ai  ─┐             │
+         app.confire.ai  ─┤   :443    ┌─────────── your VPS ──────────────────────────┐
+      portal.confire.ai  ─┴─────────▶ │ Caddy ──▶ server :3000  (sign-in + staff app) │
                                       │       └─▶ portal :3001  (customer portal)     │
                                       │             └──── Postgres 17 (volume) ───────┘
                                       └──────────────────────│────────────────────────┘
@@ -22,23 +23,22 @@ plus DNS (see `docker-compose.yml`'s header and `Caddyfile`).
 
 | Host | Serves |
 |---|---|
-| `confire.ai` | sign-in, sign-up, the `/login` dispatcher, `/api/auth`, the mail logo |
-| `<slug>.app.confire.ai` | the staff app for workspace `<slug>` |
-| `<slug>.portal.confire.ai` | that workspace's customer portal |
-| `app.confire.ai`, `portal.confire.ai` | redirect to `confire.ai/login` |
+| `app.confire.ai` | sign-in, sign-up, the `/login` dispatcher, `/api/auth`; the staff app of workspace `<slug>` at `/<slug>/` |
+| `portal.confire.ai` | the customer portal of workspace `<slug>` at `/<slug>/`, and the mail logo |
+| `confire.ai` | redirects to `app.confire.ai/login` (until a marketing site exists) |
 | `mail.confire.ai` | Confire's sending domain (Resend) — no website |
+
+The workspace is the path, not the host: there are no per-tenant names, so no wildcard DNS and no
+wildcard certificate.
 
 ---
 
 ## 1. Domain
 
-1. **Buy the domain.** Any registrar works, but the nameservers must end up on **Cloudflare**: Caddy
-   gets its wildcard certificates through Cloudflare's DNS API (`CADDY_TLS=cloudflare`). Cloudflare
-   Registrar is simplest (at-cost, already on Cloudflare); otherwise add the site in Cloudflare (Free
-   plan) and set the registrar's nameservers to the two Cloudflare gives you.
-2. **Decide the domain once.** `DOMAIN` is baked into both SPA builds (`VITE_AUTH_URL`,
-   `VITE_*_BASE_DOMAIN`) and into every OAuth redirect URI and Resend domain. Changing it later means a
-   rebuild plus re-registering all of those.
+1. **Buy the domain.** Any registrar and any DNS host work: Caddy gets its certificates over the HTTP
+   challenge, so it needs no DNS API.
+2. **Decide the domain once.** `DOMAIN` is not baked into the image, but it is in every OAuth redirect
+   URI and the Resend domain. Changing it later means re-registering those.
 3. **Buy a second, separate domain for agent tunnels** (e.g. `confire-agents.net`) — see §6. The
    session cookie is set on `.confire.ai`, so every host under it receives every user's session. A
    tunnel hostname terminates on a *customer's* machine and therefore must never live under
@@ -61,34 +61,27 @@ A single Linux VPS running Docker is what the compose file is built for.
   sudo ufw allow 22/tcp && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw enable
   ```
   Docker bypasses ufw for published ports, which is why compose binds Postgres, `:3000` and `:3001` to
-  `127.0.0.1` only. Keep it that way: a public `:3000` would serve plain HTTP and trust a
-  client-supplied `X-Forwarded-Host`.
+  `127.0.0.1` only. Keep it that way: a public `:3000` would serve plain HTTP.
 - Disable SSH password login; use keys.
 
-## 3. DNS (Cloudflare)
+## 3. DNS
 
-All records **DNS only (grey cloud)**. Caddy terminates TLS itself, and Cloudflare's free proxy
-certificate does not cover a two-level wildcard like `*.app.confire.ai`.
+On Cloudflare, keep the records **DNS only (grey cloud)**: Caddy terminates TLS itself and answers the
+Let's Encrypt HTTP challenge on `:80`.
 
 | Type | Name | Content |
 |---|---|---|
 | A | `confire.ai` (`@`) | VPS IPv4 |
 | A | `app` | VPS IPv4 |
-| A | `*.app` | VPS IPv4 |
 | A | `portal` | VPS IPv4 |
-| A | `*.portal` | VPS IPv4 |
-| AAAA | same five | VPS IPv6 (optional, only if the VPS has one) |
+| AAAA | same three | VPS IPv6 (optional, only if the VPS has one) |
 | CAA | `@` | `0 issue "letsencrypt.org"` (optional hardening) |
 
 Plus the mail records from §4.
 
-**Cloudflare API token for Caddy:** *My Profile → API Tokens → Create Token → Edit zone DNS* template,
-permissions `Zone:Zone:Read` + `Zone:DNS:Edit`, zone resources = only `confire.ai`. This is
-`CLOUDFLARE_API_TOKEN`.
-
-Caddy issues exactly **three certificates**: `confire.ai` (+`app`, `portal`), `*.app.confire.ai`,
-`*.portal.confire.ai`. Never one per tenant — every certificate is published in Certificate
-Transparency logs, so per-tenant certs would publish your customer list.
+Caddy issues exactly **three certificates**, one per name, all three issued as soon as the stack is up
+and port 80 is reachable. A tenant never gets a name of its own — and so never a certificate, which
+would publish your customer list in the Certificate Transparency logs.
 
 ## 4. Mail
 
@@ -97,7 +90,7 @@ There are up to three separate concerns. Keep them on separate names so their DN
 ### 4a. Confire's outgoing mail — Resend on `mail.confire.ai` (required)
 
 Sign-up verification, password resets and staff notifications come from `notify@mail.confire.ai`
-(`MAIL_DOMAIN` is set to `mail.${DOMAIN}` by compose). Sign-in **requires a verified email**, so without
+(always `mail.<DOMAIN>`). Sign-in **requires a verified email**, so without
 this nobody can sign up in production.
 
 1. Create a Resend account; *Domains → Add* `mail.confire.ai`. **Choose the region first** (EU
@@ -126,12 +119,9 @@ this nobody can sign up in production.
 
 Client-facing portal mail can go out from a tenant's own subdomain (e.g. `notify@mail.mueller-gmbh.de`,
 Settings → Portal). That needs a second key, **Full access**, as `RESEND_ADMIN_KEY` — only the
-sender-domain handlers use it. The tenant adds the DNS records Confire shows them on their own domain;
-until it verifies (or if Resend refuses it), mail falls back to `mail.confire.ai`.
-
-> ⚠️ `docker-compose.yml` does not pass `RESEND_ADMIN_KEY` through today. Add
-> `RESEND_ADMIN_KEY: ${RESEND_ADMIN_KEY:-}` to the `server` service's `environment: &app-env` block (the portal inherits it) if you want this feature;
-> without it Settings → Portal shows sender domains as unavailable.
+sender-domain handlers use it; without it Settings → Portal shows sender domains as unavailable. The
+tenant adds the DNS records Confire shows them on their own domain; until it verifies (or if Resend
+refuses it), mail falls back to `mail.confire.ai`.
 
 ### 4c. Human mailboxes (optional, separate provider)
 
@@ -146,9 +136,9 @@ start.)
 Email + password works with nothing extra. For social sign-in, one redirect URI per provider:
 
 - **Google** (Cloud Console → Credentials → OAuth client, *Web application*):
-  `https://confire.ai/api/auth/callback/google`
+  `https://app.confire.ai/api/auth/callback/google` (dev: `http://localhost:5173/api/auth/callback/google`)
 - **Microsoft** (Entra ID → App registrations, *Accounts in any organizational directory and personal
-  accounts*): `https://confire.ai/api/auth/callback/microsoft`. Under *Token configuration*, add the
+  accounts*): `https://app.confire.ai/api/auth/callback/microsoft`. Under *Token configuration*, add the
   optional claim **`xms_edov`** — a Microsoft address only counts as verified with it.
 
 An unset client ID just leaves that button dead (Better Auth logs a warning at boot).
@@ -183,11 +173,10 @@ On the VPS:
 git clone <repo> confire && cd confire
 cat > .env <<'EOF'
 DOMAIN=confire.ai
-CADDY_TLS=cloudflare
-CLOUDFLARE_API_TOKEN=...
+CADDY_TLS=acme
 BETTER_AUTH_SECRET=...            # openssl rand -base64 32
 RESEND_API_KEY=re_...
-# RESEND_ADMIN_KEY=re_...         # §4b, once compose passes it
+# RESEND_ADMIN_KEY=re_...         # §4b, tenant sender domains
 # GOOGLE_CLIENT_ID= / GOOGLE_CLIENT_SECRET=
 # MICROSOFT_CLIENT_ID= / MICROSOFT_CLIENT_SECRET=
 EOF
@@ -201,12 +190,11 @@ docker compose --profile full up -d
 docker compose logs -f caddy          # watch the three certificates get issued
 ```
 
-Then: open `https://confire.ai/signup`, verify the email, create the first workspace, and you land on
-`https://<slug>.app.confire.ai`. Configure the SAP connection (§6) and Settings → Portal.
+Then: open `https://app.confire.ai/signup`, verify the email, create the first workspace, and you land
+on `https://app.confire.ai/<slug>/`. Configure the SAP connection (§6) and Settings → Portal.
 
-**Back up `BETTER_AUTH_SECRET`.** It signs sessions and — unless `CONFIRE_SECRET_KEY` is set — is also
-the key that encrypts stored SAP agent secrets. Losing or rotating it makes every stored
-`sap_connection.secret` unreadable.
+**Back up `BETTER_AUTH_SECRET`.** It signs sessions and is also the key that encrypts stored SAP agent
+secrets. Losing or rotating it makes every stored `sap_connection.secret` unreadable.
 
 ## 8. Updates
 
@@ -232,14 +220,14 @@ There is a few seconds' downtime while the two containers restart; Caddy holds c
   Encrypt rate limits if you recreate it repeatedly).
 - **Logs:** `docker compose logs -f server portal`. Set Docker's log rotation
   (`/etc/docker/daemon.json`: `{"log-driver":"local"}`).
-- **Uptime:** an external check (UptimeRobot, Better Stack) on `https://confire.ai/login`.
+- **Uptime:** an external check (UptimeRobot, Better Stack) on `https://app.confire.ai/login` and
+  `https://portal.confire.ai/api/auth/ok`.
 
 ## 10. Checklist
 
-- [ ] Domain on Cloudflare nameservers; separate agent domain bought
+- [ ] Domain bought; separate agent domain bought
 - [ ] VPS with Docker, ufw 22/80/443, SSH keys only
-- [ ] A records: `@`, `app`, `*.app`, `portal`, `*.portal` — grey cloud
-- [ ] Cloudflare API token (Zone Read + DNS Edit, this zone only)
+- [ ] A records: `@`, `app`, `portal` (grey cloud on Cloudflare)
 - [ ] Resend: `mail.<domain>` verified in the right region, sending key created
 - [ ] DMARC record on the apex
 - [ ] OAuth redirect URIs (+ `xms_edov` for Microsoft), if used
@@ -256,8 +244,5 @@ Worth fixing before a real launch:
 1. **Postgres password is `confire`, hard-coded** in `docker-compose.yml`. The database is reachable
    only on loopback and the compose network, but read it from `.env` (`POSTGRES_PASSWORD` and
    `DATABASE_URL`) anyway.
-2. **`RESEND_ADMIN_KEY` and `CONFIRE_SECRET_KEY` are not passed through** to the containers (§4b,
-   §7).
-3. **`apps/server/Dockerfile`'s comment says `bun run db:migrate`**, a script that does not exist; the
-   schema path is `drizzle-kit push` as above. The root `db:push` script reads `../../.env`, which the
-   image does not contain (`.dockerignore`), so call `drizzle-kit` directly in the container.
+2. The root `db:push` script reads `../../.env`, which the image does not contain (`.dockerignore`), so
+   call `drizzle-kit` directly in the container, as above.

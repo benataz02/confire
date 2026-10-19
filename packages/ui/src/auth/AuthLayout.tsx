@@ -4,7 +4,7 @@ import "./AuthLayout.css";
 /** Staggers a `.reveal` element's entrance: the CSS reads --d as its animation delay. */
 export const revealDelay = (ms: number): CSSProperties => ({ ["--d" as string]: `${ms}ms` });
 
-/** Branded split screen for the apex pages (login, signup, onboarding…): `brand` fills the
+/** Branded split screen for the pages outside an app shell (login, signup, onboarding…): `brand` fills the
  *  presentational left panel — Confire's own in the internal app, the supplier's on the portal —
  *  and the form slots into the right. */
 export function AuthLayout({ brand, children }: { brand: ReactNode; children: ReactNode }) {

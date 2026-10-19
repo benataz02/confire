@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { render } from "react-email";
 import { Resend } from "resend";
+import { platformDomain } from "../tenant.ts";
 
 // The Mailer seam (spec D13): Resend when RESEND_API_KEY is set, the console otherwise. That is
 // configuration, not a dev/prod branch — the same as an unset GOOGLE_CLIENT_ID leaving its button dead.
@@ -14,7 +15,7 @@ export type Mail = {
   body: ReactElement;
   /** The From display name — the address is always notify@<domain>. */
   fromName: string;
-  /** The From address's domain: a tenant's verified sender (D29). Absent = MAIL_DOMAIN. */
+  /** The From address's domain: a tenant's verified sender (D29). Absent = mailDomain. */
   fromDomain?: string;
   replyTo?: string;
   /** `<event>/<id>` (Resend keeps it 24 h): a retried send is the original send, not a second mail. */
@@ -28,7 +29,7 @@ export type SendResult = { error: string | null; status: number | null };
 // A sending_access key: it can send and nothing else, so a leak cannot touch domains or keys.
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 /** Confire's own sending domain, `mail.<domain>`: account and internal mail, and every fallback. */
-export const mailDomain = (process.env.MAIL_DOMAIN ?? "mail.lvh.me").toLowerCase();
+export const mailDomain = `mail.${platformDomain}`;
 
 /** RFC 5322 quoted display name: `"` and `\` escaped, so `Müller & Söhne, GmbH` stays one name and
  *  cannot inject a second address. */

@@ -4,6 +4,11 @@
 **Superseded in part 2026-10-17** by `2026-10-17-single-sign-in-design.md`: one Better Auth instance,
 one session table and one sign-in on `<domain>` for staff and customers. D2's cookie zones, §3 "Auth
 lives on each apex", §4.1, §4.5 (captcha, `t` branding) and §9's apex lobby no longer hold.
+**Superseded in part 2026-10-19** by `2026-10-19-path-tenancy-design.md`: no tenant subdomains — the
+tenant is the first path segment on two fixed hosts (`app.<domain>/<slug>/`, `portal.<domain>/<slug>/`),
+sign-in is `app.<domain>/login`, and a customer is a Better Auth `member` of the supplier's
+organization with role `external` (`companyId`, `portalRole`). D2, §3's hosts, `portal_member` (§4.2,
+§6), "host → tenant" (§4.2, §4.3) and D23's leftover `client` rows no longer hold.
 **Status:** Spec agreed through Q&A. **P0–P2 built 2026-10-16** (plan:
 `docs/superpowers/plans/2026-10-16-portal-p0-p2.md`). **P3 built 2026-10-16** (plan:
 `docs/superpowers/plans/2026-10-16-portal-p3.md`). Decided then: no `joined` event until P4; the

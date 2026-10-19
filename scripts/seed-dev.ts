@@ -1,6 +1,6 @@
 /**
- * Bootstrap a dev tenant from an empty database: a user + the org whose slug IS the
- * subdomain. Sign in at http://app.lvh.me:5173, land on http://<slug>.app.lvh.me:5173.
+ * Bootstrap a dev tenant from an empty database: a user + the org whose slug IS the workspace's
+ * path. Sign in at http://localhost:5173/login, land on http://localhost:5173/<slug>/.
  *
  *   bun run seed:dev [slug] [email] [password]
  *
@@ -10,6 +10,7 @@
 import { eq } from "drizzle-orm";
 import { db, pool, organization, user as userTable } from "@confire/db";
 import { auth } from "../apps/server/src/auth.ts";
+import { appTenantUrl, authUrl } from "../apps/server/src/tenant.ts";
 
 const slug = process.env.SLUG ?? "alumigraf";
 const email = process.env.EMAIL ?? `dev@${slug}.test`;
@@ -43,7 +44,7 @@ async function main(): Promise<void> {
     console.log(`org   ${slug} (created)`);
   }
 
-  console.log(`\nsign in: http://app.lvh.me:5173  ->  http://${slug}.app.lvh.me:5173`);
+  console.log(`\nsign in: ${authUrl}/login  ->  ${appTenantUrl(slug)}`);
 }
 
 async function createVerifiedUser(): Promise<string> {

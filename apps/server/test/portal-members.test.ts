@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { db, portalCompany, portalCompanyDomain, portalInvitation, portalMember, type PortalRole } from "@confire/db";
-import { devOutbox } from "../src/mail/mailer.ts";
+import { db, EXTERNAL_ROLE, member, portalCompany, portalCompanyDomain, portalInvitation, type PortalRole } from "@confire/db";
+import { devOutbox, mailDomain } from "../src/mail/mailer.ts";
 import { addPortalMember, cancelInvitations, changeMember, claimDomain, sendInvitation } from "../src/portal/members.ts";
-import { makePortalUser, makeTenant, makeUser } from "./harness.ts";
+import { portalTenantUrl } from "../src/tenant.ts";
+import { makePortalUser, makeTenant, makeUser, seatRole as roleOf } from "./harness.ts";
 
 // The portal's write rules (spec §4.2, §5.1), shared by the internal and the portal process:
 // apps/server/src/portal/members.ts is the only code that writes seats, domains and invitations.
@@ -20,10 +21,6 @@ async function company(tenantId: string, cardName = "Kunde AG") {
 
 const add = (tenantId: string, companyId: string, userId: string, role: PortalRole) =>
   db.transaction((tx) => addPortalMember(tx, { tenantId, companyId, userId, role }));
-
-const roleOf = async (companyId: string, userId: string) =>
-  (await db.select({ role: portalMember.role }).from(portalMember)
-    .where(and(eq(portalMember.companyId, companyId), eq(portalMember.userId, userId))))[0]?.role;
 
 async function mailTo(email: string) {
   for (let i = 0; i < 100; i++) {
@@ -53,6 +50,16 @@ describe("addPortalMember", () => {
     expect(await codeOf(add(t1.tenantId, b.id, u.userId, "buyer"))).toBe("CONFLICT");
     expect(await roleOf(b.id, u.userId)).toBeUndefined();
     await add(t2.tenantId, (await company(t2.tenantId)).id, u.userId, "viewer");
+  });
+
+  test("two joins at once, into two companies, leave one membership", async () => {
+    const { tenantId } = await makeTenant();
+    const u = await makePortalUser();
+    const a = await company(tenantId);
+    const b = await company(tenantId);
+    const results = await Promise.all([codeOf(add(tenantId, a.id, u.userId, "viewer")), codeOf(add(tenantId, b.id, u.userId, "viewer"))]);
+    expect(results.sort()).toEqual(["CONFLICT", "OK"]);
+    expect(await db.select().from(member).where(and(eq(member.organizationId, tenantId), eq(member.userId, u.userId)))).toHaveLength(1);
   });
 
   test("a second way into the same company raises the role, never lowers it", async () => {
@@ -109,8 +116,8 @@ describe("changeMember", () => {
       codeOf(changeMember({ tenantId, companyId: c.id, userId: b.userId, role: "viewer" })),
     ]);
     expect(results.sort()).toEqual(["CONFLICT", "OK"]);
-    const owners = await db.select().from(portalMember)
-      .where(and(eq(portalMember.companyId, c.id), eq(portalMember.role, "owner")));
+    const owners = await db.select().from(member)
+      .where(and(eq(member.role, EXTERNAL_ROLE), eq(member.companyId, c.id), eq(member.portalRole, "owner")));
     expect(owners).toHaveLength(1);
   });
 
@@ -163,10 +170,9 @@ describe("sendInvitation", () => {
     expect(row).toMatchObject({ tenantId, companyId: c.id, role: "buyer", status: "pending", registerDomain: true, invitedBy: inviter.id });
 
     const mail = await mailTo(email);
-    expect(mail.from).toBe(`"${slug}" <notify@${process.env.MAIL_DOMAIN ?? "mail.lvh.me"}>`);
+    expect(mail.from).toBe(`"${slug}" <notify@${mailDomain}>`);
     expect(mail.replyTo).toBe(inviter.email);
-    expect(mail.text).toContain(`${slug}.portal.`);
-    expect(mail.text).toContain(`/accept/${id}`);
+    expect(mail.text).toContain(portalTenantUrl(slug, `/accept/${id}`));
     expect(mail.text).toContain("Ines Inviter");
     expect(mail.text).toContain("Müller & Söhne GmbH");
   });

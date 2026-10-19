@@ -1,6 +1,6 @@
 import { and, eq, inArray, ne, sql, type SQL } from "drizzle-orm";
 import {
-  db, configModel, configProject, configProjectEvent, member, portalCompany, portalMember, user,
+  db, configModel, configProject, configProjectEvent, EXTERNAL_ROLE, member, portalCompany, user,
   type NotifyEvent, type NotifyMode, type PortalSettings, type RevisionDiff,
 } from "@confire/db";
 import { tenantConnector, tenantCurrency } from "./b1.ts";
@@ -50,19 +50,19 @@ type Person = { userId: string; email: string; name: string };
 export async function clientRecipients(companyId: string, createdBy: string, mode: NotifyMode): Promise<Person[]> {
   if (mode === "off") return [];
   const seats = await db
-    .select({ userId: portalMember.userId, email: user.email, name: user.name, role: portalMember.role })
-    .from(portalMember).innerJoin(user, eq(user.id, portalMember.userId))
-    .where(eq(portalMember.companyId, companyId));
+    .select({ userId: member.userId, email: user.email, name: user.name, role: member.portalRole })
+    .from(member).innerJoin(user, eq(user.id, member.userId))
+    .where(and(eq(member.role, EXTERNAL_ROLE), eq(member.companyId, companyId)));
   return seats
     .filter((s) => s.userId === createdBy || (mode === "buyers" && s.role !== "viewer"))
     .map(({ role: _role, ...p }) => p);
 }
 
-/** The tenant's staff — internal members; a leftover `client` row is not one — narrowed by `where`. */
+/** The tenant's staff — every member but its customers — narrowed by `where`. */
 const staff = (tenantId: string, where: SQL | undefined) => db
   .select({ userId: user.id, email: user.email, name: user.name })
   .from(member).innerJoin(user, eq(user.id, member.userId))
-  .where(and(eq(member.organizationId, tenantId), ne(member.role, "client"), where));
+  .where(and(eq(member.organizationId, tenantId), ne(member.role, EXTERNAL_ROLE), where));
 
 /** The BP's sales employee's email in B1 — `SalesPersonCode` → `SalesPersons.Email` (checked in the
  *  cached schema 2026-10-18; -1 is B1's "-No Sales Employee-"). Live, so anything that fails (no

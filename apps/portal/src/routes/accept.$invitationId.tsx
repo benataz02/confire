@@ -8,7 +8,7 @@ import { PortalAuthLayout } from "../components/AuthChrome.tsx";
 import { hardRedirect, loginUrl } from "../lib/host.ts";
 import { invitationGuard } from "../lib/invitation.ts";
 
-// The invitation link (spec §5.2): `<slug>.portal.<domain>/accept/<id>`. The server checks everything
+// The invitation link (spec §5.2): `portal.<domain>/<slug>/accept/<id>`. The server checks everything
 // again on accept; this page only says what joining means, or why it can't. A new-client invitation
 // goes on to its form (§5.3).
 export const Route = createFileRoute("/accept/$invitationId")({

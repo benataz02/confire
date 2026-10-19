@@ -2,7 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { Resend } from "resend";
 import type { PortalSettings, SenderDomain, SenderDomainRecord } from "@confire/db";
 import { mailDomain, sendMails, type Mail, type SendResult } from "../mail/mailer.ts";
-import { authUrl } from "../tenant.ts";
+import { platformDomain } from "../tenant.ts";
 import { loadPortalSettings, setSenderDomain, updateSenderDomain } from "./settings.ts";
 
 // A tenant's own sending subdomain (spec D29, §12): while Resend calls it `verified`, client-facing
@@ -17,8 +17,6 @@ const admin = process.env.RESEND_ADMIN_KEY ? new Resend(process.env.RESEND_ADMIN
 export const SENDER_REGIONS = ["eu-west-1", "us-east-1", "sa-east-1", "ap-northeast-1"] as const;
 export type SenderRegion = (typeof SENDER_REGIONS)[number];
 
-const platformHost = new URL(authUrl).hostname.toLowerCase();
-
 /**
  * Why `name` cannot be a tenant's sender, or null. A subdomain only: records on it cannot collide
  * with the tenant's own Microsoft 365 SPF/MX, and its reputation stays apart from their mailboxes'.
@@ -28,7 +26,7 @@ const platformHost = new URL(authUrl).hostname.toLowerCase();
  */
 export function senderNameProblem(name: string): string | null {
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(name)) return "Enter a domain name such as mail.mueller-gmbh.de";
-  if (name === platformHost || name.endsWith(`.${platformHost}`) || name === mailDomain)
+  if (name === platformDomain || name.endsWith(`.${platformDomain}`) || name === mailDomain)
     return `${name} belongs to Confire: use a subdomain of your own domain`;
   if (name.split(".").length < 3)
     return `Use a subdomain such as mail.${name}: records on ${name} itself would collide with your own email's`;

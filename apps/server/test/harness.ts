@@ -1,8 +1,8 @@
-import { eq } from "drizzle-orm";
-import { db, member, organization, portalCompany, portalMember, user, type PortalRole } from "@confire/db";
+import { and, eq } from "drizzle-orm";
+import { db, EXTERNAL_ROLE, member, organization, portalCompany, user, type PortalRole } from "@confire/db";
 import type { ModelDef } from "@confire/config-engine";
 import { auth } from "../src/auth.ts";
-import { baseDomain, portalBaseDomain } from "../src/tenant.ts";
+import { TENANT_HEADER } from "../src/tenant.ts";
 
 export { call } from "@orpc/server";
 
@@ -16,7 +16,7 @@ export async function makeTenant(): Promise<{ tenantId: string; slug: string }> 
 }
 
 export async function makeUser(
-  role?: "member" | "admin" | "owner" | "client",
+  role?: "member" | "admin" | "owner",
   tenantId?: string,
 ): Promise<{ userId: string; email: string; cookie: string; cookies: string }> {
   const email = `u${uid()}@test.local`;
@@ -42,8 +42,9 @@ export async function makeUser(
   return { userId, email, cookie, cookies };
 }
 
+/** A call from a page under `/<slug>/`, in either app: the SPA sends the path's slug as `x-tenant`. */
 export const tenantHeaders = (slug: string, cookie?: string): Headers =>
-  new Headers({ "x-forwarded-host": `${slug}.${baseDomain}`, ...(cookie ? { cookie } : {}) });
+  new Headers({ [TENANT_HEADER]: slug, ...(cookie ? { cookie } : {}) });
 
 // --- customer portal (apps/server/src/portal) ---------------------------------------------------
 
@@ -60,16 +61,28 @@ export async function makePortalUser(email = `p${uid()}@test.local`): Promise<{ 
   return { userId: u.id, email, cookie: await portalSignIn(email) };
 }
 
-export const portalHeaders = (slug: string, cookie?: string): Headers =>
-  new Headers({ "x-forwarded-host": `${slug}.${portalBaseDomain}`, ...(cookie ? { cookie } : {}) });
+/** A seat: an `external` member row of the tenant, inserted directly rather than through
+ *  addPortalMember. */
+export const insertSeat = (tenantId: string, companyId: string, userId: string, role: PortalRole) =>
+  db.insert(member).values({
+    id: crypto.randomUUID(), organizationId: tenantId, userId, role: EXTERNAL_ROLE, companyId, portalRole: role, createdAt: new Date(),
+  });
 
-/** A customer company with one seat, inserted directly rather than through addPortalMember: the
- *  builder tests need a seat even for staff, which addPortalMember refuses. */
+/** A user's role in a company — their external member row naming it — or undefined. */
+export const seatRole = async (companyId: string, userId: string) =>
+  (await db.select({ role: member.portalRole }).from(member)
+    .where(and(eq(member.role, EXTERNAL_ROLE), eq(member.companyId, companyId), eq(member.userId, userId))))[0]?.role ?? undefined;
+
+/** Every seat a user holds, across suppliers. */
+export const seatsOf = (userId: string) =>
+  db.select().from(member).where(and(eq(member.role, EXTERNAL_ROLE), eq(member.userId, userId)));
+
+/** A customer company with one seat. */
 export async function makePortalSeat(tenantId: string, userId: string, role: PortalRole, cardName = "Kunde GmbH") {
   const [company] = await db.insert(portalCompany)
     .values({ tenantId, cardCode: `C${uid()}`, cardName, cardType: "cCustomer" })
     .returning();
-  await db.insert(portalMember).values({ companyId: company!.id, userId, tenantId, role });
+  await insertSeat(tenantId, company!.id, userId, role);
   return company!;
 }
 

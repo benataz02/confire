@@ -3,10 +3,14 @@ import { boolean, index, jsonb, pgTable, primaryKey, text, timestamp, uniqueInde
 import { user } from "./auth.ts";
 
 // The customer portal (spec docs/superpowers/specs/2026-10-07-portal-redesign.md §4, §6): companies,
-// seats, domains and invitations. Hand-written. Sessions are not here: one Better Auth instance and its
-// `session` table serve both processes (spec 2026-10-17-single-sign-in-design.md).
+// domains and invitations. Hand-written. A seat is not here: a customer is a Better Auth `member` of the
+// supplier's organization with role `external`, its company and portal role in that row's two extra
+// fields (spec 2026-10-19-path-tenancy-design.md).
 
 export type PortalCardType = "cCustomer" | "cLid";
+/** `member.role` of a supplier's customer. Every other role (owner, admin, member) is staff. */
+export const EXTERNAL_ROLE = "external";
+/** `member.portalRole`: a customer's role in their company. Staff rows leave it null. */
 export const PORTAL_ROLES = ["owner", "buyer", "viewer"] as const;
 export type PortalRole = (typeof PORTAL_ROLES)[number];
 export type PortalInviteStatus = "pending" | "accepted" | "canceled";
@@ -54,7 +58,8 @@ export type PortalSettings = {
 
 /** A customer company: one per tenant × CardCode, the register of which CardCodes are on the portal
  *  (§4.2). Created server-side only — by an invitation or an onboarding submit — never by a call a
- *  portal user can make. Plain Confire table, not a Better Auth organization. */
+ *  portal user can make. Plain Confire table, not a Better Auth organization or team: its people are
+ *  the supplier's `external` members whose `companyId` names it. */
 export const portalCompany = pgTable(
   "portal_company",
   {
@@ -69,28 +74,6 @@ export const portalCompany = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("portal_company_tenant_card_uq").on(t.tenantId, t.cardCode)],
-);
-
-/** A portal user's seat in a company. The unique (tenantId, userId) index IS "one company per user
- *  per tenant": a constraint rather than a hook, so a concurrent join and accept cannot both win.
- *  tenantId is copied from the company for exactly that index. */
-export const portalMember = pgTable(
-  "portal_member",
-  {
-    companyId: uuid("company_id")
-      .notNull()
-      .references(() => portalCompany.id, { onDelete: "cascade" }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    tenantId: text("tenant_id").notNull(),
-    role: text("role").$type<PortalRole>().notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    primaryKey({ columns: [t.companyId, t.userId] }),
-    uniqueIndex("portal_member_tenant_user_uq").on(t.tenantId, t.userId),
-  ],
 );
 
 /** An invitation into a company (§4.2, §5). `companyId` null is a new-client invitation (P6) until

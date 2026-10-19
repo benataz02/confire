@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { AuthLayout, revealDelay as delay } from "@confire/ui/auth/AuthLayout.tsx";
 
 /** The portal's split screen for the pages a user sees before they have a seat (an invitation, the
- *  invite-only page). It wears the supplier of this host — the tenant `me` resolved from it. */
+ *  invite-only page). It wears the supplier in the path — the tenant `me` resolved from it. */
 export function PortalAuthLayout({ tenant, children }: { tenant: { name: string; logo: string | null }; children: ReactNode }) {
   return (
     <AuthLayout

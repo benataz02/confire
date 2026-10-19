@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { db, configModel, configProjectEvent, entityMeta, portalMember } from "@confire/db";
+import { db, configModel, configProjectEvent, entityMeta } from "@confire/db";
 import type { B1EntitySchema, B1Field } from "@confire/b1";
 import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
 import { readRows } from "../src/entity-read.ts";
 import { savePortalSettings } from "../src/portal/settings.ts";
 import {
-  call, makePortalSeat, makePortalUser, makeTenant, makeUser, portalHeaders, tenantHeaders, TEST_MODEL,
+  call, insertSeat, makePortalSeat, makePortalUser, makeTenant, makeUser, tenantHeaders, TEST_MODEL,
 } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
@@ -115,15 +115,15 @@ async function clientSetup() {
     DeliveryNotes: [{ DocEntry: 8, CardCode: A.cardCode, DocumentLines: [{ BaseType: 17, BaseEntry: 7 }] }],
     Invoices: [{ DocEntry: 9, CardCode: A.cardCode, DocumentLines: [{ BaseType: 15, BaseEntry: 8 }] }],
   });
-  const portalA = { context: { headers: portalHeaders(t.slug, ua.cookie) } };
-  const portalB = { context: { headers: portalHeaders(t.slug, ub.cookie) } };
+  const portalA = { context: { headers: tenantHeaders(t.slug, ua.cookie) } };
+  const portalB = { context: { headers: tenantHeaders(t.slug, ub.cookie) } };
   // A buyer of A's creates the project; the viewer above reads documents (any seat may).
   const buyer = await makePortalUser();
-  await db.insert(portalMember).values({ companyId: A.id, userId: buyer.userId, tenantId: t.tenantId, role: "buyer" });
+  await insertSeat(t.tenantId, A.id, buyer.userId, "buyer");
   const [model] = await db.insert(configModel)
     .values({ tenantId: t.tenantId, name: TEST_MODEL.name, definition: TEST_MODEL, portal: true, portalPricing: "request" }).returning();
   const { id: projectId } = await call(portalRouter.projects.create, { modelId: model!.id, name: "Kabel 1" },
-    { context: { headers: portalHeaders(t.slug, buyer.cookie) } });
+    { context: { headers: tenantHeaders(t.slug, buyer.cookie) } });
   await db.insert(configProjectEvent).values({
     tenantId: t.tenantId, projectId, kind: "quoted", actorSide: "internal",
     payload: { docEntry: 1, docNum: 101, value: 10, mode: "created", inputs: { entries: {}, batches: [], tables: {} } },

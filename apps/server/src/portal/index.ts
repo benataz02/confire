@@ -10,6 +10,6 @@ export default serve({
   auth,
   router: portalRouter,
   files: fileRoutes("external"),
-  spaDist: process.env.PORTAL_DIST ?? "../portal/dist",
-  port: Number(process.env.PORTAL_PORT ?? 3001),
+  spaDist: "../portal/dist",
+  port: 3001,
 });

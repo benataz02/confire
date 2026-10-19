@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { asc, eq } from "drizzle-orm";
-import { db, configModel, configProject, configProjectEvent, portalMember } from "@confire/db";
+import { db, configModel, configProject, configProjectEvent } from "@confire/db";
 import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
 import { revisionDiff } from "../src/project-lifecycle.ts";
 import {
-  call, makePortalSeat, makePortalUser, makeTenant, makeUser, portalHeaders, tenantHeaders, TEST_MODEL,
+  call, insertSeat, makePortalSeat, makePortalUser, makeTenant, makeUser, tenantHeaders, TEST_MODEL,
 } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
@@ -30,7 +30,7 @@ async function setup(pricing: "indicative" | "request" = "indicative") {
     .values({ tenantId: t.tenantId, name: TEST_MODEL.name, definition: TEST_MODEL, portal: true, portalPricing: pricing })
     .returning();
   const staff = { context: { headers: tenantHeaders(t.slug, admin.cookie) } };
-  const portal = { context: { headers: portalHeaders(t.slug, client.cookie) } };
+  const portal = { context: { headers: tenantHeaders(t.slug, client.cookie) } };
   const create = () => call(portalRouter.projects.create, { modelId: model!.id, name: "Kabel 1" }, portal);
   return { ...t, admin, client, company, model: model!, staff, portal, create };
 }
@@ -182,13 +182,13 @@ describe("portal projects", () => {
 
     const other = await makePortalUser();
     await makePortalSeat(s.tenantId, other.userId, "owner", "Andere GmbH");
-    const otherCtx = { context: { headers: portalHeaders(s.slug, other.cookie) } };
+    const otherCtx = { context: { headers: tenantHeaders(s.slug, other.cookie) } };
     expect(await codeOf(call(portalRouter.projects.get, { id }, otherCtx))).toBe("NOT_FOUND");
     expect((await call(portalRouter.projects.rows, { query: NO_QUERY, top: 50 }, otherCtx)).rows).toHaveLength(0);
 
     const viewer = await makePortalUser();
-    await db.insert(portalMember).values({ companyId: s.company.id, userId: viewer.userId, tenantId: s.tenantId, role: "viewer" });
-    const viewerCtx = { context: { headers: portalHeaders(s.slug, viewer.cookie) } };
+    await insertSeat(s.tenantId, s.company.id, viewer.userId, "viewer");
+    const viewerCtx = { context: { headers: tenantHeaders(s.slug, viewer.cookie) } };
     expect(await codeOf(call(portalRouter.projects.get, { id }, viewerCtx))).toBe("OK");
     expect(await codeOf(call(portalRouter.projects.calculate, { id, entries: { material: "alu" } }, viewerCtx))).toBe("FORBIDDEN");
 

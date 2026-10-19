@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
-import { db, portalCompany, portalInvitation, portalMember } from "@confire/db";
+import { and, eq } from "drizzle-orm";
+import { db, EXTERNAL_ROLE, member, portalCompany, portalInvitation } from "@confire/db";
 import { auth } from "../src/auth.ts";
 import { devOutbox } from "../src/mail/mailer.ts";
 import { router } from "../src/orpc/router.ts";
-import { call, makePortalSeat, makePortalUser, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
+import { authUrl, portalTenantUrl } from "../src/tenant.ts";
+import { call, insertSeat, makePortalSeat, makePortalUser, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
 // The internal app's side of the portal (spec §5.1, §10, §11): an admin invites a business partner's
@@ -51,7 +52,7 @@ describe("portalInvitations.inviteExisting", () => {
       mail = devOutbox.find((m) => m.to === email);
       if (!mail) await Bun.sleep(20);
     }
-    expect(mail?.text).toContain(`${slug}.portal.`);
+    expect(mail?.text).toContain(portalTenantUrl(slug, `/accept/${id}`));
   });
 
   test("leads qualify, suppliers do not, and an unknown CardCode is NOT_FOUND", async () => {
@@ -105,7 +106,7 @@ describe("portalCompanies", () => {
     await call(router.portalInvitations.inviteExisting, { cardCode: "C1", email, role: "buyer", registerDomain: false }, as);
     const [company] = await db.select().from(portalCompany).where(eq(portalCompany.tenantId, tenantId));
     const u = await makePortalUser();
-    await db.insert(portalMember).values({ companyId: company!.id, userId: u.userId, tenantId, role: "owner" });
+    await insertSeat(tenantId, company!.id, u.userId, "owner");
     await call(router.portalCompanies.addDomain, { cardCode: "C1", domain: "Kunde-AG.de" }, as);
 
     const got = await call(router.portalCompanies.get, { cardCode: "C1" }, as);
@@ -139,24 +140,41 @@ describe("portalCompanies", () => {
     const c = await makePortalSeat(tenantId, owner.userId, "owner");
     expect(await codeOf(call(router.portalCompanies.removeMember, { cardCode: c.cardCode, userId: owner.userId }, as))).toBe("CONFLICT");
     const buyer = await makePortalUser();
-    await db.insert(portalMember).values({ companyId: c.id, userId: buyer.userId, tenantId, role: "buyer" });
+    await insertSeat(tenantId, c.id, buyer.userId, "buyer");
     await call(router.portalCompanies.setRole, { cardCode: c.cardCode, userId: buyer.userId, role: "owner" }, as);
     await call(router.portalCompanies.removeMember, { cardCode: c.cardCode, userId: owner.userId }, as);
-    const left = await db.select().from(portalMember).where(eq(portalMember.companyId, c.id));
-    expect(left).toEqual([expect.objectContaining({ userId: buyer.userId, role: "owner" })]);
+    const left = await db.select().from(member).where(and(eq(member.role, EXTERNAL_ROLE), eq(member.companyId, c.id)));
+    expect(left).toEqual([expect.objectContaining({ userId: buyer.userId, portalRole: "owner" })]);
   });
 });
 
-describe("the internal side's mirror check (spec §4.2)", () => {
-  test("a customer with a seat here cannot accept an invitation into this workspace", async () => {
-    const { tenantId, admin } = await setup();
-    const customer = await makeUser();
-    await makePortalSeat(tenantId, customer.userId, "buyer");
-    const inv = await auth.api.createInvitation({
-      body: { email: customer.email, role: "member", organizationId: tenantId },
-      headers: new Headers({ cookie: admin.cookie }),
-    });
-    const accepted = auth.api.acceptInvitation({ body: { invitationId: inv.id }, headers: new Headers({ cookie: customer.cookie }) });
-    expect(await messageOf(accepted)).toMatch(/customer on this company.s portal/);
+describe("a customer is a member of the supplier's organization (spec 2026-10-19)", () => {
+  test("refused by every internal procedure", async () => {
+    const { tenantId, slug } = await makeTenant();
+    const customer = await makePortalUser();
+    await makePortalSeat(tenantId, customer.userId, "owner");
+    expect(await codeOf(call(router.me, undefined, ctx(slug, customer.cookie)))).toBe("FORBIDDEN");
+    expect(await codeOf(call(router.portalInvitations.rows, { query: NO_QUERY, top: 1 }, ctx(slug, customer.cookie)))).toBe("FORBIDDEN");
+  });
+
+  test("Better Auth's member endpoints are off: a customer cannot list the supplier's people", async () => {
+    const { tenantId } = await makeTenant();
+    const customer = await makePortalUser();
+    await makePortalSeat(tenantId, customer.userId, "owner");
+    const get = (path: string) =>
+      auth.handler(new Request(`${authUrl}/api/auth/organization/${path}`, { headers: { cookie: customer.cookie } }));
+    expect((await get(`list-members?organizationId=${tenantId}`)).status).toBe(404);
+    expect((await get(`get-full-organization?organizationId=${tenantId}`)).status).toBe(404);
+    expect((await get("list")).status).toBe(404);
+  });
+
+  test("a seat does not count toward the one-workspace limit; a workspace does", async () => {
+    const customer = await makePortalUser();
+    await makePortalSeat((await makeTenant()).tenantId, customer.userId, "buyer");
+    const slug = `w${uid()}`;
+    await auth.api.createOrganization({ body: { name: slug, slug, userId: customer.userId } });
+    const second = `w${uid()}`;
+    await expect(auth.api.createOrganization({ body: { name: second, slug: second, userId: customer.userId } }))
+      .rejects.toMatchObject({ status: "FORBIDDEN" });
   });
 });

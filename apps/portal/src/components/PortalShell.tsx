@@ -133,7 +133,7 @@ export function PortalShell() {
               <UserMenuItem text="Cozy" icon={density === "cozy" ? "sys-enter" : ""} onClick={() => setDensity("cozy")} />
             </UserMenuItem>
             {(lobby.data?.length ?? 0) > 1 ? (
-              <UserMenuItem text="Switch supplier" icon="switch-views" onClick={() => void hardRedirect(authUrl("/login"))} />
+              <UserMenuItem text="Switch supplier" icon="switch-views" onClick={() => void hardRedirect(authUrl("/login?choose=1"))} />
             ) : null}
           </UserMenu>
         </>

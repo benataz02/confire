@@ -95,6 +95,8 @@ export const member = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     role: text("role").default("member").notNull(),
     createdAt: timestamp("created_at").notNull(),
+    companyId: text("company_id"),
+    portalRole: text("portal_role"),
   },
   (table) => [
     index("member_organizationId_idx").on(table.organizationId),

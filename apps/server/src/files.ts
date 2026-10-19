@@ -3,17 +3,18 @@ import { ORPCError } from "@orpc/server";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, projectFile } from "@confire/db";
 import { auth } from "./auth.ts";
-import { membershipFromHost } from "./orpc/base.ts";
+import { membershipOf } from "./orpc/base.ts";
 import { isInternalMember, seatOf } from "./portal/members.ts";
-import { tenantFromHost } from "./portal/orpc/base.ts";
+import { tenantOf } from "./portal/orpc/base.ts";
 import { addFile, projectFileFor, type Actor, type Side } from "./project-lifecycle.ts";
 
 // Files (spec D14): plain Hono routes, not oRPC — the RPC body cap is 2 MB. Both processes mount
-// them, each with its own side: the same session and the same host → tenant → membership (staff) or
-// seat (portal) boundary as their procedures, and project-lifecycle.ts's project fence. A download
-// is always an attachment with nosniff and a sandbox CSP, so an upload can never run as a page on
-// either origin. The one file served without a session is a tenant's branding logo (D20): a mail
-// needs an absolute public URL for it.
+// them, each with its own side: the same session and the same tenant → membership (staff) or seat
+// (portal) boundary as their procedures, and project-lifecycle.ts's project fence. The tenant is the
+// route's first segment (`/files/<slug>/…`), because a download is a plain link and a link carries no
+// `x-tenant` header. A download is always an attachment with nosniff and a sandbox CSP, so an upload
+// can never run as a page on either origin. The one file served without a session — and without a
+// tenant in its path — is a tenant's branding logo (D20): a mail needs an absolute public URL for it.
 
 export const FILE_MAX = 10 * 1024 * 1024;
 export const LOGO_MAX = 1024 * 1024;
@@ -51,18 +52,18 @@ export const imageType = (b: Buffer): "image/png" | "image/jpeg" | null =>
 
 type Who = { tenantId: string; actor: Actor; canUpload: boolean; isAdmin: boolean };
 
-/** The procedures' own boundary, for a plain route: a session, then the host's tenant joined to this
+/** The procedures' own boundary, for a plain route: a session, then the path's tenant joined to this
  *  user's membership (staff) or seat (portal — and never the supplier's own staff). */
-async function whoFor(side: Side, headers: Headers): Promise<Who> {
+async function whoFor(side: Side, c: Context): Promise<Who> {
+  const headers = c.req.raw.headers;
   const data = await auth.api.getSession({ headers, query: { disableCookieCache: true } });
   if (!data) throw new ORPCError("UNAUTHORIZED");
   const userId = data.user.id;
   if (side === "internal") {
-    const m = await membershipFromHost(headers, userId);
-    if (m.role === "client") throw new ORPCError("FORBIDDEN", { message: "Not available for this account" });
+    const m = await membershipOf(c.req.param("tenant"), userId);
     return { tenantId: m.tenantId, actor: { userId, side }, canUpload: true, isAdmin: m.role === "admin" || m.role === "owner" };
   }
-  const tenant = await tenantFromHost(headers);
+  const tenant = await tenantOf(c.req.param("tenant"));
   if (await isInternalMember(tenant.id, userId)) throw new ORPCError("FORBIDDEN", { message: "You work for this supplier: use its internal app" });
   const seat = await seatOf(tenant.id, userId);
   if (!seat) throw new ORPCError("FORBIDDEN", { message: "Not a member of a company on this portal" });
@@ -103,8 +104,8 @@ export function fileRoutes(side: Side): Hono {
     /** The branding logo (D20), admins only: PNG or JPEG, ≤ 1 MB. It shows once Settings saves its
      *  id. ponytail: a logo uploaded and never saved stays behind (≤ 1 MB each); sweep rows no
      *  settings name if that ever adds up. */
-    app.post("/files/logo", handle(async (c) => {
-      const who = await whoFor(side, c.req.raw.headers);
+    app.post("/files/:tenant/logo", handle(async (c) => {
+      const who = await whoFor(side, c);
       if (!who.isAdmin) throw new ORPCError("FORBIDDEN", { message: "Admins only" });
       const data = await readCapped(c.req.raw, LOGO_MAX);
       if (!data) throw new ORPCError("PAYLOAD_TOO_LARGE", { message: "A logo can be up to 1 MB" });
@@ -120,10 +121,10 @@ export function fileRoutes(side: Side): Hono {
 
   /** Upload to a project's timeline: the raw body, `?name=` the file name, `&internal=1` (staff) an
    *  internal-only file. ≤ 10 MB, any type. */
-  app.post("/files/:projectId", handle(async (c) => {
+  app.post("/files/:tenant/:projectId", handle(async (c) => {
     const projectId = c.req.param("projectId")!;
     if (!UUID.test(projectId)) throw new ORPCError("NOT_FOUND");
-    const who = await whoFor(side, c.req.raw.headers);
+    const who = await whoFor(side, c);
     if (!who.canUpload) throw new ORPCError("FORBIDDEN", { message: "Buyers and owners only" });
     const data = await readCapped(c.req.raw, FILE_MAX);
     if (!data) throw new ORPCError("PAYLOAD_TOO_LARGE", { message: "A file can be up to 10 MB" });
@@ -134,14 +135,20 @@ export function fileRoutes(side: Side): Hono {
     return c.json(r, 201);
   }));
 
+  /** A logo is public by design and never changes under its id. */
   app.get("/files/:id", handle(async (c) => {
     const id = c.req.param("id")!;
     if (!UUID.test(id)) throw new ORPCError("NOT_FOUND");
-    // A logo is public by design and never changes under its id.
     const [logo] = await db.select({ name: projectFile.name, mime: projectFile.mime, data: projectFile.data })
       .from(projectFile).where(and(eq(projectFile.id, id), isNull(projectFile.projectId))).limit(1);
-    if (logo) return fileResponse(logo, "inline", "public, max-age=31536000, immutable");
-    const who = await whoFor(side, c.req.raw.headers);
+    if (!logo) throw new ORPCError("NOT_FOUND");
+    return fileResponse(logo, "inline", "public, max-age=31536000, immutable");
+  }));
+
+  app.get("/files/:tenant/:id", handle(async (c) => {
+    const id = c.req.param("id")!;
+    if (!UUID.test(id)) throw new ORPCError("NOT_FOUND");
+    const who = await whoFor(side, c);
     return fileResponse(await projectFileFor(who.tenantId, id, who.actor), "attachment", "private, max-age=3600");
   }));
 

@@ -14,15 +14,15 @@ import { bad } from "../../entity-read.ts";
 import { DEDUP_UDF } from "../../config-quote.ts";
 
 // The two ways into a company (spec §4.4, §5.2): an invitation, accepted on its link, and auto-join
-// by a registered email domain. Both run on the supplier's host — the auth endpoints live on the
-// apex, where there is no tenant — and both end in addPortalMember. The session builder already
+// by a registered email domain. Both run on the supplier's portal page — sign-in lives on the sign-in
+// host, where there is no tenant — and both end in addPortalMember. The session builder already
 // refuses the supplier's own staff.
 
 /** `anna@kunde.de` → `a…@kunde.de`: enough for the right person to recognise, no more. */
 const mask = (email: string) => `${email[0]}…${email.slice(email.lastIndexOf("@"))}`;
 
 /** What Better Auth's acceptInvitation checks (pending, not expired, the same email ignoring case,
- *  a verified address), plus that the invitation is this host's supplier's (spec §5.2). Holding the
+ *  a verified address), plus that the invitation is the request's supplier's (spec §5.2). Holding the
  *  link is not enough: it has to be the invitee who opens it. */
 async function openInvitationFor(tenantId: string, u: { email: string; emailVerified: boolean }, id: string) {
   const [inv] = await db
@@ -204,7 +204,7 @@ export const onboardingRouter = {
 
   /** Auto-join (spec D5, §4.4): a verified address on a domain registered to a company here joins
    *  it as `viewer`. null when nothing matches — the page then says to ask for an invitation.
-   *  ponytail: no `joined` audit event until config_project_event lands (P4); portal_member.createdAt
+   *  ponytail: no `joined` audit event until config_project_event lands (P4); the member row's createdAt
    *  is the record meanwhile. */
   join: portalSessionProcedure.handler(async ({ context }) => {
     if (!context.user.emailVerified) return null;

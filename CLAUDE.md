@@ -12,9 +12,9 @@ Everything runs on **Bun** (no npm — see `package.json` workspaces).
 ```bash
 docker compose up -d db                 # Postgres 17 on :5432 (dev runs server/web with bun)
 bun install
-bun run dev                             # sign in at http://lvh.me:5173; staff app <slug>.app.lvh.me:5173
-                                        # (server :3000), portal <slug>.portal.lvh.me:5180 (server :3001),
-                                        # agent :4000
+bun run dev                             # sign in at http://localhost:5173/login; staff app
+                                        # localhost:5173/<slug>/ (server :3000), portal
+                                        # localhost:5180/<slug>/ (server :3001), agent :4000
 bun run db:push                         # drizzle-kit push — the ONLY schema migration 
 bun run auth:generate                   # regenerate schema/auth.ts after a Better Auth config change
 ```
@@ -56,45 +56,59 @@ record is `docs/superpowers/specs/2026-10-07-portal-redesign.md`; P0–P6 are bu
 The agent is a Windows service the customer installs. SAP credentials live in its `agent.json`
 and never reach the cloud. `sapConnection.agentUrl` is `http://localhost:4000` in dev and a
 Cloudflare Tunnel hostname in production — **that difference is a database row, not a branch in
-the code**, which is why nothing here is conditional on "dev vs prod".
+the code**, which is why nothing here is conditional on "dev vs prod". The deployment itself is one
+setting, `DOMAIN` (below); the root `.env` needs only `DATABASE_URL` and `BETTER_AUTH_SECRET` in dev.
 
-## Tenancy is the request host
+## Tenancy is the path
 
-`<slug>.<APP_BASE_DOMAIN>`. `tenant.ts` parses the slug (the only place the host is parsed);
-`orpc/base.ts` joins it against `member` — **the membership join is the tenant boundary**, so a
-forged Host can only ever select an org the user already belongs to. Three procedure builders
-compose that check:
+Two fixed hosts, no tenant subdomains (`docs/superpowers/specs/2026-10-19-path-tenancy-design.md`): the
+staff app on `app.<DOMAIN>/<slug>/…`, the portal on `portal.<DOMAIN>/<slug>/…`. Each SPA's router runs
+under `/<slug>` as its **basepath** (`@confire/ui/host.ts` `tenantBasepath`), so no route or link names
+the tenant, and moving to another tenant is always a full page load — the query cache never holds two.
+The oRPC link sends the slug as **`x-tenant`** on every call; the plain file routes carry it in their
+path (`/files/<slug>/…`), because a download is a link. `tenant.ts` is the only place a slug is read
+off a request (`tenantSlug`, with the reserved names: the staff SPA's top-level pages and the server's
+routes). `orpc/base.ts` joins it against `member` — **the membership join is the tenant boundary**,
+so a forged `x-tenant` can only ever select an org the user already belongs to. Three procedure
+builders compose that check:
 
 | Builder | Who |
 |---|---|
 | `sessionProcedure` | signed in; `me` resolves membership itself |
-| `userProcedure` | member of this workspace; a leftover `client` role stays forbidden |
+| `userProcedure` | staff of this workspace: any `member` role but `external` |
 | `adminProcedure` | admin/owner — model builder, settings |
 
-**One sign-in for both** (`docs/superpowers/specs/2026-10-17-single-sign-in-design.md`): one Better Auth
-instance (`auth.ts`), one `session` table, one cookie on the sign-in host's domain (`BETTER_AUTH_URL`,
-`confire.ai`; dev `http://lvh.me:5173`), which covers both zones. Both processes mount it on `/api/auth`.
-A session says who you are, never where you may go: that is the membership join here and the seat join
-on the portal. `/login` on the sign-in host is also the **dispatcher** (`sap.lobby` lists the workspace
-and every portal seat, with server-built URLs): signed in, it follows a safe `redirect`, else sends the
-user to their one place, else renders "Where to?"; no place at all is workspace setup. A portal stays
-invite-only because a portal-originated sign-in carries `redirect` back to the portal, whose own guard
-shows the invite-only page — sign-in itself cannot know who is "a customer".
+**One sign-in for both:** one Better Auth instance (`auth.ts`), one `session` table, one cookie. The
+sign-in host is the staff app's origin (`baseURL`); the cookie is on `<DOMAIN>` itself so it reaches
+both hosts, and host-only on `localhost` in dev (cookies ignore ports). Both processes mount it on
+`/api/auth`. A session says who you are, never where you may go: that is the membership join here and
+the seat join on the portal. The session **remembers** where it last worked: each app's `me` writes
+`session.activeOrganizationId` (`rememberActiveOrganization`) — the path decides, the session only
+remembers. `/login` is also the **dispatcher** (`sap.lobby` lists the workspace and every portal seat,
+with server-built URLs and `active` marked): signed in, it follows a safe `redirect`, else goes to the
+active place, else the one place, else renders "Where to?" (`?choose` asks for it outright: the
+portal's *Switch supplier*); no place at all is workspace setup. A portal stays invite-only because a
+portal-originated sign-in carries `redirect` back to the portal, whose own guard shows the invite-only
+page — sign-in itself cannot know who is "a customer".
 
-**The portal** is the same tenancy pattern on its own zone: `<slug>.<PORTAL_BASE_DOMAIN>`, parsed by the
-same `tenantSlugFromHost`. No organization plugin: a customer company is `portal_company` (one per
-tenant × CardCode) and a seat is `portal_member`, whose unique `(tenantId, userId)` index is "one
-company per user per tenant". Builders (`portal/orpc/base.ts`);
-every tenant-scoped one refuses the supplier's own staff (any internal `member` of the host tenant):
+**A customer is a member of the supplier's organization** with role **`external`** (`EXTERNAL_ROLE`,
+an access-control role with no permissions) and two extra member fields: `companyId` (→ the
+`portal_company`, one per tenant × CardCode) and `portalRole` (`owner`/`buyer`/`viewer`). One member row
+per (organization, user) is "one company per user per tenant" and makes staff and customer of one
+tenant exclusive. Every staff query filters `role <> 'external'`; `organizationLimit` counts staff rows
+only, so a customer may still found their own workspace. Better Auth's organization endpoints treat
+all members as peers (`list-members` would show a customer every other customer), so `auth.ts`
+disables every one but `create` and `check-slug` (`disabledPaths`, computed from the plugin).
+Builders (`portal/orpc/base.ts`); every tenant-scoped one refuses the supplier's own staff:
 
 | Builder | Who |
 |---|---|
 | `portalAuthedProcedure` | signed in; no tenant (`lobby`); `me` resolves the rest itself |
-| `portalSessionProcedure` | + the host's tenant, maybe no seat yet |
-| `portalMemberProcedure` | + a seat: `portal_member ⋈ portal_company` on that tenant |
+| `portalSessionProcedure` | + the request's tenant, maybe no seat yet |
+| `portalMemberProcedure` | + a seat: the `external` member row ⋈ its `portal_company` |
 | `portalBuyerProcedure` / `portalOwnerProcedure` | seat role `buyer`/`owner` / `owner` |
 
-**`portal/members.ts` is the only writer** of `portal_member` (`addPortalMember`), `portal_company_domain`
+**`portal/members.ts` is the only writer** of external member rows (`addPortalMember`, `changeMember`), `portal_company_domain`
 (`claimDomain`) and `portal_invitation` (`sendInvitation`, `cancelInvitations`), and both processes
 import it. The internal router (`orpc/routers/portal.ts`: `portalInvitations`, `portalCompanies`)
 and the portal's (`onboarding`, `company`) therefore enforce one rule set. The rules:
@@ -102,10 +116,11 @@ and the portal's (`onboarding`, `company`) therefore enforce one rule set. The r
 - A second way into the same company never lowers a role.
 - No change may leave a company that had an owner with none.
 - Free-mail domains are never registered or auto-joined.
-- Staff and customer of one tenant are mutually exclusive: `addPortalMember` refuses staff, and the
-  internal `beforeAcceptInvitation` refuses a portal customer.
+- Staff and customer of one tenant are mutually exclusive: `addPortalMember` refuses a staff row. It
+  locks the user row first — the generated Better Auth schema cannot carry a unique
+  (organizationId, userId) index, so the lock is what stops two concurrent joins both inserting.
 
-Ways in are an invitation (`/accept/<id>`, existing-BP from the BP Object Page's *Invite to portal*)
+Ways in are an invitation (`/<slug>/accept/<id>`, existing-BP from the BP Object Page's *Invite to portal*)
 or auto-join (`onboarding.join`, a verified address on a domain registered to a company).
 `bun run seed:portal` gives a dev tenant a company and an owner login.
 
@@ -148,28 +163,24 @@ fields in Settings → Portal (`portalSettings`, one jsonb `portal_settings` doc
 only, in both apps (`@confire/ui/PrintActions.tsx`).
 
 There is no bot check and no supplier branding on sign-in: account mail is always Confire's. Host
-rules for both SPAs (slug, the sign-in host's URLs, `safeRedirect` — anything under the sign-in host's
-domain) are `@confire/ui/host.ts`; `VITE_AUTH_URL` is baked into both builds.
+rules for both SPAs (the path's slug, the two origins, `safeRedirect` — an absolute URL on one of the
+two origins) are `@confire/ui/host.ts`. The SPAs carry no build setting: each reads its origins off
+its own location (`app.<domain>` / `portal.<domain>`, any other host = dev's `:5173` / `:5180`), so
+one image serves any domain.
 
-Dev signs in at `http://lvh.me:5173` (public DNS: lvh.me at any depth → 127.0.0.1); the staff app is
-`<slug>.app.lvh.me:5173`, the portal `<slug>.portal.lvh.me:5180`, and the `.lvh.me` cookie reaches both
-(cookies ignore ports). Not `localhost`: the browser treats it as a TLD, so a `.localhost` cookie never
-reaches `acme.localhost`. Not `confire.localhost` either — the cookie works, but Google rejects
-`http://*.localhost` OAuth redirect URIs. Not `.local`: that is mDNS, and nss-mdns answers it before
-`/etc/hosts` is read.
-
-Prod is one `DOMAIN=confire.ai` in compose: sign-in (and later marketing) on `confire.ai`,
-`APP_BASE_DOMAIN=app.confire.ai`, `PORTAL_BASE_DOMAIN=portal.confire.ai`; bare `app.`/`portal.`
-redirect to `confire.ai/login`. **Every `*.confire.ai` host receives the session cookie: never point a
-name under it at a service this stack does not control** (a subdomain takeover would collect sessions).
-Caddy: the apex plus one wildcard site per zone, certs via the Cloudflare DNS challenge
-(`CADDY_TLS=cloudflare`; see `docker-compose.yml`).
+**`DOMAIN` is the whole deployment** (`tenant.ts`): `DOMAIN=confire.ai` puts the staff app and sign-in
+on `https://app.confire.ai`, the portal on `https://portal.confire.ai`, the cookie on `confire.ai` and
+Confire's mail on `mail.confire.ai`; the apex only redirects to sign-in. Unset is dev: `localhost:5173`
+and `localhost:5180`. **Every `*.confire.ai` host receives the session cookie: never point a name
+under it at a service this stack does not control** (a subdomain takeover would collect sessions).
+Caddy has two fixed sites plus the apex redirect, certificates from Let's Encrypt over the HTTP
+challenge (`CADDY_TLS=acme`; `internal` for the full stack on lvh.me) — no wildcard, no DNS API.
 
 ## Mail
 
 `apps/server/src/mail/`: `sendMail` is the seam — Resend when `RESEND_API_KEY` is set, otherwise the
 console (the server log prints each mail, links included; tests read `devOutbox`). Sender
-`notify@<MAIL_DOMAIN>`, the display name quoted by `formatFrom`. Templates are React Email
+`notify@mail.<DOMAIN>` (`mailDomain`), the display name quoted by `formatFrom`. Templates are React Email
 components (`react-email`, pinned: 6.11.3 requires a `@react-email/render` that was never
 published), one typed props object each, drawn in `layout.tsx`'s frame with a `Brand`. Sends are
 fire-and-forget and never throw — a mail is never on a request's critical path.
@@ -178,9 +189,9 @@ fire-and-forget and never throw — a mail is never on a request's critical path
 transition, comment or file) and onboarding submit. Client mail (D27: `off`/`creator`/`buyers`, the
 company's `portal_company.notify` over the tenant's `portal_settings.notify`) wears the tenant's
 branding and goes through `portal/sender-domain.ts`'s `sendClientMail`: from the tenant's own verified
-Resend domain, and on a 403 once more from `MAIL_DOMAIN`, marking the domain failed. Staff mail (D22:
+Resend domain, and on a 403 once more from `mailDomain`, marking the domain failed. Staff mail (D22:
 assignee, else the BP's sales employee in B1, else `notifyFallback`, else admins and owners) is
-Confire's, from `MAIL_DOMAIN`. Recipients are read at send time; a failure lands on the event's
+Confire's, from `mailDomain`. Recipients are read at send time; a failure lands on the event's
 `mailError`. Only the sender-domain handlers hold `RESEND_ADMIN_KEY`. **Tests never send:**
 `bunfig.toml` preloads `scripts/test-preload.ts`, which drops both Resend keys; tests read `devOutbox`
 and await `notificationsSettled()`.

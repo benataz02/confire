@@ -2,7 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import {
-  db, member, NOTIFY_EVENTS, NOTIFY_MODES, organization, PORTAL_ROLES, portalCompany, portalCompanyDomain,
+  db, EXTERNAL_ROLE, member, NOTIFY_EVENTS, NOTIFY_MODES, organization, PORTAL_ROLES, portalCompany, portalCompanyDomain,
   portalInvitation, projectFile, user,
   type PortalCardType, type PortalDocFields, type PortalSettings,
 } from "@confire/db";
@@ -189,12 +189,11 @@ export const portalCompaniesRouter = {
     }),
 };
 
-/** The workspace's people — internal members; a leftover `client` row is not one — for the
- *  fallback picker. */
+/** The workspace's people — every member but its customers — for the fallback picker. */
 const staffOf = (tenantId: string) => db
   .select({ userId: user.id, name: user.name, email: user.email, role: member.role })
   .from(member).innerJoin(user, eq(user.id, member.userId))
-  .where(and(eq(member.organizationId, tenantId), ne(member.role, "client")))
+  .where(and(eq(member.organizationId, tenantId), ne(member.role, EXTERNAL_ROLE)))
   .orderBy(user.name);
 
 /** The SAP fields an entity can offer the portal, as the picker lists them. */

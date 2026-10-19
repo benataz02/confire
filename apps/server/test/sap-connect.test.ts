@@ -5,10 +5,12 @@ import { auth } from "../src/auth.ts";
 import { decryptSecret } from "../src/crypto.ts";
 import { upsertSapConnection } from "../src/seed-agent.ts";
 import { router } from "../src/orpc/router.ts";
+import { portalRouter } from "../src/portal/orpc/router.ts";
 import { appTenantUrl, portalTenantUrl } from "../src/tenant.ts";
 import { call, makePortalSeat, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
 
 const code = (p: Promise<unknown>) => p.then(() => "OK", (e) => (e as { code?: string }).code ?? "ERR");
+/** The sign-in host's calls: no workspace in the path, so no x-tenant. */
 const apex = (cookie: string) => ({ context: { headers: new Headers({ cookie }) } });
 
 describe.skipIf(!process.env.DATABASE_URL)("upsertSapConnection", () => {
@@ -48,7 +50,7 @@ describe.skipIf(!process.env.DATABASE_URL)("sap.connect / sap.lobby", () => {
     const ctx = apex(owner.cookie);
 
     expect(await call(router.sap.lobby, undefined, ctx)).toEqual({
-      workspace: { slug, name: slug, url: appTenantUrl(slug), needsAgent: true }, portals: [],
+      workspace: { slug, name: slug, url: appTenantUrl(slug), active: false, needsAgent: true }, portals: [],
     });
 
     await call(router.sap.connect, {
@@ -78,22 +80,24 @@ describe.skipIf(!process.env.DATABASE_URL)("sap.connect / sap.lobby", () => {
     expect(row!.agentUrl).toBe("https://agent.example");
   });
 
-  test("member, client, and non-member can't connect; lobby sends them on", async () => {
+  test("member, customer and non-member can't connect; lobby sends them on", async () => {
     const { tenantId, slug } = await makeTenant();
     const member = await makeUser("member", tenantId);
-    const client = await makeUser("client", tenantId);
+    const customer = await makeUser();
+    await makePortalSeat(tenantId, customer.userId, "owner");
     const stranger = await makeUser();
     const body = { agentUrl: "http://localhost:4000", secret: "x" };
     expect(await code(call(router.sap.connect, body, apex(member.cookie)))).toBe("FORBIDDEN");
-    expect(await code(call(router.sap.connect, body, apex(client.cookie)))).toBe("FORBIDDEN");
+    expect(await code(call(router.sap.connect, body, apex(customer.cookie)))).toBe("FORBIDDEN");
     expect(await code(call(router.sap.connect, body, apex(stranger.cookie)))).toBe("FORBIDDEN");
-    // No agent yet, but they couldn't connect one — so the tenant, not the agent form.
+    // No agent yet, but they couldn't connect one — so the workspace, not the agent form.
     expect((await call(router.sap.lobby, undefined, apex(member.cookie))).workspace).toMatchObject({ slug, needsAgent: false });
-    expect((await call(router.sap.lobby, undefined, apex(client.cookie))).workspace).toMatchObject({ slug, needsAgent: false });
+    // A seat is a membership too, but never a workspace.
+    expect(await call(router.sap.lobby, undefined, apex(customer.cookie))).toMatchObject({ workspace: null, portals: [{ slug }] });
     expect(await call(router.sap.lobby, undefined, apex(stranger.cookie))).toEqual({ workspace: null, portals: [] });
   });
 
-  // The sign-in dispatcher's four shapes (spec 2026-10-17-single-sign-in-design.md §5.1).
+  // The sign-in dispatcher's shapes (spec 2026-10-19-path-tenancy-design.md).
   test("lobby lists every portal seat, by supplier name, next to the workspace", async () => {
     const [a, b, c] = [await makeTenant(), await makeTenant(), await makeTenant()];
     await db.update(organization).set({ name: "Zeta" }).where(eq(organization.id, a.tenantId));
@@ -104,18 +108,28 @@ describe.skipIf(!process.env.DATABASE_URL)("sap.connect / sap.lobby", () => {
     const lobby = await call(router.sap.lobby, undefined, apex(u.cookie));
     expect(lobby.workspace?.url).toBe(appTenantUrl(c.slug));
     expect(lobby.portals).toEqual([
-      { slug: b.slug, tenantName: "Alpha", logo: null, cardName: "B-Kunde", role: "viewer", url: portalTenantUrl(b.slug) },
-      { slug: a.slug, tenantName: "Zeta", logo: null, cardName: "A-Kunde", role: "owner", url: portalTenantUrl(a.slug) },
+      { slug: b.slug, tenantName: "Alpha", logo: null, cardName: "B-Kunde", role: "viewer", url: portalTenantUrl(b.slug), active: false },
+      { slug: a.slug, tenantName: "Zeta", logo: null, cardName: "A-Kunde", role: "owner", url: portalTenantUrl(a.slug), active: false },
     ]);
+
+    // The place the session last worked in is marked: where /login sends it back to.
+    await call(portalRouter.me, undefined, { context: { headers: tenantHeaders(a.slug, u.cookie) } });
+    const afterPortal = await call(router.sap.lobby, undefined, apex(u.cookie));
+    expect(afterPortal.portals.filter((p) => p.active).map((p) => p.slug)).toEqual([a.slug]);
+    expect(afterPortal.workspace?.active).toBe(false);
+    await call(router.me, undefined, { context: { headers: tenantHeaders(c.slug, u.cookie) } });
+    const afterApp = await call(router.sap.lobby, undefined, apex(u.cookie));
+    expect(afterApp.workspace?.active).toBe(true);
+    expect(afterApp.portals.some((p) => p.active)).toBe(false);
 
     const customer = await makeUser();
     await makePortalSeat(a.tenantId, customer.userId, "buyer");
     expect(await call(router.sap.lobby, undefined, apex(customer.cookie))).toMatchObject({ workspace: null, portals: [{ slug: a.slug }] });
   });
 
-  test("a slug the host can't resolve is refused on create and rename", async () => {
+  test("a slug the path can't carry is refused on create and rename", async () => {
     const u = await makeUser();
-    for (const slug of ["Acme", "app", "a.b", "a_b"]) {
+    for (const slug of ["Acme", "app", "login", "files", "a.b", "a_b"]) {
       await expect(auth.api.createOrganization({ body: { name: slug, slug, userId: u.userId } })).rejects.toThrow("Invalid workspace URL");
     }
     const { tenantId } = await makeTenant();

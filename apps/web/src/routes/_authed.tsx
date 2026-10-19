@@ -3,14 +3,14 @@ import { meQuery } from "../orpc.ts";
 import { authUrl, currentSlug, hardRedirect, loginUrl } from "../lib/tenant.ts";
 import { AppShell } from "../components/AppShell.tsx";
 
-// The app shell for every signed-in page. The tenant is the subdomain; anywhere else — the
-// sign-in host, the bare zone apex — this route never renders: the dispatcher (/login) decides.
+// The app shell for every signed-in page. The workspace is the path's first segment (the router's
+// basepath); without one — the bare origin — this route never renders: the dispatcher (/login) decides.
 export const Route = createFileRoute("/_authed")({
   beforeLoad: async ({ context, location }) => {
     const slug = currentSlug();
     if (!slug) return hardRedirect(authUrl("/login"));
 
-    // Tenant subdomain: one call covers signed-in, member-of-this-workspace, and role.
+    // In a workspace: one call covers signed-in, member-of-this-workspace, and role.
     // beforeLoad re-runs on every navigation, so it's cached — an in-app route change costs
     // no network. Retry is off so a rejection bounces immediately.
     // The server re-checks membership on every procedure regardless — this is UX, not the boundary.

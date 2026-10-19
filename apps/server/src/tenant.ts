@@ -1,78 +1,67 @@
-// Tenant slug lives in the request host: `<slug>.<baseDomain>`. The apex (and a few
-// reserved labels) carry no tenant. This is the only place the host is parsed server-side.
+// The tenant is the first segment of the page's path: `app.confire.ai/<slug>/…` for staff,
+// `portal.confire.ai/<slug>/…` for a supplier's customers (spec 2026-10-19-path-tenancy-design.md).
+// The SPA sends that slug on every call as the `x-tenant` header, and in the path of the plain file
+// routes. This is the only place a slug is read off a request; the membership join behind it
+// (orpc/base.ts, portal/orpc/base.ts) is the boundary.
 import assert from "node:assert/strict";
 
-const RESERVED = new Set(["app", "www", "api", "auth", "admin", "static", "assets"]);
+/** Never a workspace slug: the staff SPA's own top-level pages, the server's routes, and a few names
+ *  kept back. Mirrored in @confire/ui/host.ts, which decides what a path's first segment means. */
+const RESERVED = new Set([
+  "login", "signup", "forgot-password", "reset-password", "onboarding",
+  "api", "rpc", "files", "assets",
+  "app", "portal", "www", "auth", "admin", "static",
+]);
 
-/** Prod sets APP_BASE_DOMAIN (e.g. `app.confire.ai`). Dev is `app.lvh.me`: public DNS sends lvh.me
- *  and every subdomain, at any depth, to 127.0.0.1 (bare `localhost` is a TLD to the browser, so its
- *  cookie spans nothing), and Google accepts its OAuth redirect URI. `confire.localhost` was tried:
- *  the cookie works, but Google rejects `http://*.localhost` redirect URIs. */
-export const baseDomain = (process.env.APP_BASE_DOMAIN ?? "app.lvh.me").toLowerCase();
+export const TENANT_HEADER = "x-tenant";
 
-/** The portal process's zone, a sibling of baseDomain. Both sit under the sign-in host, whose
- *  hostname is the one session cookie's domain (auth.ts). */
-export const portalBaseDomain = (process.env.PORTAL_BASE_DOMAIN ?? "portal.lvh.me").toLowerCase();
+/** The one deployment setting, compose's `DOMAIN` (`confire.ai`): the staff app — which is also the
+ *  sign-in host — on `https://app.<domain>`, the portal on `https://portal.<domain>`, the session
+ *  cookie on `<domain>` so it reaches both, Confire's mail from `mail.<domain>`. Unset, it is dev:
+ *  `http://localhost:5173` and `http://localhost:5180`, and a host-only cookie on `localhost`, which
+ *  the browser sends to both ports. The SPAs read the same rule off their own location (host.ts). */
+const domain = process.env.DOMAIN?.trim().toLowerCase() || undefined;
 
-/** The sign-in host as the browser sees it: Better Auth's baseURL (it reads BETTER_AUTH_URL itself),
- *  so its OAuth callbacks, its mailed links and the cookie domain. Staff URLs take its protocol and port. */
-export const authUrl = (process.env.BETTER_AUTH_URL ?? "http://lvh.me:5173").replace(/\/+$/, "");
+/** The staff app's origin and the sign-in host: Better Auth's baseURL, so its OAuth callbacks and
+ *  every mailed link. */
+export const authUrl = domain ? `https://app.${domain}` : "http://localhost:5173";
 
-/** The portal zone's apex as the browser sees it. Only its protocol and port are used: dev serves the
- *  portal on :5180, the sign-in host and the staff app on :5173. */
-export const portalUrl = (process.env.PORTAL_URL ?? `http://${portalBaseDomain}:5180`).replace(/\/+$/, "");
+/** The customer portal's origin. */
+export const portalUrl = domain ? `https://portal.${domain}` : "http://localhost:5180";
 
-const zoneUrl = (origin: string, hostname: string, path: string) => {
-  const url = new URL(path, origin);
-  url.hostname = hostname;
-  return url.toString();
-};
+/** The session cookie's domain; undefined = host-only. */
+export const cookieDomain = domain;
 
-/** A workspace page: `<slug>.<APP_BASE_DOMAIN>`, protocol and dev port included. */
-export const appTenantUrl = (slug: string, path = "/") => zoneUrl(authUrl, `${slug}.${baseDomain}`, path);
+/** Confire's own domain: every name under it is the platform's, never a tenant's. */
+export const platformDomain = domain ?? "localhost";
 
-/** A supplier's portal page: `<slug>.<PORTAL_BASE_DOMAIN>`, protocol and dev port included. */
-export const portalTenantUrl = (slug: string, path = "/") => zoneUrl(portalUrl, `${slug}.${portalBaseDomain}`, path);
-
-/** `acme.app.lvh.me` + base `app.lvh.me` -> "acme"; apex/reserved/deeper -> null. */
-export function tenantSlugFromHost(
-  host: string | null | undefined,
-  baseDomain: string,
-): string | null {
-  if (!host) return null;
-  const name = host.split(":")[0]!.toLowerCase(); // drop port
-  const base = baseDomain.toLowerCase();
-  if (name === base) return null; // apex
-  const suffix = `.${base}`;
-  if (!name.endsWith(suffix)) return null;
-  const label = name.slice(0, -suffix.length);
-  if (!/^[a-z0-9-]+$/.test(label)) return null; // single label only (no deeper subdomains)
-  return RESERVED.has(label) ? null : label;
+/** A slug as a request carries it, or null: one lowercase label, not reserved. */
+export function tenantSlug(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return /^[a-z0-9-]+$/.test(value) && !RESERVED.has(value) ? value : null;
 }
+
+const tenantUrl = (origin: string, slug: string, path: string) => `${origin}/${slug}${path.startsWith("/") ? path : `/${path}`}`;
+
+/** A workspace page: `<authUrl>/<slug><path>`. */
+export const appTenantUrl = (slug: string, path = "/") => tenantUrl(authUrl, slug, path);
+
+/** A supplier's portal page: `<portalUrl>/<slug><path>`. */
+export const portalTenantUrl = (slug: string, path = "/") => tenantUrl(portalUrl, slug, path);
 
 // ponytail: assert-based self-check — `bun apps/server/src/tenant.ts`.
 if (import.meta.main) {
-  const t = (h: string | null, b: string) => tenantSlugFromHost(h, b);
-  assert.equal(t("acme.confire.local", "confire.local"), "acme");
-  assert.equal(t("acme.localhost:5173", "localhost"), "acme");
-  assert.equal(t("ACME.Confire.Local", "confire.local"), "acme");
-  assert.equal(t("confire.local", "confire.local"), null); // apex
-  assert.equal(t("localhost:3000", "localhost"), null); // apex
-  assert.equal(t("app.confire.local", "confire.local"), null); // reserved
-  assert.equal(t("a.b.confire.local", "confire.local"), null); // deeper subdomain
-  assert.equal(t("acme.evil.com", "confire.local"), null); // wrong base
-  assert.equal(t(null, "confire.local"), null);
-  // Two sibling zones: each process parses only its own, and neither swallows the other.
-  assert.equal(t("acme.app.lvh.me:5173", "app.lvh.me"), "acme");
-  assert.equal(t("acme.portal.lvh.me:5180", "portal.lvh.me"), "acme");
-  assert.equal(t("acme.portal.lvh.me", "app.lvh.me"), null);
-  assert.equal(t("acme.app.lvh.me", "portal.lvh.me"), null);
-  assert.equal(t("portal.lvh.me", "portal.lvh.me"), null); // portal apex
-  assert.notEqual(portalBaseDomain, baseDomain);
-  assert.equal(tenantSlugFromHost(new URL(portalTenantUrl("acme", "/accept/x")).host, portalBaseDomain), "acme");
-  assert.equal(tenantSlugFromHost(new URL(appTenantUrl("acme")).host, baseDomain), "acme");
-  // The sign-in host is a tenant in neither zone.
-  assert.equal(tenantSlugFromHost(new URL(authUrl).host, baseDomain), null);
-  assert.equal(tenantSlugFromHost(new URL(authUrl).host, portalBaseDomain), null);
+  assert.equal(tenantSlug("acme"), "acme");
+  assert.equal(tenantSlug("acme-2"), "acme-2");
+  assert.equal(tenantSlug("ACME"), null); // the client sends what the URL holds, lowercased by the slug rule
+  assert.equal(tenantSlug("login"), null); // reserved: a staff SPA page
+  assert.equal(tenantSlug("files"), null); // reserved: a server route
+  assert.equal(tenantSlug("a.b"), null);
+  assert.equal(tenantSlug("a/b"), null);
+  assert.equal(tenantSlug(""), null);
+  assert.equal(tenantSlug(null), null);
+  assert.equal(appTenantUrl("acme"), `${authUrl}/acme/`);
+  assert.equal(portalTenantUrl("acme", "/accept/x"), `${portalUrl}/acme/accept/x`);
+  assert.equal(portalTenantUrl("acme", "projects"), `${portalUrl}/acme/projects`);
   console.log("tenant.ts ok");
 }

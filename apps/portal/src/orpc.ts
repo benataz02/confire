@@ -3,12 +3,17 @@ import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import type { PortalRouter } from "@confire/server/portal-router";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
-import { hardRedirect, loginUrl } from "./lib/host.ts";
+import { currentSlug, hardRedirect, loginUrl, TENANT_HEADER } from "./lib/host.ts";
 
-// Same-origin (dev proxy / prod static) → the session cookie rides along. A function, so
-// the module never touches `window` at import time.
+// Same-origin (dev proxy / prod static) → the session cookie rides along. The supplier is the page's
+// path segment, sent as x-tenant on every call. Functions, so the module never touches `window` at
+// import time.
 const link = new RPCLink({
   url: () => `${window.location.origin}/rpc`,
+  headers: (): Record<string, string> => {
+    const slug = currentSlug();
+    return slug ? { [TENANT_HEADER]: slug } : {};
+  },
   interceptors: [
     onError((error) => {
       if ((error as { code?: string }).code === "UNAUTHORIZED") void hardRedirect(loginUrl());

@@ -1,20 +1,21 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
-import { db, member, organization, sapConnection } from "@confire/db";
+import { and, eq, ne } from "drizzle-orm";
+import { db, EXTERNAL_ROLE, member, organization, sapConnection } from "@confire/db";
 import { adminProcedure, sessionProcedure } from "../base.ts";
 import { sapConnectionExists, upsertSapConnection } from "../../seed-agent.ts";
 import { encryptSecret } from "../../crypto.ts";
 import { portalSeats } from "../../portal/members.ts";
 import { appTenantUrl, portalTenantUrl } from "../../tenant.ts";
 
-/** Apex onboarding has no tenant Host — the user's one org is the tenant. */
+/** Workspace setup has no workspace in its path — the user's one staff membership is the tenant.
+ *  Customer seats are members too, and never count (auth.ts' organizationLimit). */
 async function oneMembership(userId: string) {
   const [row] = await db
     .select({ tenantId: organization.id, slug: organization.slug, name: organization.name, role: member.role })
     .from(member)
     .innerJoin(organization, eq(organization.id, member.organizationId))
-    .where(eq(member.userId, userId))
+    .where(and(eq(member.userId, userId), ne(member.role, EXTERNAL_ROLE)))
     .limit(1);
   return row;
 }
@@ -30,19 +31,20 @@ async function ownedTenant(userId: string): Promise<string> {
 export const sapRouter = {
   // The sign-in dispatcher's one call (/login, signed in): every place this user can go — their
   // workspace (null = no company yet; does it still need an agent?) and every supplier portal they
-  // have a seat at. Only an owner/admin can connect an agent, so a member — or a leftover client, whom
-  // the tenant shell turns away with its own page — goes straight to the tenant whether or not the row
-  // exists. The URLs are built here so the browser never guesses a zone's port.
+  // have a seat at, the one the session last worked in marked `active`. Only an owner/admin can
+  // connect an agent, so a member goes straight to the workspace whether or not the row exists. The
+  // URLs are built here so the browser never guesses the other app's origin.
   lobby: sessionProcedure.handler(async ({ context }) => {
     const [row, seats] = await Promise.all([oneMembership(context.user.id), portalSeats(context.user.id)]);
+    const active = context.session.activeOrganizationId;
     return {
       workspace: row
         ? {
-          slug: row.slug, name: row.name, url: appTenantUrl(row.slug),
+          slug: row.slug, name: row.name, url: appTenantUrl(row.slug), active: row.tenantId === active,
           needsAgent: isAdmin(row.role) && !(await sapConnectionExists(row.tenantId)),
         }
         : null,
-      portals: seats.map((s) => ({ ...s, url: portalTenantUrl(s.slug) })),
+      portals: seats.map(({ tenantId, ...s }) => ({ ...s, url: portalTenantUrl(s.slug), active: tenantId === active })),
     };
   }),
   connect: sessionProcedure
@@ -64,7 +66,7 @@ export const sapRouter = {
       });
     }),
 
-  // Settings: the same row, edited after onboarding from the tenant subdomain — so host-scoped
+  // Settings: the same row, edited after onboarding from inside the workspace — so path-scoped
   // (adminProcedure) rather than ownedTenant's "first org" lookup. Secrets never come back out:
   // the Access secret is shown once by Cloudflare and the agent secret lives in agent.json, so
   // a blank field means "keep", and changing only the URL never forces either to be re-entered.

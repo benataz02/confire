@@ -1,19 +1,19 @@
 # Dev:  docker compose up -d db          (just Postgres; run server/web with bun)
-# Prod: docker compose --profile full up  (Postgres + server + Caddy wildcard subdomains)
+# Prod: docker compose --profile full up  (Postgres + both processes + Caddy)
 #
-# A real domain is .env only, no code change:
-#   DOMAIN=confire.ai                 sign-in on confire.ai, staff on <slug>.app.confire.ai, the customer
-#                                     portal on <slug>.portal.confire.ai; one session cookie on
-#                                     .confire.ai (spec 2026-10-17-single-sign-in); the SPAs are rebuilt for it
-#   CADDY_TLS=cloudflare              + CLOUDFLARE_API_TOKEN (Zone:Zone:Read + Zone:DNS:Edit)
+# A real domain is .env only, no code change and no rebuild:
+#   DOMAIN=confire.ai                 staff app and sign-in on app.confire.ai, the customer portal on
+#                                     portal.confire.ai, a workspace at /<slug>/ on each; one session
+#                                     cookie on confire.ai (apps/server/src/tenant.ts)
+#   CADDY_TLS=acme                    real certificates (Let's Encrypt, HTTP challenge); default
+#                                     `internal` = Caddy's local CA, for the full stack on lvh.me
 #   BETTER_AUTH_SECRET=...            openssl rand -base64 32
 #   RESEND_API_KEY=re_...             a sending_access key; unset = mail is printed to the server log
-# Cloudflare DNS: A records for the apex, app, *.app, portal and *.portal, DNS only (grey cloud) —
-# Caddy terminates TLS, and Cloudflare's free edge cert does not cover a two-level wildcard. Every
-# *.<DOMAIN> host receives the session cookie: never point a name at a service you don't control.
+# DNS: A records for app and portal (and the apex, which redirects to sign-in). Every *.<DOMAIN>
+# host receives the session cookie: never point a name at a service you don't control.
 # Resend: verify mail.<DOMAIN> (SPF, DKIM, MX for the return path). Its region is fixed when the
 # domain is added, so pick EU vs US first.
-# OAuth consoles: one redirect URI per provider, https://<DOMAIN>/api/auth/callback/{google,microsoft}.
+# OAuth consoles: one redirect URI per provider, https://app.<DOMAIN>/api/auth/callback/{google,microsoft}.
 # Microsoft: emit the optional `xms_edov` claim (a Microsoft email counts as verified only on it).
 services:
   db:
@@ -38,65 +38,42 @@ services:
     build:
       context: .
       dockerfile: apps/server/Dockerfile
-      # Each SPA's zone and the sign-in host are baked in at build time.
-      args:
-        VITE_AUTH_URL: https://${DOMAIN:-lvh.me}
-        VITE_APP_BASE_DOMAIN: app.${DOMAIN:-lvh.me}
-        VITE_PORTAL_BASE_DOMAIN: portal.${DOMAIN:-lvh.me}
     environment: &app-env
       DATABASE_URL: postgres://confire:confire@db:5432/confire
-      # Fail fast: a placeholder here would sign cookies AND (via crypto.ts' fallback) encrypt SAP
-      # secrets with a string that is in git. Better Auth only rejects its own default secret.
+      # Fail fast: a placeholder here would sign cookies AND (crypto.ts) encrypt SAP secrets with a
+      # string that is in git. Better Auth only rejects its own default secret.
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET (openssl rand -base64 32)}
-      # The sign-in host as the browser sees it (Caddy, HTTPS) — the OAuth redirect URI and the
-      # `.${DOMAIN}` session cookie are both derived from it, so :3000 would break both. Both
-      # processes read it: the Confire logo in mail, and every staff URL.
-      BETTER_AUTH_URL: https://${DOMAIN:-lvh.me}
-      APP_BASE_DOMAIN: app.${DOMAIN:-lvh.me}
-      # The portal's zone, and the origin its links are built on.
-      PORTAL_URL: https://portal.${DOMAIN:-lvh.me}
-      PORTAL_BASE_DOMAIN: portal.${DOMAIN:-lvh.me}
-      # Mail (apps/server/src/mail): sender notify@mail.<DOMAIN>. No key = the console mailer.
+      # Every URL, the cookie's domain and the mail domain derive from it (tenant.ts).
+      DOMAIN: ${DOMAIN:-lvh.me}
+      # Mail (apps/server/src/mail): sender notify@mail.<DOMAIN>. No key = the console mailer. The
+      # admin key is only for tenant sender domains (Settings → Portal); unset turns them off.
       RESEND_API_KEY: ${RESEND_API_KEY:-}
-      MAIL_DOMAIN: mail.${DOMAIN:-lvh.me}
+      RESEND_ADMIN_KEY: ${RESEND_ADMIN_KEY:-}
       # Unset leaves that sign-in button dead: Better Auth only logs a warning at boot.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
       MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
-      PORT: 3000
     depends_on:
       db:
         condition: service_healthy
-    # Loopback only: Caddy is the public door. A public :3000 would serve plain HTTP and take a
-    # client-supplied X-Forwarded-Host (orpc/base.ts prefers it) that Caddy otherwise overwrites.
+    # Loopback only: Caddy is the public door, and a public :3000 would serve plain HTTP.
     ports:
       - "127.0.0.1:3000:3000"
     profiles: ["full"]
 
-  # The customer portal (spec §3): the same image, a second process with its own event loop.
+  # The customer portal (spec §3): the same image, a second process with its own event loop, on :3001.
   portal:
     <<: *app
     command: ["bun", "run", "--cwd", "apps/server", "start:portal"]
-    environment:
-      <<: *app-env
-      PORTAL_PORT: 3001
     ports:
       - "127.0.0.1:3001:3001"
 
   caddy:
-    # Stock Caddy ships no DNS providers; the wildcard cert's DNS challenge needs one compiled in.
-    build:
-      context: .
-      dockerfile_inline: |
-        FROM caddy:2-builder AS build
-        RUN xcaddy build --with github.com/caddy-dns/cloudflare
-        FROM caddy:2
-        COPY --from=build /usr/bin/caddy /usr/bin/caddy
+    image: caddy:2
     environment:
       DOMAIN: ${DOMAIN:-lvh.me}
       CADDY_TLS: ${CADDY_TLS:-internal}
-      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
     ports:
       - "80:80"
       - "443:443"

@@ -1,8 +1,8 @@
 import { os, ORPCError } from "@orpc/server";
-import { and, eq } from "drizzle-orm";
-import { db, member, organization } from "@confire/db";
+import { and, eq, ne } from "drizzle-orm";
+import { db, EXTERNAL_ROLE, member, organization } from "@confire/db";
 import { auth } from "../auth.ts";
-import { baseDomain, tenantSlugFromHost } from "../tenant.ts";
+import { TENANT_HEADER, tenantSlug } from "../tenant.ts";
 
 // Initial context provided by the Hono adapter on every request.
 export interface InitialContext {
@@ -24,31 +24,29 @@ const requireSession = base.middleware(async ({ context, next }) => {
   return next({ context: { session: data.session, user: data.user } });
 });
 
-/** Resolve host subdomain → org, gated by this user's membership (the tenant boundary). */
-export async function membershipFromHost(headers: Headers, userId: string) {
-  // Caddy preserves Host; the dev proxy and e2e set X-Forwarded-Host. Prefer the latter.
-  const host = headers.get("x-forwarded-host") ?? headers.get("host");
-  const slug = tenantSlugFromHost(host, baseDomain);
-  if (!slug) throw new ORPCError("BAD_REQUEST", { message: "No tenant subdomain" });
+/** The workspace a request names (its `x-tenant`: the page's first path segment, tenant.ts), gated by
+ *  this user's staff membership — the tenant boundary. A supplier's customer (`external`) is a member
+ *  of the organization too, and is refused here like a stranger. */
+export async function membershipOf(slugValue: string | null | undefined, userId: string) {
+  const slug = tenantSlug(slugValue);
+  if (!slug) throw new ORPCError("BAD_REQUEST", { message: "No workspace in the request" });
   const [row] = await db
     .select({ tenantId: organization.id, role: member.role })
     .from(organization)
     .innerJoin(member, eq(member.organizationId, organization.id))
-    .where(and(eq(organization.slug, slug), eq(member.userId, userId)))
+    .where(and(eq(organization.slug, slug), eq(member.userId, userId), ne(member.role, EXTERNAL_ROLE)))
     .limit(1);
   if (!row) throw new ORPCError("FORBIDDEN", { message: "Not a member of this workspace" });
   return row;
 }
 
 /**
- * Procedures a signed-in user calls, scoped to the tenant in the request host
- * (`<slug>.<baseDomain>`). The membership join is the tenant boundary: a forged host
- * can only ever select an org the user already belongs to. A leftover `client` membership
- * — the removed external portal — stays locked out of every internal endpoint.
+ * Procedures a signed-in user calls, scoped to the workspace the request names. The membership
+ * join is the tenant boundary: a forged `x-tenant` can only ever select an org the user is already
+ * staff of.
  */
 export const userProcedure = base.use(requireSession).use(async ({ context, next }) => {
-  const row = await membershipFromHost(context.headers, context.user.id);
-  if (row.role === "client") throw new ORPCError("FORBIDDEN", { message: "Not available for this account" });
+  const row = await membershipOf(context.headers.get(TENANT_HEADER), context.user.id);
   return next({ context: { tenantId: row.tenantId, role: row.role, userId: context.user.id } });
 });
 
@@ -60,5 +58,5 @@ export const adminProcedure = userProcedure.use(({ context, next }) => {
   return next({});
 });
 
-/** Session only. `me` resolves membership itself so the shell can learn the role. */
+/** Session only: the sign-in host's calls (no workspace yet), and `me`. */
 export const sessionProcedure = base.use(requireSession);

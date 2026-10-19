@@ -67,7 +67,7 @@ export const entitiesRouter = {
       entity: EntityZ,
       query: ListQueryZ,
       /** sealed @odata.nextLink from the previous page; absent = first page. There is no
-       *  page-size input: B1_PAGE_SIZE is the one knob, so a client cannot ask for a page the
+       *  page-size input: DEFAULT_PAGE is the one size, so a client cannot ask for a page the
        *  Service Layer would silently truncate. */
       cursor: z.string().optional(),
       /** ask B1 for the total in the same read; only worth it on the first page */

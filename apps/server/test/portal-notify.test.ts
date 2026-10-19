@@ -1,15 +1,16 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { asc, eq } from "drizzle-orm";
-import { db, configModel, configProjectEvent, portalMember, type PortalRole } from "@confire/db";
+import { db, configModel, configProjectEvent, type PortalRole } from "@confire/db";
 import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
-import { devOutbox } from "../src/mail/mailer.ts";
+import { devOutbox, mailDomain } from "../src/mail/mailer.ts";
 import { notificationsSettled } from "../src/notify.ts";
 import { fileRoutes, imageType, cleanName } from "../src/files.ts";
 import { contrastOnWhite } from "../src/portal/settings.ts";
 import { senderNameProblem } from "../src/portal/sender-domain.ts";
+import { platformDomain } from "../src/tenant.ts";
 import {
-  call, makePortalSeat, makePortalUser, makeTenant, makeUser, portalHeaders, tenantHeaders, TEST_MODEL,
+  call, insertSeat, makePortalSeat, makePortalUser, makeTenant, makeUser, tenantHeaders, TEST_MODEL,
 } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
@@ -39,7 +40,7 @@ const mark = async () => {
 
 async function seat(companyId: string, tenantId: string, role: PortalRole) {
   const u = await makePortalUser();
-  await db.insert(portalMember).values({ companyId, userId: u.userId, tenantId, role });
+  await insertSeat(tenantId, companyId, u.userId, role);
   return u;
 }
 
@@ -57,7 +58,7 @@ async function setup() {
     .values({ tenantId: t.tenantId, name: TEST_MODEL.name, definition: TEST_MODEL, portal: true, portalPricing: "request" })
     .returning();
   const as = (cookie: string) => ({ context: { headers: tenantHeaders(t.slug, cookie) } });
-  const on = (cookie: string) => ({ context: { headers: portalHeaders(t.slug, cookie) } });
+  const on = (cookie: string) => ({ context: { headers: tenantHeaders(t.slug, cookie) } });
   /** A project the buyer created and calculated, still a draft. */
   const draft = async () => {
     const { id } = await call(portalRouter.projects.create, { modelId: model!.id, name: "Kabel 1" }, on(buyer.cookie));
@@ -86,7 +87,7 @@ describe("notifications", () => {
     expect(to(s.admin.email)).toHaveLength(1);
     expect(to(s.rep.email)).toHaveLength(0);
     // Internal mail is Confire's own, and replies to the client who acted.
-    expect(to(s.owner.email)[0]).toMatchObject({ from: '"Confire" <notify@mail.lvh.me>', replyTo: s.buyer.email });
+    expect(to(s.owner.email)[0]).toMatchObject({ from: `"Confire" <notify@${mailDomain}>`, replyTo: s.buyer.email });
     expect(to(s.owner.email)[0]!.text).toContain(`/configs/${id}`);
 
     // The fallback list picks who instead.
@@ -132,7 +133,7 @@ describe("notifications", () => {
     expect(to(s.colleague.email)).toHaveLength(1);
     expect(to(s.viewer.email)).toHaveLength(0);
     // Client mail: the supplier's name, Confire's domain (no sender domain), replies to whoever acted.
-    expect(to(s.buyer.email)[0]).toMatchObject({ from: `"${s.slug}" <notify@mail.lvh.me>`, replyTo: s.admin.email });
+    expect(to(s.buyer.email)[0]).toMatchObject({ from: `"${s.slug}" <notify@${mailDomain}>`, replyTo: s.admin.email });
     expect(to(s.buyer.email)[0]!.text).toContain(`/projects/${id}`);
 
     // An internal note mails nobody; a comment for the client does.
@@ -168,8 +169,11 @@ describe("notifications", () => {
 describe("files", () => {
   const internal = fileRoutes("internal");
   const external = fileRoutes("external");
-  const upload = (app: typeof internal, headers: Headers, projectId: string, body: Uint8Array | string, q = "name=Zeichnung%20%C3%BC.pdf") =>
-    app.request(`/files/${projectId}?${q}`, { method: "POST", body, headers: new Headers([...headers, ["content-type", "application/pdf"]]) });
+  // The tenant is the route's first segment (a download is a plain link: no x-tenant header).
+  const upload = (app: typeof internal, slug: string, cookie: string, projectId: string, body: Uint8Array | string, q = "name=Zeichnung%20%C3%BC.pdf") =>
+    app.request(`/files/${slug}/${projectId}?${q}`, { method: "POST", body, headers: { cookie, "content-type": "application/pdf" } });
+  const download = (app: typeof internal, slug: string, fileId: string, cookie?: string) =>
+    app.request(`/files/${slug}/${fileId}`, { headers: cookie ? { cookie } : {} });
 
   test("upload on the timeline, download as an attachment, fenced per side; viewers read only; 10 MB", async () => {
     const s = await setup();
@@ -178,7 +182,7 @@ describe("files", () => {
     await call(router.requests.accept, { id }, s.as(s.admin.cookie));
 
     let m = await mark();
-    const res = await upload(external, portalHeaders(s.slug, s.buyer.cookie), id, "%PDF-1.4 drawing");
+    const res = await upload(external, s.slug, s.buyer.cookie, id, "%PDF-1.4 drawing");
     expect(res.status).toBe(201);
     const { id: fileId } = (await res.json()) as { id: string };
     const to = await mailSince(m);
@@ -187,8 +191,8 @@ describe("files", () => {
     const tl = await call(portalRouter.timeline.list, { projectId: id }, s.on(s.buyer.cookie));
     expect(tl.events.find((e) => e.kind === "file")!.payload).toEqual({ fileId, name: "Zeichnung ü.pdf", size: 16 });
 
-    for (const [app, headers] of [[external, portalHeaders(s.slug, s.viewer.cookie)], [internal, tenantHeaders(s.slug, s.rep.cookie)]] as const) {
-      const got = await app.request(`/files/${fileId}`, { headers });
+    for (const [app, cookie] of [[external, s.viewer.cookie], [internal, s.rep.cookie]] as const) {
+      const got = await download(app, s.slug, fileId, cookie);
       expect(got.status).toBe(200);
       expect(got.headers.get("content-disposition")).toBe(`attachment; filename="Zeichnung _.pdf"; filename*=UTF-8''Zeichnung%20%C3%BC.pdf`);
       expect(got.headers.get("x-content-type-options")).toBe("nosniff");
@@ -197,30 +201,37 @@ describe("files", () => {
 
     // Staff may keep a file internal: the portal cannot list it, fetch it or hear of it.
     m = await mark();
-    const secret = await upload(internal, tenantHeaders(s.slug, s.admin.cookie), id, "costing", "name=calc.xlsx&internal=1");
+    const secret = await upload(internal, s.slug, s.admin.cookie, id, "costing", "name=calc.xlsx&internal=1");
     const { id: secretId } = (await secret.json()) as { id: string };
-    expect((await external.request(`/files/${secretId}`, { headers: portalHeaders(s.slug, s.buyer.cookie) })).status).toBe(404);
+    expect((await download(external, s.slug, secretId, s.buyer.cookie)).status).toBe(404);
     expect((await mailSince(m))(s.buyer.email)).toHaveLength(0);
     const seen = await call(portalRouter.timeline.list, { projectId: id }, s.on(s.buyer.cookie));
     expect(seen.events.filter((e) => e.kind === "file")).toHaveLength(1);
 
     // Viewers don't upload; another company's buyer sees nothing; no session, nothing.
-    expect((await upload(external, portalHeaders(s.slug, s.viewer.cookie), id, "x")).status).toBe(403);
+    expect((await upload(external, s.slug, s.viewer.cookie, id, "x")).status).toBe(403);
     const stranger = await makePortalUser();
     await makePortalSeat(s.tenantId, stranger.userId, "buyer", "Other GmbH");
-    expect((await external.request(`/files/${fileId}`, { headers: portalHeaders(s.slug, stranger.cookie) })).status).toBe(404);
-    expect((await upload(external, portalHeaders(s.slug, stranger.cookie), id, "x")).status).toBe(404);
-    expect((await external.request(`/files/${fileId}`, { headers: portalHeaders(s.slug) })).status).toBe(401);
+    expect((await download(external, s.slug, fileId, stranger.cookie)).status).toBe(404);
+    expect((await upload(external, s.slug, stranger.cookie, id, "x")).status).toBe(404);
+    expect((await download(external, s.slug, fileId)).status).toBe(401);
+    // Another tenant in the path: the buyer has no seat there, and staff no membership.
+    const other = await makeTenant();
+    expect((await download(external, other.slug, fileId, s.buyer.cookie)).status).toBe(403);
+    expect((await download(internal, other.slug, fileId, s.rep.cookie)).status).toBe(403);
+    // Staff on the portal's routes, a customer on the staff app's: each side refuses the other.
+    expect((await download(external, s.slug, fileId, s.rep.cookie)).status).toBe(403);
+    expect((await download(internal, s.slug, fileId, s.buyer.cookie)).status).toBe(403);
 
     // Counted on the stream, not on what the request claims.
-    expect((await upload(external, portalHeaders(s.slug, s.buyer.cookie), id, new Uint8Array(10 * 1024 * 1024 + 1))).status).toBe(413);
+    expect((await upload(external, s.slug, s.buyer.cookie, id, new Uint8Array(10 * 1024 * 1024 + 1))).status).toBe(413);
   });
 
   test("the logo: admins upload a PNG or JPEG, anyone may fetch it, branding shows on the portal and in mail", async () => {
     const s = await setup();
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
     const post = (cookie: string, body: Uint8Array | string) =>
-      internal.request("/files/logo", { method: "POST", body, headers: tenantHeaders(s.slug, cookie) });
+      internal.request(`/files/${s.slug}/logo`, { method: "POST", body, headers: { cookie } });
     expect((await post(s.rep.cookie, png)).status).toBe(403);
     expect((await post(s.admin.cookie, "<svg onload=alert(1)>")).status).toBe(415);
     const res = await post(s.admin.cookie, png);
@@ -247,7 +258,7 @@ describe("files", () => {
     await call(portalRouter.projects.submit, { id }, s.on(s.buyer.cookie));
     await call(router.requests.accept, { id }, s.as(s.admin.cookie));
     const mail = (await mailSince(m))(s.buyer.email)[0]!;
-    expect(mail.from).toBe('"Müller & Söhne" <notify@mail.lvh.me>');
+    expect(mail.from).toBe(`"Müller & Söhne" <notify@${mailDomain}>`);
     expect(mail.html).toContain(`/files/${logoId}`);
     expect(mail.html).toContain("#0a6ed1");
   });
@@ -299,8 +310,8 @@ describe("pure rules", () => {
   test("a sender is a subdomain of the tenant's own domain", () => {
     expect(senderNameProblem("mail.mueller-gmbh.de")).toBeNull();
     expect(senderNameProblem("mueller-gmbh.de")).toContain("Use a subdomain");
-    expect(senderNameProblem("acme.lvh.me")).toContain("belongs to Confire");
-    expect(senderNameProblem("mail.lvh.me")).toContain("belongs to Confire");
+    expect(senderNameProblem(`acme.${platformDomain}`)).toContain("belongs to Confire");
+    expect(senderNameProblem(mailDomain)).toContain("belongs to Confire");
     expect(senderNameProblem("mail mueller.de")).toContain("Enter a domain");
   });
 

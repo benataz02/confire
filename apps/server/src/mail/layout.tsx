@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Body, Button, Column, Container, Head, Heading, Html, Img, Preview, Row, Section, Text } from "react-email";
+import { authUrl } from "../tenant.ts";
 
 // The one frame every mail is drawn in. Inline styles rather than <Tailwind>: email clients drop
 // <style> blocks and `rem`, and inline objects need no CSS compile per render. Tables, not flexbox
@@ -14,9 +15,8 @@ export type Brand = {
   accent?: string;
 };
 
-// The sign-in host serves apps/web/public, so the logo URL is its own (BETTER_AUTH_URL).
-const appUrl = process.env.BETTER_AUTH_URL?.replace(/\/+$/, "");
-export const CONFIRE: Brand = { name: "Confire", logoUrl: appUrl ? `${appUrl}/confire-logo.png` : null };
+// The staff app serves apps/web/public, so the logo URL is its own.
+export const CONFIRE: Brand = { name: "Confire", logoUrl: `${authUrl}/confire-logo.png` };
 
 // SAP Horizon blue, the auth pages' link colour: 4.9:1 against white.
 const DEFAULT_ACCENT = "#0a6ed1";

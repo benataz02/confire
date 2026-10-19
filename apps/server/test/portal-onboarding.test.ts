@@ -8,7 +8,8 @@ import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
 import { leadKey } from "../src/portal/onboarding-form.ts";
 import { savePortalSettings } from "../src/portal/settings.ts";
-import { call, makePortalSeat, makePortalUser, makeTenant, makeUser, portalHeaders, tenantHeaders } from "./harness.ts";
+import { portalTenantUrl } from "../src/tenant.ts";
+import { call, makePortalSeat, makePortalUser, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
 // New-client onboarding (spec §5.1, §5.3, §5.4): an admin invites someone with no CardCode yet, the
@@ -58,7 +59,7 @@ async function invited(registerDomain = false) {
   const email = `n${uid()}@neu${uid()}.de`;
   const { id } = await call(router.portalInvitations.inviteNew, { email, registerDomain }, s.as);
   const invitee = await makePortalUser(email);
-  const on = { context: { headers: portalHeaders(s.slug, invitee.cookie) } };
+  const on = { context: { headers: tenantHeaders(s.slug, invitee.cookie) } };
   return { ...s, id, email, invitee, on };
 }
 
@@ -79,7 +80,7 @@ describe("portalInvitations.inviteNew", () => {
       if (!mail) await Bun.sleep(20);
     }
     expect(mail?.text).toContain("Set up your company");
-    expect(mail?.text).toContain(`${slug}.portal.`);
+    expect(mail?.text).toContain(portalTenantUrl(slug, `/accept/${id}`));
   });
 
   test("refused for an address already in a company here, naming its CardCode, and for one already invited", async () => {
@@ -120,7 +121,7 @@ describe("onboarding.formSchema", () => {
   test("only for its invitee, only a new-client invitation, only without a seat", async () => {
     const { tenantId, slug, id, on, invitee } = await invited();
     const other = await makePortalUser(`o${uid()}@neu.de`);
-    expect(await codeOf(call(portalRouter.onboarding.formSchema, { id }, { context: { headers: portalHeaders(slug, other.cookie) } }))).toBe("FORBIDDEN");
+    expect(await codeOf(call(portalRouter.onboarding.formSchema, { id }, { context: { headers: tenantHeaders(slug, other.cookie) } }))).toBe("FORBIDDEN");
     await makePortalSeat(tenantId, invitee.userId, "viewer");
     expect(await codeOf(call(portalRouter.onboarding.formSchema, { id }, on))).toBe("CONFLICT");
   });
@@ -132,7 +133,7 @@ describe("onboarding.formSchema", () => {
     const email = `e${uid()}@kunde.de`;
     const { id } = await call(router.portalInvitations.inviteExisting, { cardCode, email, role: "buyer", registerDomain: false }, as);
     const u = await makePortalUser(email);
-    expect(await codeOf(call(portalRouter.onboarding.formSchema, { id }, { context: { headers: portalHeaders(slug, u.cookie) } }))).toBe("BAD_REQUEST");
+    expect(await codeOf(call(portalRouter.onboarding.formSchema, { id }, { context: { headers: tenantHeaders(slug, u.cookie) } }))).toBe("BAD_REQUEST");
   });
 });
 

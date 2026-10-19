@@ -1,70 +1,83 @@
-// Client-side mirror of apps/server/src/tenant.ts, for any zone: the internal app passes its
-// APP base domain, the customer portal its PORTAL one. The subdomain label is the tenant slug; the
-// apex (and a few reserved labels) carry no tenant. Both zones send people to one sign-in host, whose
-// hostname is the session cookie's domain. The server re-validates against membership — this is only
-// for UX and redirects.
+// Client-side mirror of apps/server/src/tenant.ts, for both apps. The tenant is the first segment of
+// the page's path — `app.confire.ai/<slug>/…`, `portal.confire.ai/<slug>/…` — and each app's router
+// runs under it as its basepath, so routes and links never name it. Every call sends it as
+// `x-tenant`; a file route carries it in its own path. Sign-in is a page of the staff app, the one
+// sign-in host. The server re-validates against membership — this is only for UX and redirects.
 
-const RESERVED = new Set(["app", "www", "api", "auth", "admin", "static", "assets"]);
+/** Never a slug: the staff SPA's own top-level pages, the server's routes, a few names kept back. */
+const RESERVED = new Set([
+  "login", "signup", "forgot-password", "reset-password", "onboarding",
+  "api", "rpc", "files", "assets",
+  "app", "portal", "www", "auth", "admin", "static",
+]);
 
 export const isReserved = (slug: string) => RESERVED.has(slug);
 
-/** `acme.<base>` → "acme"; the apex, a reserved label, a deeper name or another zone → null. */
-export function slugOf(hostname: string, baseDomain: string): string | null {
-  const name = hostname.toLowerCase();
-  const base = baseDomain.toLowerCase();
-  if (name === base || !name.endsWith(`.${base}`)) return null;
-  const label = name.slice(0, -(base.length + 1));
-  return /^[a-z0-9-]+$/.test(label) && !RESERVED.has(label) ? label : null;
+export const TENANT_HEADER = "x-tenant";
+
+/** `/acme/configs/1` → "acme"; `/`, `/login`, `/assets/x.js` → null. */
+export function slugOf(pathname: string): string | null {
+  const first = pathname.split("/")[1] ?? "";
+  return /^[a-z0-9-]+$/.test(first) && !RESERVED.has(first) ? first : null;
 }
 
-/**
- * Cross-origin hop (apex <-> subdomain). Returns a never-resolving promise so a router
- * beforeLoad halts instead of rendering before the browser navigates.
- */
+/** This page's tenant, or null. `window` is read on call, never at import, so tests can import this. */
+export const currentSlug = () => slugOf(window.location.pathname);
+
+/** The router's basepath: `/<slug>` on a tenant's page, `/` on the app's own pages. Read once, when
+ *  the router is made: a page never changes tenant without a full load (hardRedirect), so the query
+ *  cache never holds two tenants' data. */
+export const tenantBasepath = () => {
+  const slug = currentSlug();
+  return slug ? `/${slug}` : "/";
+};
+
+/** A hop to another page load: another app, another tenant, or out of the router. Returns a
+ *  never-resolving promise so a router beforeLoad halts instead of rendering before the browser
+ *  navigates. */
 export function hardRedirect(url: string): Promise<never> {
   window.location.assign(url);
   return new Promise<never>(() => {});
 }
 
-/** The helpers for one zone, and the sign-in host (`authOrigin`: `https://confire.ai`, dev
- *  `http://lvh.me:5173`) every zone signs in on. `window` is read on call, never at import, so tests
- *  can import this. */
-export function hosts(baseDomain: string, authOrigin: string) {
-  const base = baseDomain.toLowerCase();
-  const auth = new URL(authOrigin);
-  // The cookie domain: every host this stack serves — the sign-in host and both zones — is under it.
-  const root = auth.hostname.toLowerCase();
-  const origin = (host: string) =>
-    `${window.location.protocol}//${host}${window.location.port ? `:${window.location.port}` : ""}`;
-  const currentSlug = () => slugOf(window.location.hostname, base);
-  return {
-    BASE_DOMAIN: base,
-    /** Tenant slug from window.location.hostname, or null on the apex/reserved hosts. */
-    currentSlug,
-    isApex: () => currentSlug() === null,
-    isAuthHost: () => window.location.host === auth.host,
-    /** A page on the sign-in host. */
-    authUrl: (path = "/") => `${auth.origin}${path}`,
-    /** Sign in, then come back here (or to `redirect`). */
-    loginUrl: (redirect = window.location.href) => `${auth.origin}/login?${new URLSearchParams({ redirect })}`,
-    tenantUrl: (slug: string, path = "/") => `${origin(`${slug}.${base}`)}${path}`,
-    /**
-     * Guard against open redirects: only ever hand back a URL whose hostname is the sign-in host or
-     * under it — either zone, since the sign-in host sends people to both. Anything else —
-     * unparsable, a relative path, a foreign host, `javascript:` — comes back `null` so callers fall
-     * through to a safe default. Deliberately requires an absolute URL: `redirect=` is only ever
-     * produced by the apps themselves as a full `window.location.href`.
-     */
-    safeRedirect: (url: string | undefined): string | null => {
-      if (!url) return null;
-      try {
-        const u = new URL(url);
-        if (u.protocol !== "http:" && u.protocol !== "https:") return null;
-        const host = u.hostname.toLowerCase();
-        return host === root || host.endsWith(`.${root}`) ? url : null;
-      } catch {
-        return null;
-      }
-    },
-  };
+type Loc = { protocol: string; hostname: string };
+
+/** The two origins this stack serves, read off the page's own — the server's DOMAIN rule (tenant.ts),
+ *  so a build carries no setting and one image serves any domain: `app.<domain>` (the staff app,
+ *  which is the sign-in host) and `portal.<domain>`; on any other host — dev — that host on :5173
+ *  and :5180. */
+export function origins(loc: Loc = window.location): { auth: string; portal: string } {
+  const domain = /^(?:app|portal)\.(.+)$/.exec(loc.hostname)?.[1];
+  const at = (host: string) => `${loc.protocol}//${host}`;
+  return domain
+    ? { auth: at(`app.${domain}`), portal: at(`portal.${domain}`) }
+    : { auth: at(`${loc.hostname}:5173`), portal: at(`${loc.hostname}:5180`) };
+}
+
+export const isAuthHost = () => window.location.origin === origins().auth;
+
+/** A page on the sign-in host. */
+export const authUrl = (path = "/") => `${origins().auth}${path}`;
+
+/** Sign in, then come back here (or to `redirect`). */
+export const loginUrl = (redirect = window.location.href) => authUrl(`/login?${new URLSearchParams({ redirect })}`);
+
+/** A tenant's page in this app. */
+export const tenantUrl = (slug: string, path = "/") => `${window.location.origin}/${slug}${path}`;
+
+/**
+ * Guard against open redirects: only ever hand back an absolute URL on one of the two origins — the
+ * sign-in host sends people to both apps. Anything else — unparsable, a relative path, a foreign
+ * host, `javascript:` — comes back `null` so callers fall through to a safe default. `redirect=` is
+ * only ever produced by the apps themselves as a full `window.location.href`.
+ */
+export function safeRedirect(url: string | undefined, loc: Loc = window.location): string | null {
+  if (!url) return null;
+  const { auth, portal } = origins(loc);
+  try {
+    const origin = new URL(url).origin;
+    return origin === auth || origin === portal ? url : null;
+  } catch {
+    return null;
+  }
 }

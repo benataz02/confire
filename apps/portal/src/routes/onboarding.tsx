@@ -3,15 +3,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../auth-client.ts";
 import { client, meQuery } from "../orpc.ts";
 import { PortalAuthLayout } from "../components/AuthChrome.tsx";
-import { authUrl, hardRedirect, isApex, loginUrl } from "../lib/host.ts";
+import { authUrl, currentSlug, hardRedirect, loginUrl } from "../lib/host.ts";
 
-// Signed in on a supplier's host without a seat there (spec §4.4, §9). First auto-join: a verified
+// Signed in on a supplier's portal without a seat there (spec §4.4, §9). First auto-join: a verified
 // address on a domain the supplier registered to a company joins it as viewer, and lands home. If
 // nothing matches, this is the invite-only page: it grants nothing, and never offers workspace setup.
 // An invitation's link (/accept/<id>) is the other way in.
 export const Route = createFileRoute("/onboarding")({
   beforeLoad: async ({ context }) => {
-    if (isApex()) return hardRedirect(authUrl("/login"));
+    if (!currentSlug()) return hardRedirect(authUrl("/login"));
     const me = await context.queryClient.ensureQueryData(meQuery).catch((e: unknown) => {
       if ((e as { code?: string }).code === "UNAUTHORIZED") return null;
       throw e;

@@ -2,17 +2,20 @@ import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins";
-import { and, eq } from "drizzle-orm";
+import { createAccessControl } from "better-auth/plugins/access";
+import { adminAc, defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "@confire/db/client";
 import * as schema from "@confire/db/schema";
-import { baseDomain, portalBaseDomain, tenantSlugFromHost } from "./tenant.ts";
+import { EXTERNAL_ROLE } from "@confire/db/schema";
+import { authUrl, cookieDomain, portalUrl, tenantSlug } from "./tenant.ts";
 import { authMail } from "./mail/auth-mail.tsx";
 
-/** The web's SLUG_RE is UX; this is the gate. Better Auth takes any non-empty slug, and one the host
- *  parser cannot hand back is a workspace no request can ever reach — with organizationLimit: 1 and
+/** The web's SLUG_RE is UX; this is the gate. Better Auth takes any non-empty slug, and one the path
+ *  rule cannot hand back is a workspace no URL can ever reach — with a one-workspace limit and
  *  deletion off, its owner could not start over. */
 const assertSlug = (slug: string | undefined) => {
-  if (slug !== undefined && tenantSlugFromHost(`${slug}.${baseDomain}`, baseDomain) !== slug) {
+  if (slug !== undefined && tenantSlug(slug) !== slug) {
     throw new APIError("BAD_REQUEST", { message: "Invalid workspace URL" });
   }
 };
@@ -25,11 +28,66 @@ export const microsoftEmailVerified = (profile: Record<string, unknown>): boolea
 
 const mail = authMail();
 
-// The one Better Auth instance, for staff and customers alike (spec 2026-10-17-single-sign-in-design.md).
-// Both processes mount it on /api/auth; the tenant boundary is not the session but the membership
-// join (orpc/base.ts) or the portal seat join (portal/orpc/base.ts) behind it.
-// secret and baseURL come from BETTER_AUTH_SECRET / BETTER_AUTH_URL, which Better Auth reads itself.
+/** The browser calls only these two organization endpoints (workspace setup). Every other one is off:
+ *  they treat every member as a peer, so a supplier's customer — an `external` member — could list the
+ *  supplier's staff and every other customer (`list-members`, `get-full-organization`), and an admin
+ *  could turn a customer into staff (`update-member-role`). Confire's own procedures write members
+ *  (portal/members.ts) and pick the organization (the path), so nothing is lost. Computed from the
+ *  plugin, so an endpoint a Better Auth upgrade adds starts off too. */
+const BROWSER_ORG_PATHS = new Set(["/organization/create", "/organization/check-slug"]);
+
+// Better Auth's own three roles, unchanged, plus the customer's.
+const ac = createAccessControl(defaultStatements);
+
+const orgPlugin = organization({
+  ac,
+  roles: {
+    owner: ac.newRole(ownerAc.statements),
+    admin: ac.newRole(adminAc.statements),
+    member: ac.newRole(memberAc.statements),
+    // A supplier's customer (spec 2026-10-19-path-tenancy-design.md): a member of the supplier's
+    // organization, refused by every internal procedure, with no permission on any org endpoint. Its
+    // seat is the two fields below: which portal_company it belongs to, and its role there.
+    [EXTERNAL_ROLE]: ac.newRole({}),
+  },
+  schema: {
+    member: {
+      additionalFields: {
+        // portal_company.id as text: Better Auth has no uuid field type, so there is no FK either.
+        // Nothing deletes a company (§4.2), and portal/members.ts is the only writer of both fields.
+        companyId: { type: "string", required: false, input: false },
+        portalRole: { type: "string", required: false, input: false },
+      },
+    },
+  },
+  // Staff of one workspace at most — there is no workspace picker in the app — but a customer of any
+  // number of suppliers, so the count is of staff rows only. True = the limit is reached.
+  organizationLimit: async (user) => {
+    const [staff] = await db.select({ id: schema.member.id }).from(schema.member)
+      .where(and(eq(schema.member.userId, user.id), ne(schema.member.role, EXTERNAL_ROLE))).limit(1);
+    return !!staff;
+  },
+  // No UI deletes a company, and nothing references organization.id by FK — a delete through
+  // /organization/delete would orphan every tenant_id row and free the slug. Off until a real
+  // offboarding flow exists to clean those up.
+  disableOrganizationDeletion: true,
+  // Update too: the endpoint is off, but auth.api.updateOrganization is not, and a slug is a URL.
+  organizationHooks: {
+    beforeCreateOrganization: async ({ organization }) => assertSlug(organization.slug),
+    beforeUpdateOrganization: async ({ organization }) => assertSlug(organization.slug),
+  },
+  // No seeding hook: every list's Standard view is declared in code (the web features), so a
+  // new tenant has nothing to be given.
+});
+
+// The one Better Auth instance, for staff and customers alike. Both processes mount it on /api/auth;
+// the tenant boundary is not the session but the membership join behind it (orpc/base.ts staff,
+// portal/orpc/base.ts customers). The secret comes from BETTER_AUTH_SECRET, which Better Auth reads
+// itself.
 export const auth = betterAuth({
+  // The staff app's origin, which is also the sign-in host: OAuth callbacks and every mailed link.
+  // From DOMAIN (tenant.ts), so Better Auth needs no BETTER_AUTH_URL of its own.
+  baseURL: authUrl,
   database: drizzleAdapter(db, { provider: "pg", schema }),
   // Default min length (8) on purpose: there is no dev/prod branch here, so a dev-only floor ships.
   // Sign-in never checks length, so an existing shorter dev password still logs in.
@@ -59,57 +117,33 @@ export const auth = betterAuth({
       mapProfileToUser: (profile) => ({ emailVerified: microsoftEmailVerified(profile as unknown as Record<string, unknown>) }),
     },
   },
-  plugins: [
-    organization({
-      // A user belongs to exactly one company — there is no workspace picker anywhere in the
-      // app, so a second one would be unreachable. Better Auth returns FORBIDDEN on create.
-      organizationLimit: 1,
-      // No UI deletes a company, and nothing references organization.id by FK — a delete through
-      // /organization/delete would orphan every tenant_id row and free the slug. Off until a real
-      // offboarding flow exists to clean those up.
-      disableOrganizationDeletion: true,
-      // Update too: an admin can rename the slug through /organization/update.
-      organizationHooks: {
-        beforeCreateOrganization: async ({ organization }) => assertSlug(organization.slug),
-        beforeUpdateOrganization: async ({ organization }) => assertSlug(organization.slug),
-        // Spec D3/§4.2: never staff and customer of the same supplier. The portal's addPortalMember
-        // refuses staff; this is its mirror. Here and not in beforeAddMember: acceptInvitation does
-        // not run beforeAddMember (verified on 1.7.7).
-        beforeAcceptInvitation: async ({ user, organization }) => {
-          const [seat] = await db.select({ userId: schema.portalMember.userId }).from(schema.portalMember)
-            .where(and(eq(schema.portalMember.tenantId, organization.id), eq(schema.portalMember.userId, user.id))).limit(1);
-          if (seat) {
-            throw new APIError("FORBIDDEN", {
-              message: "This account is a customer on this company's portal, so it can't join its workspace too. Ask an admin to remove it from the portal first.",
-            });
-          }
-        },
-      },
-      // No seeding hook: every list's Standard view is declared in code (the web features), so a
-      // new tenant has nothing to be given.
-    }),
-  ],
+  plugins: [orgPlugin],
+  disabledPaths: Object.values(orgPlugin.endpoints)
+    .map((e) => e.path)
+    .filter((p): p is string => !!p && !BROWSER_ORG_PATHS.has(p)),
   // Off: a signed session_data cookie would keep a deleted/expired row "valid" for maxAge,
   // and login's getSession would bounce the 401 interceptor back to the tenant. oRPC also
   // passes disableCookieCache so a future re-enable cannot paper over the tenant boundary.
   session: { cookieCache: { enabled: false } },
-  // Sign-in lives on the sign-in host (baseURL, trusted automatically), but both apps POST (sign-out)
-  // from every tenant subdomain, and a sign-in's callbackURL may be a tenant page in either zone. A
-  // pattern without `://` is matched against URL.host — which includes the port — hence both forms:
-  // prod (`acme.portal.confire.ai`) and dev (`acme.portal.lvh.me:5180`). Anything else — a LAN IP to
-  // open the app from a phone — is a per-machine fact, so it comes from APP_TRUSTED_ORIGINS
-  // (comma-separated) and never from a literal in here.
-  trustedOrigins: [
-    `*.${baseDomain}`,
-    `*.${baseDomain}:*`,
-    `*.${portalBaseDomain}`,
-    `*.${portalBaseDomain}:*`,
-    ...(process.env.APP_TRUSTED_ORIGINS ?? "").split(",").map((o) => o.trim()).filter(Boolean),
-  ],
+  // Sign-in lives on baseURL (trusted automatically), but the portal POSTs (sign-out) from its own
+  // origin, and a sign-in's callbackURL may be a portal page.
+  trustedOrigins: [portalUrl],
   advanced: {
-    // No `domain`: Better Auth then uses baseURL's hostname — `confire.ai` (dev `lvh.me`), the parent
-    // of both zones, so one session reaches the staff app and the portal. Every `*.confire.ai` host
-    // receives this cookie: never point a confire.ai name at a service this stack does not control.
-    crossSubDomainCookies: { enabled: true },
+    // DOMAIN (`confire.ai`) is the parent of both hosts, so one session reaches the staff app and the
+    // portal. Every `*.confire.ai` host receives this cookie: never point a confire.ai name at a
+    // service this stack does not control. Unset (dev): a host-only cookie on `localhost`, which the
+    // browser sends to both ports anyway.
+    crossSubDomainCookies: { enabled: cookieDomain !== undefined, domain: cookieDomain },
   },
 });
+
+/** The session remembers the organization its last request was scoped to: where the dispatcher sends
+ *  a fresh visit to /login. Written to the row directly, and only when it changes — the caller has
+ *  already joined the membership (Better Auth's set-active would join it again), and with the cookie
+ *  cache off there is no cookie to refresh. */
+export async function rememberActiveOrganization(
+  session: { id: string; activeOrganizationId?: string | null }, organizationId: string,
+): Promise<void> {
+  if (session.activeOrganizationId === organizationId) return;
+  await db.update(schema.session).set({ activeOrganizationId: organizationId }).where(eq(schema.session.id, session.id));
+}

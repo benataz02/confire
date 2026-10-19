@@ -11,6 +11,7 @@ import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { UiSourceProvider, type UiSource } from "@confire/ui/source.tsx";
 import { routeTree } from "./routeTree.gen.ts";
 import { client, meQuery, orpc } from "./orpc.ts";
+import { tenantBasepath } from "./lib/host.ts";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,6 +23,8 @@ const queryClient = new QueryClient({
 
 const router = createRouter({
   routeTree,
+  // `/<slug>`: every portal page is one supplier's, and no route or link names it.
+  basepath: tenantBasepath(),
   context: { queryClient },
   defaultErrorComponent: RouteError,
   defaultNotFoundComponent: RouteNotFound,

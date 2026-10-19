@@ -1,6 +1,6 @@
 import { Button } from "@ui5/webcomponents-react";
 
-// Brand glyphs as inline SVG (no icon dependency). Shared by both zones' login + signup.
+// Brand glyphs as inline SVG (no icon dependency). The sign-in host's login + signup.
 const GoogleGlyph = () => (
   <svg viewBox="0 0 48 48" aria-hidden="true">
     <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.6 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6.1C12.2 13.5 17.6 9.5 24 9.5z" />
@@ -20,8 +20,7 @@ const MicrosoftGlyph = () => (
 
 export type SocialProvider = "google" | "microsoft";
 
-/** Google and Microsoft sign-in. `signIn` is the app's: each zone has its own auth client and its
- *  own callback URLs. */
+/** Google and Microsoft sign-in. `signIn` is the app's: it owns the auth client and the callback URLs. */
 export function SocialButtons({ signIn }: { signIn: (provider: SocialProvider) => void }) {
   return (
     <div className="auth-social">

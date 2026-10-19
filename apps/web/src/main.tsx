@@ -10,6 +10,7 @@ import { routeTree } from "./routeTree.gen.ts";
 import { RouteError, RouteNotFound } from "@confire/ui/Boundaries.tsx";
 import { UiSourceProvider, type UiSource } from "@confire/ui/source.tsx";
 import { client, meQuery, orpc, useCurrency } from "./orpc.ts";
+import { tenantBasepath } from "./lib/tenant.ts";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,6 +22,8 @@ const queryClient = new QueryClient({
 
 const router = createRouter({
   routeTree,
+  // `/<slug>` in a workspace, so no route or link ever names the tenant; `/` on the sign-in pages.
+  basepath: tenantBasepath(),
   context: {
     queryClient,
   },

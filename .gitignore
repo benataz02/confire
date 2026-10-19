@@ -13,3 +13,4 @@ apps/agent/confire-agent.exe
 apps/agent/hera-agent.exe
 apps/portal/src/routeTree.gen.ts
 apps/portal/tsconfig.tsbuildinfo
+.tanstack/

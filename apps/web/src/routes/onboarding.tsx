@@ -5,16 +5,14 @@ import { Input, Button, MessageStrip, CheckBox } from "@ui5/webcomponents-react"
 import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { lobbyQuery, orpc } from "../orpc.ts";
-import {
-  authUrl, BASE_DOMAIN, hardRedirect, isAuthHost, isReserved, SLUG_RE, toSlug, tenantUrl,
-} from "../lib/tenant.ts";
+import { authUrl, hardRedirect, isReserved, onSignInHost, SLUG_RE, toSlug, tenantUrl } from "../lib/tenant.ts";
 import { copyInput, generateAgentSecret } from "../lib/agent-secret.ts";
 
 export const Route = createFileRoute("/onboarding")({
   // On the sign-in host. A user with a company and an agent row belongs *in* the tenant;
   // a company without sap_connection stays here on the agent step.
   beforeLoad: async ({ context }) => {
-    if (!isAuthHost()) return hardRedirect(authUrl("/onboarding"));
+    if (!onSignInHost()) return hardRedirect(authUrl("/onboarding"));
     const data = await context.queryClient.ensureQueryData(sessionQuery);
     if (!data?.session) throw redirect({ to: "/login" });
     const { workspace } = await context.queryClient.fetchQuery(lobbyQuery);
@@ -197,7 +195,7 @@ function Onboarding() {
           onKeyDown={(e) => e.key === "Enter" && canCreate && create.mutate()}
         />
         <small className="auth-sub">
-          {slug ? `${slug}.${BASE_DOMAIN}` : `your-company.${BASE_DOMAIN}`}
+          {`${window.location.host}/${slug || "your-company"}`}
           {slug && !slugValid ? " · use a-z, 0-9, hyphens" : ""}
           {slugValid && avail.isFetching ? " · checking…" : ""}
           {available ? " · ✓ available" : ""}

@@ -1,17 +1,17 @@
 import { useNavigate, useRouter, useRouterState, Outlet } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Avatar, Button, IllustratedMessage,
+  Avatar, Button,
   NavigationLayout, ShellBar, ShellBarBranding, SideNavigation, SideNavigationGroup, SideNavigationItem,
   ToggleButton,
   UserMenu,
   UserMenuAccount,
   UserMenuItem,
 } from "@ui5/webcomponents-react";
-import "@ui5/webcomponents-fiori/dist/illustrations/ErrorScreen.js";
 import type { SideNavigationPropTypes, NavigationLayoutDomRef, NavigationLayoutPropTypes } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
 import { meQuery, useIsAdmin } from "../orpc.ts";
+import { authUrl, hardRedirect } from "../lib/tenant.ts";
 import { B1_FEATURES } from "../features/b1/index.ts";
 import { GlobalSearch, type SearchEntry } from "./GlobalSearch.tsx";
 import { useRef, useState, useMemo } from "react";
@@ -19,8 +19,8 @@ import type { MouseEvent } from "react";
 import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 
 
-// The app shell for every signed-in page. The tenant is the subdomain; the auth gate lives in the
-// _authed route (beforeLoad), this only renders the chrome.
+// The app shell for every signed-in page. The workspace is the path's first segment; the auth gate
+// lives in the _authed route (beforeLoad), this only renders the chrome.
 export function AppShell() {
   const navigate = useNavigate();
   const router = useRouter();
@@ -46,7 +46,6 @@ export function AppShell() {
   const me = useQuery(meQuery);
   const user = me.data?.user;
   const isAdmin = useIsAdmin();
-  const isClient = me.data?.role === "client";
   const queryClient = useQueryClient();
 
   const onSelect: SideNavigationPropTypes["onSelectionChange"] = (e) => {
@@ -94,22 +93,8 @@ export function AppShell() {
   const signOut = async () => {
     await authClient.signOut();
     queryClient.clear(); // drop session + role caches, not just the session
-    navigate({ to: "/login" });
+    void hardRedirect(authUrl("/login")); // the sign-in page sits outside the workspace's basepath
   };
-
-  // A leftover portal membership has no app left. The server already refuses its calls;
-  // this keeps the shell from rendering pages that would only answer FORBIDDEN.
-  if (isClient) {
-    return (
-      <IllustratedMessage
-        name="ErrorScreen"
-        titleText="This account no longer has access"
-        subtitleText="The client portal has been removed. Sign out, or ask an administrator for a workspace account."
-      >
-        <Button onClick={() => void signOut()}>Sign out</Button>
-      </IllustratedMessage>
-    );
-  }
 
   return (
     <NavigationLayout

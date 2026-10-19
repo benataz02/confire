@@ -13,19 +13,14 @@ export default defineConfig({
     dedupe: ["react", "react-dom", "@tanstack/react-query", "@tanstack/react-router", "@ui5/webcomponents-react", "@ui5/webcomponents", "@ui5/webcomponents-base"],
   },
   server: {
-    // Bind IPv4 (0.0.0.0) — lvh.me resolves to 127.0.0.1; Vite's default `localhost` bind is
-    // IPv6-only (::1) on Windows, which lvh.me can't reach (connection refused).
-    host: true,
-    // The sign-in host lvh.me:5173 and tenant subdomains acme.app.lvh.me:5173 (lvh.me resolves to
-    // 127.0.0.1 at any depth, and unlike localhost a `.lvh.me` cookie is shared across subdomains).
-    // Vite blocks unknown hosts.
-    allowedHosts: [".lvh.me", ".localhost"],
+    // http://localhost:5173 is the sign-in host with no DOMAIN set (tenant.ts, @confire/ui/host.ts):
+    // its OAuth callbacks and mailed links name this port, so another one would break them.
+    port: 5173,
+    strictPort: true,
     proxy: {
-      // changeOrigin:false keeps the tenant Host (acme.app.lvh.me) so the server resolves
-      // the tenant from it — see apps/server/src/orpc/base.ts.
-      "/rpc": { target: "http://localhost:3000", changeOrigin: false },
-      "/api": { target: "http://localhost:3000", changeOrigin: false },
-      "/files": { target: "http://localhost:3000", changeOrigin: false },
+      "/rpc": "http://localhost:3000",
+      "/api": "http://localhost:3000",
+      "/files": "http://localhost:3000",
     },
   },
 });

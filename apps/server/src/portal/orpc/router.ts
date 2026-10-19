@@ -1,4 +1,4 @@
-import { isInternalMember, portalAuthedProcedure, seatOf, tenantFromHost } from "./base.ts";
+import { isInternalMember, portalAuthedProcedure, seatOf, tenantOf } from "./base.ts";
 import { portalSeats } from "../members.ts";
 import { brandOf, onboardingRouter } from "./onboarding.ts";
 import { homeRouter } from "./home.ts";
@@ -7,18 +7,21 @@ import { modelsRouter, projectsRouter } from "./projects.ts";
 import { timelineRouter, viewsRouter } from "./timeline.ts";
 import { docsRouter } from "./docs.ts";
 import { tenantCurrency } from "../../b1.ts";
-import { appTenantUrl } from "../../tenant.ts";
+import { rememberActiveOrganization } from "../../auth.ts";
+import { appTenantUrl, TENANT_HEADER } from "../../tenant.ts";
 
 export const portalRouter = {
   /** Who am I on this supplier's portal? Signed in (UNAUTHORIZED otherwise), whose portal (the
    *  tenant and its branding), and one of three states: a seat (`company`), the supplier's own staff
    *  (`internal` — every other builder refuses them), or neither (`company: null`, onboarding).
-   *  It resolves the state itself, like the internal `me`, so the shell can say which it is. */
+   *  It resolves the state itself, like the internal `me`, so the shell can say which it is. A seat
+   *  makes this supplier the session's active organization, where the dispatcher lands next time. */
   me: portalAuthedProcedure.handler(async ({ context }) => {
-    const tenant = await tenantFromHost(context.headers);
+    const tenant = await tenantOf(context.headers.get(TENANT_HEADER));
     const { id, name, email, image, emailVerified } = context.user;
     const internal = await isInternalMember(tenant.id, id);
     const company = internal ? null : ((await seatOf(tenant.id, id)) ?? null);
+    if (company) await rememberActiveOrganization(context.session, tenant.id);
     return {
       user: { id, name, email, image: image ?? null, emailVerified },
       // Branded (D20): the display name, logo and accent the supplier picked, over its own.

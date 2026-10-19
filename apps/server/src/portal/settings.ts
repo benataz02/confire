@@ -2,7 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { and, eq, sql } from "drizzle-orm";
 import { db, organization, portalSettings, type PortalSettings, type SenderDomain } from "@confire/db";
 import type { Brand } from "../mail/layout.tsx";
-import { portalTenantUrl } from "../tenant.ts";
+import { portalUrl } from "../tenant.ts";
 
 // The tenant's portal settings document (spec §6), loaded and saved whole. Both processes read it:
 // the internal Settings → Portal tab writes it, the portal's document reads apply it.
@@ -65,7 +65,8 @@ export async function tenantBrand(tenantId: string): Promise<{ slug: string; bra
     settings,
     brand: {
       name: b.displayName || org.name,
-      logoUrl: b.logoFileId ? portalTenantUrl(org.slug, `/files/${b.logoFileId}`) : org.logo,
+      // The one file route without a tenant in its path: mail links to it, signed out (files.ts).
+      logoUrl: b.logoFileId ? `${portalUrl}/files/${b.logoFileId}` : org.logo,
       ...(b.accent ? { accent: b.accent } : {}),
     },
   };

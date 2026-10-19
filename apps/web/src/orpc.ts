@@ -4,13 +4,18 @@ import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import type { AppRouter } from "@confire/server/router";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
-import { hardRedirect, loginUrl } from "./lib/tenant.ts";
+import { currentSlug, hardRedirect, loginUrl, TENANT_HEADER } from "./lib/tenant.ts";
 
-// Same-origin (dev proxy / prod static) → cookies ride along automatically. A function, so the
+// Same-origin (dev proxy / prod static) → cookies ride along automatically. The workspace is the
+// page's path segment, sent as x-tenant on every call (none on the sign-in pages). Functions, so the
 // module never touches `window` at import time: the pure helpers that sit next to a hook (views.ts,
 // metadata.ts, the CFL modules) stay importable from `bun test`.
 const link = new RPCLink({
   url: () => `${window.location.origin}/rpc`,
+  headers: (): Record<string, string> => {
+    const slug = currentSlug();
+    return slug ? { [TENANT_HEADER]: slug } : {};
+  },
   interceptors: [
     onError((error) => {
       if ((error as { code?: string }).code === "UNAUTHORIZED") void hardRedirect(loginUrl());
@@ -21,7 +26,7 @@ export const client: RouterClient<AppRouter> = createORPCClient(link);
 export const orpc = createTanstackQueryUtils(client);
 
 /**
- * Identity on the current tenant subdomain: session + membership + role in one call.
+ * Identity in the workspace in the path: session + membership + role in one call.
  * `_authed`'s beforeLoad primes it and re-runs on every navigation, so it is cached for the
  * page session — see the note there about why the role is deliberately not revalidated.
  */

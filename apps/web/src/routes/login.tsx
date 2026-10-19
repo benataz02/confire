@@ -7,23 +7,25 @@ import { authClient, sessionQuery } from "../auth-client.ts";
 import { lobbyQuery } from "../orpc.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { SocialButtons } from "../components/SocialButtons.tsx";
-import { authUrl, hardRedirect, isAuthHost, safeRedirect } from "../lib/tenant.ts";
+import { authUrl, hardRedirect, onSignInHost, safeRedirect } from "../lib/tenant.ts";
 import { authErrorMessage, notVerifiedMessage } from "@confire/ui/auth/messages.ts";
 
-type Place = { url: string; title: string; description: string; icon: string; role?: string };
+type Place = { url: string; active: boolean; title: string; description: string; icon: string; role?: string };
 
-// The one sign-in for staff and customers, and the dispatcher (spec 2026-10-17-single-sign-in-design.md
-// §5.1). Signed out it is the form. Signed in it sends the user on: to `redirect` (the page a 401
-// bounced from — that app's own guard decides from there, which is how a portal stays invite-only),
-// else to their one place, else it renders "Where to?". No place at all is workspace setup.
-// ?error=<code> (social sign-in, a dead verification link) reads through authErrorMessage.
+// The one sign-in for staff and customers, and the dispatcher (spec 2026-10-19-path-tenancy-design.md).
+// Signed out it is the form. Signed in it sends the user on: to `redirect` (the page a 401 bounced
+// from — that app's own guard decides from there, which is how a portal stays invite-only), else to
+// the place the session last worked in (staff app or portal), else to their one place, else it renders
+// "Where to?" — which `?choose` asks for outright ("Switch supplier"). No place at all is workspace
+// setup. ?error=<code> (social sign-in, a dead verification link) reads through authErrorMessage.
 export const Route = createFileRoute("/login")({
-  validateSearch: (s: Record<string, unknown>): { redirect?: string; error?: string } => ({
+  validateSearch: (s: Record<string, unknown>): { redirect?: string; error?: string; choose?: boolean } => ({
     redirect: typeof s.redirect === "string" ? s.redirect : undefined,
     error: typeof s.error === "string" ? s.error : undefined,
+    choose: s.choose !== undefined ? true : undefined,
   }),
   beforeLoad: async ({ context, search, location }) => {
-    if (!isAuthHost()) return hardRedirect(authUrl(`/login${location.searchStr}`));
+    if (!onSignInHost()) return hardRedirect(authUrl(`/login${location.searchStr}`));
     const data = await context.queryClient.ensureQueryData(sessionQuery);
     if (!data?.session) return { places: null };
     const to = safeRedirect(search.redirect);
@@ -32,10 +34,13 @@ export const Route = createFileRoute("/login")({
     if (!workspace && !portals.length) throw redirect({ to: "/onboarding" });
     if (workspace?.needsAgent) throw redirect({ to: "/onboarding" });
     const places: Place[] = [
-      ...(workspace ? [{ url: workspace.url, title: workspace.name, description: "Your workspace", icon: "building" }] : []),
-      ...portals.map((p) => ({ url: p.url, title: p.tenantName, description: `${p.cardName} · customer portal`, icon: "supplier", role: ROLE_LABEL[p.role] })),
+      ...(workspace ? [{ url: workspace.url, active: workspace.active, title: workspace.name, description: "Your workspace", icon: "building" }] : []),
+      ...portals.map((p) => ({ url: p.url, active: p.active, title: p.tenantName, description: `${p.cardName} · customer portal`, icon: "supplier", role: ROLE_LABEL[p.role] })),
     ];
-    if (places.length === 1) return hardRedirect(places[0]!.url);
+    if (!search.choose) {
+      const next = places.length === 1 ? places[0] : places.find((p) => p.active);
+      if (next) return hardRedirect(next.url);
+    }
     return { places };
   },
   component: Login,

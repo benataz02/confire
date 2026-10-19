@@ -1,20 +1,23 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { and, eq } from "drizzle-orm";
-import { db, portalCompany, portalCompanyDomain, portalInvitation, portalMember, user } from "@confire/db";
+import { eq } from "drizzle-orm";
+import { db, portalCompany, portalCompanyDomain, portalInvitation, user } from "@confire/db";
 import { auth, microsoftEmailVerified } from "../src/auth.ts";
-import { devOutbox } from "../src/mail/mailer.ts";
+import { devOutbox, mailDomain } from "../src/mail/mailer.ts";
 import { router } from "../src/orpc/router.ts";
 import { portalBuyerProcedure, portalMemberProcedure, portalOwnerProcedure, portalSessionProcedure } from "../src/portal/orpc/base.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
 import { sendInvitation } from "../src/portal/members.ts";
-import { call, makePortalSeat, makePortalUser, makeTenant, makeUser, portalHeaders, portalSignIn, tenantHeaders } from "./harness.ts";
+import { appTenantUrl, authUrl } from "../src/tenant.ts";
+import {
+  call, insertSeat, makePortalSeat, makePortalUser, makeTenant, makeUser, portalSignIn, seatRole, seatsOf, tenantHeaders,
+} from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
 // The customer portal's own process (spec §3–§4): the one Better Auth instance it shares with the
-// internal app (spec 2026-10-17-single-sign-in-design.md), and builders whose boundary is
-// host → tenant → seat.
+// internal app, and builders whose boundary is the path's tenant → seat (spec
+// 2026-10-19-path-tenancy-design.md).
 
-const ctx = (slug: string, cookie?: string) => ({ context: { headers: portalHeaders(slug, cookie) } });
+const ctx = (slug: string, cookie?: string) => ({ context: { headers: tenantHeaders(slug, cookie) } });
 const codeOf = (p: Promise<unknown>) => p.then(() => "OK", (e: { code?: string }) => e.code);
 
 describe("one sign-in for staff and customers", () => {
@@ -49,14 +52,14 @@ describe("one sign-in for staff and customers", () => {
     const { slug } = await makeTenant();
     const email = `b${crypto.randomUUID().slice(0, 8)}@test.local`;
     await auth.api.signUpEmail({
-      body: { email, password: "test1234", name: "Bea", callbackURL: `http://lvh.me:5173/login?t=${slug}` },
+      body: { email, password: "test1234", name: "Bea", callbackURL: `${authUrl}/login?redirect=${encodeURIComponent(`${authUrl}/${slug}/`)}` },
     });
     let mail;
     for (let i = 0; i < 100 && !mail; i++) {
       mail = devOutbox.find((m) => m.to === email);
       if (!mail) await Bun.sleep(20);
     }
-    expect(mail?.from).toBe(`"Confire" <notify@${process.env.MAIL_DOMAIN ?? "mail.lvh.me"}>`);
+    expect(mail?.from).toBe(`"Confire" <notify@${mailDomain}>`);
     expect(mail?.html).toContain("/api/auth/verify-email?token=");
   });
 
@@ -84,21 +87,17 @@ describe("portal procedure builders", () => {
     expect(await codeOf(call(probe.session, undefined, ctx("nosuchsupplier", cookie)))).toBe("NOT_FOUND");
   });
 
-  test("an internal member of the host tenant is refused by every builder", async () => {
+  test("an internal member of the request's tenant is refused by every builder", async () => {
     const { tenantId, slug } = await makeTenant();
     const staff = await makeUser("member", tenantId);
     const cookie = await portalSignIn(staff.email);
-    // Even with a seat — the builder refuses before it ever reads one.
-    await makePortalSeat(tenantId, staff.userId, "owner");
     for (const p of Object.values(probe)) expect(await codeOf(call(p, undefined, ctx(slug, cookie)))).toBe("FORBIDDEN");
   });
 
-  test("a leftover `client` membership (the removed in-app portal, D23) is not staff", async () => {
-    const { tenantId, slug } = await makeTenant();
-    const former = await makeUser("client", tenantId);
-    const cookie = await portalSignIn(former.email);
-    expect(await call(probe.session, undefined, ctx(slug, cookie))).toBe(tenantId);
-    expect((await call(portalRouter.me, undefined, ctx(slug, cookie))).internal).toBe(false);
+  test("no tenant in the request is BAD_REQUEST, a reserved name too", async () => {
+    const { cookie } = await makePortalUser();
+    expect(await codeOf(call(probe.session, undefined, { context: { headers: new Headers({ cookie }) } }))).toBe("BAD_REQUEST");
+    expect(await codeOf(call(probe.session, undefined, ctx("login", cookie)))).toBe("BAD_REQUEST");
   });
 
   test("no seat here: the session builder passes, the member builders refuse", async () => {
@@ -148,8 +147,19 @@ describe("portal router", () => {
 
     const staff = await makeUser("admin", tenantId);
     const internal = await call(portalRouter.me, undefined, ctx(slug, await portalSignIn(staff.email)));
-    expect(internal).toMatchObject({ internal: true, company: null });
-    expect(internal.internalAppUrl).toContain(`${slug}.`);
+    expect(internal).toMatchObject({ internal: true, company: null, internalAppUrl: appTenantUrl(slug) });
+  });
+
+  test("me with a seat makes the supplier the session's active organization; without one it does not", async () => {
+    const a = await makeTenant();
+    const b = await makeTenant();
+    const u = await makePortalUser();
+    await makePortalSeat(a.tenantId, u.userId, "viewer");
+    const active = async () => (await auth.api.getSession({ headers: new Headers({ cookie: u.cookie }) }))?.session.activeOrganizationId;
+    await call(portalRouter.me, undefined, ctx(b.slug, u.cookie));
+    expect(await active()).toBeFalsy();
+    await call(portalRouter.me, undefined, ctx(a.slug, u.cookie));
+    expect(await active()).toBe(a.tenantId);
   });
 
   test("lobby lists the user's companies across suppliers", async () => {
@@ -182,10 +192,6 @@ async function invitingTenant(cardName = "Kunde AG") {
     });
   return { ...t, company: company!, admin, invite };
 }
-
-const seatRole = async (companyId: string, userId: string) =>
-  (await db.select({ role: portalMember.role }).from(portalMember)
-    .where(and(eq(portalMember.companyId, companyId), eq(portalMember.userId, userId))))[0]?.role;
 
 describe("onboarding.invitation / accept", () => {
   test("names the company, role and inviter; accept seats the user and registers the domain", async () => {
@@ -251,7 +257,7 @@ describe("onboarding.invitation / accept", () => {
       codeOf(call(portalRouter.onboarding.accept, { id }, ctx(t.slug, u.cookie))),
     ]);
     expect(results.sort()).toEqual(["CONFLICT", "OK"]);
-    expect(await db.select().from(portalMember).where(eq(portalMember.userId, u.userId))).toHaveLength(1);
+    expect(await seatsOf(u.userId)).toHaveLength(1);
   });
 
   test("a free-mail invitation with registerDomain registers nothing", async () => {
@@ -291,7 +297,7 @@ describe("onboarding.join (auto-join, spec §4.4)", () => {
     const none = await invitingTenant();
     const v = await makePortalUser();
     expect(await call(portalRouter.onboarding.join, undefined, ctx(none.slug, v.cookie))).toBeNull();
-    expect(await db.select().from(portalMember).where(eq(portalMember.userId, v.userId))).toHaveLength(0);
+    expect(await seatsOf(v.userId)).toHaveLength(0);
   });
 
   test("an auto-joined viewer who then accepts a buyer invitation becomes buyer", async () => {
@@ -317,10 +323,8 @@ describe("company (the owner's page, spec §9)", () => {
     await db.insert(portalCompanyDomain).values({ tenantId: t.tenantId, domain, companyId: t.company.id });
     const owner = await makePortalUser();
     const buyer = await makePortalUser();
-    await db.insert(portalMember).values([
-      { companyId: t.company.id, userId: owner.userId, tenantId: t.tenantId, role: "owner" },
-      { companyId: t.company.id, userId: buyer.userId, tenantId: t.tenantId, role: "buyer" },
-    ]);
+    await insertSeat(t.tenantId, t.company.id, owner.userId, "owner");
+    await insertSeat(t.tenantId, t.company.id, buyer.userId, "buyer");
     return { ...t, domain, owner, buyer, as: (u: { cookie: string }) => ctx(t.slug, u.cookie) };
   }
 

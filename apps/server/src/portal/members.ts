@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { and, asc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import {
-  db, member, organization, portalCompany, portalCompanyDomain, portalInvitation, portalMember, user, type PortalRole,
+  db, EXTERNAL_ROLE, member, organization, portalCompany, portalCompanyDomain, portalInvitation, user, type PortalRole,
 } from "@confire/db";
 import { invitationMail } from "../mail/portal-mail.tsx";
 import { portalTenantUrl } from "../tenant.ts";
@@ -11,22 +11,34 @@ import { tenantBrand } from "./settings.ts";
 // The customer portal's write rules (spec §4.2, §5.1): seats, registered domains and invitations.
 // Both processes import this module — the internal app (an admin inviting from a BP, editing a
 // company) and the portal (accept, auto-join, an owner inviting colleagues) — so the two sides
-// cannot enforce different rules. It never touches Better Auth.
+// cannot enforce different rules.
+//
+// A seat is a Better Auth `member` row of the supplier's organization with role `external`, its
+// company in `companyId` and its role there in `portalRole` (spec 2026-10-19-path-tenancy-design.md).
+// One member row per (organization, user) is what makes staff and customer of one tenant exclusive,
+// and "one company per user per tenant" — this module writes external rows directly, never through
+// Better Auth's endpoints (auth.ts turns those off).
 
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** member.companyId is text (Better Auth has no uuid field), portal_company.id a uuid. The company
+ *  must be the member's own organization's: the join says so, rather than trusting the field. */
+const seatCompany = and(eq(portalCompany.id, sql`${member.companyId}::uuid`), eq(portalCompany.tenantId, member.organizationId));
+const portalRole = sql<PortalRole>`${member.portalRole}`;
+const isExternal = eq(member.role, EXTERNAL_ROLE);
 
 /** Every supplier this user has a seat at, by supplier name: the sign-in dispatcher's portal rows
  *  (internal `sap.lobby`) and the portal shell's "Switch supplier" (portal `lobby`). */
 export const portalSeats = (userId: string) =>
   db
     .select({
-      slug: organization.slug, tenantName: organization.name, logo: organization.logo,
-      cardName: portalCompany.cardName, role: portalMember.role,
+      tenantId: organization.id, slug: organization.slug, tenantName: organization.name, logo: organization.logo,
+      cardName: portalCompany.cardName, role: portalRole,
     })
-    .from(portalMember)
-    .innerJoin(portalCompany, eq(portalCompany.id, portalMember.companyId))
-    .innerJoin(organization, eq(organization.id, portalCompany.tenantId))
-    .where(eq(portalMember.userId, userId))
+    .from(member)
+    .innerJoin(portalCompany, seatCompany)
+    .innerJoin(organization, eq(organization.id, member.organizationId))
+    .where(and(eq(member.userId, userId), isExternal))
     .orderBy(asc(organization.name));
 
 const INVITATION_DAYS = 14;
@@ -56,12 +68,10 @@ const violated = (e: unknown, constraint: string): boolean => {
   return false;
 };
 
-/** Works for this supplier: an internal membership. A leftover `client` row (the removed in-app
- *  portal) is not staff — it stays locked out of the internal app, and the portal does not read it
- *  (spec D23), so its owner is a customer here like any other. */
-export async function isInternalMember(tenantId: string, userId: string, q: typeof db | Tx = db): Promise<boolean> {
-  const [row] = await q.select({ id: member.id }).from(member)
-    .where(and(eq(member.organizationId, tenantId), eq(member.userId, userId), ne(member.role, "client"))).limit(1);
+/** Works for this supplier: a membership of its organization that is not `external`. */
+export async function isInternalMember(tenantId: string, userId: string): Promise<boolean> {
+  const [row] = await db.select({ id: member.id }).from(member)
+    .where(and(eq(member.organizationId, tenantId), eq(member.userId, userId), ne(member.role, EXTERNAL_ROLE))).limit(1);
   return !!row;
 }
 
@@ -70,40 +80,43 @@ export async function seatOf(tenantId: string, userId: string) {
   const [seat] = await db
     .select({
       companyId: portalCompany.id, cardCode: portalCompany.cardCode, cardName: portalCompany.cardName,
-      cardType: portalCompany.cardType, role: portalMember.role,
+      cardType: portalCompany.cardType, role: portalRole,
     })
-    .from(portalMember)
-    .innerJoin(portalCompany, eq(portalCompany.id, portalMember.companyId))
-    .where(and(eq(portalMember.userId, userId), eq(portalCompany.tenantId, tenantId)))
+    .from(member)
+    .innerJoin(portalCompany, seatCompany)
+    .where(and(eq(member.organizationId, tenantId), eq(member.userId, userId), isExternal))
     .limit(1);
   return seat;
 }
 
+const RANK: Record<PortalRole, number> = { viewer: 0, buyer: 1, owner: 2 };
+
 /**
- * The only insert into portal_member (auto-join, invitation accept, onboarding submit). Refuses the
- * supplier's own staff. The unique (tenantId, userId) index is "one company per user per tenant",
- * so a seat at another company here — even one won by a concurrent request — is a CONFLICT.
- * A second way into the SAME company (an auto-joined viewer then accepting a buyer invitation)
- * raises the role and never lowers it, so it can never take a company's last owner away.
+ * The only writer of an external member row (auto-join, invitation accept, onboarding submit). The
+ * user's one membership of this organization decides: staff is FORBIDDEN, a seat at another company
+ * here is a CONFLICT, and a second way into the SAME company (an auto-joined viewer then accepting a
+ * buyer invitation) raises the role and never lowers it, so it can never take a company's last owner
+ * away. The user row is locked first: the generated Better Auth schema cannot carry a unique
+ * (organizationId, userId) index, so this lock is what keeps two concurrent joins from both inserting.
  */
 export async function addPortalMember(tx: Tx, m: { tenantId: string; companyId: string; userId: string; role: PortalRole }) {
-  if (await isInternalMember(m.tenantId, m.userId, tx)) {
+  await tx.select({ id: user.id }).from(user).where(eq(user.id, m.userId)).for("update");
+  const [row] = await tx.select({ id: member.id, role: member.role, companyId: member.companyId, portalRole })
+    .from(member).where(and(eq(member.organizationId, m.tenantId), eq(member.userId, m.userId))).limit(1);
+  if (!row) {
+    await tx.insert(member).values({
+      id: crypto.randomUUID(), organizationId: m.tenantId, userId: m.userId, role: EXTERNAL_ROLE,
+      companyId: m.companyId, portalRole: m.role, createdAt: new Date(),
+    });
+    return;
+  }
+  if (row.role !== EXTERNAL_ROLE) {
     throw new ORPCError("FORBIDDEN", { message: "This account works for the supplier: staff use its internal app, not the portal" });
   }
-  try {
-    await tx.insert(portalMember).values(m).onConflictDoUpdate({
-      target: [portalMember.companyId, portalMember.userId],
-      set: {
-        role: sql`case when excluded.role = 'owner' or (excluded.role = 'buyer' and ${portalMember.role} = 'viewer')
-          then excluded.role else ${portalMember.role} end`,
-      },
-    });
-  } catch (e) {
-    if (violated(e, "portal_member_tenant_user_uq")) {
-      throw new ORPCError("CONFLICT", { message: "This account already belongs to another company on this portal" });
-    }
-    throw e;
+  if (row.companyId !== m.companyId) {
+    throw new ORPCError("CONFLICT", { message: "This account already belongs to another company on this portal" });
   }
+  if (RANK[m.role] > RANK[row.portalRole]) await tx.update(member).set({ portalRole: m.role }).where(eq(member.id, row.id));
 }
 
 /** Registers `domain` to the company — the auto-join index. Free mail is never registered, and a
@@ -129,18 +142,18 @@ export async function claimDomain(
  */
 export async function changeMember(c: { tenantId: string; companyId: string; userId: string; role: PortalRole | null }) {
   await db.transaction(async (tx) => {
-    const fence = and(eq(portalMember.companyId, c.companyId), eq(portalMember.tenantId, c.tenantId));
-    const owners = await tx.select({ userId: portalMember.userId }).from(portalMember)
-      .where(and(fence, eq(portalMember.role, "owner"))).for("update");
-    const [target] = await tx.select({ role: portalMember.role }).from(portalMember)
-      .where(and(fence, eq(portalMember.userId, c.userId)));
+    const fence = and(eq(member.organizationId, c.tenantId), isExternal, eq(member.companyId, c.companyId));
+    const owners = await tx.select({ userId: member.userId }).from(member)
+      .where(and(fence, eq(member.portalRole, "owner"))).for("update");
+    const [target] = await tx.select({ role: portalRole }).from(member)
+      .where(and(fence, eq(member.userId, c.userId)));
     if (!target) throw new ORPCError("NOT_FOUND", { message: "No such member in this company" });
     const lastOwner = target.role === "owner" && owners.length === 1 && owners[0]!.userId === c.userId;
     if (lastOwner && c.role !== "owner") {
       throw new ORPCError("CONFLICT", { message: "A company needs at least one owner: make someone else owner first" });
     }
-    if (c.role === null) await tx.delete(portalMember).where(and(fence, eq(portalMember.userId, c.userId)));
-    else await tx.update(portalMember).set({ role: c.role }).where(and(fence, eq(portalMember.userId, c.userId)));
+    if (c.role === null) await tx.delete(member).where(and(fence, eq(member.userId, c.userId)));
+    else await tx.update(member).set({ portalRole: c.role }).where(and(fence, eq(member.userId, c.userId)));
   });
 }
 
@@ -241,9 +254,9 @@ export async function cancelInvitations(tenantId: string, ids: string[], company
  *  section and the owner's company page read the same lists. */
 export async function companyPeople(companyId: string) {
   const [members, invitations, domains] = await Promise.all([
-    db.select({ userId: portalMember.userId, name: user.name, email: user.email, role: portalMember.role, createdAt: portalMember.createdAt })
-      .from(portalMember).innerJoin(user, eq(user.id, portalMember.userId))
-      .where(eq(portalMember.companyId, companyId)).orderBy(asc(portalMember.createdAt)),
+    db.select({ userId: member.userId, name: user.name, email: user.email, role: portalRole, createdAt: member.createdAt })
+      .from(member).innerJoin(user, eq(user.id, member.userId))
+      .where(and(isExternal, eq(member.companyId, companyId))).orderBy(asc(member.createdAt)),
     db.select({
       id: portalInvitation.id, email: portalInvitation.email, role: portalInvitation.role,
       expiresAt: portalInvitation.expiresAt, expired: sql<boolean>`${portalInvitation.expiresAt} < now()`,

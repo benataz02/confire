@@ -5,7 +5,7 @@ import {
 } from "@ui5/webcomponents-react";
 import { sameState } from "@confire/ui/views.ts";
 import { toast } from "@confire/ui/toast.ts";
-import { fileUrl, uploadLogo } from "@confire/ui/files.ts";
+import { logoUrl, uploadLogo } from "@confire/ui/files.ts";
 import { client, orpc } from "../../orpc.ts";
 
 // Settings → Portal → Branding (spec D20): the name, accent colour and logo the portal and its client
@@ -63,7 +63,7 @@ function BrandingForm({ current }: { current: General }) {
   }));
 
   const accentBad = draft.accent !== "" && !HEX.test(draft.accent);
-  const logo = draft.logoFileId ? fileUrl(draft.logoFileId) : current.organization.logo;
+  const logo = draft.logoFileId ? logoUrl(draft.logoFileId) : current.organization.logo;
   const pickLogo = async (file: File | undefined) => {
     setPicks((n) => n + 1);
     if (!file) return;
