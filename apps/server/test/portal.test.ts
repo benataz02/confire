@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { db, EXTERNAL_ROLE, invitation, portalCompany, portalCompanyDomain, user } from "@confire/db";
+import { db, invitation, portalCompany, portalCompanyDomain, user } from "@confire/db";
 import { auth, microsoftEmailVerified } from "../src/auth.ts";
 import { devOutbox, mailDomain } from "../src/mail/mailer.ts";
 import { router } from "../src/orpc/router.ts";
@@ -338,7 +338,7 @@ describe("company (the owner's page, spec §9)", () => {
     const { id } = await call(portalRouter.company.members.invite, { email: inside, role: "viewer" }, c.as(c.owner));
     const [inv] = await db.select().from(invitation).where(eq(invitation.id, id));
     expect(inv).toMatchObject({
-      cardCode: c.company.cardCode, role: EXTERNAL_ROLE, portalRole: "viewer", registerDomain: false, inviterId: c.owner.userId,
+      cardCode: c.company.cardCode, role: "portal_viewer", registerDomain: false, inviterId: c.owner.userId,
     });
     expect(await codeOf(call(portalRouter.company.members.invite, { email: `z${uid()}@${c.domain}`, role: "viewer" }, c.as(c.buyer))))
       .toBe("FORBIDDEN");

@@ -23,7 +23,7 @@ function colKeys(columns: unknown): string[] {
 // on save, so "0 issues" here means the save cannot be rejected for model errors.
 export function useDraftModel(id?: string) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
+  const navigate = useNavigate({ from: "/$slug" });
   const rec = useQuery({ ...orpc.models.get.queryOptions({ input: { id: id! } }), enabled: !!id });
   const tablesQ = useQuery(orpc.masterdata.list.queryOptions());
   const [draft, setDraft] = useState<ModelDef | null>(() => (id ? null : starterModel("")));
@@ -72,7 +72,7 @@ export function useDraftModel(id?: string) {
         // save RETURNs the saved row, so seed the cache with it instead of refetching models.get.
         qc.setQueryData(orpc.models.get.queryOptions({ input: { id: row.id } }).queryKey, row);
         toast("Model saved");
-        if (!id) void navigate({ to: "/models/$id", params: { id: row.id }, replace: true });
+        if (!id) void navigate({ to: "/$slug/models/$id", params: { id: row.id }, replace: true });
       },
       onError: (e) => {
         // models.save rejects invalid definitions with BAD_REQUEST + data.issues (span Issues).

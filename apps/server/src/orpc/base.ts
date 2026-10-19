@@ -1,6 +1,6 @@
 import { os, ORPCError } from "@orpc/server";
-import { and, eq, ne } from "drizzle-orm";
-import { db, EXTERNAL_ROLE, member, organization } from "@confire/db";
+import { and, eq, notInArray } from "drizzle-orm";
+import { db, EXTERNAL_ROLES, member, organization } from "@confire/db";
 import { auth } from "../auth.ts";
 import { TENANT_HEADER, tenantSlug } from "../tenant.ts";
 
@@ -25,7 +25,7 @@ const requireSession = base.middleware(async ({ context, next }) => {
 });
 
 /** The workspace a request names (its `x-tenant`: the page's first path segment, tenant.ts), gated by
- *  this user's staff membership — the tenant boundary. A supplier's customer (`external`) is a member
+ *  this user's staff membership — the tenant boundary. A supplier's customer (a `portal_*` role) is a member
  *  of the organization too, and is refused here like a stranger. */
 export async function membershipOf(slugValue: string | null | undefined, userId: string) {
   const slug = tenantSlug(slugValue);
@@ -34,7 +34,7 @@ export async function membershipOf(slugValue: string | null | undefined, userId:
     .select({ tenantId: organization.id, role: member.role })
     .from(organization)
     .innerJoin(member, eq(member.organizationId, organization.id))
-    .where(and(eq(organization.slug, slug), eq(member.userId, userId), ne(member.role, EXTERNAL_ROLE)))
+    .where(and(eq(organization.slug, slug), eq(member.userId, userId), notInArray(member.role, EXTERNAL_ROLES)))
     .limit(1);
   if (!row) throw new ORPCError("FORBIDDEN", { message: "Not a member of this workspace" });
   return row;

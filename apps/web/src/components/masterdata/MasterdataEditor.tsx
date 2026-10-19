@@ -82,7 +82,7 @@ function issueOf(d: Draft): string | null {
 }
 
 export function MasterdataEditor({ id }: { id?: string }) {
-  const navigate = useNavigate();
+  const navigate = useNavigate({ from: "/$slug" });
   const qc = useQueryClient();
   const list = useQuery(orpc.masterdata.list.queryOptions());
   const row = id ? list.data?.find((t) => t.id === id) : undefined;
@@ -140,7 +140,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
       setDirty(false);
       invalidate();
       toast("Masterdata saved");
-      if (!id) void navigate({ to: "/masterdata/$id", params: { id: r.id }, replace: true });
+      if (!id) void navigate({ to: "/$slug/masterdata/$id", params: { id: r.id }, replace: true });
     },
   });
   const save = useMutation({
@@ -167,11 +167,11 @@ export function MasterdataEditor({ id }: { id?: string }) {
   // field afterwards would light it up again — the very thing this was meant to stop.
   const submitted = save.isError;
   const remove = useMutation(orpc.masterdata.remove.mutationOptions({
-    onSuccess: () => { setDirty(false); invalidate(); toast("Table deleted"); void navigate({ to: "/masterdata" }); },
+    onSuccess: () => { setDirty(false); invalidate(); toast("Table deleted"); void navigate({ to: "/$slug/masterdata" }); },
   }));
   // Copies the *persisted* row, which is why the button is disabled while dirty — see the toolbar.
   const duplicate = useMutation(orpc.masterdata.duplicate.mutationOptions({
-    onSuccess: (r) => { invalidate(); toast("Table duplicated"); void navigate({ to: "/masterdata/$id", params: { id: r.id } }); },
+    onSuccess: (r) => { invalidate(); toast("Table duplicated"); void navigate({ to: "/$slug/masterdata/$id", params: { id: r.id } }); },
   }));
 
   useBlocker({

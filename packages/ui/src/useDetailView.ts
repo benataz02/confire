@@ -1,11 +1,10 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { coerceKey, parseKeyParam, type Key } from "@confire/b1";
 import { useUiSource } from "./source.tsx";
 import { toast } from "./toast.ts";
 import { useFieldConstraints, type EntityConstraints } from "./metadata.ts";
-import { entityPath } from "./navigation.ts";
+import { useEntityNav } from "./EntityLink.tsx";
 import type { CreateAction } from "./object-page/ObjectPage.tsx";
 import type { Row } from "./types.ts";
 
@@ -26,7 +25,7 @@ export function useDetailView({ entity, routeKey, route, isNew = false }: {
   isNew?: boolean;
 }) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
+  const open = useEntityNav();
   const { client, orpc } = useUiSource();
   const meta = useFieldConstraints(entity);
   const constraints = meta.data;
@@ -67,9 +66,9 @@ export function useDetailView({ entity, routeKey, route, isNew = false }: {
       const newKey = keyOf(constraints, String(r.row[field] ?? ""));
       seed(newKey, r.row, r.etag);
       toast(`${constraints.label} created`);
-      if (createAction === "view") void navigate({ href: entityPath(route, newKey) });
+      if (createAction === "view") open(route, newKey);
       else if (createAction === "new") setCreateEpoch((n) => n + 1);
-      else void navigate({ href: route });
+      else open(route);
       return;
     }
     if (key === undefined) throw new Error("No record");
@@ -86,7 +85,7 @@ export function useDetailView({ entity, routeKey, route, isNew = false }: {
     try {
       const r = await client.entities.neighbor({ entity, dir, ...(dir === "prev" || dir === "next" ? { key: key as string | number } : {}) });
       if (r.key === null) toast(dir === "next" || dir === "last" ? "This is the last record" : "This is the first record");
-      else void navigate({ href: entityPath(route, r.key) });
+      else open(route, r.key);
     } finally {
       setNavBusy(false);
     }

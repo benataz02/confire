@@ -45,7 +45,7 @@ const CAP = { all: 6, scoped: 20 };
 // ponytail: client-side substring match over the two list endpoints the app already caches. Add a
 // server-side search procedure when a tenant outgrows a single list response.
 export function GlobalSearch({ entries, isAdmin }: { entries: SearchEntry[]; isAdmin: boolean }) {
-  const navigate = useNavigate();
+  const navigate = useNavigate({ from: "/$slug" });
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [scope, setScope] = useState(ALL);
@@ -62,14 +62,14 @@ export function GlobalSearch({ entries, isAdmin }: { entries: SearchEntry[]; isA
         text: c.name,
         description: [c.customer, c.modelName, c.status].filter(Boolean).join(" · "),
         icon: "sales-quote",
-        run: () => navigate({ to: "/configs/$id", params: { id: c.id } }),
+        run: () => navigate({ to: "/$slug/configs/$id", params: { id: c.id } }),
       })),
       ...(models.data ?? []).map((m) => ({
         group: "Models",
         text: m.name,
         description: "Configurator model",
         icon: "tree",
-        run: () => navigate({ to: "/models/$id", params: { id: m.id } }),
+        run: () => navigate({ to: "/$slug/models/$id", params: { id: m.id } }),
       })),
     ];
     return [...entries, ...objects].filter(

@@ -4,10 +4,10 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
 import { adminAc, defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, notInArray } from "drizzle-orm";
 import { db } from "@confire/db/client";
 import * as schema from "@confire/db/schema";
-import { EXTERNAL_ROLE } from "@confire/db/schema";
+import { EXTERNAL_ROLES } from "@confire/db/schema";
 import { authUrl, cookieDomain, portalUrl, tenantSlug } from "./tenant.ts";
 import { authMail } from "./mail/auth-mail.tsx";
 
@@ -29,7 +29,7 @@ export const microsoftEmailVerified = (profile: Record<string, unknown>): boolea
 const mail = authMail();
 
 /** The browser calls only these two organization endpoints (workspace setup). Every other one is off:
- *  they treat every member as a peer, so a supplier's customer — an `external` member — could list the
+ *  they treat every member as a peer, so a supplier's customer — a `portal_*` member — could list the
  *  supplier's staff and every other customer (`list-members`, `get-full-organization`), and an admin
  *  could turn a customer into staff (`update-member-role`). Confire's own procedures write members
  *  (portal/members.ts) and pick the organization (the path), so nothing is lost. Computed from the
@@ -46,9 +46,9 @@ const orgPlugin = organization({
     admin: ac.newRole(adminAc.statements),
     member: ac.newRole(memberAc.statements),
     // A supplier's customer (spec 2026-10-19-path-tenancy-design.md): a member of the supplier's
-    // organization, refused by every internal procedure, with no permission on any org endpoint. Its
-    // seat is the two fields below: its company's CardCode, and its role there.
-    [EXTERNAL_ROLE]: ac.newRole({}),
+    // organization whose role is its role in its company (`portal_owner`/`_buyer`/`_viewer`), refused
+    // by every internal procedure, with no permission on any org endpoint. Its company is `cardCode`.
+    ...Object.fromEntries(EXTERNAL_ROLES.map((r) => [r, ac.newRole({})])),
   },
   schema: {
     member: {
@@ -57,19 +57,16 @@ const orgPlugin = organization({
         // completes the key — never match a CardCode without it. No FK: the generated schema cannot
         // carry one, and nothing deletes a company (§4.2). portal/members.ts is the only writer.
         cardCode: { type: "string", required: false, input: false },
-        portalRole: { type: "string", required: false, input: false },
       },
     },
-    // A portal invitation is Better Auth's own row with role `external` and the seat it will become:
-    // cardCode (null = a new client, set by its onboarding submit) and portalRole. It
-    // joins the supplier's organization (organizationId) and never creates one. Never `owner` in
-    // `role`: Better Auth's acceptInvitation would make that an organization owner. Its accept is off
-    // anyway — it inserts the member bare, before a new client has a company, and never checks an
-    // existing membership — so portal/members.ts writes and accepts these rows (addPortalMember).
+    // A portal invitation is Better Auth's own row with the seat it will become: a `portal_*` role and
+    // cardCode (null = a new client, set by its onboarding submit). It joins the supplier's
+    // organization (organizationId) and never creates one. Better Auth's accept is off — it inserts
+    // the member bare, before a new client has a company, and never checks an existing membership — so
+    // portal/members.ts writes and accepts these rows (addPortalMember).
     invitation: {
       additionalFields: {
         cardCode: { type: "string", required: false, input: false },
-        portalRole: { type: "string", required: false, input: false },
         registerDomain: { type: "boolean", required: false, defaultValue: false, input: false },
       },
     },
@@ -78,7 +75,7 @@ const orgPlugin = organization({
   // number of suppliers, so the count is of staff rows only. True = the limit is reached.
   organizationLimit: async (user) => {
     const [staff] = await db.select({ id: schema.member.id }).from(schema.member)
-      .where(and(eq(schema.member.userId, user.id), ne(schema.member.role, EXTERNAL_ROLE))).limit(1);
+      .where(and(eq(schema.member.userId, user.id), notInArray(schema.member.role, EXTERNAL_ROLES))).limit(1);
     return !!staff;
   },
   // No UI deletes a company, and nothing references organization.id by FK — a delete through

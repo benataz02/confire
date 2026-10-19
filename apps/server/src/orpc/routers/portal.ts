@@ -1,10 +1,10 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import {
-  db, EXTERNAL_ROLE, invitation, member, NOTIFY_EVENTS, NOTIFY_MODES, organization, PORTAL_ROLES, portalCompany,
-  portalCompanyDomain, projectFile, user,
-  type PortalCardType, type PortalDocFields, type PortalRole, type PortalSettings,
+  db, EXTERNAL_ROLES, invitation, member, NOTIFY_EVENTS, NOTIFY_MODES, organization, PORTAL_ROLES, portalCompany,
+  portalCompanyDomain, portalRoleOf, projectFile, user,
+  type PortalCardType, type PortalDocFields, type PortalSettings,
 } from "@confire/db";
 import { rowsOf, type B1EntitySchema, type B1Field } from "@confire/b1";
 import { adminProcedure } from "../base.ts";
@@ -35,7 +35,7 @@ const DomainZ = z.string().trim().toLowerCase().regex(/^[a-z0-9-]+(\.[a-z0-9-]+)
 /** A pending invitation past its expiry still reads `pending` in the table; lists show `expired`. */
 const STATE = sql<"pending" | "accepted" | "canceled" | "expired">`case when ${invitation.status} = 'pending'
   and ${invitation.expiresAt} < now() then 'expired' else ${invitation.status} end`;
-const ROLE = sql<PortalRole>`${invitation.portalRole}`;
+const ROLE = portalRoleOf(invitation.role);
 
 const INVITATION_FIELDS: SqlFields = {
   email: { col: invitation.email, kind: "string" },
@@ -196,7 +196,7 @@ export const portalCompaniesRouter = {
 const staffOf = (tenantId: string) => db
   .select({ userId: user.id, name: user.name, email: user.email, role: member.role })
   .from(member).innerJoin(user, eq(user.id, member.userId))
-  .where(and(eq(member.organizationId, tenantId), ne(member.role, EXTERNAL_ROLE)))
+  .where(and(eq(member.organizationId, tenantId), notInArray(member.role, EXTERNAL_ROLES)))
   .orderBy(user.name);
 
 /** The SAP fields an entity can offer the portal, as the picker lists them. */

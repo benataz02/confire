@@ -1,7 +1,8 @@
 import { ORPCError } from "@orpc/server";
-import { and, asc, eq, gt, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, notInArray, sql } from "drizzle-orm";
 import {
-  db, EXTERNAL_ROLE, invitation, member, organization, portalCompany, portalCompanyDomain, user, type PortalRole,
+  db, EXTERNAL_ROLES, externalRole, invitation, member, organization, PORTAL_ROLES, portalCompany, portalCompanyDomain,
+  portalRoleOf, user, type PortalRole,
 } from "@confire/db";
 import { invitationMail } from "../mail/portal-mail.tsx";
 import { portalTenantUrl } from "../tenant.ts";
@@ -13,11 +14,11 @@ import { tenantBrand } from "./settings.ts";
 // company) and the portal (accept, auto-join, an owner inviting colleagues) — so the two sides
 // cannot enforce different rules.
 //
-// A seat is a Better Auth `member` row of the supplier's organization with role `external`, its
-// company's CardCode in `cardCode` and its role there in `portalRole` (spec
+// A seat is a Better Auth `member` row of the supplier's organization whose role is its role in its
+// company (`portal_buyer`, externalRole) and whose `cardCode` is that company (spec
 // 2026-10-19-path-tenancy-design.md). A company is (organization, CardCode): a CardCode alone is
 // another supplier's company too, so every match below carries the organization with it.
-// An invitation is Better Auth's `invitation` row with role `external` and the same two fields.
+// An invitation is Better Auth's `invitation` row with the same two.
 // One member row per (organization, user) is what makes staff and customer of one tenant exclusive,
 // and "one company per user per tenant" — this module writes external rows directly, never through
 // Better Auth's endpoints (auth.ts turns those off).
@@ -26,8 +27,8 @@ export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** The member's company: its CardCode in the member's own organization. */
 const seatCompany = and(eq(portalCompany.tenantId, member.organizationId), eq(portalCompany.cardCode, member.cardCode));
-const portalRole = sql<PortalRole>`${member.portalRole}`;
-const isExternal = eq(member.role, EXTERNAL_ROLE);
+const portalRole = portalRoleOf(member.role);
+const isExternal = inArray(member.role, EXTERNAL_ROLES);
 
 /** Every supplier this user has a seat at, by supplier name: the sign-in dispatcher's portal rows
  *  (internal `sap.lobby`) and the portal shell's "Switch supplier" (portal `lobby`). */
@@ -61,10 +62,10 @@ export const emailDomain = (email: string) => email.slice(email.lastIndexOf("@")
 /** A domain anyone can get an address on: never auto-joins, never registered to a company. */
 export const isFreeMail = (domain: string) => FREE_MAIL.has(domain.trim().toLowerCase());
 
-/** Works for this supplier: a membership of its organization that is not `external`. */
+/** Works for this supplier: a membership of its organization that is not a customer's. */
 export async function isInternalMember(tenantId: string, userId: string): Promise<boolean> {
   const [row] = await db.select({ id: member.id }).from(member)
-    .where(and(eq(member.organizationId, tenantId), eq(member.userId, userId), ne(member.role, EXTERNAL_ROLE))).limit(1);
+    .where(and(eq(member.organizationId, tenantId), eq(member.userId, userId), notInArray(member.role, EXTERNAL_ROLES))).limit(1);
   return !!row;
 }
 
@@ -94,22 +95,23 @@ const RANK: Record<PortalRole, number> = { viewer: 0, buyer: 1, owner: 2 };
  */
 export async function addPortalMember(tx: Tx, m: { tenantId: string; cardCode: string; userId: string; role: PortalRole }) {
   await tx.select({ id: user.id }).from(user).where(eq(user.id, m.userId)).for("update");
-  const [row] = await tx.select({ id: member.id, role: member.role, cardCode: member.cardCode, portalRole })
+  const [row] = await tx.select({ id: member.id, role: member.role, cardCode: member.cardCode })
     .from(member).where(and(eq(member.organizationId, m.tenantId), eq(member.userId, m.userId))).limit(1);
   if (!row) {
     await tx.insert(member).values({
-      id: crypto.randomUUID(), organizationId: m.tenantId, userId: m.userId, role: EXTERNAL_ROLE,
-      cardCode: m.cardCode, portalRole: m.role, createdAt: new Date(),
+      id: crypto.randomUUID(), organizationId: m.tenantId, userId: m.userId, role: externalRole(m.role),
+      cardCode: m.cardCode, createdAt: new Date(),
     });
     return;
   }
-  if (row.role !== EXTERNAL_ROLE) {
+  const current = PORTAL_ROLES.find((r) => externalRole(r) === row.role);
+  if (!current) {
     throw new ORPCError("FORBIDDEN", { message: "This account works for the supplier: staff use its internal app, not the portal" });
   }
   if (row.cardCode !== m.cardCode) {
     throw new ORPCError("CONFLICT", { message: "This account already belongs to another company on this portal" });
   }
-  if (RANK[m.role] > RANK[row.portalRole]) await tx.update(member).set({ portalRole: m.role }).where(eq(member.id, row.id));
+  if (RANK[m.role] > RANK[current]) await tx.update(member).set({ role: externalRole(m.role) }).where(eq(member.id, row.id));
 }
 
 /** Registers `domain` to the company — the auto-join index. Free mail is never registered, and a
@@ -135,7 +137,7 @@ export async function changeMember(c: { tenantId: string; cardCode: string; user
   await db.transaction(async (tx) => {
     const fence = and(eq(member.organizationId, c.tenantId), isExternal, eq(member.cardCode, c.cardCode));
     const owners = await tx.select({ userId: member.userId }).from(member)
-      .where(and(fence, eq(member.portalRole, "owner"))).for("update");
+      .where(and(fence, eq(member.role, externalRole("owner")))).for("update");
     const [target] = await tx.select({ role: portalRole }).from(member)
       .where(and(fence, eq(member.userId, c.userId)));
     if (!target) throw new ORPCError("NOT_FOUND", { message: "No such member in this company" });
@@ -144,7 +146,7 @@ export async function changeMember(c: { tenantId: string; cardCode: string; user
       throw new ORPCError("CONFLICT", { message: "A company needs at least one owner: make someone else owner first" });
     }
     if (c.role === null) await tx.delete(member).where(and(fence, eq(member.userId, c.userId)));
-    else await tx.update(member).set({ portalRole: c.role }).where(and(fence, eq(member.userId, c.userId)));
+    else await tx.update(member).set({ role: externalRole(c.role) }).where(and(fence, eq(member.userId, c.userId)));
   });
 }
 
@@ -166,10 +168,10 @@ async function inviteGuard(tenantId: string, cardCode: string | null, email: str
   });
 }
 
-/** This tenant's portal invitations: Better Auth's rows with role `external` (a staff invitation, if
+/** This tenant's portal invitations: Better Auth's rows with a `portal_*` role (a staff invitation, if
  *  one is ever written, is none of the portal's business). */
 export const portalInvitationOf = (tenantId: string) =>
-  and(eq(invitation.organizationId, tenantId), eq(invitation.role, EXTERNAL_ROLE));
+  and(eq(invitation.organizationId, tenantId), inArray(invitation.role, EXTERNAL_ROLES));
 
 /** Pending and not expired: an expired invitation keeps `pending` (Better Auth's own rule), so only
  *  this pair means "open". */
@@ -208,8 +210,8 @@ export async function sendInvitation(i: {
     }
     const id = crypto.randomUUID();
     await tx.insert(invitation).values({
-      id, organizationId: i.tenantId, email, role: EXTERNAL_ROLE, status: "pending", expiresAt, inviterId: i.inviter.id,
-      cardCode: i.cardCode, portalRole: i.role, registerDomain: i.registerDomain,
+      id, organizationId: i.tenantId, email, role: externalRole(i.role), status: "pending", expiresAt,
+      inviterId: i.inviter.id, cardCode: i.cardCode, registerDomain: i.registerDomain,
     });
     return id;
   });
@@ -246,7 +248,7 @@ export async function companyPeople(tenantId: string, cardCode: string) {
       .from(member).innerJoin(user, eq(user.id, member.userId))
       .where(and(eq(member.organizationId, tenantId), isExternal, eq(member.cardCode, cardCode))).orderBy(asc(member.createdAt)),
     db.select({
-      id: invitation.id, email: invitation.email, role: sql<PortalRole>`${invitation.portalRole}`,
+      id: invitation.id, email: invitation.email, role: portalRoleOf(invitation.role),
       expiresAt: invitation.expiresAt, expired: sql<boolean>`${invitation.expiresAt} < now()`,
     })
       .from(invitation)

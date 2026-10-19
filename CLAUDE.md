@@ -62,9 +62,13 @@ setting, `DOMAIN` (below); the root `.env` needs only `DATABASE_URL` and `BETTER
 ## Tenancy is the path
 
 Two fixed hosts, no tenant subdomains (`docs/superpowers/specs/2026-10-19-path-tenancy-design.md`): the
-staff app on `app.<DOMAIN>/<slug>/…`, the portal on `portal.<DOMAIN>/<slug>/…`. Each SPA's router runs
-under `/<slug>` as its **basepath** (`@confire/ui/host.ts` `tenantBasepath`), so no route or link names
-the tenant, and moving to another tenant is always a full page load — the query cache never holds two.
+staff app on `app.<DOMAIN>/<slug>/…`, the portal on `portal.<DOMAIN>/<slug>/…`. In each SPA the slug is
+the **`$slug` route param** (`routes/$slug.tsx`: the tenant's guard, and the staff app's shell; the bare
+origin is `routes/index.tsx`, the dispatcher's). A link never names or changes it: typed navigation is
+`useNavigate({ from: "/$slug" })` + `to: "/$slug/…"`, which carries the param over, and the shells'
+declared routes (`/b1/Items`) go through `useEntityNav` (`@confire/ui/EntityLink.tsx`), which puts them
+under `/$slug`. Moving to another tenant is always a full page load — the query cache never holds two.
+The staff app's admin-only pages (Settings, `/b1/*`) sit under the pathless `_admin` layout.
 The oRPC link sends the slug as **`x-tenant`** on every call; the plain file routes carry it in their
 path (`/files/<slug>/…`), because a download is a link. `tenant.ts` is the only place a slug is read
 off a request (`tenantSlug`, with the reserved names: the staff SPA's top-level pages and the server's
@@ -91,12 +95,15 @@ portal's *Switch supplier*); no place at all is workspace setup. A portal stays 
 portal-originated sign-in carries `redirect` back to the portal, whose own guard shows the invite-only
 page — sign-in itself cannot know who is "a customer".
 
-**A customer is a member of the supplier's organization** with role **`external`** (`EXTERNAL_ROLE`,
-an access-control role with no permissions) and two extra member fields: `cardCode` (its company: a
-`portal_company` is (tenant, CardCode) and has no id of its own, so a CardCode is never matched without
-the tenant) and `portalRole` (`owner`/`buyer`/`viewer`). One member row
+**A customer is a member of the supplier's organization** whose role is its role in its company:
+**`portal_owner`/`portal_buyer`/`portal_viewer`** (`EXTERNAL_ROLES`, access-control roles with no
+permissions; prefixed because Better Auth compares role names exactly, so `portal_owner` is never its
+`owner`). The API and UI say `owner`/`buyer`/`viewer` (`PortalRole`); `externalRole()` and
+`portalRoleOf()` (`@confire/db`) convert at the DB. One extra member field, `cardCode`, is its company:
+a `portal_company` is (tenant, CardCode) and has no id of its own, so a CardCode is never matched
+without the tenant. One member row
 per (organization, user) is "one company per user per tenant" and makes staff and customer of one
-tenant exclusive. Every staff query filters `role <> 'external'`; `organizationLimit` counts staff rows
+tenant exclusive. Every staff query filters `role not in EXTERNAL_ROLES`; `organizationLimit` counts staff rows
 only, so a customer may still found their own workspace. Better Auth's organization endpoints treat
 all members as peers (`list-members` would show a customer every other customer), so `auth.ts`
 disables every one but `create` and `check-slug` (`disabledPaths`, computed from the plugin).
@@ -112,8 +119,8 @@ Builders (`portal/orpc/base.ts`); every tenant-scoped one refuses the supplier's
 **`portal/members.ts` is the only writer** of external member rows (`addPortalMember`, `changeMember`), `portal_company_domain`
 (`claimDomain`) and portal invitations (`sendInvitation`, `cancelInvitations`), and both processes
 import it. The internal router (`orpc/routers/portal.ts`: `portalInvitations`, `portalCompanies`)
-and the portal's (`onboarding`, `company`) therefore enforce one rule set. Invitations are Better Auth's own `invitation` rows with role `external` plus `cardCode` (null = a new
-client), `portalRole` and `registerDomain`; Better Auth's accept stays off (it inserts the member bare,
+and the portal's (`onboarding`, `company`) therefore enforce one rule set. Invitations are Better Auth's own `invitation` rows with a `portal_*` role plus `cardCode` (null = a new
+client) and `registerDomain`; Better Auth's accept stays off (it inserts the member bare,
 before a new client has a company, and never checks an existing membership), so accept and onboarding
 submit end in `addPortalMember` instead, with the organization and the company both known. The rules:
 - One open invitation per email: `sendInvitation` locks the organization row and checks (the generated schema cannot carry the partial unique index). An expired row stays `pending` and blocks nothing.

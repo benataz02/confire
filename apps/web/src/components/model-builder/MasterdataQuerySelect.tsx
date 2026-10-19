@@ -17,7 +17,7 @@ export function MasterdataQuerySelect({ value, onChange, issue, required, access
   required?: boolean;
   accessibleName: string;
 }) {
-  const navigate = useNavigate();
+  const navigate = useNavigate({ from: "/$slug" });
   const md = useQuery(orpc.masterdata.list.queryOptions());
   const queries = (md.data ?? []).filter((t) => t.kind === "query");
   const picked = queries.find((t) => t.name === value);
@@ -37,11 +37,11 @@ export function MasterdataQuerySelect({ value, onChange, issue, required, access
       </Select>
       {picked ? (
         <Link icon="inspect" wrappingType="None"
-          onClick={() => void navigate({ to: "/masterdata/$id", params: { id: picked.id } })}>
+          onClick={() => void navigate({ to: "/$slug/masterdata/$id", params: { id: picked.id } })}>
           Open in Masterdata
         </Link>
       ) : (
-        <Link icon="add" wrappingType="None" onClick={() => void navigate({ to: "/masterdata/new" })}>
+        <Link icon="add" wrappingType="None" onClick={() => void navigate({ to: "/$slug/masterdata/new" })}>
           Create a query
         </Link>
       )}

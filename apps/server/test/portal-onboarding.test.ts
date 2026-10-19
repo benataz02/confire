@@ -71,7 +71,7 @@ describe("portalInvitations.inviteNew", () => {
     const email = `n${uid()}@neu.de`;
     const { id } = await call(router.portalInvitations.inviteNew, { email, registerDomain: true }, as);
     const [inv] = await db.select().from(invitation).where(eq(invitation.id, id));
-    expect(inv).toMatchObject({ cardCode: null, role: "external", portalRole: "owner", status: "pending", registerDomain: true });
+    expect(inv).toMatchObject({ cardCode: null, role: "portal_owner", status: "pending", registerDomain: true });
     const page = await call(router.portalInvitations.rows, { query: { ...NO_QUERY, filter: [{ field: "email", op: "eq", value: email }] }, top: 10 }, as);
     expect(page.rows[0]).toMatchObject({ email, cardCode: null });
     let mail;
@@ -162,7 +162,7 @@ describe("onboarding.submit", () => {
     expect(inv).toMatchObject({ status: "accepted", cardCode: company!.cardCode });
     const me = await call(portalRouter.me, undefined, on);
     expect(me.company).toMatchObject({ cardCode: res.cardCode, role: "owner", cardType: "cLid" });
-    const domains = await db.select().from(portalCompanyDomain).where(eq(portalCompanyDomain.cardCode, company!.cardCode));
+    const domains = await db.select().from(portalCompanyDomain).where(and(eq(portalCompanyDomain.tenantId, tenantId), eq(portalCompanyDomain.cardCode, company!.cardCode)));
     expect(domains.map((d) => d.domain)).toEqual([email.split("@")[1]!]);
     // Used up: a second submit of the same link is refused before SAP.
     expect(await codeOf(call(portalRouter.onboarding.submit, { id, form: FORM }, on))).toBe("CONFLICT");

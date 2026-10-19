@@ -27,7 +27,7 @@ export const orpc = createTanstackQueryUtils(client);
 
 /**
  * Identity in the workspace in the path: session + membership + role in one call.
- * `_authed`'s beforeLoad primes it and re-runs on every navigation, so it is cached for the
+ * `$slug`'s beforeLoad primes it and re-runs on every navigation, so it is cached for the
  * page session — see the note there about why the role is deliberately not revalidated.
  */
 export const meQuery = orpc.me.queryOptions({ staleTime: Infinity });
@@ -52,7 +52,7 @@ export function useCurrency(): string | undefined {
   return useQuery(meQuery).data?.currency ?? undefined;
 }
 
-/** admin/owner: who may open the /b1 pages and the model builder. Hides links only — `_authed`
+/** admin/owner: who may open the /b1 pages and the model builder. Hides links only — `_admin`
  *  and the server enforce it. */
 export function useIsAdmin(): boolean {
   const role = useQuery(meQuery).data?.role;

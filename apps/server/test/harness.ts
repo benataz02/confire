@@ -1,5 +1,5 @@
-import { and, eq } from "drizzle-orm";
-import { db, EXTERNAL_ROLE, member, organization, portalCompany, user, type PortalRole } from "@confire/db";
+import { and, eq, inArray } from "drizzle-orm";
+import { db, EXTERNAL_ROLES, externalRole, member, organization, portalCompany, portalRoleOf, user, type PortalRole } from "@confire/db";
 import type { ModelDef } from "@confire/config-engine";
 import { auth } from "../src/auth.ts";
 import { TENANT_HEADER } from "../src/tenant.ts";
@@ -61,11 +61,11 @@ export async function makePortalUser(email = `p${uid()}@test.local`): Promise<{ 
   return { userId: u.id, email, cookie: await portalSignIn(email) };
 }
 
-/** A seat: an `external` member row of the tenant, inserted directly rather than through
+/** A seat: a `portal_*` member row of the tenant, inserted directly rather than through
  *  addPortalMember. */
 export const insertSeat = (tenantId: string, cardCode: string, userId: string, role: PortalRole) =>
   db.insert(member).values({
-    id: crypto.randomUUID(), organizationId: tenantId, userId, role: EXTERNAL_ROLE, cardCode, portalRole: role, createdAt: new Date(),
+    id: crypto.randomUUID(), organizationId: tenantId, userId, role: externalRole(role), cardCode, createdAt: new Date(),
   });
 
 /** A company is (tenant, CardCode): a portal_company row, or anything shaped like its key. */
@@ -73,12 +73,12 @@ export type CompanyKey = { tenantId: string; cardCode: string };
 
 /** A user's role in a company — their external member row naming it — or undefined. */
 export const seatRole = async (c: CompanyKey, userId: string) =>
-  (await db.select({ role: member.portalRole }).from(member)
-    .where(and(eq(member.organizationId, c.tenantId), eq(member.role, EXTERNAL_ROLE), eq(member.cardCode, c.cardCode), eq(member.userId, userId))))[0]?.role ?? undefined;
+  (await db.select({ role: portalRoleOf(member.role) }).from(member)
+    .where(and(eq(member.organizationId, c.tenantId), inArray(member.role, EXTERNAL_ROLES), eq(member.cardCode, c.cardCode), eq(member.userId, userId))))[0]?.role ?? undefined;
 
 /** Every seat a user holds, across suppliers. */
 export const seatsOf = (userId: string) =>
-  db.select().from(member).where(and(eq(member.role, EXTERNAL_ROLE), eq(member.userId, userId)));
+  db.select().from(member).where(and(inArray(member.role, EXTERNAL_ROLES), eq(member.userId, userId)));
 
 /** A customer company with one seat. */
 export async function makePortalSeat(tenantId: string, userId: string, role: PortalRole, cardName = "Kunde GmbH") {

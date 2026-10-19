@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { db, EXTERNAL_ROLE, invitation, member, portalCompany, portalCompanyDomain, type PortalRole } from "@confire/db";
+import { db, invitation, member, portalCompany, portalCompanyDomain, type PortalRole } from "@confire/db";
 import { devOutbox, mailDomain } from "../src/mail/mailer.ts";
 import { addPortalMember, cancelInvitations, changeMember, claimDomain, companyPeople, sendInvitation } from "../src/portal/members.ts";
 import { portalTenantUrl } from "../src/tenant.ts";
@@ -117,7 +117,7 @@ describe("changeMember", () => {
     ]);
     expect(results.sort()).toEqual(["CONFLICT", "OK"]);
     const owners = await db.select().from(member)
-      .where(and(eq(member.role, EXTERNAL_ROLE), eq(member.cardCode, c.cardCode), eq(member.portalRole, "owner")));
+      .where(and(eq(member.role, "portal_owner"), eq(member.cardCode, c.cardCode)));
     expect(owners).toHaveLength(1);
   });
 
@@ -173,7 +173,7 @@ describe("sendInvitation", () => {
     expect(days).toBeLessThan(14.1);
     const [row] = await db.select().from(invitation).where(eq(invitation.id, id));
     expect(row).toMatchObject({
-      organizationId: tenantId, cardCode: c.cardCode, role: EXTERNAL_ROLE, portalRole: "buyer", status: "pending",
+      organizationId: tenantId, cardCode: c.cardCode, role: "portal_buyer", status: "pending",
       registerDomain: true, inviterId: inviter.id,
     });
 
@@ -201,7 +201,7 @@ describe("sendInvitation", () => {
     const inviter = await inviterOf();
     const email = `e${uid()}@kunde.de`;
     const [old] = await db.insert(invitation).values({
-      id: crypto.randomUUID(), organizationId: tenantId, email, role: EXTERNAL_ROLE, cardCode: c.cardCode, portalRole: "viewer",
+      id: crypto.randomUUID(), organizationId: tenantId, email, role: "portal_viewer", cardCode: c.cardCode,
       inviterId: inviter.id, expiresAt: new Date(Date.now() - 1000),
     }).returning();
     const { id } = await sendInvitation({ tenantId, cardCode: c.cardCode, email, role: "buyer", registerDomain: false, inviter });
@@ -238,8 +238,8 @@ describe("cancelInvitations", () => {
     const inviter = await makePortalUser();
     const row = async (tenantId: string, cardCode: string, status: "pending" | "accepted" = "pending") =>
       (await db.insert(invitation).values({
-        id: crypto.randomUUID(), organizationId: tenantId, email: `${uid()}@x.de`, role: EXTERNAL_ROLE, cardCode,
-        portalRole: "viewer", status, inviterId: inviter.userId, expiresAt: new Date(Date.now() + 86_400_000),
+        id: crypto.randomUUID(), organizationId: tenantId, email: `${uid()}@x.de`, role: "portal_viewer", cardCode,
+        status, inviterId: inviter.userId, expiresAt: new Date(Date.now() + 86_400_000),
       }).returning())[0]!.id;
     const pending = await row(t1.tenantId, a.cardCode);
     const accepted = await row(t1.tenantId, a.cardCode, "accepted");

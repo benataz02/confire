@@ -25,7 +25,7 @@ const panels = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(3
 const chartH = { height: "12rem", width: "100%" } as const;
 
 export function DashboardPage() {
-  const navigate = useNavigate();
+  const navigate = useNavigate({ from: "/$slug" });
   const qc = useQueryClient();
   const [window, setWindow] = useState<"month" | "quarter" | "year12">("month");
   const [ageFilter, setAgeFilter] = useState<string | null>(null);
@@ -65,7 +65,7 @@ export function DashboardPage() {
         overlineText={overline}
         headerText={greeting(new Date(), firstName)}
         actions={
-          <Button icon="add" design="Default" onClick={() => navigate({ to: "/configs/new" })}>New configuration</Button>
+          <Button icon="add" design="Default" onClick={() => navigate({ to: "/$slug/configs/new" })}>New configuration</Button>
         }
         endContent={
           <Card
@@ -78,7 +78,7 @@ export function DashboardPage() {
                 subtitleText={attentionN ? "Quotes with no movement" : "Nothing waiting"}
                 additionalText={String(attentionN)}
                 avatar={<Icon name="alert" />}
-                onClick={() => { if (attentionN) void navigate({ to: "/configs" }); }}
+                onClick={() => { if (attentionN) void navigate({ to: "/$slug/configs" }); }}
               />
             }
           />
@@ -93,7 +93,7 @@ export function DashboardPage() {
                 titleText="Configurations"
                 subtitleText="Open and quoted work"
                 avatar={<Icon name="sales-quote" />}
-                onClick={() => void navigate({ to: "/configs" })}
+                onClick={() => void navigate({ to: "/$slug/configs" })}
               />
             }
           />
@@ -107,7 +107,7 @@ export function DashboardPage() {
                     titleText="Models"
                     subtitleText="Configurator models"
                     avatar={<Icon name="tree" />}
-                    onClick={() => void navigate({ to: "/models" })}
+                    onClick={() => void navigate({ to: "/$slug/models" })}
                   />
                 }
               />
@@ -119,7 +119,7 @@ export function DashboardPage() {
                     titleText="Master data"
                     subtitleText="Tables and live queries"
                     avatar={<Icon name="table-view" />}
-                    onClick={() => void navigate({ to: "/masterdata" })}
+                    onClick={() => void navigate({ to: "/$slug/masterdata" })}
                   />
                 }
               />
@@ -242,7 +242,7 @@ export function DashboardPage() {
           <div style={panels}>
             <Card
               accessibleName="Configuration to order" loading={busy}
-              header={<CardHeader interactive titleText="Configuration → order" onClick={() => void navigate({ to: "/configs" })} />}
+              header={<CardHeader interactive titleText="Configuration → order" onClick={() => void navigate({ to: "/$slug/configs" })} />}
             >
               <ColumnChart
                 style={chartH} dataset={d.funnel} noLegend loading={busy}
@@ -302,7 +302,7 @@ export function DashboardPage() {
                       setAgeFilter(null);
                     }}>{ageFilter}</Tag>
                   ) : undefined}
-                  onClick={() => void navigate({ to: "/configs" })}
+                  onClick={() => void navigate({ to: "/$slug/configs" })}
                 />
               }
             >
@@ -315,7 +315,7 @@ export function DashboardPage() {
                       key={a.id} type="Navigation" description={a.customer ?? undefined}
                       additionalText={`${a.ageDays}d`}
                       additionalTextState={a.reason.startsWith("Portal") ? "Information" : "Critical"}
-                      onClick={() => void navigate({ to: "/configs/$id", params: { id: a.id } })}
+                      onClick={() => void navigate({ to: "/$slug/configs/$id", params: { id: a.id } })}
                     >
                       {a.name} — {a.reason}
                     </ListItemStandard>

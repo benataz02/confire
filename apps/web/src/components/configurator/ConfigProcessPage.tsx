@@ -58,7 +58,7 @@ const PANEL_BODY = { display: "flex", flexDirection: "column", gap: "0.75rem", p
 // runs before the configuration exists.
 export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string; new?: boolean }) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
+  const navigate = useNavigate({ from: "/$slug" });
   const currency = useCurrency();
   const sectionParam = useSectionParam();
   const isAdmin = useIsAdmin(); // /b1 is admin/owner only
@@ -125,13 +125,13 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
     void qc.invalidateQueries({ queryKey: orpc.configs.rows.key() });
   };
   const create = useMutation(orpc.configs.create.mutationOptions({
-    onSuccess: (r) => { invalidateLists(); void navigate({ to: "/configs/$id", params: { id: r.id }, replace: true }); },
+    onSuccess: (r) => { invalidateLists(); void navigate({ to: "/$slug/configs/$id", params: { id: r.id }, replace: true }); },
   }));
   const duplicate = useMutation(orpc.configs.duplicate.mutationOptions({
-    onSuccess: (r) => { invalidateLists(); toast("Configuration duplicated"); void navigate({ to: "/configs/$id", params: { id: r.id } }); },
+    onSuccess: (r) => { invalidateLists(); toast("Configuration duplicated"); void navigate({ to: "/$slug/configs/$id", params: { id: r.id } }); },
   }));
   const remove = useMutation(orpc.configs.remove.mutationOptions({
-    onSuccess: () => { invalidateLists(); toast("Configuration deleted"); void navigate({ to: "/configs" }); },
+    onSuccess: () => { invalidateLists(); toast("Configuration deleted"); void navigate({ to: "/$slug/configs" }); },
   }));
   // Refill the cache the form is drawn from. Not setProject: the answer changes the *lookups*, not
   // the project, so the lookups query is what gets invalidated.
@@ -418,7 +418,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   // builds from the *saved* selection, hence `busy` while a pick or an edit is still saving.
   const mustPick = candidates.length > 1 && !project.selection?.length;
   const busy = !runReady || unsaved;
-  const toQuote = () => void navigate({ to: "/configs/$id/quote", params: { id } });
+  const toQuote = () => void navigate({ to: "/$slug/configs/$id/quote", params: { id } });
   const finalize = () =>
     mustPick ? sectionParam.go("candidates")
     : project.selection?.length ? toQuote()
@@ -519,7 +519,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
               {project.b1DocEntry !== null && isAdmin ? (
                 <ToolbarButton icon="document-text" design="Transparent" text="Open quotation"
                   onClick={() => navigate({
-                    to: "/b1/$entity/$key",
+                    to: "/$slug/b1/$entity/$key",
                     params: { entity: "Quotations", key: String(project.b1DocEntry) },
                   })} />
               ) : null}
@@ -643,7 +643,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
  *  Its own component so its fetches re-render this tab, not the whole configurator. */
 function RequestTimeline({ id }: { id: string }) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
+  const navigate = useNavigate({ from: "/$slug" });
   const currency = useCurrency();
   const isAdmin = useIsAdmin();
   const listKey = orpc.timeline.list.queryKey({ input: { projectId: id } });
@@ -661,7 +661,7 @@ function RequestTimeline({ id }: { id: string }) {
       onComment={(note, internalOnly) => comment.mutateAsync({ projectId: id, note, internalOnly })}
       onUpload={(file, internalOnly) => uploadFile(id, file, internalOnly).then(() => qc.invalidateQueries({ queryKey: listKey }))}
       onOpenDocument={isAdmin
-        ? (entity, key) => void navigate({ to: "/b1/$entity/$key", params: { entity, key: String(key) } })
+        ? (entity, key) => void navigate({ to: "/$slug/b1/$entity/$key", params: { entity, key: String(key) } })
         : undefined}
       canPreview={isAdmin} />
   );

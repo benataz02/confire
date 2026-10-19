@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, eq, gt, sql } from "drizzle-orm";
-import { db, invitation, portalCompany, portalCompanyDomain, user, type PortalCardType, type PortalRole } from "@confire/db";
+import { and, eq, gt } from "drizzle-orm";
+import { db, invitation, portalCompany, portalCompanyDomain, portalRoleOf, user, type PortalCardType } from "@confire/db";
 import { B1Error, readPages, rowsOf, type B1Transport } from "@confire/b1";
 import { portalSessionProcedure } from "./base.ts";
 import { addPortalMember, claimDomain, emailDomain, isFreeMail, portalInvitationOf, seatOf } from "../members.ts";
@@ -28,7 +28,7 @@ async function openInvitationFor(tenantId: string, u: { email: string; emailVeri
   const [inv] = await db
     .select({
       id: invitation.id, cardCode: invitation.cardCode, email: invitation.email,
-      role: sql<PortalRole>`${invitation.portalRole}`, status: invitation.status, expiresAt: invitation.expiresAt,
+      role: portalRoleOf(invitation.role), status: invitation.status, expiresAt: invitation.expiresAt,
       registerDomain: invitation.registerDomain, inviterId: invitation.inviterId,
       companyName: portalCompany.cardName, inviterName: user.name,
     })

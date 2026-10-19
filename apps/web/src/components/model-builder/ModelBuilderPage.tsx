@@ -39,7 +39,7 @@ const PREVIEW_AT_KEY = "modelBuilder.previewAt";
 
 export function ModelBuilderPage({ id }: { id?: string }) {
   const m = useDraftModel(id);
-  const navigate = useNavigate();
+  const navigate = useNavigate({ from: "/$slug" });
   const qc = useQueryClient();
   const sectionParam = useSectionParam();
   // A layout preference, so per browser like density/theme in AppShell rather than per model.
@@ -54,10 +54,10 @@ export function ModelBuilderPage({ id }: { id?: string }) {
   // Copies the *persisted* model, hence disabled while dirty. Delete is not dirty-gated —
   // discarding the edits is the point — so it clears the flag before the blocker can ask.
   const duplicate = useMutation(orpc.models.duplicate.mutationOptions({
-    onSuccess: (r) => { invalidateLists(); toast("Model duplicated"); void navigate({ to: "/models/$id", params: { id: r.id } }); },
+    onSuccess: (r) => { invalidateLists(); toast("Model duplicated"); void navigate({ to: "/$slug/models/$id", params: { id: r.id } }); },
   }));
   const remove = useMutation(orpc.models.remove.mutationOptions({
-    onSuccess: () => { m.setDirty(false); invalidateLists(); toast("Model deleted"); void navigate({ to: "/models" }); },
+    onSuccess: () => { m.setDirty(false); invalidateLists(); toast("Model deleted"); void navigate({ to: "/$slug/models" }); },
   }));
 
   // Guard against losing an unsaved draft: intercept in-app navigation (including switching models,
@@ -183,7 +183,7 @@ export function ModelBuilderPage({ id }: { id?: string }) {
               </Button>
               {/* No setDirty(false) here, unlike Delete: leaving with edits is exactly the case the
                   blocker's "Discard changes?" exists for. */}
-              <Button disabled={m.saving} onClick={() => void navigate({ to: "/models" })}>Cancel</Button>
+              <Button disabled={m.saving} onClick={() => void navigate({ to: "/$slug/models" })}>Cancel</Button>
             </>
           } />
         }

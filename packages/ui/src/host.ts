@@ -1,7 +1,7 @@
 // Client-side mirror of apps/server/src/tenant.ts, for both apps. The tenant is the first segment of
-// the page's path — `app.confire.ai/<slug>/…`, `portal.confire.ai/<slug>/…` — and each app's router
-// runs under it as its basepath, so routes and links never name it. Every call sends it as
-// `x-tenant`; a file route carries it in its own path. Sign-in is a page of the staff app, the one
+// the page's path — `app.confire.ai/<slug>/…`, `portal.confire.ai/<slug>/…` — the `$slug` route param
+// of each app's router; a link carries it over from the current params and never names it. Every
+// call sends it as `x-tenant`; a file route carries it in its own path. Sign-in is a page of the staff app, the one
 // sign-in host. The server re-validates against membership — this is only for UX and redirects.
 
 /** Never a slug: the staff SPA's own top-level pages, the server's routes, a few names kept back. */
@@ -15,24 +15,23 @@ export const isReserved = (slug: string) => RESERVED.has(slug);
 
 export const TENANT_HEADER = "x-tenant";
 
+/** Whether a path segment can name a tenant: what the `$slug` routes accept. */
+export const isSlug = (s: string) => /^[a-z0-9-]+$/.test(s) && !RESERVED.has(s);
+
 /** `/acme/configs/1` → "acme"; `/`, `/login`, `/assets/x.js` → null. */
 export function slugOf(pathname: string): string | null {
   const first = pathname.split("/")[1] ?? "";
-  return /^[a-z0-9-]+$/.test(first) && !RESERVED.has(first) ? first : null;
+  return isSlug(first) ? first : null;
 }
+
+/** `/acme/configs/1` → `/configs/1`: the path inside the tenant, which the shells' nav items name. */
+export const tenantPath = (pathname: string) => pathname.replace(/^\/[^/]+/, "") || "/";
 
 /** This page's tenant, or null. `window` is read on call, never at import, so tests can import this. */
 export const currentSlug = () => slugOf(window.location.pathname);
 
-/** The router's basepath: `/<slug>` on a tenant's page, `/` on the app's own pages. Read once, when
- *  the router is made: a page never changes tenant without a full load (hardRedirect), so the query
- *  cache never holds two tenants' data. */
-export const tenantBasepath = () => {
-  const slug = currentSlug();
-  return slug ? `/${slug}` : "/";
-};
-
-/** A hop to another page load: another app, another tenant, or out of the router. Returns a
+/** A hop to another page load: another app, another tenant, or out of the router. Every tenant change
+ *  is one — a link never changes `$slug` — so the query cache never holds two tenants' data. Returns a
  *  never-resolving promise so a router beforeLoad halts instead of rendering before the browser
  *  navigates. */
 export function hardRedirect(url: string): Promise<never> {

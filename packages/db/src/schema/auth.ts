@@ -96,7 +96,6 @@ export const member = pgTable(
     role: text("role").default("member").notNull(),
     createdAt: timestamp("created_at").notNull(),
     cardCode: text("card_code"),
-    portalRole: text("portal_role"),
   },
   (table) => [
     index("member_organizationId_idx").on(table.organizationId),
@@ -120,7 +119,6 @@ export const invitation = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     cardCode: text("card_code"),
-    portalRole: text("portal_role"),
     registerDomain: boolean("register_domain").default(false),
   },
   (table) => [

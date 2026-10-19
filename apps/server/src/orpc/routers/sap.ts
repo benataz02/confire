@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, eq, ne } from "drizzle-orm";
-import { db, EXTERNAL_ROLE, member, organization, sapConnection } from "@confire/db";
+import { and, eq, notInArray } from "drizzle-orm";
+import { db, EXTERNAL_ROLES, member, organization, sapConnection } from "@confire/db";
 import { adminProcedure, sessionProcedure } from "../base.ts";
 import { sapConnectionExists, upsertSapConnection } from "../../seed-agent.ts";
 import { encryptSecret } from "../../crypto.ts";
@@ -15,7 +15,7 @@ async function oneMembership(userId: string) {
     .select({ tenantId: organization.id, slug: organization.slug, name: organization.name, role: member.role })
     .from(member)
     .innerJoin(organization, eq(organization.id, member.organizationId))
-    .where(and(eq(member.userId, userId), ne(member.role, EXTERNAL_ROLE)))
+    .where(and(eq(member.userId, userId), notInArray(member.role, EXTERNAL_ROLES)))
     .limit(1);
   return row;
 }

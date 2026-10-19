@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { origins, safeRedirect, slugOf } from "./host.ts";
+import { origins, safeRedirect, slugOf, tenantPath } from "./host.ts";
 
 // Mirrors apps/server/src/tenant.ts (the server re-validates; this is UX and redirect safety).
 
@@ -15,6 +15,12 @@ test("slugOf: the first path segment, when it is one lowercase label and not an 
   expect(slugOf("/assets/index.js")).toBeNull();
   expect(slugOf("/confire-logo.png")).toBeNull();
   expect(slugOf("/ACME/")).toBeNull();
+});
+
+test("tenantPath: the path under the slug, `/` for the tenant's home", () => {
+  expect(tenantPath("/acme")).toBe("/");
+  expect(tenantPath("/acme/")).toBe("/");
+  expect(tenantPath("/acme/configs/1")).toBe("/configs/1");
 });
 
 test("origins: app.<domain> and portal.<domain> from either one; any other host is dev's two ports", () => {

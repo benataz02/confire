@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { and, eq } from "drizzle-orm";
-import { db, EXTERNAL_ROLE, member, portalCompany, invitation } from "@confire/db";
+import { and, eq, inArray } from "drizzle-orm";
+import { db, EXTERNAL_ROLES, member, portalCompany, invitation } from "@confire/db";
 import { auth } from "../src/auth.ts";
 import { devOutbox } from "../src/mail/mailer.ts";
 import { router } from "../src/orpc/router.ts";
@@ -46,7 +46,7 @@ describe("portalInvitations.inviteExisting", () => {
     const [company] = await db.select().from(portalCompany).where(eq(portalCompany.tenantId, tenantId));
     expect(company).toMatchObject({ cardCode: "C1", cardName: "Kunde AG", cardType: "cCustomer" });
     const [inv] = await db.select().from(invitation).where(eq(invitation.id, id));
-    expect(inv).toMatchObject({ cardCode: company!.cardCode, email, role: EXTERNAL_ROLE, portalRole: "owner", status: "pending", registerDomain: true });
+    expect(inv).toMatchObject({ cardCode: company!.cardCode, email, role: "portal_owner", status: "pending", registerDomain: true });
     let mail;
     for (let i = 0; i < 100 && !mail; i++) {
       mail = devOutbox.find((m) => m.to === email);
@@ -143,8 +143,8 @@ describe("portalCompanies", () => {
     await insertSeat(tenantId, c.cardCode, buyer.userId, "buyer");
     await call(router.portalCompanies.setRole, { cardCode: c.cardCode, userId: buyer.userId, role: "owner" }, as);
     await call(router.portalCompanies.removeMember, { cardCode: c.cardCode, userId: owner.userId }, as);
-    const left = await db.select().from(member).where(and(eq(member.role, EXTERNAL_ROLE), eq(member.cardCode, c.cardCode)));
-    expect(left).toEqual([expect.objectContaining({ userId: buyer.userId, portalRole: "owner" })]);
+    const left = await db.select().from(member).where(and(inArray(member.role, EXTERNAL_ROLES), eq(member.cardCode, c.cardCode)));
+    expect(left).toEqual([expect.objectContaining({ userId: buyer.userId, role: "portal_owner" })]);
   });
 });
 

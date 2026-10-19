@@ -1,10 +1,9 @@
 import { useCallback, useMemo } from "react";
-import { useNavigate } from "@tanstack/react-router";
 import {
   keepPreviousData, useInfiniteQuery,
   type InfiniteData, type InfiniteQueryObserverResult, type UseInfiniteQueryResult,
 } from "@tanstack/react-query";
-import { entityPath } from "./navigation.ts";
+import { useEntityNav } from "./EntityLink.tsx";
 import type { Row } from "./types.ts";
 
 // BaseListView (LIST-REPORT-OBJECT-PAGE.md §2): the paged rows a ListReport shows, plus the
@@ -37,7 +36,7 @@ const flatten = (data: InfiniteData<Page> | undefined) => (data?.pages ?? []).fl
  * Create goes (`route#create`, the createModeMatch of Beas).
  */
 export function useListView(options: object, nav?: { route: string; keyOf: (row: Row) => unknown; create?: boolean }): ListData {
-  const navigate = useNavigate();
+  const open = useEntityNav();
   const page = useInfiniteQuery({
     retry: false,
     placeholderData: keepPreviousData,
@@ -70,9 +69,9 @@ export function useListView(options: object, nav?: { route: string; keyOf: (row:
       ? {
           onRowClick: (row: Row) => {
             const key = nav.keyOf(row);
-            if (key !== undefined && key !== null && key !== "") void navigate({ href: entityPath(nav.route, key) });
+            if (key !== undefined && key !== null && key !== "") open(nav.route, key);
           },
-          ...(nav.create ? { onCreate: () => void navigate({ href: `${nav.route}#create` }) } : {}),
+          ...(nav.create ? { onCreate: () => open(nav.route, undefined, "create") } : {}),
         }
       : {}),
   };

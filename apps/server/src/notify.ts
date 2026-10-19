@@ -1,6 +1,6 @@
-import { and, eq, inArray, ne, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql, type SQL } from "drizzle-orm";
 import {
-  db, configModel, configProject, configProjectEvent, EXTERNAL_ROLE, member, portalCompany, user,
+  db, configModel, configProject, configProjectEvent, EXTERNAL_ROLES, externalRole, member, portalCompany, user,
   type NotifyEvent, type NotifyMode, type PortalSettings, type RevisionDiff,
 } from "@confire/db";
 import { tenantConnector, tenantCurrency } from "./b1.ts";
@@ -50,11 +50,11 @@ type Person = { userId: string; email: string; name: string };
 export async function clientRecipients(tenantId: string, cardCode: string, createdBy: string, mode: NotifyMode): Promise<Person[]> {
   if (mode === "off") return [];
   const seats = await db
-    .select({ userId: member.userId, email: user.email, name: user.name, role: member.portalRole })
+    .select({ userId: member.userId, email: user.email, name: user.name, role: member.role })
     .from(member).innerJoin(user, eq(user.id, member.userId))
-    .where(and(eq(member.organizationId, tenantId), eq(member.role, EXTERNAL_ROLE), eq(member.cardCode, cardCode)));
+    .where(and(eq(member.organizationId, tenantId), inArray(member.role, EXTERNAL_ROLES), eq(member.cardCode, cardCode)));
   return seats
-    .filter((s) => s.userId === createdBy || (mode === "buyers" && s.role !== "viewer"))
+    .filter((s) => s.userId === createdBy || (mode === "buyers" && s.role !== externalRole("viewer")))
     .map(({ role: _role, ...p }) => p);
 }
 
@@ -62,7 +62,7 @@ export async function clientRecipients(tenantId: string, cardCode: string, creat
 const staff = (tenantId: string, where: SQL | undefined) => db
   .select({ userId: user.id, email: user.email, name: user.name })
   .from(member).innerJoin(user, eq(user.id, member.userId))
-  .where(and(eq(member.organizationId, tenantId), ne(member.role, EXTERNAL_ROLE), where));
+  .where(and(eq(member.organizationId, tenantId), notInArray(member.role, EXTERNAL_ROLES), where));
 
 /** The BP's sales employee's email in B1 — `SalesPersonCode` → `SalesPersons.Email` (checked in the
  *  cached schema 2026-10-18; -1 is B1's "-No Sales Employee-"). Live, so anything that fails (no

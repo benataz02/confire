@@ -42,7 +42,7 @@ export function showLink(o: {
   return { route, action: cfg.action, target };
 }
 
-/** `/b1/*` is admin/owner only (the _authed guard), so a link into it is hidden for everyone else
+/** `/b1/*` is admin/owner only (the staff app's `_admin` route), so a link into it is hidden for everyone else
  *  rather than drawn and bounced. */
 export const canOpenRoute = (route: string, role: string | undefined): boolean =>
   !route.startsWith("/b1") || role === "admin" || role === "owner";

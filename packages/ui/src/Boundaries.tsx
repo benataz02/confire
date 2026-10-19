@@ -1,4 +1,4 @@
-import { useNavigate, useRouter, type ErrorComponentProps, type NotFoundRouteProps } from "@tanstack/react-router";
+import { useNavigate, useParams, useRouter, type ErrorComponentProps, type NotFoundRouteProps } from "@tanstack/react-router";
 import { Button, IllustratedMessage } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/ErrorScreen.js";
 import "@ui5/webcomponents-fiori/dist/illustrations/PageNotFound.js";
@@ -25,13 +25,15 @@ export function RouteError({ error, reset }: ErrorComponentProps) {
   );
 }
 
-// Renders for an unmatched URL and for `throw notFound()` from a loader.
+// Renders for an unmatched URL and for `throw notFound()` from a loader. Home is the tenant's when the
+// URL names one; the bare origin's `/` is the sign-in dispatcher.
 export function RouteNotFound(_props: NotFoundRouteProps) {
   const navigate = useNavigate();
+  const { slug } = useParams({ strict: false });
   return (
     <IllustratedMessage name="PageNotFound" design="Scene" titleText="This page doesn't exist"
       subtitleText="The link may be out of date, or the item was deleted.">
-      <Button design="Emphasized" onClick={() => navigate({ to: "/" })}>Go to home</Button>
+      <Button design="Emphasized" onClick={() => navigate(slug ? { to: "/$slug", params: { slug } } : { to: "/" })}>Go to home</Button>
     </IllustratedMessage>
   );
 }

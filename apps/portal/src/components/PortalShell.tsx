@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
-import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { Outlet, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Avatar, Button, NavigationLayout, ShellBar, ShellBarBranding, SideNavigation, SideNavigationGroup, SideNavigationItem,
@@ -11,7 +11,8 @@ import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 import { ROLE_LABEL } from "@confire/ui/portal/CompanyPeople.tsx";
 import { authClient } from "../auth-client.ts";
 import { lobbyQuery, meQuery, type Me } from "../orpc.ts";
-import { authUrl, hardRedirect } from "@confire/ui/host.ts";
+import { authUrl, hardRedirect, tenantPath } from "@confire/ui/host.ts";
+import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { DOC_PAGES } from "../features/documents.ts";
 
 // The supplier's portal chrome (spec §9): the same NavigationLayout + ShellBar + SideNavigation
@@ -50,9 +51,10 @@ const accentVars = (accent: string): Record<string, string> => {
 };
 
 export function PortalShell() {
-  const navigate = useNavigate();
+  const go = useEntityNav();
   const queryClient = useQueryClient();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  // Inside the supplier's portal, as the nav items name it.
+  const pathname = useRouterState({ select: (s) => tenantPath(s.location.pathname) });
   // Primed by _authed's beforeLoad, which only renders the shell for a user with a seat.
   const me = useQuery(meQuery).data as Me & { company: NonNullable<Me["company"]> };
   // Switching supplier only means something with more than one.
@@ -78,7 +80,7 @@ export function PortalShell() {
 
   const onSelect: SideNavigationPropTypes["onSelectionChange"] = (e) => {
     const to = (e.detail.item as HTMLElement).dataset.to;
-    if (to) void navigate({ to });
+    if (to) go(to);
   };
 
   const signOut = async () => {
@@ -101,7 +103,7 @@ export function PortalShell() {
                 logo={me.tenant.logo
                   ? <img alt="" src={me.tenant.logo} />
                   : <Avatar icon="building" size="XS" colorScheme="Accent6" accessibleName={me.tenant.name} />}
-                onClick={() => void navigate({ to: "/" })}
+                onClick={() => go("/")}
               >
                 {me.tenant.name}
               </ShellBarBranding>

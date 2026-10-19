@@ -1,18 +1,24 @@
-import { foreignKey, index, jsonb, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import { foreignKey, index, jsonb, pgTable, primaryKey, text, timestamp, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 
 // The customer portal (spec docs/superpowers/specs/2026-10-07-portal-redesign.md §4, §6): companies and
 // their domains. Hand-written. A seat is not here: a customer is a Better Auth `member` of the
-// supplier's organization with role `external`, its company's CardCode and its portal role in that
-// row's two extra fields (spec 2026-10-19-path-tenancy-design.md), and an invitation is Better Auth's
-// `invitation` with the same two fields. A company has no id of its own: it is (tenant, CardCode).
+// supplier's organization whose role is its portal role (`portal_buyer`) and whose `cardCode` is its
+// company (spec 2026-10-19-path-tenancy-design.md), and an invitation is Better Auth's `invitation`
+// with the same two. A company has no id of its own: it is (tenant, CardCode).
 
 export type PortalCardType = "cCustomer" | "cLid";
-/** `member.role` of a supplier's customer. Every other role (owner, admin, member) is staff. */
-export const EXTERNAL_ROLE = "external";
-/** `member.portalRole`: a customer's role in their company. Staff rows leave it null. */
+/** A customer's role in their company, as the API and the UI name it. */
 export const PORTAL_ROLES = ["owner", "buyer", "viewer"] as const;
 export type PortalRole = (typeof PORTAL_ROLES)[number];
+/** The same role as `member.role`/`invitation.role` store it. Prefixed so it is never a staff role:
+ *  Better Auth compares role names exactly (split on `,`), so `portal_owner` is not its `owner`. */
+export const externalRole = (r: PortalRole) => `portal_${r}` as const;
+/** Every customer role. Any other `member.role` (owner, admin, member) is staff. */
+export const EXTERNAL_ROLES = PORTAL_ROLES.map(externalRole);
+/** The other way, in SQL: a customer's `member.role`/`invitation.role` as its PortalRole. */
+export const portalRoleOf = (role: AnyPgColumn) => sql<PortalRole>`replace(${role}, 'portal_', '')`;
 /** The SAP document fields a tenant shows its clients (D19), per entity, in display order. */
 export type PortalDocFields = { header: string[]; lines: string[] };
 /** A BusinessPartners field an admin adds to the new-client onboarding form (§5.3), in form order. */
@@ -58,7 +64,7 @@ export type PortalSettings = {
 /** A customer company: one per tenant × CardCode, the register of which CardCodes are on the portal
  *  (§4.2). Created server-side only — by an invitation or an onboarding submit — never by a call a
  *  portal user can make. Plain Confire table, not a Better Auth organization or team: its people are
- *  the supplier's `external` members whose `cardCode` names it, in its tenant. */
+ *  the supplier's customer members (`portal_*` roles) whose `cardCode` names it, in its tenant. */
 export const portalCompany = pgTable(
   "portal_company",
   {

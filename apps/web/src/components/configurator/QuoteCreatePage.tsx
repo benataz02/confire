@@ -28,18 +28,18 @@ const LOCKED_REQUEST = ["DocumentLines", "CardCode"];
 
 export function QuoteCreatePage({ projectId }: { projectId: string }) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
-  // The B1 pages are admin/owner only — _authed bounces everyone else off /b1 — so a plain member
+  const navigate = useNavigate({ from: "/$slug" });
+  // The B1 pages are admin/owner only — _admin bounces everyone else off /b1 — so a plain member
   // stays here and reads the confirmation rather than being thrown back to the dashboard.
   const canOpenInB1 = useIsAdmin();
   const meta = useFieldConstraints("Quotations");
   const draft = useQuery({ ...orpc.configs.quoteDraft.queryOptions({ input: { projectId } }), retry: false });
-  const backToConfig = () => navigate({ to: "/configs/$id", params: { id: projectId } });
+  const backToConfig = () => navigate({ to: "/$slug/configs/$id", params: { id: projectId } });
   // The lines' only editor: the configuration's items grid, on the Configure tab.
   const tableActions = {
     lines: () => (
       <Button icon="edit" design="Transparent"
-        onClick={() => navigate({ to: "/configs/$id", params: { id: projectId }, search: { section: "configure" } })}>
+        onClick={() => navigate({ to: "/$slug/configs/$id", params: { id: projectId }, search: { section: "configure" } })}>
         Edit in configurator
       </Button>
     ),
@@ -61,7 +61,7 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
           <>
             {canOpenInB1 ? (
               <Button design="Emphasized" onClick={() => navigate({
-                to: "/b1/$entity/$key",
+                to: "/$slug/b1/$entity/$key",
                 params: { entity: "Quotations", key: String(d.quoted!.docEntry) },
               })}>
                 Open quotation
@@ -119,7 +119,7 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
             { row: r.row, etag: r.etag },
           );
         }
-        void navigate({ to: "/b1/$entity/$key", params: { entity: "Quotations", key: String(r.docEntry) } });
+        void navigate({ to: "/$slug/b1/$entity/$key", params: { entity: "Quotations", key: String(r.docEntry) } });
       }}
     />
   );

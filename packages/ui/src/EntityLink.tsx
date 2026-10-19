@@ -10,12 +10,13 @@ export function useCanOpen(): (route: string) => boolean {
   return useCallback((route: string) => canOpenRoute(route, role), [role]);
 }
 
-/** Navigate to an entity's detail page by route + key. `href`, not `to`: the path is built at
- *  runtime, which the typed route tree cannot check — the blockers still see it. */
+/** Navigate to a route a page declares (`/b1/Quotations`), or its record by key — every shell's way
+ *  to a page. Declared routes are the tenant's, so the path goes under `/$slug`, which the router
+ *  fills from the current params. Built at runtime, so the typed route tree cannot check it. */
 export function useEntityNav() {
   const navigate = useNavigate();
-  return useCallback((route: string, key?: unknown) => {
-    void navigate({ href: key === undefined ? route : entityPath(route, key) });
+  return useCallback((route: string, key?: unknown, hash?: string) => {
+    void navigate({ to: `/$slug${key === undefined ? route : entityPath(route, key)}` as string, hash });
   }, [navigate]);
 }
 

@@ -1,4 +1,4 @@
-import { useNavigate, useRouter, useRouterState, Outlet } from "@tanstack/react-router";
+import { useRouter, useRouterState, Outlet } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Avatar, Button,
@@ -11,7 +11,8 @@ import {
 import type { SideNavigationPropTypes, NavigationLayoutDomRef, NavigationLayoutPropTypes } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
 import { meQuery, useIsAdmin } from "../orpc.ts";
-import { authUrl, hardRedirect } from "@confire/ui/host.ts";
+import { authUrl, hardRedirect, tenantPath } from "@confire/ui/host.ts";
+import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { B1_FEATURES } from "../features/b1/index.ts";
 import { GlobalSearch, type SearchEntry } from "./GlobalSearch.tsx";
 import { useRef, useState, useMemo } from "react";
@@ -20,11 +21,12 @@ import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 
 
 // The app shell for every signed-in page. The workspace is the path's first segment; the auth gate
-// lives in the _authed route (beforeLoad), this only renders the chrome.
+// lives in the $slug route (beforeLoad), this only renders the chrome. Nav targets and `pathname`
+// are paths inside the workspace.
 export function AppShell() {
-  const navigate = useNavigate();
+  const go = useEntityNav();
   const router = useRouter();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const pathname = useRouterState({ select: (s) => tenantPath(s.location.pathname) });
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const navLayoutRef = useRef<NavigationLayoutDomRef>(null);
   const [navMode, setNavMode] = useState<NavigationLayoutPropTypes["mode"]>("Auto");
@@ -41,7 +43,7 @@ export function AppShell() {
   };
   const { theme, setTheme: setThemeState, density, setDensity } = useAppearance();
 
-  // Identity + org role in one query, already primed by _authed's beforeLoad — a cache read.
+  // Identity + org role in one query, already primed by $slug's beforeLoad — a cache read.
   // Role decides whether the Settings item shows; the server gates it too.
   const me = useQuery(meQuery);
   const user = me.data?.user;
@@ -49,18 +51,14 @@ export function AppShell() {
   const queryClient = useQueryClient();
 
   const onSelect: SideNavigationPropTypes["onSelectionChange"] = (e) => {
-    const el = e.detail.item as HTMLElement;
-    const to = el.dataset.to;
-    if (!to) return;
-    const b1 = /^\/b1\/([^/]+)$/.exec(to);
-    if (b1) navigate({ to: "/b1/$entity", params: { entity: b1[1]! } });
-    else navigate({ to: to });
+    const to = (e.detail.item as HTMLElement).dataset.to;
+    if (to) go(to);
   };
 
   // What the shellbar search can reach besides objects: the same targets as the side nav, plus the
   // appearance settings that otherwise only live in the user menu.
   const searchEntries = useMemo<SearchEntry[]>(() => {
-    const page = (text: string, to: string, icon: string) => ({ group: "Menus", text, icon, run: () => navigate({ to }) });
+    const page = (text: string, to: string, icon: string) => ({ group: "Menus", text, icon, run: () => go(to) });
     return [
       page("Home", "/", "home"),
       page("Configurations", "/configs", "sales-quote"),
@@ -72,7 +70,7 @@ export function AppShell() {
               text: f.label,
               description: "SAP Business One",
               icon: f.icon,
-              run: () => navigate({ to: "/b1/$entity", params: { entity: f.entity } }),
+              run: () => go(`/b1/${f.entity}`),
             })),
             page("Configurator models", "/models", "tree"),
             page("Masterdata", "/masterdata", "table-view"),
@@ -88,12 +86,12 @@ export function AppShell() {
       { group: "Settings", text: "Cozy", description: "Density", icon: "resize-horizontal", run: () => setDensity('cozy') },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, navigate]);
+  }, [isAdmin, go]);
 
   const signOut = async () => {
     await authClient.signOut();
     queryClient.clear(); // drop session + role caches, not just the session
-    void hardRedirect(authUrl("/login")); // the sign-in page sits outside the workspace's basepath
+    void hardRedirect(authUrl("/login")); // a page load: nothing of this workspace stays in memory
   };
 
   return (
@@ -120,7 +118,7 @@ export function AppShell() {
             }
             branding={
               <ShellBarBranding logo={<img alt="Confire" src="/confire-logo.png" />}
-                onClick={() => navigate({ to: "/" })}>
+                onClick={() => go("/")}>
                 Confire
               </ShellBarBranding>
             }
