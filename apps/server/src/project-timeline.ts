@@ -13,16 +13,16 @@ import { internalVisible, type Actor } from "./project-lifecycle.ts";
 /** The project, fenced for the actor: a client reads only its company's, staff never a client's
  *  draft. */
 async function projectFor(tenantId: string, projectId: string, actor: Actor) {
-  if (actor.side === "external" && !actor.companyId) throw new ORPCError("NOT_FOUND");
+  if (actor.side === "external" && !actor.cardCode) throw new ORPCError("NOT_FOUND");
   const [p] = await db
     .select({
       modelId: configProject.modelId, b1DocEntry: configProject.b1DocEntry,
-      portalCompanyId: configProject.portalCompanyId, customer: configProject.customer,
+      portalCardCode: configProject.portalCardCode, customer: configProject.customer,
     })
     .from(configProject)
     .where(and(
       eq(configProject.id, projectId), eq(configProject.tenantId, tenantId),
-      actor.side === "external" ? eq(configProject.portalCompanyId, actor.companyId!) : internalVisible,
+      actor.side === "external" ? eq(configProject.portalCardCode, actor.cardCode!) : internalVisible,
     ))
     .limit(1);
   if (!p) throw new ORPCError("NOT_FOUND");

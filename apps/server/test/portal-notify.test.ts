@@ -38,9 +38,9 @@ const mark = async () => {
   return new Set<unknown>(devOutbox);
 };
 
-async function seat(companyId: string, tenantId: string, role: PortalRole) {
+async function seat(cardCode: string, tenantId: string, role: PortalRole) {
   const u = await makePortalUser();
-  await insertSeat(tenantId, companyId, u.userId, role);
+  await insertSeat(tenantId, cardCode, u.userId, role);
   return u;
 }
 
@@ -52,8 +52,8 @@ async function setup() {
   const rep = await makeUser("member", t.tenantId);
   const buyer = await makePortalUser();
   const company = await makePortalSeat(t.tenantId, buyer.userId, "buyer");
-  const colleague = await seat(company.id, t.tenantId, "owner");
-  const viewer = await seat(company.id, t.tenantId, "viewer");
+  const colleague = await seat(company.cardCode, t.tenantId, "owner");
+  const viewer = await seat(company.cardCode, t.tenantId, "viewer");
   const [model] = await db.insert(configModel)
     .values({ tenantId: t.tenantId, name: TEST_MODEL.name, definition: TEST_MODEL, portal: true, portalPricing: "request" })
     .returning();

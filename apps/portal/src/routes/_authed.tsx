@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { meQuery } from "../orpc.ts";
-import { authUrl, currentSlug, hardRedirect, loginUrl } from "../lib/host.ts";
+import { authUrl, currentSlug, hardRedirect, loginUrl } from "@confire/ui/host.ts";
 import { PortalShell } from "../components/PortalShell.tsx";
 
 // Every signed-in page, under a supplier's path segment, for users with a seat there. The bare portal

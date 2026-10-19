@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { db, entityMeta, portalCompany, portalCompanyDomain, portalInvitation } from "@confire/db";
+import { db, entityMeta, portalCompany, portalCompanyDomain, invitation } from "@confire/db";
 import type { B1EntitySchema, B1Field } from "@confire/b1";
 import { devOutbox } from "../src/mail/mailer.ts";
 import { notificationsSettled } from "../src/notify.ts";
@@ -70,8 +70,8 @@ describe("portalInvitations.inviteNew", () => {
     const { as, slug } = await setup();
     const email = `n${uid()}@neu.de`;
     const { id } = await call(router.portalInvitations.inviteNew, { email, registerDomain: true }, as);
-    const [inv] = await db.select().from(portalInvitation).where(eq(portalInvitation.id, id));
-    expect(inv).toMatchObject({ companyId: null, role: "owner", status: "pending", registerDomain: true });
+    const [inv] = await db.select().from(invitation).where(eq(invitation.id, id));
+    expect(inv).toMatchObject({ cardCode: null, role: "external", portalRole: "owner", status: "pending", registerDomain: true });
     const page = await call(router.portalInvitations.rows, { query: { ...NO_QUERY, filter: [{ field: "email", op: "eq", value: email }] }, top: 10 }, as);
     expect(page.rows[0]).toMatchObject({ email, cardCode: null });
     let mail;
@@ -158,11 +158,11 @@ describe("onboarding.submit", () => {
 
     const [company] = await db.select().from(portalCompany).where(and(eq(portalCompany.tenantId, tenantId), eq(portalCompany.cardCode, res.cardCode)));
     expect(company).toMatchObject({ cardName: "Neu GmbH", cardType: "cLid" });
-    const [inv] = await db.select().from(portalInvitation).where(eq(portalInvitation.id, id));
-    expect(inv).toMatchObject({ status: "accepted", companyId: company!.id });
+    const [inv] = await db.select().from(invitation).where(eq(invitation.id, id));
+    expect(inv).toMatchObject({ status: "accepted", cardCode: company!.cardCode });
     const me = await call(portalRouter.me, undefined, on);
     expect(me.company).toMatchObject({ cardCode: res.cardCode, role: "owner", cardType: "cLid" });
-    const domains = await db.select().from(portalCompanyDomain).where(eq(portalCompanyDomain.companyId, company!.id));
+    const domains = await db.select().from(portalCompanyDomain).where(eq(portalCompanyDomain.cardCode, company!.cardCode));
     expect(domains.map((d) => d.domain)).toEqual([email.split("@")[1]!]);
     // Used up: a second submit of the same link is refused before SAP.
     expect(await codeOf(call(portalRouter.onboarding.submit, { id, form: FORM }, on))).toBe("CONFLICT");

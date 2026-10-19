@@ -11,7 +11,7 @@ import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 import { ROLE_LABEL } from "@confire/ui/portal/CompanyPeople.tsx";
 import { authClient } from "../auth-client.ts";
 import { lobbyQuery, meQuery, type Me } from "../orpc.ts";
-import { authUrl, hardRedirect } from "../lib/host.ts";
+import { authUrl, hardRedirect } from "@confire/ui/host.ts";
 import { DOC_PAGES } from "../features/documents.ts";
 
 // The supplier's portal chrome (spec §9): the same NavigationLayout + ShellBar + SideNavigation

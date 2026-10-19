@@ -1,11 +1,11 @@
-import { sql } from "drizzle-orm";
-import { boolean, index, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { foreignKey, index, jsonb, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 
-// The customer portal (spec docs/superpowers/specs/2026-10-07-portal-redesign.md §4, §6): companies,
-// domains and invitations. Hand-written. A seat is not here: a customer is a Better Auth `member` of the
-// supplier's organization with role `external`, its company and portal role in that row's two extra
-// fields (spec 2026-10-19-path-tenancy-design.md).
+// The customer portal (spec docs/superpowers/specs/2026-10-07-portal-redesign.md §4, §6): companies and
+// their domains. Hand-written. A seat is not here: a customer is a Better Auth `member` of the
+// supplier's organization with role `external`, its company's CardCode and its portal role in that
+// row's two extra fields (spec 2026-10-19-path-tenancy-design.md), and an invitation is Better Auth's
+// `invitation` with the same two fields. A company has no id of its own: it is (tenant, CardCode).
 
 export type PortalCardType = "cCustomer" | "cLid";
 /** `member.role` of a supplier's customer. Every other role (owner, admin, member) is staff. */
@@ -13,7 +13,6 @@ export const EXTERNAL_ROLE = "external";
 /** `member.portalRole`: a customer's role in their company. Staff rows leave it null. */
 export const PORTAL_ROLES = ["owner", "buyer", "viewer"] as const;
 export type PortalRole = (typeof PORTAL_ROLES)[number];
-export type PortalInviteStatus = "pending" | "accepted" | "canceled";
 /** The SAP document fields a tenant shows its clients (D19), per entity, in display order. */
 export type PortalDocFields = { header: string[]; lines: string[] };
 /** A BusinessPartners field an admin adds to the new-client onboarding form (§5.3), in form order. */
@@ -59,11 +58,10 @@ export type PortalSettings = {
 /** A customer company: one per tenant × CardCode, the register of which CardCodes are on the portal
  *  (§4.2). Created server-side only — by an invitation or an onboarding submit — never by a call a
  *  portal user can make. Plain Confire table, not a Better Auth organization or team: its people are
- *  the supplier's `external` members whose `companyId` names it. */
+ *  the supplier's `external` members whose `cardCode` names it, in its tenant. */
 export const portalCompany = pgTable(
   "portal_company",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
     tenantId: text("tenant_id").notNull(),
     cardCode: text("card_code").notNull(),
     cardName: text("card_name").notNull(),
@@ -73,33 +71,7 @@ export const portalCompany = pgTable(
     notify: jsonb("notify").$type<PortalNotify>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("portal_company_tenant_card_uq").on(t.tenantId, t.cardCode)],
-);
-
-/** An invitation into a company (§4.2, §5). `companyId` null is a new-client invitation (P6) until
- *  its onboarding submit sets it, so every accepted invitation ends up linked to a CardCode. The
- *  random id is the link token, but holding it is not enough: acceptance also checks the email.
- *  Written only through apps/server/src/portal/members.ts. */
-export const portalInvitation = pgTable(
-  "portal_invitation",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: text("tenant_id").notNull(),
-    companyId: uuid("company_id").references(() => portalCompany.id, { onDelete: "cascade" }),
-    email: text("email").notNull(),
-    role: text("role").$type<PortalRole>().notNull(),
-    invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
-    registerDomain: boolean("register_domain").notNull().default(false),
-    status: text("status").$type<PortalInviteStatus>().notNull().default("pending"),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    // "One open invitation per email per tenant" as a constraint: two concurrent sends cannot both
-    // win. An expired invitation is still `pending` here, so a send cancels those first.
-    uniqueIndex("portal_invitation_pending_uq").on(t.tenantId, sql`lower(${t.email})`).where(sql`status = 'pending'`),
-    index("portal_invitation_company_idx").on(t.companyId),
-  ],
+  (t) => [primaryKey({ columns: [t.tenantId, t.cardCode] })],
 );
 
 /** The auto-join index (§4.4): a verified sign-in on this domain joins this company as `viewer`.
@@ -111,15 +83,15 @@ export const portalCompanyDomain = pgTable(
   {
     tenantId: text("tenant_id").notNull(),
     domain: text("domain").notNull(),
-    companyId: uuid("company_id")
-      .notNull()
-      .references(() => portalCompany.id, { onDelete: "cascade" }),
+    cardCode: text("card_code").notNull(),
     addedBy: text("added_by").references(() => user.id, { onDelete: "set null" }),
     addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.tenantId, t.domain] }),
-    index("portal_company_domain_company_idx").on(t.companyId),
+    foreignKey({ name: "portal_company_domain_company_fk", columns: [t.tenantId, t.cardCode], foreignColumns: [portalCompany.tenantId, portalCompany.cardCode] })
+      .onDelete("cascade"),
+    index("portal_company_domain_company_idx").on(t.tenantId, t.cardCode),
   ],
 );
 

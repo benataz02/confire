@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../auth-client.ts";
 import { client, meQuery } from "../orpc.ts";
 import { PortalAuthLayout } from "../components/AuthChrome.tsx";
-import { authUrl, currentSlug, hardRedirect, loginUrl } from "../lib/host.ts";
+import { authUrl, currentSlug, hardRedirect, loginUrl } from "@confire/ui/host.ts";
 
 // Signed in on a supplier's portal without a seat there (spec §4.4, §9). First auto-join: a verified
 // address on a domain the supplier registered to a company joins it as viewer, and lands home. If

@@ -4,12 +4,12 @@ import { useMutation } from "@tanstack/react-query";
 import { Input, Button, MessageStrip } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
-import { authUrl, hardRedirect, onSignInHost } from "../lib/tenant.ts";
+import { authUrl, hardRedirect, currentSlug } from "@confire/ui/host.ts";
 
 export const Route = createFileRoute("/forgot-password")({
   // Auth lives on the sign-in host, and the reset link comes back to it (redirectTo below).
   beforeLoad: ({ location }) => {
-    if (!onSignInHost()) return hardRedirect(authUrl(`/forgot-password${location.searchStr}`));
+    if (currentSlug()) return hardRedirect(authUrl(`/forgot-password${location.searchStr}`));
   },
   component: ForgotPassword,
 });

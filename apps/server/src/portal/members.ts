@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
-import { and, asc, eq, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, ne, sql } from "drizzle-orm";
 import {
-  db, EXTERNAL_ROLE, member, organization, portalCompany, portalCompanyDomain, portalInvitation, user, type PortalRole,
+  db, EXTERNAL_ROLE, invitation, member, organization, portalCompany, portalCompanyDomain, user, type PortalRole,
 } from "@confire/db";
 import { invitationMail } from "../mail/portal-mail.tsx";
 import { portalTenantUrl } from "../tenant.ts";
@@ -14,16 +14,18 @@ import { tenantBrand } from "./settings.ts";
 // cannot enforce different rules.
 //
 // A seat is a Better Auth `member` row of the supplier's organization with role `external`, its
-// company in `companyId` and its role there in `portalRole` (spec 2026-10-19-path-tenancy-design.md).
+// company's CardCode in `cardCode` and its role there in `portalRole` (spec
+// 2026-10-19-path-tenancy-design.md). A company is (organization, CardCode): a CardCode alone is
+// another supplier's company too, so every match below carries the organization with it.
+// An invitation is Better Auth's `invitation` row with role `external` and the same two fields.
 // One member row per (organization, user) is what makes staff and customer of one tenant exclusive,
 // and "one company per user per tenant" — this module writes external rows directly, never through
 // Better Auth's endpoints (auth.ts turns those off).
 
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-/** member.companyId is text (Better Auth has no uuid field), portal_company.id a uuid. The company
- *  must be the member's own organization's: the join says so, rather than trusting the field. */
-const seatCompany = and(eq(portalCompany.id, sql`${member.companyId}::uuid`), eq(portalCompany.tenantId, member.organizationId));
+/** The member's company: its CardCode in the member's own organization. */
+const seatCompany = and(eq(portalCompany.tenantId, member.organizationId), eq(portalCompany.cardCode, member.cardCode));
 const portalRole = sql<PortalRole>`${member.portalRole}`;
 const isExternal = eq(member.role, EXTERNAL_ROLE);
 
@@ -59,15 +61,6 @@ export const emailDomain = (email: string) => email.slice(email.lastIndexOf("@")
 /** A domain anyone can get an address on: never auto-joins, never registered to a company. */
 export const isFreeMail = (domain: string) => FREE_MAIL.has(domain.trim().toLowerCase());
 
-/** Postgres unique_violation on one named constraint. node-postgres puts `code`/`constraint` on its
- *  error, which drizzle 0.45 wraps as `cause`, so the chain is walked. */
-const violated = (e: unknown, constraint: string): boolean => {
-  for (let x = e as { code?: string; constraint?: string; cause?: unknown } | undefined; x; x = x.cause as typeof x) {
-    if (x.code === "23505" && x.constraint === constraint) return true;
-  }
-  return false;
-};
-
 /** Works for this supplier: a membership of its organization that is not `external`. */
 export async function isInternalMember(tenantId: string, userId: string): Promise<boolean> {
   const [row] = await db.select({ id: member.id }).from(member)
@@ -79,8 +72,8 @@ export async function isInternalMember(tenantId: string, userId: string): Promis
 export async function seatOf(tenantId: string, userId: string) {
   const [seat] = await db
     .select({
-      companyId: portalCompany.id, cardCode: portalCompany.cardCode, cardName: portalCompany.cardName,
-      cardType: portalCompany.cardType, role: portalRole,
+      cardCode: portalCompany.cardCode, cardName: portalCompany.cardName, cardType: portalCompany.cardType,
+      role: portalRole,
     })
     .from(member)
     .innerJoin(portalCompany, seatCompany)
@@ -99,21 +92,21 @@ const RANK: Record<PortalRole, number> = { viewer: 0, buyer: 1, owner: 2 };
  * away. The user row is locked first: the generated Better Auth schema cannot carry a unique
  * (organizationId, userId) index, so this lock is what keeps two concurrent joins from both inserting.
  */
-export async function addPortalMember(tx: Tx, m: { tenantId: string; companyId: string; userId: string; role: PortalRole }) {
+export async function addPortalMember(tx: Tx, m: { tenantId: string; cardCode: string; userId: string; role: PortalRole }) {
   await tx.select({ id: user.id }).from(user).where(eq(user.id, m.userId)).for("update");
-  const [row] = await tx.select({ id: member.id, role: member.role, companyId: member.companyId, portalRole })
+  const [row] = await tx.select({ id: member.id, role: member.role, cardCode: member.cardCode, portalRole })
     .from(member).where(and(eq(member.organizationId, m.tenantId), eq(member.userId, m.userId))).limit(1);
   if (!row) {
     await tx.insert(member).values({
       id: crypto.randomUUID(), organizationId: m.tenantId, userId: m.userId, role: EXTERNAL_ROLE,
-      companyId: m.companyId, portalRole: m.role, createdAt: new Date(),
+      cardCode: m.cardCode, portalRole: m.role, createdAt: new Date(),
     });
     return;
   }
   if (row.role !== EXTERNAL_ROLE) {
     throw new ORPCError("FORBIDDEN", { message: "This account works for the supplier: staff use its internal app, not the portal" });
   }
-  if (row.companyId !== m.companyId) {
+  if (row.cardCode !== m.cardCode) {
     throw new ORPCError("CONFLICT", { message: "This account already belongs to another company on this portal" });
   }
   if (RANK[m.role] > RANK[row.portalRole]) await tx.update(member).set({ portalRole: m.role }).where(eq(member.id, row.id));
@@ -122,16 +115,14 @@ export async function addPortalMember(tx: Tx, m: { tenantId: string; companyId: 
 /** Registers `domain` to the company — the auto-join index. Free mail is never registered, and a
  *  domain already registered to another company stays where it is: the caller learns its CardCode. */
 export async function claimDomain(
-  tx: Tx, d: { tenantId: string; companyId: string; domain: string; addedBy: string | null },
+  tx: Tx, d: { tenantId: string; cardCode: string; domain: string; addedBy: string | null },
 ): Promise<"added" | "free" | { takenBy: string }> {
   const domain = d.domain.trim().toLowerCase();
   if (isFreeMail(domain)) return "free";
   await tx.insert(portalCompanyDomain).values({ ...d, domain }).onConflictDoNothing();
-  const [holder] = await tx.select({ companyId: portalCompanyDomain.companyId, cardCode: portalCompany.cardCode })
-    .from(portalCompanyDomain)
-    .innerJoin(portalCompany, eq(portalCompany.id, portalCompanyDomain.companyId))
+  const [holder] = await tx.select({ cardCode: portalCompanyDomain.cardCode }).from(portalCompanyDomain)
     .where(and(eq(portalCompanyDomain.tenantId, d.tenantId), eq(portalCompanyDomain.domain, domain)));
-  return holder!.companyId === d.companyId ? "added" : { takenBy: holder!.cardCode };
+  return holder!.cardCode === d.cardCode ? "added" : { takenBy: holder!.cardCode };
 }
 
 /**
@@ -140,9 +131,9 @@ export async function claimDomain(
  * first. The company's owner rows are locked FOR UPDATE, so two owners demoting each other at once
  * run one after the other, and the second sees the first's result.
  */
-export async function changeMember(c: { tenantId: string; companyId: string; userId: string; role: PortalRole | null }) {
+export async function changeMember(c: { tenantId: string; cardCode: string; userId: string; role: PortalRole | null }) {
   await db.transaction(async (tx) => {
-    const fence = and(eq(member.organizationId, c.tenantId), isExternal, eq(member.companyId, c.companyId));
+    const fence = and(eq(member.organizationId, c.tenantId), isExternal, eq(member.cardCode, c.cardCode));
     const owners = await tx.select({ userId: member.userId }).from(member)
       .where(and(fence, eq(member.portalRole, "owner"))).for("update");
     const [target] = await tx.select({ role: portalRole }).from(member)
@@ -157,11 +148,10 @@ export async function changeMember(c: { tenantId: string; companyId: string; use
   });
 }
 
-/** Spec §5.1's guard, checked on send against Confire's own tables: not the supplier's staff, not in
- *  another company here (accept would fail on the unique index anyway), not already in this one. A
- *  new-client invitation (`companyId` null) is refused for anyone in a company here: the message
- *  names its CardCode, so the sender uses *Invite to portal* on that BP instead. */
-async function inviteGuard(tenantId: string, companyId: string | null, email: string) {
+/** Spec §5.1's guard, checked on send: not the supplier's staff, not in another company here, not
+ *  already in this one. A new-client invitation (`cardCode` null) is refused for anyone in a company
+ *  here: the message names its CardCode, so the sender uses *Invite to portal* on that BP instead. */
+async function inviteGuard(tenantId: string, cardCode: string | null, email: string) {
   const [u] = await db.select({ id: user.id }).from(user).where(sql`lower(${user.email}) = ${email}`).limit(1);
   if (!u) return;
   if (await isInternalMember(tenantId, u.id)) {
@@ -170,61 +160,59 @@ async function inviteGuard(tenantId: string, companyId: string | null, email: st
   const seat = await seatOf(tenantId, u.id);
   if (!seat) return;
   throw new ORPCError("CONFLICT", {
-    message: seat.companyId === companyId
+    message: seat.cardCode === cardCode
       ? `${email} is already a member of ${seat.cardName}`
       : `${email} already belongs to ${seat.cardName} (${seat.cardCode}) on your portal`,
   });
 }
 
-/** An open invitation for this address, named for the refusal message. */
-async function openInvitation(tenantId: string, email: string) {
-  const [row] = await db
-    .select({ cardCode: portalCompany.cardCode, cardName: portalCompany.cardName, createdAt: portalInvitation.createdAt })
-    .from(portalInvitation)
-    .leftJoin(portalCompany, eq(portalCompany.id, portalInvitation.companyId))
-    .where(and(eq(portalInvitation.tenantId, tenantId), sql`lower(${portalInvitation.email}) = ${email}`, eq(portalInvitation.status, "pending")))
-    .limit(1);
-  return row;
-}
+/** This tenant's portal invitations: Better Auth's rows with role `external` (a staff invitation, if
+ *  one is ever written, is none of the portal's business). */
+export const portalInvitationOf = (tenantId: string) =>
+  and(eq(invitation.organizationId, tenantId), eq(invitation.role, EXTERNAL_ROLE));
+
+/** Pending and not expired: an expired invitation keeps `pending` (Better Auth's own rule), so only
+ *  this pair means "open". */
+const open = () => and(eq(invitation.status, "pending"), gt(invitation.expiresAt, new Date()));
 
 /**
- * An invitation (spec §5.1): guard → cancel this address's expired invitations (they are still
- * `pending`, and the partial unique index would block every re-invite) → insert → mail, after commit
- * and off the request path. Re-sending is cancel + a new invitation: the index allows one open
- * invitation per address and tenant, and is the backstop when two sends race. `companyId` null is a
- * new-client invitation (D25): its invitee fills the onboarding form, and its submit sets the company.
+ * An invitation (spec §5.1): guard → lock the organization → refuse a second open invitation for the
+ * address → insert → mail, after commit and off the request path. Re-sending is cancel + a new
+ * invitation. The organization row lock is the "one open invitation per address" rule: the generated
+ * Better Auth schema cannot carry the partial unique index, so two concurrent sends run one after the
+ * other and the second sees the first. `cardCode` null is a new-client invitation (D25): its invitee
+ * fills the onboarding form, and its submit sets the company.
  */
 export async function sendInvitation(i: {
-  tenantId: string; companyId: string | null; email: string; role: PortalRole; registerDomain: boolean;
+  tenantId: string; cardCode: string | null; email: string; role: PortalRole; registerDomain: boolean;
   inviter: { id: string; name: string; email: string };
 }): Promise<{ id: string; expiresAt: Date }> {
   const email = i.email.trim().toLowerCase();
   const { slug, brand, settings } = await tenantBrand(i.tenantId);
-  const [company] = i.companyId === null ? [null] : await db.select({ cardName: portalCompany.cardName }).from(portalCompany)
-    .where(and(eq(portalCompany.id, i.companyId), eq(portalCompany.tenantId, i.tenantId)));
+  const [company] = i.cardCode === null ? [null] : await db.select({ cardName: portalCompany.cardName }).from(portalCompany)
+    .where(and(eq(portalCompany.tenantId, i.tenantId), eq(portalCompany.cardCode, i.cardCode)));
   if (company === undefined) throw new ORPCError("NOT_FOUND", { message: "No such company on this portal" });
-  await inviteGuard(i.tenantId, i.companyId, email);
+  await inviteGuard(i.tenantId, i.cardCode, email);
 
   const expiresAt = new Date(Date.now() + INVITATION_DAYS * 86_400_000);
-  let id: string;
-  try {
-    id = await db.transaction(async (tx) => {
-      await tx.update(portalInvitation).set({ status: "canceled" }).where(and(
-        eq(portalInvitation.tenantId, i.tenantId), sql`lower(${portalInvitation.email}) = ${email}`,
-        eq(portalInvitation.status, "pending"), lt(portalInvitation.expiresAt, new Date()),
-      ));
-      const [row] = await tx.insert(portalInvitation).values({
-        tenantId: i.tenantId, companyId: i.companyId, email, role: i.role, invitedBy: i.inviter.id,
-        registerDomain: i.registerDomain, expiresAt,
-      }).returning({ id: portalInvitation.id });
-      return row!.id;
+  const id = await db.transaction(async (tx) => {
+    await tx.select({ id: organization.id }).from(organization).where(eq(organization.id, i.tenantId)).for("update");
+    const [taken] = await tx.select({ cardCode: invitation.cardCode, cardName: portalCompany.cardName })
+      .from(invitation)
+      .leftJoin(portalCompany, and(eq(portalCompany.tenantId, invitation.organizationId), eq(portalCompany.cardCode, invitation.cardCode)))
+      .where(and(portalInvitationOf(i.tenantId), eq(invitation.email, email), open()))
+      .limit(1);
+    if (taken) {
+      const to = taken.cardCode ? ` to ${taken.cardName} (${taken.cardCode})` : " as a new client";
+      throw new ORPCError("CONFLICT", { message: `${email} already has an open invitation${to}: cancel it to send a new one` });
+    }
+    const id = crypto.randomUUID();
+    await tx.insert(invitation).values({
+      id, organizationId: i.tenantId, email, role: EXTERNAL_ROLE, status: "pending", expiresAt, inviterId: i.inviter.id,
+      cardCode: i.cardCode, portalRole: i.role, registerDomain: i.registerDomain,
     });
-  } catch (e) {
-    if (!violated(e, "portal_invitation_pending_uq")) throw e;
-    const open = await openInvitation(i.tenantId, email);
-    const to = open?.cardCode ? ` to ${open.cardName} (${open.cardCode})` : open ? " as a new client" : "";
-    throw new ORPCError("CONFLICT", { message: `${email} already has an open invitation${to}: cancel it to send a new one` });
-  }
+    return id;
+  });
 
   // Client-facing (D29): from the tenant's own domain when it has one; off the request path.
   const mail = invitationMail({
@@ -239,33 +227,35 @@ export async function sendInvitation(i: {
 
 /** pending → canceled, for these ids on this tenant — and this company, when named (an owner may
  *  cancel only their own company's). Returns how many it cancelled. */
-export async function cancelInvitations(tenantId: string, ids: string[], companyId?: string): Promise<number> {
+export async function cancelInvitations(tenantId: string, ids: string[], cardCode?: string): Promise<number> {
   if (!ids.length) return 0;
-  const rows = await db.update(portalInvitation).set({ status: "canceled" })
+  const rows = await db.update(invitation).set({ status: "canceled" })
     .where(and(
-      eq(portalInvitation.tenantId, tenantId), inArray(portalInvitation.id, ids), eq(portalInvitation.status, "pending"),
-      companyId ? eq(portalInvitation.companyId, companyId) : undefined,
+      portalInvitationOf(tenantId), inArray(invitation.id, ids), eq(invitation.status, "pending"),
+      cardCode ? eq(invitation.cardCode, cardCode) : undefined,
     ))
-    .returning({ id: portalInvitation.id });
+    .returning({ id: invitation.id });
   return rows.length;
 }
 
 /** Who is in a company, who is invited, and which domains auto-join it — the BP Object Page's Portal
  *  section and the owner's company page read the same lists. */
-export async function companyPeople(companyId: string) {
+export async function companyPeople(tenantId: string, cardCode: string) {
   const [members, invitations, domains] = await Promise.all([
     db.select({ userId: member.userId, name: user.name, email: user.email, role: portalRole, createdAt: member.createdAt })
       .from(member).innerJoin(user, eq(user.id, member.userId))
-      .where(and(isExternal, eq(member.companyId, companyId))).orderBy(asc(member.createdAt)),
+      .where(and(eq(member.organizationId, tenantId), isExternal, eq(member.cardCode, cardCode))).orderBy(asc(member.createdAt)),
     db.select({
-      id: portalInvitation.id, email: portalInvitation.email, role: portalInvitation.role,
-      expiresAt: portalInvitation.expiresAt, expired: sql<boolean>`${portalInvitation.expiresAt} < now()`,
+      id: invitation.id, email: invitation.email, role: sql<PortalRole>`${invitation.portalRole}`,
+      expiresAt: invitation.expiresAt, expired: sql<boolean>`${invitation.expiresAt} < now()`,
     })
-      .from(portalInvitation)
-      .where(and(eq(portalInvitation.companyId, companyId), eq(portalInvitation.status, "pending")))
-      .orderBy(asc(portalInvitation.createdAt)),
+      .from(invitation)
+      .where(and(portalInvitationOf(tenantId), eq(invitation.cardCode, cardCode), eq(invitation.status, "pending")))
+      .orderBy(asc(invitation.createdAt)),
     db.select({ domain: portalCompanyDomain.domain, addedAt: portalCompanyDomain.addedAt })
-      .from(portalCompanyDomain).where(eq(portalCompanyDomain.companyId, companyId)).orderBy(asc(portalCompanyDomain.domain)),
+      .from(portalCompanyDomain)
+      .where(and(eq(portalCompanyDomain.tenantId, tenantId), eq(portalCompanyDomain.cardCode, cardCode)))
+      .orderBy(asc(portalCompanyDomain.domain)),
   ]);
   return { members, invitations, domains };
 }

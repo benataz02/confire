@@ -5,8 +5,6 @@
 #   DOMAIN=confire.ai                 staff app and sign-in on app.confire.ai, the customer portal on
 #                                     portal.confire.ai, a workspace at /<slug>/ on each; one session
 #                                     cookie on confire.ai (apps/server/src/tenant.ts)
-#   CADDY_TLS=acme                    real certificates (Let's Encrypt, HTTP challenge); default
-#                                     `internal` = Caddy's local CA, for the full stack on lvh.me
 #   BETTER_AUTH_SECRET=...            openssl rand -base64 32
 #   RESEND_API_KEY=re_...             a sending_access key; unset = mail is printed to the server log
 # DNS: A records for app and portal (and the apex, which redirects to sign-in). Every *.<DOMAIN>
@@ -43,12 +41,17 @@ services:
       # Fail fast: a placeholder here would sign cookies AND (crypto.ts) encrypt SAP secrets with a
       # string that is in git. Better Auth only rejects its own default secret.
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET (openssl rand -base64 32)}
-      # Every URL, the cookie's domain and the mail domain derive from it (tenant.ts).
-      DOMAIN: ${DOMAIN:-lvh.me}
+      # Every URL, the cookie's domain and the mail domain derive from it (tenant.ts). No default: unset
+      # is dev's localhost, so a forgotten DOMAIN breaks the deploy instead of putting the session
+      # cookie on a name this stack does not own. Not `:?` — compose checks that for every service, so
+      # it would refuse even the dev `up -d db`.
+      DOMAIN: ${DOMAIN:-}
       # Mail (apps/server/src/mail): sender notify@mail.<DOMAIN>. No key = the console mailer. The
       # admin key is only for tenant sender domains (Settings → Portal); unset turns them off.
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_ADMIN_KEY: ${RESEND_ADMIN_KEY:-}
+      # Rows per Service Layer page (apps/server/src/lookups.ts); unset = 100.
+      B1_PAGE_SIZE: ${B1_PAGE_SIZE:-}
       # Unset leaves that sign-in button dead: Better Auth only logs a warning at boot.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -72,8 +75,7 @@ services:
   caddy:
     image: caddy:2
     environment:
-      DOMAIN: ${DOMAIN:-lvh.me}
-      CADDY_TLS: ${CADDY_TLS:-internal}
+      DOMAIN: ${DOMAIN:-}
     ports:
       - "80:80"
       - "443:443"

@@ -11,7 +11,7 @@ import {
 import type { SideNavigationPropTypes, NavigationLayoutDomRef, NavigationLayoutPropTypes } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
 import { meQuery, useIsAdmin } from "../orpc.ts";
-import { authUrl, hardRedirect } from "../lib/tenant.ts";
+import { authUrl, hardRedirect } from "@confire/ui/host.ts";
 import { B1_FEATURES } from "../features/b1/index.ts";
 import { GlobalSearch, type SearchEntry } from "./GlobalSearch.tsx";
 import { useRef, useState, useMemo } from "react";

@@ -11,8 +11,8 @@ import {
 // timelineEvents is the fence — and the SAP documents whose CardCode is the company's. Every seat
 // may comment, viewers included; a client's comment is always external.
 
-const actorOf = (c: { user: { id: string }; companyId: string }): Actor =>
-  ({ userId: c.user.id, side: "external", companyId: c.companyId });
+const actorOf = (c: { user: { id: string }; cardCode: string }): Actor =>
+  ({ userId: c.user.id, side: "external", cardCode: c.cardCode });
 const ProjectZ = z.object({ projectId: z.uuid() });
 
 export const timelineRouter = {

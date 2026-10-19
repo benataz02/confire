@@ -4,7 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Input, Button, MessageStrip } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
-import { authUrl, hardRedirect, onSignInHost } from "../lib/tenant.ts";
+import { authUrl, hardRedirect, currentSlug } from "@confire/ui/host.ts";
 
 // The mailed link goes to Better Auth's /api/auth/reset-password/<token>, which checks the token and
 // redirects here with ?token=… — or with ?error=INVALID_TOKEN when it is unknown, used or expired.
@@ -14,7 +14,7 @@ export const Route = createFileRoute("/reset-password")({
     error: typeof s.error === "string" ? s.error : undefined,
   }),
   beforeLoad: ({ location }) => {
-    if (!onSignInHost()) return hardRedirect(authUrl(`/reset-password${location.searchStr}`));
+    if (currentSlug()) return hardRedirect(authUrl(`/reset-password${location.searchStr}`));
   },
   component: ResetPassword,
 });

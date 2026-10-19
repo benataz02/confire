@@ -20,9 +20,11 @@ import { andFilter, escapeLiteral } from "@confire/b1";
 
 /** Rows per B1 page: the `$top` Confire asks for, and (via packages/b1's pageHeader) the
  *  `Prefer: odata.maxpagesize` that goes with it. The Service Layer's own default is **20**, so
- *  without both a "give me 100" read quietly comes back with 20.
- *  ponytail: one size for every tenant; make it a sap_connection column if a slow WAN needs less. */
-export const DEFAULT_PAGE = 100;
+ *  without both a "give me 100" read quietly comes back with 20. `B1_PAGE_SIZE` tunes it per install
+ *  — a slow WAN to the agent wants smaller pages, a fast LAN larger ones; unset, 0 or junk is 100.
+ *  It is every list and value-help page too, so it is also how many rows one page shows.
+ *  ponytail: one size for every tenant; make it a sap_connection column if tenants need different ones. */
+export const DEFAULT_PAGE = Math.max(1, Number(process.env.B1_PAGE_SIZE) || 100);
 
 export type QueryPage = {
   rows: Record<string, unknown>[];

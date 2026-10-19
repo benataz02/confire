@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { meQuery } from "../orpc.ts";
-import { authUrl, currentSlug, hardRedirect, loginUrl } from "../lib/tenant.ts";
+import { authUrl, currentSlug, hardRedirect, loginUrl } from "@confire/ui/host.ts";
 import { AppShell } from "../components/AppShell.tsx";
 
 // The app shell for every signed-in page. The workspace is the path's first segment (the router's

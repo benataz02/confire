@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { db, EXTERNAL_ROLE, member, portalCompany, portalInvitation } from "@confire/db";
+import { db, EXTERNAL_ROLE, member, portalCompany, invitation } from "@confire/db";
 import { auth } from "../src/auth.ts";
 import { devOutbox } from "../src/mail/mailer.ts";
 import { router } from "../src/orpc/router.ts";
@@ -45,8 +45,8 @@ describe("portalInvitations.inviteExisting", () => {
     expect(agent.calls.some((c) => c.route === "/entity" && c.body.entitySet === "BusinessPartners" && c.body.key === "C1")).toBe(true);
     const [company] = await db.select().from(portalCompany).where(eq(portalCompany.tenantId, tenantId));
     expect(company).toMatchObject({ cardCode: "C1", cardName: "Kunde AG", cardType: "cCustomer" });
-    const [inv] = await db.select().from(portalInvitation).where(eq(portalInvitation.id, id));
-    expect(inv).toMatchObject({ companyId: company!.id, email, role: "owner", status: "pending", registerDomain: true });
+    const [inv] = await db.select().from(invitation).where(eq(invitation.id, id));
+    expect(inv).toMatchObject({ cardCode: company!.cardCode, email, role: EXTERNAL_ROLE, portalRole: "owner", status: "pending", registerDomain: true });
     let mail;
     for (let i = 0; i < 100 && !mail; i++) {
       mail = devOutbox.find((m) => m.to === email);
@@ -77,7 +77,7 @@ describe("portalInvitations.rows / cancel", () => {
     const { tenantId, as } = await setup();
     const live = await call(router.portalInvitations.inviteExisting, { cardCode: "C1", email: `l${uid()}@kunde.de`, role: "buyer", registerDomain: false }, as);
     const old = await call(router.portalInvitations.inviteExisting, { cardCode: "C1", email: `o${uid()}@kunde.de`, role: "buyer", registerDomain: false }, as);
-    await db.update(portalInvitation).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(portalInvitation.id, old.id));
+    await db.update(invitation).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(invitation.id, old.id));
 
     const all = await call(router.portalInvitations.rows, { query: NO_QUERY, top: 100 }, as);
     expect(all.total).toBe(2);
@@ -89,7 +89,7 @@ describe("portalInvitations.rows / cancel", () => {
       { query: { ...NO_QUERY, filter: [{ field: "state", op: "eq", value: "expired" }] }, top: 100 }, as);
     expect(expired.rows.map((r) => r.id)).toEqual([old.id]);
 
-    await db.update(portalInvitation).set({ status: "accepted" }).where(eq(portalInvitation.id, old.id));
+    await db.update(invitation).set({ status: "accepted" }).where(eq(invitation.id, old.id));
     expect(await call(router.portalInvitations.cancel, { ids: [live.id, old.id] }, as)).toEqual({ canceled: 1 });
     // Another tenant's admin sees none of it.
     const other = await setup();
@@ -106,7 +106,7 @@ describe("portalCompanies", () => {
     await call(router.portalInvitations.inviteExisting, { cardCode: "C1", email, role: "buyer", registerDomain: false }, as);
     const [company] = await db.select().from(portalCompany).where(eq(portalCompany.tenantId, tenantId));
     const u = await makePortalUser();
-    await insertSeat(tenantId, company!.id, u.userId, "owner");
+    await insertSeat(tenantId, company!.cardCode, u.userId, "owner");
     await call(router.portalCompanies.addDomain, { cardCode: "C1", domain: "Kunde-AG.de" }, as);
 
     const got = await call(router.portalCompanies.get, { cardCode: "C1" }, as);
@@ -140,10 +140,10 @@ describe("portalCompanies", () => {
     const c = await makePortalSeat(tenantId, owner.userId, "owner");
     expect(await codeOf(call(router.portalCompanies.removeMember, { cardCode: c.cardCode, userId: owner.userId }, as))).toBe("CONFLICT");
     const buyer = await makePortalUser();
-    await insertSeat(tenantId, c.id, buyer.userId, "buyer");
+    await insertSeat(tenantId, c.cardCode, buyer.userId, "buyer");
     await call(router.portalCompanies.setRole, { cardCode: c.cardCode, userId: buyer.userId, role: "owner" }, as);
     await call(router.portalCompanies.removeMember, { cardCode: c.cardCode, userId: owner.userId }, as);
-    const left = await db.select().from(member).where(and(eq(member.role, EXTERNAL_ROLE), eq(member.companyId, c.id)));
+    const left = await db.select().from(member).where(and(eq(member.role, EXTERNAL_ROLE), eq(member.cardCode, c.cardCode)));
     expect(left).toEqual([expect.objectContaining({ userId: buyer.userId, portalRole: "owner" })]);
   });
 });

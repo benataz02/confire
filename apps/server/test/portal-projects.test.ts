@@ -187,7 +187,7 @@ describe("portal projects", () => {
     expect((await call(portalRouter.projects.rows, { query: NO_QUERY, top: 50 }, otherCtx)).rows).toHaveLength(0);
 
     const viewer = await makePortalUser();
-    await insertSeat(s.tenantId, s.company.id, viewer.userId, "viewer");
+    await insertSeat(s.tenantId, s.company.cardCode, viewer.userId, "viewer");
     const viewerCtx = { context: { headers: tenantHeaders(s.slug, viewer.cookie) } };
     expect(await codeOf(call(portalRouter.projects.get, { id }, viewerCtx))).toBe("OK");
     expect(await codeOf(call(portalRouter.projects.calculate, { id, entries: { material: "alu" } }, viewerCtx))).toBe("FORBIDDEN");

@@ -16,7 +16,7 @@ const doc = (entity: DocEntity, r: Record<string, unknown>) => ({
 export const homeRouter = {
   /** The company's projects by status, and the quotations waiting for its answer. */
   overview: portalMemberProcedure.handler(async ({ context }) => {
-    const mine = and(eq(configProject.tenantId, context.tenantId), eq(configProject.portalCompanyId, context.companyId));
+    const mine = and(eq(configProject.tenantId, context.tenantId), eq(configProject.portalCardCode, context.cardCode));
     const [byStatus, awaiting] = await Promise.all([
       db.select({ status: configProject.status, n: count() }).from(configProject).where(mine).groupBy(configProject.status),
       db.select({ id: configProject.id, name: configProject.name, quotedAt: configProject.quotedAt })

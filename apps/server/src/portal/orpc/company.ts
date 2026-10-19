@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db, PORTAL_ROLES, portalCompany, portalCompanyDomain, type PortalCardType } from "@confire/db";
 import { portalMemberProcedure, portalOwnerProcedure } from "./base.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
@@ -13,9 +13,10 @@ import { cancelInvitations, changeMember, companyPeople, emailDomain, sendInvita
 
 const SUMMARY_FIELDS = ["CardName", "CardType", "Phone1", "EmailAddress", "Address", "ZipCode", "City", "Country"];
 
-const domainsOf = (companyId: string) =>
+const domainsOf = (tenantId: string, cardCode: string) =>
   db.select({ domain: portalCompanyDomain.domain }).from(portalCompanyDomain)
-    .where(eq(portalCompanyDomain.companyId, companyId)).orderBy(asc(portalCompanyDomain.domain));
+    .where(and(eq(portalCompanyDomain.tenantId, tenantId), eq(portalCompanyDomain.cardCode, cardCode)))
+    .orderBy(asc(portalCompanyDomain.domain));
 
 export const companyRouter = {
   /** The seat, plus the BP read live from SAP (spec §13). A lead converted in B1 keeps its CardCode,
@@ -36,7 +37,8 @@ export const companyRouter = {
       const type = summary.CardType === "cCustomer" || summary.CardType === "cLid" ? (summary.CardType as PortalCardType) : cardType;
       const name = typeof summary.CardName === "string" && summary.CardName ? summary.CardName : cardName;
       if (name !== cardName || type !== cardType) {
-        await db.update(portalCompany).set({ cardName: name, cardType: type }).where(eq(portalCompany.id, context.companyId));
+        await db.update(portalCompany).set({ cardName: name, cardType: type })
+          .where(and(eq(portalCompany.tenantId, context.tenantId), eq(portalCompany.cardCode, context.cardCode)));
         ({ cardName, cardType } = { cardName: name, cardType: type });
       }
     }
@@ -46,7 +48,7 @@ export const companyRouter = {
   members: {
     /** Colleagues for everyone with a seat; the pending invitations for the owner only. */
     list: portalMemberProcedure.handler(async ({ context }) => {
-      const { members, invitations } = await companyPeople(context.companyId);
+      const { members, invitations } = await companyPeople(context.tenantId, context.cardCode);
       return { members, invitations: context.role === "owner" ? invitations : [] };
     }),
 
@@ -55,7 +57,7 @@ export const companyRouter = {
     invite: portalOwnerProcedure
       .input(z.object({ email: z.email(), role: z.enum(PORTAL_ROLES) }))
       .handler(async ({ input, context }) => {
-        const domains = (await domainsOf(context.companyId)).map((d) => d.domain);
+        const domains = (await domainsOf(context.tenantId, context.cardCode)).map((d) => d.domain);
         if (!domains.includes(emailDomain(input.email))) {
           throw new ORPCError("FORBIDDEN", {
             message: domains.length
@@ -64,7 +66,7 @@ export const companyRouter = {
           });
         }
         return sendInvitation({
-          tenantId: context.tenantId, companyId: context.companyId, email: input.email, role: input.role, registerDomain: false,
+          tenantId: context.tenantId, cardCode: context.cardCode, email: input.email, role: input.role, registerDomain: false,
           inviter: { id: context.user.id, name: context.user.name, email: context.user.email },
         });
       }),
@@ -72,15 +74,15 @@ export const companyRouter = {
     setRole: portalOwnerProcedure
       .input(z.object({ userId: z.string().min(1), role: z.enum(PORTAL_ROLES) }))
       .handler(({ input, context }) =>
-        changeMember({ tenantId: context.tenantId, companyId: context.companyId, userId: input.userId, role: input.role })),
+        changeMember({ tenantId: context.tenantId, cardCode: context.cardCode, userId: input.userId, role: input.role })),
 
     remove: portalOwnerProcedure
       .input(z.object({ userId: z.string().min(1) }))
       .handler(({ input, context }) =>
-        changeMember({ tenantId: context.tenantId, companyId: context.companyId, userId: input.userId, role: null })),
+        changeMember({ tenantId: context.tenantId, cardCode: context.cardCode, userId: input.userId, role: null })),
 
     cancelInvite: portalOwnerProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
-      if (!(await cancelInvitations(context.tenantId, [input.id], context.companyId))) {
+      if (!(await cancelInvitations(context.tenantId, [input.id], context.cardCode))) {
         throw new ORPCError("NOT_FOUND", { message: "No open invitation with that id in your company" });
       }
     }),
@@ -88,6 +90,6 @@ export const companyRouter = {
 
   domains: {
     /** Read-only here: domains are registered by the supplier (spec §4.2). */
-    list: portalMemberProcedure.handler(({ context }) => domainsOf(context.companyId)),
+    list: portalMemberProcedure.handler(({ context }) => domainsOf(context.tenantId, context.cardCode)),
   },
 };

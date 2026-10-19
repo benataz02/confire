@@ -22,8 +22,10 @@ import {
 // company in every read and write. The engine runs here: the page gets the §7.1 projection and the
 // §7.2 figures, and nothing else — no model, no lookups, no candidates.
 
-type Seat = { tenantId: string; companyId: string; cardCode: string; cardName: string; user: { id: string } };
-const actorOf = (c: Seat): Actor => ({ userId: c.user.id, side: "external", companyId: c.companyId });
+type Seat = { tenantId: string; cardCode: string; cardName: string; user: { id: string } };
+const actorOf = (c: Seat): Actor => ({ userId: c.user.id, side: "external", cardCode: c.cardCode });
+/** The seat's company's projects: a company is (tenant, CardCode), never the CardCode alone. */
+const seatFence = (c: Seat) => and(eq(configProject.tenantId, c.tenantId), eq(configProject.portalCardCode, c.cardCode));
 
 /** The batch field's message key: data-param shares its namespace with parameter keys. */
 const BATCHES = "__batches";
@@ -38,7 +40,7 @@ const PROJECT_FIELDS: SqlFields = {
 
 async function ownProject(c: Seat, id: string): Promise<ConfigProject> {
   const [p] = await db.select().from(configProject)
-    .where(and(eq(configProject.id, id), eq(configProject.tenantId, c.tenantId), eq(configProject.portalCompanyId, c.companyId)))
+    .where(and(eq(configProject.id, id), seatFence(c)))
     .limit(1);
   if (!p) throw new ORPCError("NOT_FOUND");
   return p;
@@ -130,7 +132,7 @@ export const projectsRouter = {
       .from(configProject)
       .innerJoin(configModel, eq(configModel.id, configProject.modelId))
       .leftJoin(user, eq(user.id, configProject.createdBy))
-      .where(and(eq(configProject.tenantId, context.tenantId), eq(configProject.portalCompanyId, context.companyId), where))
+      .where(and(seatFence(context), where))
       .orderBy(...orderBy, sql`${configProject.updatedAt} desc`, configProject.id)
       .limit(input.top)
       .offset(input.skip ?? 0);
@@ -149,7 +151,7 @@ export const projectsRouter = {
         const [ins] = await tx.insert(configProject).values({
           tenantId: context.tenantId, modelId: model.id, name: input.name,
           customer: { cardCode: context.cardCode, cardName: context.cardName },
-          portalCompanyId: context.companyId,
+          portalCardCode: context.cardCode,
           batches: model.definition.batchDefaults, createdBy: context.user.id,
         }).returning({ id: configProject.id });
         await recordCreated(tx, context.tenantId, ins!.id, actorOf(context));
@@ -163,7 +165,7 @@ export const projectsRouter = {
     .handler(async ({ input, context }) => {
       await assertWritable(context.tenantId, input.id, actorOf(context));
       await db.update(configProject).set({ name: input.name, updatedAt: new Date() })
-        .where(and(eq(configProject.id, input.id), eq(configProject.portalCompanyId, context.companyId), writableBy("external")));
+        .where(and(eq(configProject.id, input.id), seatFence(context), writableBy("external")));
       return payload(context, input.id);
     }),
 
@@ -171,8 +173,7 @@ export const projectsRouter = {
   remove: portalBuyerProcedure.input(IdZ).handler(async ({ input, context }) => {
     const gone = await db.delete(configProject)
       .where(and(
-        eq(configProject.id, input.id), eq(configProject.tenantId, context.tenantId),
-        eq(configProject.portalCompanyId, context.companyId), eq(configProject.status, "draft"),
+        eq(configProject.id, input.id), seatFence(context), eq(configProject.status, "draft"),
       ))
       .returning({ id: configProject.id });
     if (!gone.length) throw new ORPCError("CONFLICT", { message: "Only a draft can be deleted" });
@@ -203,7 +204,7 @@ export const projectsRouter = {
         }
         const written = await db.update(configProject)
           .set({ ...accepted, ...(batches ? { batches } : {}), candidates: [], selection: null, calculatedAt: null, updatedAt: new Date() })
-          .where(and(eq(configProject.id, id), eq(configProject.portalCompanyId, context.companyId), writableBy("external")))
+          .where(and(eq(configProject.id, id), seatFence(context), writableBy("external")))
           .returning({ id: configProject.id });
         if (!written.length) throw new ORPCError("CONFLICT", { message: "This project moved on meanwhile — reload it" });
       }
@@ -223,7 +224,7 @@ export const projectsRouter = {
   queryPage: portalMemberProcedure.input(QueryPageZ).handler(async ({ input, context }) => {
     const model = await loadModel(context.tenantId, input.modelId);
     const own = model.portal || (await db.select({ id: configProject.id }).from(configProject)
-      .where(and(eq(configProject.modelId, model.id), eq(configProject.portalCompanyId, context.companyId))).limit(1)).length > 0;
+      .where(and(eq(configProject.modelId, model.id), seatFence(context))).limit(1)).length > 0;
     if (!own || !referencedTables(model.definition).has(input.table)) throw new ORPCError("NOT_FOUND");
     return toPortalPage(model.definition, input.table, await queryTablePage(context.tenantId, input));
   }),

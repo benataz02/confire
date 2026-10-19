@@ -11,7 +11,7 @@ import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { UiSourceProvider, type UiSource } from "@confire/ui/source.tsx";
 import { routeTree } from "./routeTree.gen.ts";
 import { client, meQuery, orpc } from "./orpc.ts";
-import { tenantBasepath } from "./lib/host.ts";
+import { tenantBasepath } from "@confire/ui/host.ts";
 
 const queryClient = new QueryClient({
   defaultOptions: {

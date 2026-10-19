@@ -46,7 +46,7 @@ const openCursor = (entity: string, f: CursorFence, cursor: string): string => {
 
 export type RowsArgs = {
   query: ListQuery;
-  /** rows per page — `Prefer: odata.maxpagesize`, DEFAULT_PAGE */
+  /** rows per page — `Prefer: odata.maxpagesize`, DEFAULT_PAGE (B1_PAGE_SIZE) */
   pageSize: number;
   /** sealed `@odata.nextLink` from the previous page; absent = first page */
   cursor?: string;

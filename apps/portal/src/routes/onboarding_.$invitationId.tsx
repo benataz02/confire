@@ -7,7 +7,7 @@ import { ObjectPageSkeleton } from "@confire/ui/object-page/ObjectPageSkeleton.t
 import { authClient } from "../auth-client.ts";
 import { client, meQuery, orpc } from "../orpc.ts";
 import { PortalAuthLayout } from "../components/AuthChrome.tsx";
-import { authUrl, hardRedirect, loginUrl } from "../lib/host.ts";
+import { authUrl, hardRedirect, loginUrl } from "@confire/ui/host.ts";
 import { invitationGuard } from "../lib/invitation.ts";
 import { ONBOARDING_HEADER, ONBOARDING_LOCKED, onboardingSections } from "../features/onboarding.ts";
 

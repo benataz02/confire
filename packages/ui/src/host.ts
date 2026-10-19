@@ -54,8 +54,6 @@ export function origins(loc: Loc = window.location): { auth: string; portal: str
     : { auth: at(`${loc.hostname}:5173`), portal: at(`${loc.hostname}:5180`) };
 }
 
-export const isAuthHost = () => window.location.origin === origins().auth;
-
 /** A page on the sign-in host. */
 export const authUrl = (path = "/") => `${origins().auth}${path}`;
 

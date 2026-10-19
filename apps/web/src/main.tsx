@@ -10,7 +10,7 @@ import { routeTree } from "./routeTree.gen.ts";
 import { RouteError, RouteNotFound } from "@confire/ui/Boundaries.tsx";
 import { UiSourceProvider, type UiSource } from "@confire/ui/source.tsx";
 import { client, meQuery, orpc, useCurrency } from "./orpc.ts";
-import { tenantBasepath } from "./lib/tenant.ts";
+import { tenantBasepath } from "@confire/ui/host.ts";
 
 const queryClient = new QueryClient({
   defaultOptions: {

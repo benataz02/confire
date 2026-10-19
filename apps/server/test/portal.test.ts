@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
-import { db, portalCompany, portalCompanyDomain, portalInvitation, user } from "@confire/db";
+import { and, eq } from "drizzle-orm";
+import { db, EXTERNAL_ROLE, invitation, portalCompany, portalCompanyDomain, user } from "@confire/db";
 import { auth, microsoftEmailVerified } from "../src/auth.ts";
 import { devOutbox, mailDomain } from "../src/mail/mailer.ts";
 import { router } from "../src/orpc/router.ts";
@@ -187,7 +187,7 @@ async function invitingTenant(cardName = "Kunde AG") {
   const admin = await makeUser("admin", t.tenantId);
   const invite = (email: string, role: "owner" | "buyer" | "viewer" = "buyer", registerDomain = false) =>
     sendInvitation({
-      tenantId: t.tenantId, companyId: company!.id, email, role, registerDomain,
+      tenantId: t.tenantId, cardCode: company!.cardCode, email, role, registerDomain,
       inviter: { id: admin.userId, name: "Ines Inviter", email: admin.email },
     });
   return { ...t, company: company!, admin, invite };
@@ -203,11 +203,11 @@ describe("onboarding.invitation / accept", () => {
       id, type: "existing", companyName: "Müller AG", role: "buyer", inviterName: t.admin.email, tenant: { slug: t.slug, name: t.slug },
     });
     await call(portalRouter.onboarding.accept, { id }, ctx(t.slug, invitee.cookie));
-    expect(await seatRole(t.company.id, invitee.userId)).toBe("buyer");
+    expect(await seatRole(t.company, invitee.userId)).toBe("buyer");
     expect((await call(portalRouter.me, undefined, ctx(t.slug, invitee.cookie))).company).toMatchObject({ cardName: "Müller AG", role: "buyer" });
-    const [inv] = await db.select().from(portalInvitation).where(eq(portalInvitation.id, id));
+    const [inv] = await db.select().from(invitation).where(eq(invitation.id, id));
     expect(inv!.status).toBe("accepted");
-    const domains = await db.select().from(portalCompanyDomain).where(eq(portalCompanyDomain.companyId, t.company.id));
+    const domains = await db.select().from(portalCompanyDomain).where(eq(portalCompanyDomain.cardCode, t.company.cardCode));
     expect(domains.map((d) => d.domain)).toEqual(["test.local"]);
   });
 
@@ -220,21 +220,21 @@ describe("onboarding.invitation / accept", () => {
     const stranger = await makePortalUser();
     const wrong = call(portalRouter.onboarding.accept, { id }, ctx(t.slug, stranger.cookie));
     expect(await messageOf(wrong)).toContain(`${invitee.email[0]}…@test.local`);
-    expect(await seatRole(t.company.id, stranger.userId)).toBeUndefined();
+    expect(await seatRole(t.company, stranger.userId)).toBeUndefined();
     await call(portalRouter.onboarding.accept, { id }, ctx(t.slug, invitee.cookie));
-    expect(await seatRole(t.company.id, invitee.userId)).toBe("buyer");
+    expect(await seatRole(t.company, invitee.userId)).toBe("buyer");
   });
 
   test("expired, cancelled or already accepted is CONFLICT; an unverified account is FORBIDDEN", async () => {
     const t = await invitingTenant();
     const a = await makePortalUser();
     const expired = await t.invite(a.email);
-    await db.update(portalInvitation).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(portalInvitation.id, expired.id));
+    await db.update(invitation).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(invitation.id, expired.id));
     expect(await codeOf(call(portalRouter.onboarding.accept, { id: expired.id }, ctx(t.slug, a.cookie)))).toBe("CONFLICT");
 
     const b = await makePortalUser();
     const cancelled = await t.invite(b.email);
-    await db.update(portalInvitation).set({ status: "canceled" }).where(eq(portalInvitation.id, cancelled.id));
+    await db.update(invitation).set({ status: "canceled" }).where(eq(invitation.id, cancelled.id));
     expect(await codeOf(call(portalRouter.onboarding.invitation, { id: cancelled.id }, ctx(t.slug, b.cookie)))).toBe("CONFLICT");
 
     const c = await makePortalUser();
@@ -265,15 +265,15 @@ describe("onboarding.invitation / accept", () => {
     const u = await makePortalUser(`f${uid()}@gmail.com`);
     const { id } = await t.invite(u.email, "owner", true);
     await call(portalRouter.onboarding.accept, { id }, ctx(t.slug, u.cookie));
-    expect(await seatRole(t.company.id, u.userId)).toBe("owner");
-    expect(await db.select().from(portalCompanyDomain).where(eq(portalCompanyDomain.companyId, t.company.id))).toHaveLength(0);
+    expect(await seatRole(t.company, u.userId)).toBe("owner");
+    expect(await db.select().from(portalCompanyDomain).where(eq(portalCompanyDomain.cardCode, t.company.cardCode))).toHaveLength(0);
   });
 });
 
 describe("onboarding.join (auto-join, spec §4.4)", () => {
   const registered = async (domain = "test.local") => {
     const t = await invitingTenant("Domain AG");
-    await db.insert(portalCompanyDomain).values({ tenantId: t.tenantId, domain, companyId: t.company.id });
+    await db.insert(portalCompanyDomain).values({ tenantId: t.tenantId, domain, cardCode: t.company.cardCode });
     return t;
   };
 
@@ -305,9 +305,9 @@ describe("onboarding.join (auto-join, spec §4.4)", () => {
     const u = await makePortalUser();
     const { id } = await t.invite(u.email, "buyer");
     await call(portalRouter.onboarding.join, undefined, ctx(t.slug, u.cookie));
-    expect(await seatRole(t.company.id, u.userId)).toBe("viewer");
+    expect(await seatRole(t.company, u.userId)).toBe("viewer");
     await call(portalRouter.onboarding.accept, { id }, ctx(t.slug, u.cookie));
-    expect(await seatRole(t.company.id, u.userId)).toBe("buyer");
+    expect(await seatRole(t.company, u.userId)).toBe("buyer");
   });
 });
 
@@ -320,11 +320,11 @@ describe("company (the owner's page, spec §9)", () => {
   async function ownedCompany() {
     const t = await invitingTenant("Alt-Name GmbH");
     const domain = `${uid()}.de`;
-    await db.insert(portalCompanyDomain).values({ tenantId: t.tenantId, domain, companyId: t.company.id });
+    await db.insert(portalCompanyDomain).values({ tenantId: t.tenantId, domain, cardCode: t.company.cardCode });
     const owner = await makePortalUser();
     const buyer = await makePortalUser();
-    await insertSeat(t.tenantId, t.company.id, owner.userId, "owner");
-    await insertSeat(t.tenantId, t.company.id, buyer.userId, "buyer");
+    await insertSeat(t.tenantId, t.company.cardCode, owner.userId, "owner");
+    await insertSeat(t.tenantId, t.company.cardCode, buyer.userId, "buyer");
     return { ...t, domain, owner, buyer, as: (u: { cookie: string }) => ctx(t.slug, u.cookie) };
   }
 
@@ -336,8 +336,10 @@ describe("company (the owner's page, spec §9)", () => {
       .toContain(c.domain);
     const inside = `y${uid()}@${c.domain.toUpperCase()}`;
     const { id } = await call(portalRouter.company.members.invite, { email: inside, role: "viewer" }, c.as(c.owner));
-    const [inv] = await db.select().from(portalInvitation).where(eq(portalInvitation.id, id));
-    expect(inv).toMatchObject({ companyId: c.company.id, role: "viewer", registerDomain: false, invitedBy: c.owner.userId });
+    const [inv] = await db.select().from(invitation).where(eq(invitation.id, id));
+    expect(inv).toMatchObject({
+      cardCode: c.company.cardCode, role: EXTERNAL_ROLE, portalRole: "viewer", registerDomain: false, inviterId: c.owner.userId,
+    });
     expect(await codeOf(call(portalRouter.company.members.invite, { email: `z${uid()}@${c.domain}`, role: "viewer" }, c.as(c.buyer))))
       .toBe("FORBIDDEN");
   });
@@ -363,9 +365,9 @@ describe("company (the owner's page, spec §9)", () => {
     const c = await ownedCompany();
     expect(await codeOf(call(portalRouter.company.members.setRole, { userId: c.owner.userId, role: "buyer" }, c.as(c.owner)))).toBe("CONFLICT");
     await call(portalRouter.company.members.setRole, { userId: c.buyer.userId, role: "viewer" }, c.as(c.owner));
-    expect(await seatRole(c.company.id, c.buyer.userId)).toBe("viewer");
+    expect(await seatRole(c.company, c.buyer.userId)).toBe("viewer");
     await call(portalRouter.company.members.remove, { userId: c.buyer.userId }, c.as(c.owner));
-    expect(await seatRole(c.company.id, c.buyer.userId)).toBeUndefined();
+    expect(await seatRole(c.company, c.buyer.userId)).toBeUndefined();
     // A member of another company is not this owner's to touch.
     const other = await ownedCompany();
     expect(await codeOf(call(portalRouter.company.members.remove, { userId: other.buyer.userId }, c.as(c.owner)))).toBe("NOT_FOUND");
@@ -383,7 +385,8 @@ describe("company (the owner's page, spec §9)", () => {
     });
     const up = await call(portalRouter.company.get, undefined, c.as(c.buyer));
     expect(up).toMatchObject({ cardName: "Neu-Name GmbH", cardType: "cLid", summary: { Phone1: "+49 1", City: "Ulm" }, summaryError: null });
-    const [row] = await db.select().from(portalCompany).where(eq(portalCompany.id, c.company.id));
+    const [row] = await db.select().from(portalCompany)
+      .where(and(eq(portalCompany.tenantId, c.company.tenantId), eq(portalCompany.cardCode, c.company.cardCode)));
     expect(row).toMatchObject({ cardName: "Neu-Name GmbH", cardType: "cLid" });
     expect((await call(portalRouter.company.domains.list, undefined, c.as(c.buyer))).map((d) => d.domain)).toEqual([c.domain]);
   });

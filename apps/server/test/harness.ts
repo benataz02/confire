@@ -63,15 +63,18 @@ export async function makePortalUser(email = `p${uid()}@test.local`): Promise<{ 
 
 /** A seat: an `external` member row of the tenant, inserted directly rather than through
  *  addPortalMember. */
-export const insertSeat = (tenantId: string, companyId: string, userId: string, role: PortalRole) =>
+export const insertSeat = (tenantId: string, cardCode: string, userId: string, role: PortalRole) =>
   db.insert(member).values({
-    id: crypto.randomUUID(), organizationId: tenantId, userId, role: EXTERNAL_ROLE, companyId, portalRole: role, createdAt: new Date(),
+    id: crypto.randomUUID(), organizationId: tenantId, userId, role: EXTERNAL_ROLE, cardCode, portalRole: role, createdAt: new Date(),
   });
 
+/** A company is (tenant, CardCode): a portal_company row, or anything shaped like its key. */
+export type CompanyKey = { tenantId: string; cardCode: string };
+
 /** A user's role in a company — their external member row naming it — or undefined. */
-export const seatRole = async (companyId: string, userId: string) =>
+export const seatRole = async (c: CompanyKey, userId: string) =>
   (await db.select({ role: member.portalRole }).from(member)
-    .where(and(eq(member.role, EXTERNAL_ROLE), eq(member.companyId, companyId), eq(member.userId, userId))))[0]?.role ?? undefined;
+    .where(and(eq(member.organizationId, c.tenantId), eq(member.role, EXTERNAL_ROLE), eq(member.cardCode, c.cardCode), eq(member.userId, userId))))[0]?.role ?? undefined;
 
 /** Every seat a user holds, across suppliers. */
 export const seatsOf = (userId: string) =>
@@ -82,7 +85,7 @@ export async function makePortalSeat(tenantId: string, userId: string, role: Por
   const [company] = await db.insert(portalCompany)
     .values({ tenantId, cardCode: `C${uid()}`, cardName, cardType: "cCustomer" })
     .returning();
-  await insertSeat(tenantId, company!.id, userId, role);
+  await insertSeat(tenantId, company!.cardCode, userId, role);
   return company!;
 }
 

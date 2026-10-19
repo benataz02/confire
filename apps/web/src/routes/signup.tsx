@@ -5,7 +5,7 @@ import { Input, Button, MessageStrip } from "@ui5/webcomponents-react";
 import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { SocialButtons } from "../components/SocialButtons.tsx";
-import { authUrl, hardRedirect, onSignInHost } from "../lib/tenant.ts";
+import { authUrl, hardRedirect, currentSlug } from "@confire/ui/host.ts";
 
 export const Route = createFileRoute("/signup")({
   validateSearch: (s: Record<string, unknown>): { redirect?: string } => ({
@@ -13,7 +13,7 @@ export const Route = createFileRoute("/signup")({
   }),
   // Already signed in: the dispatcher (/login) takes it from here.
   beforeLoad: async ({ context, search, location }) => {
-    if (!onSignInHost()) return hardRedirect(authUrl(`/signup${location.searchStr}`));
+    if (currentSlug()) return hardRedirect(authUrl(`/signup${location.searchStr}`));
     const data = await context.queryClient.ensureQueryData(sessionQuery);
     if (data?.session) throw redirect({ to: "/login", search });
   },

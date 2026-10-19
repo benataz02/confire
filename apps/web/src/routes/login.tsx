@@ -7,7 +7,7 @@ import { authClient, sessionQuery } from "../auth-client.ts";
 import { lobbyQuery } from "../orpc.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { SocialButtons } from "../components/SocialButtons.tsx";
-import { authUrl, hardRedirect, onSignInHost, safeRedirect } from "../lib/tenant.ts";
+import { authUrl, hardRedirect, currentSlug, safeRedirect } from "@confire/ui/host.ts";
 import { authErrorMessage, notVerifiedMessage } from "@confire/ui/auth/messages.ts";
 
 type Place = { url: string; active: boolean; title: string; description: string; icon: string; role?: string };
@@ -25,7 +25,7 @@ export const Route = createFileRoute("/login")({
     choose: s.choose !== undefined ? true : undefined,
   }),
   beforeLoad: async ({ context, search, location }) => {
-    if (!onSignInHost()) return hardRedirect(authUrl(`/login${location.searchStr}`));
+    if (currentSlug()) return hardRedirect(authUrl(`/login${location.searchStr}`));
     const data = await context.queryClient.ensureQueryData(sessionQuery);
     if (!data?.session) return { places: null };
     const to = safeRedirect(search.redirect);

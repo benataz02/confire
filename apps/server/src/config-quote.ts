@@ -271,7 +271,7 @@ export async function quoteDraft(tenantId: string, projectId: string) {
     quoted: done ? { docEntry: project.b1DocEntry!, quotedAt: project.quotedAt } : null,
     // A reopened project re-quotes its quotation (§7.3): the page says so before the user posts.
     replaces: !done && project.b1DocEntry !== null ? { docEntry: project.b1DocEntry } : null,
-    portal: project.portalCompanyId !== null,
+    portal: project.portalCardCode !== null,
   };
 }
 
@@ -312,7 +312,7 @@ export async function createQuote(
   const actor = { userId, side: "internal" as const };
   await assertWritable(tenantId, project.id, actor);
   // The customer of a portal project is the company (spec §10) — the page cannot quote someone else.
-  if (project.portalCompanyId !== null && input.header?.CardCode !== undefined && input.header.CardCode !== project.customer?.cardCode)
+  if (project.portalCardCode !== null && input.header?.CardCode !== undefined && input.header.CardCode !== project.customer?.cardCode)
     throw new ORPCError("BAD_REQUEST", { message: "A request is quoted to the client's own business partner" });
 
   const commandId = commandIdOf(tenantId, project);

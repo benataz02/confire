@@ -92,8 +92,9 @@ portal-originated sign-in carries `redirect` back to the portal, whose own guard
 page — sign-in itself cannot know who is "a customer".
 
 **A customer is a member of the supplier's organization** with role **`external`** (`EXTERNAL_ROLE`,
-an access-control role with no permissions) and two extra member fields: `companyId` (→ the
-`portal_company`, one per tenant × CardCode) and `portalRole` (`owner`/`buyer`/`viewer`). One member row
+an access-control role with no permissions) and two extra member fields: `cardCode` (its company: a
+`portal_company` is (tenant, CardCode) and has no id of its own, so a CardCode is never matched without
+the tenant) and `portalRole` (`owner`/`buyer`/`viewer`). One member row
 per (organization, user) is "one company per user per tenant" and makes staff and customer of one
 tenant exclusive. Every staff query filters `role <> 'external'`; `organizationLimit` counts staff rows
 only, so a customer may still found their own workspace. Better Auth's organization endpoints treat
@@ -109,10 +110,13 @@ Builders (`portal/orpc/base.ts`); every tenant-scoped one refuses the supplier's
 | `portalBuyerProcedure` / `portalOwnerProcedure` | seat role `buyer`/`owner` / `owner` |
 
 **`portal/members.ts` is the only writer** of external member rows (`addPortalMember`, `changeMember`), `portal_company_domain`
-(`claimDomain`) and `portal_invitation` (`sendInvitation`, `cancelInvitations`), and both processes
+(`claimDomain`) and portal invitations (`sendInvitation`, `cancelInvitations`), and both processes
 import it. The internal router (`orpc/routers/portal.ts`: `portalInvitations`, `portalCompanies`)
-and the portal's (`onboarding`, `company`) therefore enforce one rule set. The rules:
-- "One open invitation per email" is a partial unique index. Expired rows are still `pending`, so a send cancels them first.
+and the portal's (`onboarding`, `company`) therefore enforce one rule set. Invitations are Better Auth's own `invitation` rows with role `external` plus `cardCode` (null = a new
+client), `portalRole` and `registerDomain`; Better Auth's accept stays off (it inserts the member bare,
+before a new client has a company, and never checks an existing membership), so accept and onboarding
+submit end in `addPortalMember` instead, with the organization and the company both known. The rules:
+- One open invitation per email: `sendInvitation` locks the organization row and checks (the generated schema cannot carry the partial unique index). An expired row stays `pending` and blocks nothing.
 - A second way into the same company never lowers a role.
 - No change may leave a company that had an owner with none.
 - Free-mail domains are never registered or auto-joined.
@@ -125,7 +129,7 @@ or auto-join (`onboarding.join`, a verified address on a domain registered to a 
 `bun run seed:portal` gives a dev tenant a company and an owner login.
 
 **New-client onboarding** (spec §5.3–5.4): *Invite new client* on the BP List Report sends an invitation
-with `companyId` null; its link goes on to `/onboarding/<id>`, the BP-create `ObjectPage` unchanged over
+with `cardCode` null; its link goes on to `/onboarding/<id>`, the BP-create `ObjectPage` unchanged over
 `apps/portal/src/features/onboarding.ts`. `portal/onboarding-form.ts` is the one form rule (pure,
 tested): the denylist, what the settings picker offers, the form's fields (addresses and contact as flat
 `BillTo.*`/`ShipTo.*`/`Contact.*` keys), validation and the lead payload. `onboarding.formSchema` returns
@@ -137,7 +141,7 @@ B1's default lead series).
 
 **Portal projects** (spec §7): a published model (`config_model.portal`, set by `models.publish`, not
 by `save` — publishing must not bump `updatedAt`) becomes a client's project, `config_project` with
-`portalCompanyId` set. **The engine runs on the server**: `portal/orpc/projects.ts` returns the
+`portalCardCode` set. **The engine runs on the server**: `portal/orpc/projects.ts` returns the
 projection in `portal/projection.ts` (pure, tested) and never a `ModelDef`, lookups or a candidate —
 that module is the fence in both directions (`acceptPortalInputs` is what a client may write).
 **`project-lifecycle.ts` is the only writer of `status` and `config_project_event`**, imported by
@@ -155,7 +159,7 @@ Requests (`orpc/routers/requests.ts`) and on the existing process page. The time
 `portal/doc-fields.ts` is the one field rule — `ALWAYS` (DocNum, status, total…), `NEVER` (CardCode),
 a cost/margin/purchase-price denylist and code defaults — and `portalSchema` applies it **on read**,
 so a stale setting cannot expose a field. `portal/orpc/docs.ts` fences every read: `rows` passes
-`CardCode eq '<company>'` as `readRows`' `extraFilter` and seals its cursor to `portal:<companyId>`;
+`CardCode eq '<company>'` as `readRows`' `extraFilter` and seals its cursor to `portal:<cardCode>`;
 `one`, `print` and `project` read the document's CardCode before returning anything. `docs.project`
 walks back through the lines' `BaseType`/`BaseEntry` to the quotation a project quoted. Admins pick
 fields in Settings → Portal (`portalSettings`, one jsonb `portal_settings` document; P5 writes
@@ -174,7 +178,9 @@ Confire's mail on `mail.confire.ai`; the apex only redirects to sign-in. Unset i
 and `localhost:5180`. **Every `*.confire.ai` host receives the session cookie: never point a name
 under it at a service this stack does not control** (a subdomain takeover would collect sessions).
 Caddy has two fixed sites plus the apex redirect, certificates from Let's Encrypt over the HTTP
-challenge (`CADDY_TLS=acme`; `internal` for the full stack on lvh.me) — no wildcard, no DNS API.
+challenge (Caddy's automatic HTTPS) — no wildcard, no DNS API. There is no local full stack: dev is
+`bun run dev` on localhost, and compose has no `DOMAIN` default (unset = localhost URLs, which no
+deployment serves).
 
 ## Mail
 

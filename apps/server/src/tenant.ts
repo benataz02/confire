@@ -17,10 +17,16 @@ export const TENANT_HEADER = "x-tenant";
 
 /** The one deployment setting, compose's `DOMAIN` (`confire.ai`): the staff app — which is also the
  *  sign-in host — on `https://app.<domain>`, the portal on `https://portal.<domain>`, the session
- *  cookie on `<domain>` so it reaches both, Confire's mail from `mail.<domain>`. Unset, it is dev:
+ *  cookie on `<domain>` so it reaches both, Confire's mail from `mail.<domain>`. Unset or `localhost`, it is dev:
  *  `http://localhost:5173` and `http://localhost:5180`, and a host-only cookie on `localhost`, which
  *  the browser sends to both ports. The SPAs read the same rule off their own location (host.ts). */
-const domain = process.env.DOMAIN?.trim().toLowerCase() || undefined;
+export const domainOf = (raw: string | undefined): string | undefined => {
+  const d = raw?.trim().toLowerCase();
+  // `localhost` (any port) is dev too: there is no app./portal. under it, and Google refuses an OAuth
+  // redirect to anything but plain http://localhost.
+  return d && !/^localhost(:\d+)?$/.test(d) ? d : undefined;
+};
+const domain = domainOf(process.env.DOMAIN);
 
 /** The staff app's origin and the sign-in host: Better Auth's baseURL, so its OAuth callbacks and
  *  every mailed link. */
@@ -51,6 +57,12 @@ export const portalTenantUrl = (slug: string, path = "/") => tenantUrl(portalUrl
 
 // ponytail: assert-based self-check — `bun apps/server/src/tenant.ts`.
 if (import.meta.main) {
+  assert.equal(domainOf("confire.ai"), "confire.ai");
+  assert.equal(domainOf(" Confire.AI "), "confire.ai");
+  assert.equal(domainOf("localhost"), undefined); // dev, like unset
+  assert.equal(domainOf("localhost:5173"), undefined);
+  assert.equal(domainOf(""), undefined);
+  assert.equal(domainOf(undefined), undefined);
   assert.equal(tenantSlug("acme"), "acme");
   assert.equal(tenantSlug("acme-2"), "acme-2");
   assert.equal(tenantSlug("ACME"), null); // the client sends what the URL holds, lowercased by the slug rule

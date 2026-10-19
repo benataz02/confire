@@ -30,8 +30,6 @@ async function main(): Promise<void> {
     .values({ tenantId: tenant.id, cardCode, cardName, cardType: "cCustomer" })
     .onConflictDoNothing()
     .returning();
-  const companyId = company?.id ?? (await db.select({ id: portalCompany.id }).from(portalCompany)
-    .where(and(eq(portalCompany.tenantId, tenant.id), eq(portalCompany.cardCode, cardCode))))[0]!.id;
   console.log(`company ${cardCode} ${company ? `(created as '${cardName}')` : "(already existed)"}`);
 
   const [existing] = await db.select({ id: userTable.id }).from(userTable).where(eq(userTable.email, email)).limit(1);
@@ -41,8 +39,8 @@ async function main(): Promise<void> {
   console.log(`user    ${email} / ${existing ? "(existing password)" : password}`);
 
   const domain = await db.transaction(async (tx) => {
-    await addPortalMember(tx, { tenantId: tenant.id, companyId, userId, role: "owner" });
-    return claimDomain(tx, { tenantId: tenant.id, companyId, domain: emailDomain(email), addedBy: null });
+    await addPortalMember(tx, { tenantId: tenant.id, cardCode, userId, role: "owner" });
+    return claimDomain(tx, { tenantId: tenant.id, cardCode, domain: emailDomain(email), addedBy: null });
   });
   console.log(`domain  ${emailDomain(email)}: ${typeof domain === "object" ? `registered to ${domain.takenBy}` : domain}`);
 

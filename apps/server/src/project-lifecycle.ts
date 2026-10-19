@@ -22,17 +22,18 @@ export type Side = "internal" | "external";
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type DbOrTx = typeof db | Tx;
 
-/** Who acts. `companyId` is the portal seat's company — the external fence. */
-export type Actor = { userId: string; side: Side; companyId?: string };
+/** Who acts. `cardCode` is the portal seat's company — the external fence, always read against a
+ *  project already loaded by (id, tenantId), since a CardCode alone names a company at every tenant. */
+export type Actor = { userId: string; side: Side; cardCode?: string };
 
 /** An internal read never sees a client's draft (spec §10): it is private until the first submit. */
-export const internalVisible = or(isNull(configProject.portalCompanyId), ne(configProject.status, "draft"));
+export const internalVisible = or(isNull(configProject.portalCardCode), ne(configProject.status, "draft"));
 
 /** assertWritable's rule again, as the WHERE of the input UPDATE that follows it — so an edit that
  *  races a submit or a send-back writes nothing rather than landing on the other side's status. */
 export const writableBy = (side: Side) => side === "external"
   ? inArray(configProject.status, ["draft", "returned"])
-  : and(ne(configProject.status, "quoted"), or(isNull(configProject.portalCompanyId), eq(configProject.status, "in_review")));
+  : and(ne(configProject.status, "quoted"), or(isNull(configProject.portalCardCode), eq(configProject.status, "in_review")));
 
 /** Client-facing words for a status (spec §7). */
 export const STATUS_LABEL: Record<ProjectStatus, string> = {
@@ -98,11 +99,11 @@ async function append(q: DbOrTx, e: {
 /** A project row the actor may see, or NOT_FOUND. The fence for both sides: a client sees only
  *  its company's projects; staff never see a client's draft. Not FORBIDDEN — a foreign id is
  *  indistinguishable from a missing one. */
-function fenced<T extends { portalCompanyId: string | null; status: ProjectStatus }>(row: T | undefined, actor: Actor): T {
+function fenced<T extends { portalCardCode: string | null; status: ProjectStatus }>(row: T | undefined, actor: Actor): T {
   if (!row) throw new ORPCError("NOT_FOUND");
-  if (actor.side === "external" && (!actor.companyId || row.portalCompanyId !== actor.companyId))
+  if (actor.side === "external" && (!actor.cardCode || row.portalCardCode !== actor.cardCode))
     throw new ORPCError("NOT_FOUND");
-  if (actor.side === "internal" && row.portalCompanyId !== null && row.status === "draft")
+  if (actor.side === "internal" && row.portalCardCode !== null && row.status === "draft")
     throw new ORPCError("NOT_FOUND");
   return row;
 }
@@ -112,7 +113,7 @@ export const recordCreated = (q: DbOrTx, tenantId: string, projectId: string, ac
   append(q, { tenantId, projectId, kind: "created", actor });
 
 async function fencedProject(q: DbOrTx, tenantId: string, projectId: string, actor: Actor) {
-  const [row] = await q.select({ portalCompanyId: configProject.portalCompanyId, status: configProject.status })
+  const [row] = await q.select({ portalCardCode: configProject.portalCardCode, status: configProject.status })
     .from(configProject).where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId))).limit(1);
   return fenced(row, actor);
 }
@@ -166,15 +167,15 @@ export async function projectFileFor(tenantId: string, fileId: string, actor: Ac
  * One writer per status (spec §7's side table). Every handler that writes a project's inputs goes
  * through this first — configs.update/calculate/select/remove and their portal counterparts.
  *
- * An internal-only project (portalCompanyId null) keeps the old rule: editable until quoted.
+ * An internal-only project (portalCardCode null) keeps the old rule: editable until quoted.
  */
 export async function assertWritable(
   tenantId: string, projectId: string, actor: Actor, q: DbOrTx = db,
-): Promise<Pick<ConfigProject, "status" | "portalCompanyId">> {
-  const [row] = await q.select({ status: configProject.status, portalCompanyId: configProject.portalCompanyId })
+): Promise<Pick<ConfigProject, "status" | "portalCardCode">> {
+  const [row] = await q.select({ status: configProject.status, portalCardCode: configProject.portalCardCode })
     .from(configProject).where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId))).limit(1);
   const p = fenced(row, actor);
-  if (p.portalCompanyId === null) {
+  if (p.portalCardCode === null) {
     if (actor.side === "external") throw new ORPCError("NOT_FOUND");
     if (p.status === "quoted") throw new ORPCError("CONFLICT", { message: "Configuration is quoted and locked" });
     return p;
@@ -220,7 +221,7 @@ async function step(tx: Tx, o: Parameters<typeof transition>[0]) {
     .for("update");
   const row = fenced(locked, o.actor);
 
-  const internalOnly = row.portalCompanyId === null;
+  const internalOnly = row.portalCardCode === null;
   const from: readonly ProjectStatus[] = o.action === "quote" && internalOnly ? ["draft"] : t.from;
   if (!from.includes(row.status) || (internalOnly && o.action !== "quote")) {
     throw new ORPCError("CONFLICT", {

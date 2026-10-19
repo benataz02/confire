@@ -1,10 +1,10 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, eq, gt } from "drizzle-orm";
-import { db, portalCompany, portalCompanyDomain, portalInvitation, user, type PortalCardType } from "@confire/db";
+import { and, eq, gt, sql } from "drizzle-orm";
+import { db, invitation, portalCompany, portalCompanyDomain, user, type PortalCardType, type PortalRole } from "@confire/db";
 import { B1Error, readPages, rowsOf, type B1Transport } from "@confire/b1";
 import { portalSessionProcedure } from "./base.ts";
-import { addPortalMember, claimDomain, emailDomain, isFreeMail, seatOf } from "../members.ts";
+import { addPortalMember, claimDomain, emailDomain, isFreeMail, portalInvitationOf, seatOf } from "../members.ts";
 import { COUNTRY_FIELDS, formProblems, leadKey, leadPayload, onboardingSchema, onboardingSeed } from "../onboarding-form.ts";
 import { loadPortalSettings, tenantBrand } from "../settings.ts";
 import { notifyOnboarded } from "../../notify.ts";
@@ -27,15 +27,15 @@ const mask = (email: string) => `${email[0]}…${email.slice(email.lastIndexOf("
 async function openInvitationFor(tenantId: string, u: { email: string; emailVerified: boolean }, id: string) {
   const [inv] = await db
     .select({
-      id: portalInvitation.id, companyId: portalInvitation.companyId, email: portalInvitation.email,
-      role: portalInvitation.role, status: portalInvitation.status, expiresAt: portalInvitation.expiresAt,
-      registerDomain: portalInvitation.registerDomain, invitedBy: portalInvitation.invitedBy,
+      id: invitation.id, cardCode: invitation.cardCode, email: invitation.email,
+      role: sql<PortalRole>`${invitation.portalRole}`, status: invitation.status, expiresAt: invitation.expiresAt,
+      registerDomain: invitation.registerDomain, inviterId: invitation.inviterId,
       companyName: portalCompany.cardName, inviterName: user.name,
     })
-    .from(portalInvitation)
-    .leftJoin(portalCompany, eq(portalCompany.id, portalInvitation.companyId))
-    .leftJoin(user, eq(user.id, portalInvitation.invitedBy))
-    .where(and(eq(portalInvitation.id, id), eq(portalInvitation.tenantId, tenantId)))
+    .from(invitation)
+    .leftJoin(portalCompany, and(eq(portalCompany.tenantId, invitation.organizationId), eq(portalCompany.cardCode, invitation.cardCode)))
+    .leftJoin(user, eq(user.id, invitation.inviterId))
+    .where(and(eq(invitation.id, id), portalInvitationOf(tenantId)))
     .limit(1);
   if (!inv) throw new ORPCError("NOT_FOUND", { message: "This invitation doesn't exist on this portal" });
   if (inv.email.toLowerCase() !== u.email.toLowerCase()) {
@@ -52,10 +52,10 @@ type SessionCtx = { tenantId: string; user: { id: string; email: string; emailVe
 
 /** A new-client invitation its invitee may still act on (spec §5.4 step 1): everything
  *  openInvitationFor checks, the type, and no seat on this supplier yet. The §5.1 guard needs no
- *  second look: the address is the user's, and the pending index allows this invitation only. */
+ *  second look: the address is the user's, and sendInvitation keeps one open invitation per address. */
 async function newClientInvitation(c: SessionCtx, id: string) {
   const inv = await openInvitationFor(c.tenantId, c.user, id);
-  if (inv.companyId) throw new ORPCError("BAD_REQUEST", { message: "This invitation joins an existing company: accept it instead" });
+  if (inv.cardCode) throw new ORPCError("BAD_REQUEST", { message: "This invitation joins an existing company: accept it instead" });
   const seat = await seatOf(c.tenantId, c.user.id);
   if (seat) throw new ORPCError("CONFLICT", { message: `You already belong to ${seat.cardName} on this portal` });
   return inv;
@@ -91,8 +91,8 @@ export const onboardingRouter = {
     const inv = await openInvitationFor(context.tenantId, context.user, input.id);
     return {
       id: inv.id,
-      // companyId null = a new-client invitation: the onboarding form (P6), not a join.
-      type: inv.companyId ? ("existing" as const) : ("new" as const),
+      // cardCode null = a new-client invitation: the onboarding form (P6), not a join.
+      type: inv.cardCode ? ("existing" as const) : ("new" as const),
       companyName: inv.companyName,
       role: inv.role,
       inviterName: inv.inviterName,
@@ -104,16 +104,16 @@ export const onboardingRouter = {
    *  domain when the inviter asked for it — skipped for free mail or a domain another company has. */
   accept: portalSessionProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
     const inv = await openInvitationFor(context.tenantId, context.user, input.id);
-    const companyId = inv.companyId;
-    if (!companyId) throw new ORPCError("BAD_REQUEST", { message: "This invitation opens the new-client form: fill it in to join" });
+    const cardCode = inv.cardCode;
+    if (!cardCode) throw new ORPCError("BAD_REQUEST", { message: "This invitation opens the new-client form: fill it in to join" });
     await db.transaction(async (tx) => {
-      const done = await tx.update(portalInvitation).set({ status: "accepted" })
-        .where(and(eq(portalInvitation.id, inv.id), eq(portalInvitation.status, "pending"), gt(portalInvitation.expiresAt, new Date())))
-        .returning({ id: portalInvitation.id });
+      const done = await tx.update(invitation).set({ status: "accepted" })
+        .where(and(eq(invitation.id, inv.id), eq(invitation.status, "pending"), gt(invitation.expiresAt, new Date())))
+        .returning({ id: invitation.id });
       if (!done.length) throw new ORPCError("CONFLICT", { message: "This invitation has just been accepted or cancelled" });
-      await addPortalMember(tx, { tenantId: context.tenantId, companyId, userId: context.user.id, role: inv.role });
+      await addPortalMember(tx, { tenantId: context.tenantId, cardCode, userId: context.user.id, role: inv.role });
       if (inv.registerDomain) {
-        await claimDomain(tx, { tenantId: context.tenantId, companyId, domain: emailDomain(inv.email), addedBy: inv.invitedBy });
+        await claimDomain(tx, { tenantId: context.tenantId, cardCode, domain: emailDomain(inv.email), addedBy: inv.inviterId });
       }
     });
   }),
@@ -182,21 +182,20 @@ export const onboardingRouter = {
         cardType: (lead.CardType === "cCustomer" ? "cCustomer" : "cLid") as PortalCardType,
       };
       await db.transaction(async (tx) => {
-        const [company] = await tx.insert(portalCompany)
+        await tx.insert(portalCompany)
           .values({ tenantId: context.tenantId, cardCode, ...fresh })
-          .onConflictDoUpdate({ target: [portalCompany.tenantId, portalCompany.cardCode], set: fresh })
-          .returning({ id: portalCompany.id });
-        const done = await tx.update(portalInvitation).set({ status: "accepted", companyId: company!.id })
-          .where(and(eq(portalInvitation.id, inv.id), eq(portalInvitation.status, "pending")))
-          .returning({ id: portalInvitation.id });
+          .onConflictDoUpdate({ target: [portalCompany.tenantId, portalCompany.cardCode], set: fresh });
+        const done = await tx.update(invitation).set({ status: "accepted", cardCode })
+          .where(and(eq(invitation.id, inv.id), eq(invitation.status, "pending")))
+          .returning({ id: invitation.id });
         if (!done.length) throw new ORPCError("CONFLICT", { message: "This invitation has just been used or cancelled" });
-        await addPortalMember(tx, { tenantId: context.tenantId, companyId: company!.id, userId: context.user.id, role: "owner" });
+        await addPortalMember(tx, { tenantId: context.tenantId, cardCode, userId: context.user.id, role: "owner" });
         if (inv.registerDomain) {
-          await claimDomain(tx, { tenantId: context.tenantId, companyId: company!.id, domain: emailDomain(inv.email), addedBy: inv.invitedBy });
+          await claimDomain(tx, { tenantId: context.tenantId, cardCode, domain: emailDomain(inv.email), addedBy: inv.inviterId });
         }
       });
       notifyOnboarded({
-        tenantId: context.tenantId, invitationId: inv.id, inviterId: inv.invitedBy,
+        tenantId: context.tenantId, invitationId: inv.id, inviterId: inv.inviterId,
         client: { name: context.user.name, email: context.user.email }, cardCode, cardName: fresh.cardName,
       });
       return { cardCode, cardName: fresh.cardName };
@@ -210,14 +209,14 @@ export const onboardingRouter = {
     if (!context.user.emailVerified) return null;
     const domain = emailDomain(context.user.email);
     if (isFreeMail(domain)) return null;
-    const [hit] = await db.select({ companyId: portalCompany.id, cardName: portalCompany.cardName })
+    const [hit] = await db.select({ cardCode: portalCompany.cardCode, cardName: portalCompany.cardName })
       .from(portalCompanyDomain)
-      .innerJoin(portalCompany, eq(portalCompany.id, portalCompanyDomain.companyId))
+      .innerJoin(portalCompany, and(eq(portalCompany.tenantId, portalCompanyDomain.tenantId), eq(portalCompany.cardCode, portalCompanyDomain.cardCode)))
       .where(and(eq(portalCompanyDomain.tenantId, context.tenantId), eq(portalCompanyDomain.domain, domain)))
       .limit(1);
     if (!hit) return null;
     await db.transaction((tx) =>
-      addPortalMember(tx, { tenantId: context.tenantId, companyId: hit.companyId, userId: context.user.id, role: "viewer" }));
+      addPortalMember(tx, { tenantId: context.tenantId, cardCode: hit.cardCode, userId: context.user.id, role: "viewer" }));
     return { cardName: hit.cardName };
   }),
 };

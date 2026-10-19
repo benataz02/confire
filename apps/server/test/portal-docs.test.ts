@@ -119,7 +119,7 @@ async function clientSetup() {
   const portalB = { context: { headers: tenantHeaders(t.slug, ub.cookie) } };
   // A buyer of A's creates the project; the viewer above reads documents (any seat may).
   const buyer = await makePortalUser();
-  await insertSeat(t.tenantId, A.id, buyer.userId, "buyer");
+  await insertSeat(t.tenantId, A.cardCode, buyer.userId, "buyer");
   const [model] = await db.insert(configModel)
     .values({ tenantId: t.tenantId, name: TEST_MODEL.name, definition: TEST_MODEL, portal: true, portalPricing: "request" }).returning();
   const { id: projectId } = await call(portalRouter.projects.create, { modelId: model!.id, name: "Kabel 1" },
@@ -155,7 +155,7 @@ describe("portal documents", () => {
     const s = await clientSetup();
     const fake = { readEntitySet: async () => ({ status: 200, data: { value: [], "@odata.nextLink": "Quotations?$skip=20" } }) } as never;
     const { nextCursor } = await readRows(fake, fixtureSchema("Quotations"), "Quotations", { query: NO_QUERY, pageSize: 20 },
-      { tenantId: s.tenantId, key: `portal:${s.A.id}` });
+      { tenantId: s.tenantId, key: `portal:${s.A.cardCode}` });
     expect(nextCursor).toBeString();
     expect(await codeOf(call(portalRouter.docs.rows, { entity: "Quotations", query: NO_QUERY, cursor: nextCursor }, s.portalB))).toBe("BAD_REQUEST");
   });

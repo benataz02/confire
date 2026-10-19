@@ -20,7 +20,7 @@ person to the staff app or the portal by what they are.
 | T1 | Hosts | `app.<DOMAIN>` (staff app **and** sign-in) and `portal.<DOMAIN>` (customer portal). The apex only redirects to `app.<DOMAIN>/login`. Two processes stay (spec D1: customer traffic never shares an event loop with staff). |
 | T2 | Tenant | The **first path segment**: `app.<DOMAIN>/<slug>/…`, `portal.<DOMAIN>/<slug>/…`. The path decides; nothing else does. |
 | T3 | Session | `session.activeOrganizationId` **remembers** the last tenant a request was scoped to (each app's `me` writes it). The dispatcher lands a fresh `/login` there. It never decides a request's tenant, so two tabs on two suppliers both stay correct. |
-| T4 | Customer | A Better Auth `member` of the supplier's organization with role **`external`** and two extra fields: `companyId` (→ `portal_company`) and `portalRole` (`owner`/`buyer`/`viewer`). `portal_member` is gone. Staff keep `owner`/`admin`/`member`. |
+| T4 | Customer | A Better Auth `member` of the supplier's organization with role **`external`** and two extra fields: `cardCode` (→ `portal_company`, keyed (tenant, CardCode)) and `portalRole` (`owner`/`buyer`/`viewer`). `portal_member` is gone. Staff keep `owner`/`admin`/`member`. |
 | T5 | Memberships | Staff of one workspace at most, a customer of any number of suppliers. One place → straight there; several → the session's active one, else "Where to?". |
 | T6 | Sign-in host | `app.<DOMAIN>/login` (dev `http://localhost:5173/login`). |
 | T7 | Data | No production data existed: `db:push` drops `portal_member`, seeds are re-run. The leftover `member.role = "client"` handling (portal spec D23) is removed with it. |
@@ -46,9 +46,11 @@ person to the staff app or the portal by what they are.
 
 - `organization({ ac, roles: { owner, admin, member, external } })`: Better Auth's three roles
   unchanged, and `external` with no permission on any statement.
-- `schema.member.additionalFields`: `companyId`, `portalRole`, both `input: false`; regenerated into
-  `schema/auth.ts` by `bun run auth:generate`. `companyId` is text (Better Auth has no uuid type), so
-  the join casts and there is no FK; nothing deletes a company.
+- `schema.member.additionalFields`: `cardCode`, `portalRole`, both `input: false`; regenerated into
+  `schema/auth.ts` by `bun run auth:generate`. A company has no id: it is (organization, CardCode), so
+  every match carries the organization — a CardCode alone names a company at every tenant. No FK (the
+  generated schema cannot carry one); nothing deletes a company. `config_project.portalCardCode` is
+  the same key with the project's `tenantId`.
 - `organizationLimit` is a function counting **staff** rows only: a customer may still found their
   own workspace.
 - **The organization endpoints are off but `create` and `check-slug`** (`disabledPaths`, computed
@@ -58,16 +60,20 @@ person to the staff app or the portal by what they are.
   customer into staff. Confire's procedures write members (`portal/members.ts`) and the path picks the
   organization, so the browser needs neither. `auth.api.*` is unaffected (disabledPaths is the HTTP
   router's), which is why `beforeUpdateOrganization` keeps guarding the slug.
-- Invitations stay Confire's (`portal_invitation`): Better Auth's `acceptInvitation` creates the
-  member at once, but a new-client invitation (§5.3 of the portal spec) has no company until its form
-  is submitted, and D24's domain rule and `registerDomain` have no place there. Accept and submit end
-  in `addPortalMember`, which writes the member row in the same transaction as the invitation.
+- Invitations are Better Auth's `invitation` table (`portal_invitation` is gone): role `external`,
+  plus `cardCode` (null = a new client until its onboarding submit), `portalRole` and
+  `registerDomain`. An invitation joins the supplier's organization; it never creates one. Better
+  Auth's `acceptInvitation` stays off — verified on 1.7.7 it inserts `{organizationId, userId, role}`
+  only, before a new client has a company, and never checks an existing membership — so accept and
+  submit end in `addPortalMember`, in the same transaction as the invitation's status. `role` is never
+  a portal role: `owner` there would make Better Auth's accept create an organization owner. One open
+  invitation per address is a lock on the organization row, not an index.
 - One member row per (organization, user) is the exclusivity rule. The generated schema cannot carry a
   composite unique index, so `addPortalMember` locks the user row (`FOR UPDATE`) before it reads and
   writes: two concurrent joins run one after the other.
 - `baseURL` is passed (`authUrl`), not read from `BETTER_AUTH_URL`. The cookie is on `DOMAIN`
   (`crossSubDomainCookies.domain`), host-only on `localhost` in dev. `trustedOrigins` is the portal's
-  origin.
+  origin; `BETTER_AUTH_TRUSTED_ORIGINS` (read by Better Auth itself) adds a LAN IP in dev.
 
 ## 5. The dispatcher
 

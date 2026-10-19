@@ -68,7 +68,7 @@ async function whoFor(side: Side, c: Context): Promise<Who> {
   const seat = await seatOf(tenant.id, userId);
   if (!seat) throw new ORPCError("FORBIDDEN", { message: "Not a member of a company on this portal" });
   // Viewers read and comment; buyers and owners upload (§4.2).
-  return { tenantId: tenant.id, actor: { userId, side, companyId: seat.companyId }, canUpload: seat.role !== "viewer", isAdmin: false };
+  return { tenantId: tenant.id, actor: { userId, side, cardCode: seat.cardCode }, canUpload: seat.role !== "viewer", isAdmin: false };
 }
 
 const asciiName = (name: string) => name.replace(/[^\u0020-\u007e]|["\\]/g, "_");

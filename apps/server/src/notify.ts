@@ -47,12 +47,12 @@ type Person = { userId: string; email: string; name: string };
 
 /** The client's side (D27): `creator` is the project's creator, `buyers` adds every buyer and owner
  *  — as members of the company now. A viewer hears only of a project they created. */
-export async function clientRecipients(companyId: string, createdBy: string, mode: NotifyMode): Promise<Person[]> {
+export async function clientRecipients(tenantId: string, cardCode: string, createdBy: string, mode: NotifyMode): Promise<Person[]> {
   if (mode === "off") return [];
   const seats = await db
     .select({ userId: member.userId, email: user.email, name: user.name, role: member.portalRole })
     .from(member).innerJoin(user, eq(user.id, member.userId))
-    .where(and(eq(member.role, EXTERNAL_ROLE), eq(member.companyId, companyId)));
+    .where(and(eq(member.organizationId, tenantId), eq(member.role, EXTERNAL_ROLE), eq(member.cardCode, cardCode)));
   return seats
     .filter((s) => s.userId === createdBy || (mode === "buyers" && s.role !== "viewer"))
     .map(({ role: _role, ...p }) => p);
@@ -146,11 +146,12 @@ async function notifyEvent(tenantId: string, eventId: string, revisedId: string 
     .select({
       name: configProject.name, status: configProject.status, createdBy: configProject.createdBy,
       assigneeId: configProject.assigneeId, modelId: configProject.modelId,
-      companyId: portalCompany.id, cardCode: portalCompany.cardCode, cardName: portalCompany.cardName,
+      cardCode: portalCompany.cardCode, cardName: portalCompany.cardName,
       companyNotify: portalCompany.notify,
     })
-    .from(configProject).innerJoin(portalCompany, eq(portalCompany.id, configProject.portalCompanyId))
-    .where(eq(configProject.id, e.projectId))
+    .from(configProject)
+    .innerJoin(portalCompany, and(eq(portalCompany.tenantId, configProject.tenantId), eq(portalCompany.cardCode, configProject.portalCardCode)))
+    .where(and(eq(configProject.id, e.projectId), eq(configProject.tenantId, tenantId)))
     .limit(1);
   // No company: an internal-only configuration, with no client to tell. A client's draft is still
   // private (§10), so its comments and files reach no one at the supplier.
@@ -163,7 +164,7 @@ async function notifyEvent(tenantId: string, eventId: string, revisedId: string 
   let r: SendResult;
   if (toClient) {
     const mode = p.companyNotify?.[toClient] ?? settings.notify?.[toClient] ?? "buyers";
-    const to = await clientRecipients(p.companyId, p.createdBy, mode);
+    const to = await clientRecipients(tenantId, p.cardCode, p.createdBy, mode);
     if (!to.length) return;
     const q = e.kind === "quoted" ? (e.payload as { docNum: number | null; value: number }) : null;
     const currency = q ? await tenantCurrency(tenantId) : null;

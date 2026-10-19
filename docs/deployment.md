@@ -173,7 +173,6 @@ On the VPS:
 git clone <repo> confire && cd confire
 cat > .env <<'EOF'
 DOMAIN=confire.ai
-CADDY_TLS=acme
 BETTER_AUTH_SECRET=...            # openssl rand -base64 32
 RESEND_API_KEY=re_...
 # RESEND_ADMIN_KEY=re_...         # §4b, tenant sender domains

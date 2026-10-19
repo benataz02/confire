@@ -100,8 +100,9 @@ export const configProject = pgTable(
     customer: jsonb("customer").$type<ProjectCustomer>(),
     status: text("status").$type<ProjectStatus>().notNull().default("draft"),
     // The portal fence (spec §6): a client's project. Null = an internal-only configuration. Every
-    // portal read and write is fenced on it, and an internal read never sees one in `draft`.
-    portalCompanyId: uuid("portal_company_id"),
+    // portal read and write is fenced on it together with tenantId — a company is (tenant, CardCode) —
+    // and an internal read never sees one in `draft`.
+    portalCardCode: text("portal_card_code"),
     // Set by accept; the client sees the name. ponytail: no reassignment — add a "Reassign" action
     // when a sales team asks for one.
     assigneeId: text("assignee_id"),
@@ -136,7 +137,7 @@ export const configProject = pgTable(
   },
   (t) => [
     index("config_project_tenant_status_idx").on(t.tenantId, t.status),
-    index("config_project_portal_company_idx").on(t.portalCompanyId),
+    index("config_project_portal_company_idx").on(t.tenantId, t.portalCardCode),
   ],
 );
 

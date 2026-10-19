@@ -17,6 +17,10 @@ export default defineConfig({
     // checkouts of this repo run their own Vite there.
     port: 5180,
     strictPort: true,
+    // Every interface, so a phone on the LAN can open http://<lan-ip>:5180 — host.ts keeps that host
+    // for both origins; the server trusts it through BETTER_AUTH_TRUSTED_ORIGINS (auth.ts). IP hosts
+    // pass Vite's allowedHosts check by default.
+    host: true,
     proxy: {
       "/rpc": "http://localhost:3001",
       "/api": "http://localhost:3001",

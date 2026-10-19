@@ -110,9 +110,10 @@ async function projectPayload(tenantId: string, id: string) {
   const { project } = state;
   const model = await loadModel(tenantId, project.modelId);
   let request = null;
-  if (project.portalCompanyId !== null) {
+  if (project.portalCardCode !== null) {
     const [company] = await db.select({ cardCode: portalCompany.cardCode, cardName: portalCompany.cardName })
-      .from(portalCompany).where(eq(portalCompany.id, project.portalCompanyId)).limit(1);
+      .from(portalCompany)
+      .where(and(eq(portalCompany.tenantId, tenantId), eq(portalCompany.cardCode, project.portalCardCode))).limit(1);
     const [assignee] = project.assigneeId
       ? await db.select({ name: user.name }).from(user).where(eq(user.id, project.assigneeId)).limit(1)
       : [];
@@ -140,7 +141,7 @@ export const configsRouter = {
       .from(configProject)
       .innerJoin(configModel, eq(configModel.id, configProject.modelId))
       // The staff's own work list: a client's request lives in Requests (spec §10).
-      .where(and(eq(configProject.tenantId, context.tenantId), isNull(configProject.portalCompanyId)))
+      .where(and(eq(configProject.tenantId, context.tenantId), isNull(configProject.portalCardCode)))
       .orderBy(desc(configProject.updatedAt)),
   ),
 
@@ -158,7 +159,7 @@ export const configsRouter = {
       })
       .from(configProject)
       .innerJoin(configModel, eq(configModel.id, configProject.modelId))
-      .where(and(eq(configProject.tenantId, context.tenantId), isNull(configProject.portalCompanyId), where))
+      .where(and(eq(configProject.tenantId, context.tenantId), isNull(configProject.portalCardCode), where))
       // Newest first is the list's identity, not a default sort the user can lose; a saved view's
       // orderby goes in front of it. `id` last: OFFSET paging over a non-unique sort silently
       // duplicates and skips rows between pages, so the order has to be total.
@@ -252,7 +253,7 @@ export const configsRouter = {
     .handler(async ({ input, context }) => {
       const p = await assertWritable(context.tenantId, input.id, { userId: context.userId, side: "internal" });
       // The model was the client's pick and the customer is the company (spec §7).
-      if (p.portalCompanyId !== null && (input.modelId !== undefined || input.customer !== undefined))
+      if (p.portalCardCode !== null && (input.modelId !== undefined || input.customer !== undefined))
         throw new ORPCError("BAD_REQUEST", { message: "A request's model and customer are the client's" });
       const { id, ...rest } = input;
       const fields: Partial<typeof configProject.$inferInsert> = { ...rest, updatedAt: new Date() };
@@ -298,19 +299,19 @@ export const configsRouter = {
   // A client's request is declined, never deleted by staff: it is the client's record too.
   remove: userProcedure.input(z.object({ ids: z.array(z.uuid()).min(1) })).handler(async ({ input, context }) => {
     const locked = await db
-      .select({ status: configProject.status, portal: configProject.portalCompanyId })
+      .select({ status: configProject.status, portal: configProject.portalCardCode })
       .from(configProject)
       .where(and(
         inArray(configProject.id, input.ids),
         eq(configProject.tenantId, context.tenantId),
-        sql`(${configProject.status} = 'quoted' or ${isNotNull(configProject.portalCompanyId)})`,
+        sql`(${configProject.status} = 'quoted' or ${isNotNull(configProject.portalCardCode)})`,
       ))
       .limit(1);
     if (locked.length)
       throw new ORPCError("CONFLICT", {
         message: locked[0]!.portal ? "A client's request can't be deleted — decline it instead" : "Configuration is quoted and locked",
       });
-    await db.delete(configProject).where(and(inArray(configProject.id, input.ids), eq(configProject.tenantId, context.tenantId), isNull(configProject.portalCompanyId)));
+    await db.delete(configProject).where(and(inArray(configProject.id, input.ids), eq(configProject.tenantId, context.tenantId), isNull(configProject.portalCardCode)));
     return { ok: true };
   }),
 

@@ -47,16 +47,30 @@ const orgPlugin = organization({
     member: ac.newRole(memberAc.statements),
     // A supplier's customer (spec 2026-10-19-path-tenancy-design.md): a member of the supplier's
     // organization, refused by every internal procedure, with no permission on any org endpoint. Its
-    // seat is the two fields below: which portal_company it belongs to, and its role there.
+    // seat is the two fields below: its company's CardCode, and its role there.
     [EXTERNAL_ROLE]: ac.newRole({}),
   },
   schema: {
     member: {
       additionalFields: {
-        // portal_company.id as text: Better Auth has no uuid field type, so there is no FK either.
-        // Nothing deletes a company (§4.2), and portal/members.ts is the only writer of both fields.
-        companyId: { type: "string", required: false, input: false },
+        // The company's CardCode: a company is (organization, CardCode), so this row's organizationId
+        // completes the key — never match a CardCode without it. No FK: the generated schema cannot
+        // carry one, and nothing deletes a company (§4.2). portal/members.ts is the only writer.
+        cardCode: { type: "string", required: false, input: false },
         portalRole: { type: "string", required: false, input: false },
+      },
+    },
+    // A portal invitation is Better Auth's own row with role `external` and the seat it will become:
+    // cardCode (null = a new client, set by its onboarding submit) and portalRole. It
+    // joins the supplier's organization (organizationId) and never creates one. Never `owner` in
+    // `role`: Better Auth's acceptInvitation would make that an organization owner. Its accept is off
+    // anyway — it inserts the member bare, before a new client has a company, and never checks an
+    // existing membership — so portal/members.ts writes and accepts these rows (addPortalMember).
+    invitation: {
+      additionalFields: {
+        cardCode: { type: "string", required: false, input: false },
+        portalRole: { type: "string", required: false, input: false },
+        registerDomain: { type: "boolean", required: false, defaultValue: false, input: false },
       },
     },
   },
@@ -126,7 +140,10 @@ export const auth = betterAuth({
   // passes disableCookieCache so a future re-enable cannot paper over the tenant boundary.
   session: { cookieCache: { enabled: false } },
   // Sign-in lives on baseURL (trusted automatically), but the portal POSTs (sign-out) from its own
-  // origin, and a sign-in's callbackURL may be a portal page.
+  // origin, and a sign-in's callbackURL may be a portal page. Better Auth appends
+  // BETTER_AUTH_TRUSTED_ORIGINS (comma-separated) itself: dev from a phone on the LAN sets
+  // `http://<lan-ip>:5173,http://<lan-ip>:5180` there. Never set it in production — every entry is a
+  // valid sign-in origin and redirect target.
   trustedOrigins: [portalUrl],
   advanced: {
     // DOMAIN (`confire.ai`) is the parent of both hosts, so one session reaches the staff app and the

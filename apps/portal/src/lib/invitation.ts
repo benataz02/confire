@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { meQuery } from "../orpc.ts";
-import { authUrl, currentSlug, hardRedirect, loginUrl } from "./host.ts";
+import { authUrl, currentSlug, hardRedirect, loginUrl } from "@confire/ui/host.ts";
 
 /** beforeLoad of the two invitation pages (spec §5.2, §5.3): the link and the new-client form. Not
  *  under `_authed` — the invitee has no seat yet. Signed out, it goes to the sign-in host (login or

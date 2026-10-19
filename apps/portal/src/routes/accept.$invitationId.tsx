@@ -5,7 +5,7 @@ import { ROLE_HELP, ROLE_LABEL } from "@confire/ui/portal/CompanyPeople.tsx";
 import { authClient } from "../auth-client.ts";
 import { meQuery, orpc } from "../orpc.ts";
 import { PortalAuthLayout } from "../components/AuthChrome.tsx";
-import { hardRedirect, loginUrl } from "../lib/host.ts";
+import { hardRedirect, loginUrl } from "@confire/ui/host.ts";
 import { invitationGuard } from "../lib/invitation.ts";
 
 // The invitation link (spec §5.2): `portal.<domain>/<slug>/accept/<id>`. The server checks everything

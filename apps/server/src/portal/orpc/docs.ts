@@ -18,7 +18,7 @@ import { loadPortalSettings } from "../settings.ts";
 // document is read before anything of it is returned. The shapes mirror entities.* so the portal
 // plugs these into @confire/ui's source and the shells run unchanged.
 
-type Seat = { tenantId: string; companyId: string; cardCode: string };
+type Seat = { tenantId: string; cardCode: string };
 
 async function docSchema(tenantId: string, b1: B1Transport, entity: DocEntity) {
   const [schema, settings] = await Promise.all([
@@ -84,7 +84,7 @@ export const docsRouter = {
       const { b1 } = await tenantConnector(context.tenantId);
       const schema = await docSchema(context.tenantId, b1, input.entity);
       const page = await readRows(b1, schema, input.entity, { ...input, pageSize: DEFAULT_PAGE },
-        { tenantId: context.tenantId, key: `portal:${context.companyId}` },
+        { tenantId: context.tenantId, key: `portal:${context.cardCode}` },
         `CardCode eq '${escapeLiteral(context.cardCode)}'`);
       return { ...page, rows: page.rows.map((r) => projectRow(schema, r as Record<string, unknown>)) };
     }),
@@ -123,7 +123,7 @@ export const docsRouter = {
         eq(configProjectEvent.kind, "quoted"),
         inArray(sql<number>`(${configProjectEvent.payload}->>'docEntry')::int`, quotations),
         eq(configProject.tenantId, context.tenantId),
-        eq(configProject.portalCompanyId, context.companyId),
+        eq(configProject.portalCardCode, context.cardCode),
       ))
       .orderBy(desc(configProjectEvent.at))
       .limit(1);

@@ -7,31 +7,16 @@
 # The session cookie is on {$DOMAIN}, so every host under it receives it: never point a name under
 # {$DOMAIN} at a service this stack does not control.
 # ponytail: the apex only redirects until a marketing site exists; then serve that there instead.
-#
-# CADDY_TLS picks where certificates come from (compose defaults it to `internal`):
-#   internal    Caddy's local CA, for running the full stack on lvh.me.
-#   acme        Caddy's automatic HTTPS: one Let's Encrypt certificate per name, HTTP challenge on :80.
-(tls-internal) {
-	tls internal
-}
-
-(tls-acme) {
-	tls {
-		issuer acme
-	}
-}
+# Certificates are Caddy's automatic HTTPS: one per name, HTTP challenge on :80.
 
 app.{$DOMAIN} {
-	import tls-{$CADDY_TLS}
 	reverse_proxy server:3000
 }
 
 portal.{$DOMAIN} {
-	import tls-{$CADDY_TLS}
 	reverse_proxy portal:3001
 }
 
 {$DOMAIN} {
-	import tls-{$CADDY_TLS}
 	redir https://app.{$DOMAIN}/login
 }

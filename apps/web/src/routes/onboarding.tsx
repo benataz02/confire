@@ -5,14 +5,14 @@ import { Input, Button, MessageStrip, CheckBox } from "@ui5/webcomponents-react"
 import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { lobbyQuery, orpc } from "../orpc.ts";
-import { authUrl, hardRedirect, isReserved, onSignInHost, SLUG_RE, toSlug, tenantUrl } from "../lib/tenant.ts";
+import { authUrl, currentSlug, hardRedirect, isReserved, tenantUrl } from "@confire/ui/host.ts";
 import { copyInput, generateAgentSecret } from "../lib/agent-secret.ts";
 
 export const Route = createFileRoute("/onboarding")({
-  // On the sign-in host. A user with a company and an agent row belongs *in* the tenant;
+  // Outside any workspace. A user with a company and an agent row belongs *in* the tenant;
   // a company without sap_connection stays here on the agent step.
   beforeLoad: async ({ context }) => {
-    if (!onSignInHost()) return hardRedirect(authUrl("/onboarding"));
+    if (currentSlug()) return hardRedirect(authUrl("/onboarding"));
     const data = await context.queryClient.ensureQueryData(sessionQuery);
     if (!data?.session) throw redirect({ to: "/login" });
     const { workspace } = await context.queryClient.fetchQuery(lobbyQuery);
@@ -25,6 +25,10 @@ export const Route = createFileRoute("/onboarding")({
 
 const DEFAULT_AGENT_URL = "http://localhost:4000";
 const sanitizeSlug = (v: string) => v.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 31);
+/** Clean a company name into a slug candidate (no random suffix — it's the permanent URL). */
+const toSlug = (name: string) =>
+  name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 30);
+const SLUG_RE = /^[a-z][a-z0-9-]{1,30}$/;
 
 function Onboarding() {
   const { agentSetupSlug } = Route.useRouteContext();

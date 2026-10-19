@@ -46,12 +46,12 @@ export const requestsRouter = {
         assignee: user.name, quoteResponse: QUOTE_RESPONSE, updatedAt: configProject.updatedAt, _total: TOTAL,
       })
       .from(configProject)
-      .innerJoin(portalCompany, eq(portalCompany.id, configProject.portalCompanyId))
+      .innerJoin(portalCompany, and(eq(portalCompany.tenantId, configProject.tenantId), eq(portalCompany.cardCode, configProject.portalCardCode)))
       .innerJoin(configModel, eq(configModel.id, configProject.modelId))
       .leftJoin(user, eq(user.id, configProject.assigneeId))
       // A client's draft is private: a request shows from its first submit (spec §10).
       .where(and(
-        eq(configProject.tenantId, context.tenantId), isNotNull(configProject.portalCompanyId),
+        eq(configProject.tenantId, context.tenantId), isNotNull(configProject.portalCardCode),
         ne(configProject.status, "draft"), where,
       ))
       .orderBy(...orderBy, sql`${configProject.updatedAt} desc`, configProject.id)
