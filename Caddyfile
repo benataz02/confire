@@ -8,12 +8,16 @@
 # {$DOMAIN} at a service this stack does not control.
 # ponytail: the apex only redirects until a marketing site exists; then serve that there instead.
 # Certificates are Caddy's automatic HTTPS: one per name, HTTP challenge on :80.
+# `encode`: the SPA bundles are UI5-sized (the largest ~740 KB, ~250 KB gzipped) and Hono's
+# serveStatic sends them raw. Safe because nothing here streams (no SSE, no oRPC event iterators).
 
 app.{$DOMAIN} {
+	encode zstd gzip
 	reverse_proxy server:3000
 }
 
 portal.{$DOMAIN} {
+	encode zstd gzip
 	reverse_proxy portal:3001
 }
 

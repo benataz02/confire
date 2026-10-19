@@ -6,6 +6,7 @@
 #                                     portal.confire.ai, a workspace at /<slug>/ on each; one session
 #                                     cookie on confire.ai (apps/server/src/tenant.ts)
 #   BETTER_AUTH_SECRET=...            openssl rand -base64 32
+#   POSTGRES_PASSWORD=...             openssl rand -hex 32 (set before the volume is first created)
 #   RESEND_API_KEY=re_...             a sending_access key; unset = mail is printed to the server log
 # DNS: A records for app and portal (and the apex, which redirects to sign-in). Every *.<DOMAIN>
 # host receives the session cookie: never point a name at a service you don't control.
@@ -16,9 +17,13 @@
 services:
   db:
     image: postgres:17
+    # A VPS reboot or a crash brings the stack back; `docker compose stop` still stops it.
+    restart: unless-stopped
     environment:
       POSTGRES_USER: confire
-      POSTGRES_PASSWORD: confire
+      # From .env in production (`openssl rand -hex 32`: hex, because it goes into DATABASE_URL below
+      # unescaped). Read once, when the volume is first initialised — changing it later needs ALTER USER.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-confire}
       POSTGRES_DB: confire
     # Loopback only: the dev server reaches it on localhost, the prod server over the compose network.
     ports:
@@ -36,8 +41,9 @@ services:
     build:
       context: .
       dockerfile: apps/server/Dockerfile
+    restart: unless-stopped
     environment: &app-env
-      DATABASE_URL: postgres://confire:confire@db:5432/confire
+      DATABASE_URL: postgres://confire:${POSTGRES_PASSWORD:-confire}@db:5432/confire
       # Fail fast: a placeholder here would sign cookies AND (crypto.ts) encrypt SAP secrets with a
       # string that is in git. Better Auth only rejects its own default secret.
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET (openssl rand -base64 32)}
@@ -74,6 +80,7 @@ services:
 
   caddy:
     image: caddy:2
+    restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:-}
     ports:

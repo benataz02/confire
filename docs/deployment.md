@@ -174,6 +174,7 @@ git clone <repo> confire && cd confire
 cat > .env <<'EOF'
 DOMAIN=confire.ai
 BETTER_AUTH_SECRET=...            # openssl rand -base64 32
+POSTGRES_PASSWORD=...             # openssl rand -hex 32 — before the first `up -d db`: read once, at volume init
 RESEND_API_KEY=re_...
 # RESEND_ADMIN_KEY=re_...         # §4b, tenant sender domains
 # GOOGLE_CLIENT_ID= / GOOGLE_CLIENT_SECRET=
@@ -230,18 +231,15 @@ There is a few seconds' downtime while the two containers restart; Caddy holds c
 - [ ] Resend: `mail.<domain>` verified in the right region, sending key created
 - [ ] DMARC record on the apex
 - [ ] OAuth redirect URIs (+ `xms_edov` for Microsoft), if used
-- [ ] `.env` written, `chmod 600`, backed up with `BETTER_AUTH_SECRET`
+- [ ] `.env` written (incl. `POSTGRES_PASSWORD`), `chmod 600`, backed up with `BETTER_AUTH_SECRET`
 - [ ] Schema pushed, stack up, three certs issued
 - [ ] Sign-up mail arrives (check spam score at mail-tester.com)
 - [ ] Nightly `pg_dump` shipped off-box; one restore tested
 - [ ] Per customer: tunnel + Access service token + agent installed + SAP connection set
 
-## Known gaps in the deploy files
+## Notes on the deploy files
 
-Worth fixing before a real launch:
-
-1. **Postgres password is `confire`, hard-coded** in `docker-compose.yml`. The database is reachable
-   only on loopback and the compose network, but read it from `.env` (`POSTGRES_PASSWORD` and
-   `DATABASE_URL`) anyway.
-2. The root `db:push` script reads `../../.env`, which the image does not contain (`.dockerignore`), so
-   call `drizzle-kit` directly in the container, as above.
+- `POSTGRES_PASSWORD` unset falls back to `confire` (so the dev `up -d db` needs no `.env`). The
+  database is reachable only on loopback and the compose network, but set it in production anyway.
+- The root `db:push` script reads `../../.env`, which the image does not contain (`.dockerignore`), so
+  call `drizzle-kit` directly in the container, as above.
