@@ -1,0 +1,134 @@
+# Every PR and every push to main runs the checks; a push to main then builds the image, pushes it to
+# GHCR and deploys it to the VPS over SSH (docs/deployment.md §8). The VPS never builds.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# main runs one after another, so an older commit can never deploy over a newer one; a PR's newer
+# push cancels its older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    services:
+      db:
+        image: postgres:17
+        env:
+          POSTGRES_USER: confire
+          POSTGRES_PASSWORD: confire
+          POSTGRES_DB: confire
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U confire" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgres://confire:confire@localhost:5432/confire
+      # The server tests encrypt SAP secrets with it (crypto.ts); any value does here.
+      BETTER_AUTH_SECRET: ci-only-not-a-secret-0123456789abcdef
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2 # within the Dockerfile's oven/bun:1.4
+      - run: bun install --frozen-lockfile
+      # The builds also regenerate routeTree.gen.ts (gitignored), which the web and portal typechecks need.
+      - run: bun run build:web && bun run build:portal
+      # Per project, because there is no root tsconfig (CLAUDE.md).
+      - name: Typecheck
+        run: |
+          for p in packages/b1 packages/config-engine packages/db packages/ui apps/agent apps/server apps/web apps/portal; do
+            echo "== $p"
+            bunx tsc -p "$p/tsconfig.json" --noEmit
+          done
+      - run: bun --cwd packages/db drizzle-kit push
+      - run: bun run test:engine
+      - run: bun run test:ui
+      - run: bun run test:web
+      - run: bun run test:server
+
+  image:
+    needs: check
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.ref.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+      # GHCR names must be lowercase; a repository's need not be. Tagged by commit, so a rollback is a re-run.
+      - id: ref
+        run: |
+          repo=${GITHUB_REPOSITORY,,}
+          echo "image=ghcr.io/$repo:$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "package=${repo#*/}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          push: true
+          tags: ${{ steps.ref.outputs.image }}
+          # Links the package to this repository, which is what lets the deploy job's token pull it.
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          # One plain manifest per push (no attestation index), so a package version is one image and
+          # the cleanup below can never delete a part of one that is kept.
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # GHCR keeps every push; the last 20 are what a rollback re-runs. Never blocks the deploy.
+      - uses: actions/delete-package-versions@v5
+        continue-on-error: true
+        with:
+          package-name: ${{ steps.ref.outputs.package }}
+          package-type: container
+          min-versions-to-keep: 20
+
+  deploy:
+    needs: image
+    runs-on: ubuntu-24.04
+    # Repository secrets, not an environment's: a private repository on GitHub Free has no environments.
+    # ponytail: on Pro/Team, move them to an environment `production` limited to main and add
+    # `environment: production` here.
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: SSH setup
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        # The host key is pinned (DEPLOY_KNOWN_HOSTS), never accepted on first sight.
+        run: |
+          install -m 700 -d ~/.ssh
+          install -m 600 /dev/null ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf 'Host vps\n  HostName %s\n  User deploy\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$HOST" > ~/.ssh/config
+      - name: Deploy
+        env:
+          IMAGE: ${{ needs.image.outputs.image }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        # The registry login is this job's own token: it expires with the job, so the box keeps no credential.
+        run: |
+          echo "$TOKEN" | ssh vps "docker login ghcr.io -u $ACTOR --password-stdin"
+          ssh vps "cd ~/confire && git fetch -q origin && git checkout -q -f --detach $GITHUB_SHA && bash scripts/deploy.sh $IMAGE"
+      - if: always()
+        run: ssh vps "docker logout ghcr.io" || true

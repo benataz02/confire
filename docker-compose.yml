@@ -1,5 +1,6 @@
 # Dev:  docker compose up -d db          (just Postgres; run server/web with bun)
 # Prod: docker compose --profile full up  (Postgres + both processes + Caddy)
+#       A push to main deploys it: CI builds the image, scripts/deploy.sh runs it (docs/deployment.md §8).
 #
 # A real domain is .env only, no code change and no rebuild:
 #   DOMAIN=confire.ai                 staff app and sign-in on app.confire.ai, the customer portal on
@@ -37,7 +38,8 @@ services:
       retries: 10
 
   server: &app
-    image: confire-app
+    # The build CI pushed to GHCR, pinned in .env by scripts/deploy.sh; unset = a local `build`.
+    image: ${CONFIRE_IMAGE:-confire-app}
     build:
       context: .
       dockerfile: apps/server/Dockerfile

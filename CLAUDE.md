@@ -35,6 +35,10 @@ bun --cwd apps/portal build             # same, for the portal's route tree
 Note `apps/server/tsconfig.json` also includes `../../scripts`, so the seed/migration/e2e scripts
 are checked there rather than in a project of their own.
 
+CI (`.github/workflows/ci.yml`) runs exactly these — both builds, all eight typechecks, the four test
+suites on Postgres 17 — on every PR; a push to `main` then builds the image to GHCR and deploys it over
+SSH with `scripts/deploy.sh` (`docs/deployment.md` §8).
+
 ## The processes
 
 ```
