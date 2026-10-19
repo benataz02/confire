@@ -170,7 +170,9 @@ The agent never needs an inbound firewall hole: `cloudflared` dials out.
 On the VPS:
 
 ```bash
-git clone <repo> confire && cd confire
+# A private repo: a read-only deploy key (GitHub → repo → Settings → Deploy keys, write access off).
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 && cat ~/.ssh/id_ed25519.pub
+git clone git@github.com:<owner>/confire.git confire && cd confire
 cat > .env <<'EOF'
 DOMAIN=confire.ai
 BETTER_AUTH_SECRET=...            # openssl rand -base64 32
