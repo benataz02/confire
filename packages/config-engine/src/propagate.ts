@@ -103,7 +103,8 @@ export type Propagation = {
   /** `mandatory`, or `requiredWhen` holds — and visible: a hidden field is never required */
   required: Record<string, boolean>;
   domains: Record<string, DomainOption[]>;
-  conflicts: { message: string; path: string }[];
+  /** `params`: the parameters a conflict involves — the fields the form marks inline */
+  conflicts: { message: string; path: string; params: string[] }[];
   open: string[];
   candidateEstimate: number;
 };
@@ -126,6 +127,7 @@ export function propagate(
     else if (p.key in lookups.domains) domains[p.key] = [];
   }
   const isBound = (k: string) => k in b.values;
+  const paramKeys = new Set(model.parameters.map((p) => p.key));
   /** evaluate expr with a candidate binding merged in; recomputes defaults/computed */
   const evalWith = (src: string, extra: Entries): Val => {
     const v = bindings(model, lookups, { ...entries, ...extra }, tableRows).values;
@@ -140,6 +142,10 @@ export function propagate(
         o.eliminatedBy = by;
         changed = true;
       }
+    };
+    // b.values never changes between passes, so every pass finds the same conflicts: keep the first's.
+    const conflict = (message: string, path: string, params: string[]) => {
+      if (iter === 0) conflicts.push({ message, path, params });
     };
 
     model.constraints.forEach((c, ci) => {
@@ -163,7 +169,7 @@ export function propagate(
             }
           }
           if (allBound && c.rows.length > 0 && !c.rows.some((row) => c.params.every((k, i) => b.values[k] === row[i])))
-            conflicts.push({ message: by + " violated", path: `constraints[${ci}]` });
+            conflict(by + " violated", `constraints[${ci}]`, c.params);
         } else if (unbound.length === 1) {
           const k = unbound[0]!;
           const i = c.params.indexOf(k);
@@ -173,12 +179,14 @@ export function propagate(
           }
         } else if (allBound) {
           if (c.rows.some((row) => c.params.every((k, i) => b.values[k] === row[i])))
-            conflicts.push({ message: by + " violated", path: `constraints[${ci}]` });
+            conflict(by + " violated", `constraints[${ci}]`, c.params);
         }
         return;
       }
 
-      // expr constraint
+      // expr constraint. checkModel refuses a blank message, but a model saved before it did still
+      // has to say something — and an empty eliminatedBy is falsy, so it would not even eliminate.
+      const msg = c.message.trim() || `Rule violated: ${c.assert}`;
       if (c.when !== undefined) {
         try {
           if (evaluate(c.when, { vars: b.values, tables: lookups.tables }) !== true) return;
@@ -210,7 +218,7 @@ export function propagate(
       if (unbound.length === 0) {
         try {
           if (evaluate(c.assert, { vars: b.values, tables: lookups.tables }) === false)
-            conflicts.push({ message: c.message, path: `constraints[${ci}]` });
+            conflict(msg, `constraints[${ci}]`, refNames.filter((k) => paramKeys.has(k)));
         } catch {
           /* references something unbound & domainless -> not decidable */
         }
@@ -220,7 +228,7 @@ export function propagate(
         const k = unbound[0]!;
         for (const o of live(domains[k]!)) {
           try {
-            if (evalWith(c.assert, { [k]: o.value }) === false) kill(k, o.value, c.message);
+            if (evalWith(c.assert, { [k]: o.value }) === false) kill(k, o.value, msg);
           } catch {
             // undecidable for this value (other unbound refs) -> keep it;
             // only provably inconsistent values are eliminated
@@ -238,8 +246,8 @@ export function propagate(
               return true; // undecidable counts as support (conservative)
             }
           });
-        for (const o of live(domains[p1]!)) if (!support(p1, o.value, p2)) kill(p1, o.value, c.message);
-        for (const o of live(domains[p2]!)) if (!support(p2, o.value, p1)) kill(p2, o.value, c.message);
+        for (const o of live(domains[p1]!)) if (!support(p1, o.value, p2)) kill(p1, o.value, msg);
+        for (const o of live(domains[p2]!)) if (!support(p2, o.value, p1)) kill(p2, o.value, msg);
       }
       // ponytail: >2 unbound refs not propagated (validated once bound); full GAC if real models demand it
     });
@@ -252,7 +260,7 @@ export function propagate(
     .map((p) => p.key);
   for (const k of open) {
     if (live(domains[k]!).length === 0)
-      conflicts.push({ message: `no valid values remain for '${k}'`, path: `parameters.${k}` });
+      conflicts.push({ message: `no valid values remain for '${k}'`, path: `parameters.${k}`, params: [k] });
   }
   const candidateEstimate = open.reduce((acc, k) => acc * live(domains[k]!).length, 1);
   // Once, here, not in bindings(): evalWith reruns bindings per option. A requiredWhen that cannot

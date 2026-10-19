@@ -394,13 +394,13 @@ export async function createQuote(
   });
 
   const now = new Date();
-  await db.transaction((tx) => transition(tx, {
+  await transition({
     tenantId, projectId: project.id, action: "quote", actor,
     payload: (row) => ({ docEntry: posted.docEntry, docNum: posted.docNum, value: totals.value, mode: posted.mode, inputs: inputsOf(row) }),
     set: {
       b1DocEntry: posted.docEntry, quotedAt: now,
       quotedValue: totals.value.toFixed(4), quotedCost: totals.cost.toFixed(4),
     },
-  }));
+  });
   return posted;
 }

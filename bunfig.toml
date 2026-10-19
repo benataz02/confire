@@ -1,0 +1,4 @@
+[test]
+# Tests never send mail (spec P7): the preload drops the Resend keys before any module reads them,
+# so the mailer falls back to the console and tests read devOutbox.
+preload = ["./scripts/test-preload.ts"]

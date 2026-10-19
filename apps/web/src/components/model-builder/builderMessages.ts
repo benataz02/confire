@@ -46,7 +46,7 @@ export function anchorOf(path: string, draft: ModelDef): string | undefined {
     return key ? tableRow(draft, key) : undefined;
   }
   // A constraint's `params[j]`/`rows[j]` have no field of their own; its condition is the row.
-  const c = /^constraints\[(\d+)\](?:\.(when|assert))?/.exec(path);
+  const c = /^constraints\[(\d+)\](?:\.(when|assert|message))?/.exec(path);
   if (c) return expr(`constraints[${c[1]}].${c[2] ?? "when"}`);
   if (path === "pricing.priceExpr" || /^(computed|bom|routing)\[\d+\]\.\w+$/.test(path)) return expr(path);
   if (path === "pricing.priceList") return '[id="field-pricing.priceList"]';

@@ -110,10 +110,10 @@ async function submit(c: Seat, id: string, action: Extract<Action, "submit" | "r
   if (gaps.length) throw new ORPCError("BAD_REQUEST", { message: `Before submitting: ${gaps.join("; ")}` });
   if (!p?.calculatedAt) throw new ORPCError("BAD_REQUEST", { message: "The configuration is still calculating — try again in a moment" });
   const indicative = pl.model.portalPricing === "indicative";
-  await db.transaction((tx) => transition(tx, {
+  await transition({
     tenantId: c.tenantId, projectId: id, action, actor: actorOf(c), expectCalculatedAt: p.calculatedAt!,
     payload: (row) => ({ inputs: inputsOf(row), ...(indicative ? { prices: toPortalPrices(row.candidates, row.batches) } : {}) }),
-  }));
+  });
   return payload(c, id);
 }
 
@@ -232,7 +232,7 @@ export const projectsRouter = {
   resubmit: portalBuyerProcedure.input(IdZ).handler(({ input, context }) => submit(context, input.id, "resubmit")),
 
   withdraw: portalBuyerProcedure.input(IdZ).handler(async ({ input, context }) => {
-    await db.transaction((tx) => transition(tx, { tenantId: context.tenantId, projectId: input.id, action: "withdraw", actor: actorOf(context) }));
+    await transition({ tenantId: context.tenantId, projectId: input.id, action: "withdraw", actor: actorOf(context) });
     return payload(context, input.id);
   }),
 
@@ -241,10 +241,10 @@ export const projectsRouter = {
   respondQuote: portalBuyerProcedure
     .input(z.object({ id: z.uuid(), accept: z.boolean(), note: z.string().trim().max(2000).optional() }))
     .handler(async ({ input, context }) => {
-      await db.transaction((tx) => transition(tx, {
+      await transition({
         tenantId: context.tenantId, projectId: input.id, action: input.accept ? "quoteAccept" : "quoteDecline",
         actor: actorOf(context), note: input.note,
-      }));
+      });
       return payload(context, input.id);
     }),
 

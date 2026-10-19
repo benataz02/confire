@@ -6,7 +6,8 @@ import { B1Error, readPages, rowsOf, type B1Transport } from "@confire/b1";
 import { portalSessionProcedure } from "./base.ts";
 import { addPortalMember, claimDomain, emailDomain, isFreeMail, seatOf } from "../members.ts";
 import { COUNTRY_FIELDS, formProblems, leadKey, leadPayload, onboardingSchema, onboardingSeed } from "../onboarding-form.ts";
-import { loadPortalSettings } from "../settings.ts";
+import { loadPortalSettings, tenantBrand } from "../settings.ts";
+import { notifyOnboarded } from "../../notify.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
 import { entitySchema, toConstraints } from "../../entity-meta.ts";
 import { bad } from "../../entity-read.ts";
@@ -78,6 +79,12 @@ async function loadForm(tenantId: string) {
   return { b1, bp, settings, countries: list, form: onboardingSchema(bp, settings.onboarding?.extraFields) };
 }
 
+/** The supplier as its portal shows it (D20): branding over the organization's name and logo. */
+export async function brandOf(tenantId: string) {
+  const { slug, brand } = await tenantBrand(tenantId);
+  return { slug, name: brand.name, logo: brand.logoUrl ?? null, accent: brand.accent ?? null };
+}
+
 export const onboardingRouter = {
   /** The accept page: what joining means — whose portal, which company, which role, from whom. */
   invitation: portalSessionProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
@@ -89,7 +96,7 @@ export const onboardingRouter = {
       companyName: inv.companyName,
       role: inv.role,
       inviterName: inv.inviterName,
-      tenant: { name: context.tenant.name, slug: context.tenant.slug, logo: context.tenant.logo },
+      tenant: await brandOf(context.tenantId),
     };
   }),
 
@@ -188,8 +195,10 @@ export const onboardingRouter = {
           await claimDomain(tx, { tenantId: context.tenantId, companyId: company!.id, domain: emailDomain(inv.email), addedBy: inv.invitedBy });
         }
       });
-      // ponytail: no "new client onboarded" mail to the inviter yet (§5.4 step 6, §12) — P7 adds it
-      // with the rest of the notification routing.
+      notifyOnboarded({
+        tenantId: context.tenantId, invitationId: inv.id, inviterId: inv.invitedBy,
+        client: { name: context.user.name, email: context.user.email }, cardCode, cardName: fresh.cardName,
+      });
       return { cardCode, cardName: fresh.cardName };
     }),
 

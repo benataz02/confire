@@ -3,9 +3,10 @@ import { and, asc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import {
   db, member, organization, portalCompany, portalCompanyDomain, portalInvitation, portalMember, user, type PortalRole,
 } from "@confire/db";
-import { sendMailInBackground } from "../mail/mailer.ts";
 import { invitationMail } from "../mail/portal-mail.tsx";
 import { portalTenantUrl } from "../tenant.ts";
+import { sendClientMail } from "./sender-domain.ts";
+import { tenantBrand } from "./settings.ts";
 
 // The customer portal's write rules (spec §4.2, §5.1): seats, registered domains and invitations.
 // Both processes import this module — the internal app (an admin inviting from a BP, editing a
@@ -185,11 +186,10 @@ export async function sendInvitation(i: {
   inviter: { id: string; name: string; email: string };
 }): Promise<{ id: string; expiresAt: Date }> {
   const email = i.email.trim().toLowerCase();
-  const [tenant] = await db.select({ slug: organization.slug, name: organization.name, logo: organization.logo })
-    .from(organization).where(eq(organization.id, i.tenantId));
+  const { slug, brand, settings } = await tenantBrand(i.tenantId);
   const [company] = i.companyId === null ? [null] : await db.select({ cardName: portalCompany.cardName }).from(portalCompany)
     .where(and(eq(portalCompany.id, i.companyId), eq(portalCompany.tenantId, i.tenantId)));
-  if (!tenant || company === undefined) throw new ORPCError("NOT_FOUND", { message: "No such company on this portal" });
+  if (company === undefined) throw new ORPCError("NOT_FOUND", { message: "No such company on this portal" });
   await inviteGuard(i.tenantId, i.companyId, email);
 
   const expiresAt = new Date(Date.now() + INVITATION_DAYS * 86_400_000);
@@ -213,10 +213,14 @@ export async function sendInvitation(i: {
     throw new ORPCError("CONFLICT", { message: `${email} already has an open invitation${to}: cancel it to send a new one` });
   }
 
-  sendMailInBackground(invitationMail({
-    id, to: email, inviterEmail: i.inviter.email, inviterName: i.inviter.name, companyName: company?.cardName ?? null,
-    brand: { name: tenant.name, logoUrl: tenant.logo }, url: portalTenantUrl(tenant.slug, `/accept/${id}`), expiresAt,
-  }));
+  // Client-facing (D29): from the tenant's own domain when it has one; off the request path.
+  const mail = invitationMail({
+    id, to: email, replyTo: settings.replyTo || i.inviter.email, inviterName: i.inviter.name,
+    companyName: company?.cardName ?? null, brand, url: portalTenantUrl(slug, `/accept/${id}`), expiresAt,
+  });
+  void sendClientMail(settings, i.tenantId, [mail], `invite/${id}`).then((r) => {
+    if (r.error) console.error(`[mail] invitation ${id} -> ${email} failed: ${r.error}`);
+  });
   return { id, expiresAt };
 }
 

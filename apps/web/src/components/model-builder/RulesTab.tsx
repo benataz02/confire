@@ -66,10 +66,16 @@ export function RulesTab({ draft, update, issues, lookups, tables = [] }: {
         issue={issueFor(issues, `constraints[${i}].assert`)} placeholder='e.g. coating != "none" || material == "steel"'
         onChange={(v) => setC(i, { ...c, assert: v ?? "" })} />
     ),
-    message: ({ c, i }) => (
-      <Input style={{ width: "100%" }} value={c.message} placeholder="Shown when violated"
-        onInput={(e) => setC(i, { ...c, message: e.target.value })} />
-    ),
+    message: ({ c, i }) => {
+      const issue = issueFor(issues, `constraints[${i}].message`);
+      // The `expr-` id is builderMessages' anchor convention for a rule's cells, not a claim about the input.
+      return (
+        <Input id={`expr-constraints[${i}].message`} style={{ width: "100%" }} value={c.message}
+          placeholder="Shown when violated" required
+          valueState={issue ? "Negative" : "None"} valueStateMessage={issue ? <div>{issue.message}</div> : undefined}
+          onInput={(e) => setC(i, { ...c, message: e.target.value })} />
+      );
+    },
   });
 
   const tableGrid = useEditGrid(tablesC, TABLE_COLUMNS, {

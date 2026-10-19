@@ -150,6 +150,9 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
     if (c.kind === "expr") {
       checkExpr(c.when, `constraints[${i}].when`, base);
       checkExpr(c.assert, `constraints[${i}].assert`, base);
+      // The message is all the user is told when the rule bites — inline and in the message list.
+      if (!c.message.trim())
+        issues.push({ path: `constraints[${i}].message`, message: "Say what the user is told when this rule is broken" });
     } else {
       c.params.forEach((pk, j) => {
         const p = model.parameters.find((x) => x.key === pk);

@@ -24,6 +24,7 @@ export default defineConfig({
       // resolves the tenant from it — apps/server/src/portal/orpc/base.ts.
       "/rpc": { target: "http://localhost:3001", changeOrigin: false },
       "/api": { target: "http://localhost:3001", changeOrigin: false },
+      "/files": { target: "http://localhost:3001", changeOrigin: false },
     },
   },
 });

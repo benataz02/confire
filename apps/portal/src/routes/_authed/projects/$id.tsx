@@ -13,6 +13,7 @@ import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { money } from "@confire/ui/money.ts";
+import { uploadFile } from "@confire/ui/files.ts";
 import { client, meQuery, orpc, type Me } from "../../../orpc.ts";
 
 // One project (spec §9): the configuration, its prices, its timeline. The engine runs on the server
@@ -282,6 +283,8 @@ function ProjectPage({ id }: { id: string }) {
           loading={timeline.isPending} error={timeline.error as Error | null}
           documents={documents.data} documentsError={documents.error as Error | null}
           onComment={(note) => comment.mutateAsync({ projectId: id, note })}
+          // Buyers and owners attach files; viewers read and comment (§4.2).
+          onUpload={buyer ? (file) => uploadFile(id, file).then(() => qc.invalidateQueries({ queryKey: timelineKey })) : undefined}
           onOpenDocument={(entity, key) => void navigate({ to: "/docs/$entity/$key", params: { entity, key: String(key) } })}
           canPreview />
       </ObjectPageSection>

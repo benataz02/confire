@@ -109,6 +109,14 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     accessibleMode: readOnly ? "Display" : "Edit",
     itemSpacing: readOnly ? "Large" : "Normal",
   } as const;
+  // Every rule a parameter is part of and currently breaks — the same conflicts the page's message
+  // list shows, so the field and the list cannot disagree. A rule over two fields marks both: either
+  // side can be the one the user changes to fix it.
+  const broken = useMemo(() => {
+    const m: Record<string, string[]> = {};
+    for (const c of prop.conflicts) for (const k of c.params) (m[k] ??= []).push(c.message);
+    return m;
+  }, [prop.conflicts]);
 
   const set = (key: string, v: Val | undefined) => {
     if (v === undefined) {
@@ -133,19 +141,25 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     // painting every radio in a group negative would read as "these options are wrong".
     // prop.required, not p.mandatory: it also holds requiredWhen — what missingInputs gates on.
     const req = !!prop.required[key];
+    // A broken rule outranks an empty mandatory field: it is wrong now, not merely unfinished.
+    const rule = broken[key];
+    const ruleState = rule ? "Negative" : "None";
+    const ruleMessage = rule ? <div>{rule.join(" · ")}</div> : undefined;
     const reqProps = {
       required: req,
-      valueState: req && (v === undefined || v === null || v === "") ? "Negative" : "None",
+      valueState: rule || (req && (v === undefined || v === null || v === "")) ? "Negative" : "None",
       // UI5's default message is "Invalid entry", which is the wrong complaint: nothing was
       // entered. Name the field instead — the popup can sit over a field scrolled away from its label.
-      valueStateMessage: <div>{`${p.label || p.key} has to be answered before this configuration can be quoted.`}</div>,
+      valueStateMessage: ruleMessage ?? <div>{`${p.label || p.key} has to be answered before this configuration can be quoted.`}</div>,
     } as const;
 
     if (p.ui === "radio")
       return (
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem 1rem" }}>
           {dom.map((o, i) => (
+            // Only the picked one goes red: it is the value that breaks the rule, not the group.
             <RadioButton key={i} name={`cfg-${key}`} text={o.label} checked={v === o.value}
+              valueState={v === o.value ? ruleState : "None"}
               disabled={disabled || !!o.eliminatedBy}
               // tooltip is a runtime ui5 prop the React typing omits (like Option's disabled).
               {...(o.eliminatedBy ? ({ tooltip: `Unavailable: ${o.eliminatedBy}` } as Record<string, unknown>) : {})}
@@ -158,7 +172,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       // a checkbox can only be toggled if flipping it isn't eliminated — that reason is also the tooltip.
       const blocked = dom.find((o) => o.value === (v !== true))?.eliminatedBy;
       return (
-        <CheckBox checked={v === true} disabled={disabled || !!blocked}
+        <CheckBox checked={v === true} disabled={disabled || !!blocked} valueState={ruleState}
           // tooltip is a runtime ui5 prop the React typing omits.
           {...(blocked ? ({ tooltip: `Unavailable: ${blocked}` } as Record<string, unknown>) : {})}
           onChange={(e) => set(key, e.target.checked)} />
@@ -184,6 +198,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       return (
         <StepInput value={typeof v === "number" ? v : undefined} min={r?.min} max={r?.max} step={r?.step ?? 1}
           style={{ width: "100%" }} disabled={disabled} required={req}
+          valueState={ruleState} valueStateMessage={ruleMessage}
           onChange={(e) => set(key, e.target.value ?? undefined)} />
       );
     }
@@ -196,6 +211,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       return (
         <CflField config={{ dialogConfig: cfl.masterdataQuery(querySource, ref, canonical, { title: p.label }) }}
           value={v ?? null} disabled={disabled} required={req} accessibleName={p.label}
+          error={rule?.join(" · ")}
           onValueChange={(nv) => set(key, nv === null || nv === "" ? undefined : (nv as Val))}
           onRowSelect={(row) => onQueryPick(key, ref.table, rowTable(row, canonical))} />
       );
@@ -320,6 +336,10 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
                 // MultiComboBox filters eliminated options out (no per-item disabled in UI5 v2), so
                 // unlike Select/Radio it can't show them greyed — explain the gap with a count instead.
                 const showEliminatedNote = !readOnly && !p.readonly && p.ui === "multicombo" && eliminated > 0;
+                // RadioButton and CheckBox take a valueState but have no valueStateMessage slot, so
+                // the broken rule's message is spelled out under them instead.
+                const ruleNote = !readOnly && !p.readonly && broken[k]
+                  && (p.ui === "radio" || p.ui === "checkbox" || (p.type === "boolean" && p.ui !== "select"));
                 return (
                   <FormItem key={k} labelContent={
                     // labelSpan is 12, so the label owns a full-width row above its control — its
@@ -349,6 +369,9 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
                           {eliminated} option{eliminated === 1 ? "" : "s"} unavailable due to rules
                         </Text>
                       ) : null}
+                      {ruleNote ? broken[k]!.map((m, i) => (
+                        <Text key={i} style={{ fontSize: "0.75rem", color: "var(--sapNegativeTextColor)" }}>{m}</Text>
+                      )) : null}
                     </div>
                   </FormItem>
                 );

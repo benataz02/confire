@@ -58,9 +58,18 @@ describe("propagate", () => {
     expect(p.domains.color!.find((o) => o.value === "red")!.eliminatedBy).toContain("combination table");
   });
 
-  test("fully bound violation becomes a conflict", () => {
+  test("fully bound violation becomes one conflict, naming the parameters it involves", () => {
     const p = propagate(model, lookups, { material: "alu", section: 25 });
-    expect(p.conflicts.some((c) => c.message === "25mm² not available in aluminium")).toBe(true);
+    expect(p.conflicts.filter((c) => c.path === "constraints[0]"))
+      .toEqual([{ message: "25mm² not available in aluminium", path: "constraints[0]", params: ["material", "section"] }]);
+  });
+
+  test("a rule saved without a message still says something, and still eliminates", () => {
+    const silent = { ...model, constraints: model.constraints.map((c) => (c.kind === "expr" ? { ...c, message: " " } : c)) };
+    const said = `Rule violated: ${(model.constraints[0] as { assert: string }).assert}`;
+    expect(propagate(silent, lookups, { material: "alu", section: 25 }).conflicts[0]!.message).toBe(said);
+    const s25 = propagate(silent, lookups, { material: "alu" }).domains.section!.find((o) => o.value === 25)!;
+    expect(s25.eliminatedBy).toBe(said);
   });
 
   test("open excludes bound, defaulted and hidden params", () => {

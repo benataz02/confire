@@ -1,6 +1,7 @@
 import { auth } from "../auth.ts";
 import { portalRouter } from "./orpc/router.ts";
 import { serve } from "../serve.ts";
+import { fileRoutes } from "../files.ts";
 
 // The customer portal's process (portal.<domain>, spec §3): its own event loop, so external traffic
 // never shares one with internal users. Same image as the internal server, a second CMD. It mounts
@@ -8,6 +9,7 @@ import { serve } from "../serve.ts";
 export default serve({
   auth,
   router: portalRouter,
+  files: fileRoutes("external"),
   spaDist: process.env.PORTAL_DIST ?? "../portal/dist",
   port: Number(process.env.PORTAL_PORT ?? 3001),
 });

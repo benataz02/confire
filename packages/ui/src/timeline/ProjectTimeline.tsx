@@ -1,15 +1,17 @@
 import { useMemo, useState } from "react";
 import {
-  Button, CheckBox, IllustratedMessage, Link, MessageStrip, ObjectStatus, Tag, Text, TextArea, Timeline, TimelineItem,
+  Button, CheckBox, FileUploader, IllustratedMessage, Link, MessageStrip, ObjectStatus, Tag, Text, TextArea, Timeline,
+  TimelineItem,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoActivities.js";
 import { money } from "../money.ts";
 import { PrintActions } from "../PrintActions.tsx";
+import { FILE_MAX_MB, fileSize, fileUrl } from "../files.ts";
 
 // A project's timeline (spec §8), for both apps: one merged, time-ordered feed of the project's
 // events and the SAP documents its quotations became, with a comment box. Props-driven — each app
-// passes its own data and its own comment mutation; the fence is the server's (the portal is sent
-// external events only), nothing here hides anything.
+// passes its own data and its own comment and upload calls; the fence is the server's (the portal is
+// sent external events only), nothing here hides anything.
 
 export type TimelineEvent = {
   id: string;
@@ -85,7 +87,8 @@ type Entry =
   | { at: number; kind: "doc"; d: TimelineDoc; superseded: boolean };
 
 export function ProjectTimeline({
-  events, labels, loading, error, documents, documentsError, side, currency, canComment, onComment, onOpenDocument, canPreview,
+  events, labels, loading, error, documents, documentsError, side, currency, canComment, onComment, onUpload,
+  onOpenDocument, canPreview,
 }: {
   events: TimelineEvent[] | undefined;
   labels: Record<string, string>;
@@ -99,6 +102,9 @@ export function ProjectTimeline({
   currency?: string;
   canComment: boolean;
   onComment: (note: string, internalOnly: boolean) => Promise<unknown>;
+  /** attach a file (≤ 10 MB, any type); omit for a reader who may not upload (a portal viewer).
+   *  Staff's internal-only toggle applies to it as to a comment. */
+  onUpload?: (file: File, internalOnly: boolean) => Promise<unknown>;
   /** opens a document's object page; omit and documents render without a link */
   onOpenDocument?: (entity: string, docEntry: number) => void;
   /** a Preview of each document's SAP print layout, through the app's source — only for a reader the
@@ -119,13 +125,15 @@ export function ProjectTimeline({
     }))),
   ].sort((a, b) => b.at - a.at), [events, documents]);
 
-  const post = async () => {
-    if (!note.trim()) return;
+  // Remounts the uploader after each pick, so choosing the same file again still fires a change.
+  const [picks, setPicks] = useState(0);
+
+  const busy = async (work: () => Promise<unknown>, after: () => void) => {
     setPosting(true);
     setPostError(null);
     try {
-      await onComment(note.trim(), side === "internal" && internalOnly);
-      setNote("");
+      await work();
+      after();
       setInternalOnly(false);
     } catch (e) {
       setPostError(e instanceof Error ? e.message : String(e));
@@ -133,22 +141,39 @@ export function ProjectTimeline({
       setPosting(false);
     }
   };
+  const post = () => note.trim()
+    ? busy(() => onComment(note.trim(), side === "internal" && internalOnly), () => setNote(""))
+    : Promise.resolve();
+  const attach = (file: File | undefined) => {
+    setPicks((n) => n + 1);
+    if (!file || !onUpload) return;
+    if (file.size > FILE_MAX_MB * 1024 * 1024) return setPostError(`A file can be up to ${FILE_MAX_MB} MB`);
+    void busy(() => onUpload(file, side === "internal" && internalOnly), () => {});
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", maxWidth: "60rem" }}>
-      {canComment ? (
+      {canComment || onUpload ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           <TextArea value={note} rows={2} growing growingMaxRows={8} maxlength={4000} disabled={posting}
             placeholder={side === "internal" ? "Comment on this request" : "Ask a question or add a note"}
             accessibleName="Comment" onInput={(e) => setNote(e.target.value ?? "")} />
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             {side === "internal" ? (
-              // Off by default: a comment on a client's request is for the client unless said otherwise.
+              // Off by default: a comment or file on a client's request is for the client unless said otherwise.
               <CheckBox text="Internal note (not shown to the client)" checked={internalOnly} disabled={posting}
                 onChange={(e) => setInternalOnly(e.target.checked)} />
             ) : null}
+            {onUpload ? (
+              <FileUploader key={picks} hideInput maxFileSize={FILE_MAX_MB} disabled={posting} style={{ marginInlineStart: "auto" }}
+                accessibleName="Attach a file"
+                onFileSizeExceed={() => { setPicks((n) => n + 1); setPostError(`A file can be up to ${FILE_MAX_MB} MB`); }}
+                onChange={(e) => attach(e.detail.files?.[0])}>
+                <Button design="Transparent" icon="attachment" disabled={posting}>Attach file</Button>
+              </FileUploader>
+            ) : null}
             <Button design="Default" icon="paper-plane" disabled={posting || !note.trim()}
-              style={{ marginInlineStart: "auto" }} onClick={() => void post()}>Post</Button>
+              style={onUpload ? undefined : { marginInlineStart: "auto" }} onClick={() => void post()}>Post</Button>
           </div>
           {postError ? <MessageStrip design="Negative" hideCloseButton>{postError}</MessageStrip> : null}
         </div>
@@ -187,6 +212,7 @@ export function ProjectTimeline({
             const e = x.e;
             const k = KIND[e.kind] ?? { title: () => e.kind, icon: "history" };
             const q = e.payload as { docNum?: number | null; mode?: string; value?: number } | null;
+            const f = e.kind === "file" ? e.payload as { fileId: string; name: string; size: number } | null : null;
             const title = e.kind === "quoted" && q
               ? `Quotation ${q.docNum ?? ""} ${q.mode === "updated" ? "updated" : "sent"}`.replace(/\s+/g, " ")
               : k.title(side);
@@ -197,6 +223,7 @@ export function ProjectTimeline({
                   {e.visibility === "internal" ? <Tag design="Set2" colorScheme="8" style={{ alignSelf: "flex-start" }}>Internal note</Tag> : null}
                   {e.kind === "revised" ? <Revision payload={e.payload} labels={labels} /> : null}
                   {e.kind === "quoted" && q?.value !== undefined ? <Text>{money(q.value, currency)}</Text> : null}
+                  {f ? <Link href={fileUrl(f.fileId)} icon="download">{`${f.name} (${fileSize(f.size)})`}</Link> : null}
                   {e.note ? <Text style={{ whiteSpace: "pre-wrap" }}>{e.note}</Text> : null}
                 </div>
               </TimelineItem>

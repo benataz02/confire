@@ -9,6 +9,8 @@ import { orpc } from "../../orpc.ts";
 import { copyInput, generateAgentSecret } from "../../lib/agent-secret.ts";
 import { PortalDocFields } from "../../components/settings/PortalDocFields.tsx";
 import { PortalOnboarding } from "../../components/settings/PortalOnboarding.tsx";
+import { PortalBranding } from "../../components/settings/PortalBranding.tsx";
+import { PortalMail, PortalSenderDomain } from "../../components/settings/PortalMail.tsx";
 
 export const Route = createFileRoute("/_authed/settings")({ component: Settings });
 
@@ -25,7 +27,12 @@ function Settings() {
         {tab === "agent" ? <div style={PAGE}><AgentCard /></div> : null}
       </Tab>
       <Tab text="Portal" data-key="portal" selected={tab === "portal"}>
-        {tab === "portal" ? <div style={PAGE}><PortalDocFields /><PortalOnboarding /></div> : null}
+        {/* Postgres-only cards first: the last two read SAP and may take a while. */}
+        {tab === "portal" ? (
+          <div style={PAGE}>
+            <PortalBranding /><PortalMail /><PortalSenderDomain /><PortalDocFields /><PortalOnboarding />
+          </div>
+        ) : null}
       </Tab>
     </TabContainer>
   );

@@ -5,10 +5,6 @@ import type { PageMessage } from "../PageMessages.tsx";
 const CONFIGURE = { section: "configure", group: "Configure" } as const;
 const CANDIDATES = { section: "candidates", group: "Candidates" } as const;
 
-/** propagate() reports a conflict against `parameters.<key>` or `constraints[i]`. Only the first
- *  has a control on this page — ConfiguratorForm tags every one with `data-param`. */
-const conflictParam = (path: string) => /^parameters\.(.+)$/.exec(path)?.[1];
-
 const labelOf = (model: ModelDef | undefined, key: string) =>
   model?.parameters.find((p) => p.key === key)?.label ?? key;
 
@@ -81,11 +77,13 @@ export function configMessages(a: {
       detail: "Required before the configuration can be quoted.", ...CONFIGURE, anchor: `[data-param="${m.key}"]`,
     }));
 
+  // A conflict names the parameters it involves; ConfiguratorForm tags each visible one with
+  // `data-param` and marks it inline, so the jump goes to the first one actually drawn.
   (a.prop?.conflicts ?? []).forEach((c, i) => {
-    const key = conflictParam(c.path);
+    const key = c.params.find((k) => a.prop!.visible[k]);
     out.push({
       id: `conflict:${i}`, type: "Negative", text: c.message,
-      detail: key ? labelOf(a.model, key) : c.path,
+      detail: c.params.length ? c.params.map((k) => labelOf(a.model, k)).join(", ") : undefined,
       ...CONFIGURE, anchor: key ? `[data-param="${key}"]` : undefined,
     });
   });

@@ -40,6 +40,7 @@ test("anchors point at the control the issue is about", () => {
   // A constraint's sub-paths have no field of their own; its condition is the row.
   expect(anchorOf("constraints[1].rows[0]", draft)).toBe('[id="expr-constraints[1].when"]');
   expect(anchorOf("constraints[1].assert", draft)).toBe('[id="expr-constraints[1].assert"]');
+  expect(anchorOf("constraints[1].message", draft)).toBe('[id="expr-constraints[1].message"]');
   // Structure-level problems have nowhere to jump — the section is the answer.
   expect(anchorOf("model", draft)).toBeUndefined();
   expect(anchorOf("structure", draft)).toBeUndefined();

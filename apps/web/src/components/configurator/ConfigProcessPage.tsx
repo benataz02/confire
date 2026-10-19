@@ -17,6 +17,7 @@ import { money as formatMoney } from "@confire/ui/money.ts";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
 import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import { ProjectTimeline } from "@confire/ui/timeline/ProjectTimeline.tsx";
+import { uploadFile } from "@confire/ui/files.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { toPriced, unpricedItems, type Sel } from "./runView.ts";
 import { ConfiguratorForm, ConsistencyStatus } from "@confire/ui/configurator/ConfiguratorForm.tsx";
@@ -557,7 +558,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
       }
       footerArea={footerUp ? footer : undefined}
     >
-      <ObjectPageSection id="configure" titleText="Configure" fitContent>
+      <ObjectPageSection id="configure" titleText="Configure" >
         <DynamicSideContent style={{ flex: 1, minHeight: 0 }} sideContentVisibility="AlwaysShow"
           hideSideContent={!railShown} accessibilityAttributes={{ sideContent: { ariaLabel: "Insights" } }}
           sideContent={
@@ -658,6 +659,7 @@ function RequestTimeline({ id }: { id: string }) {
       loading={timeline.isPending} error={timeline.error as Error | null}
       documents={documents.data} documentsError={documents.error as Error | null}
       onComment={(note, internalOnly) => comment.mutateAsync({ projectId: id, note, internalOnly })}
+      onUpload={(file, internalOnly) => uploadFile(id, file, internalOnly).then(() => qc.invalidateQueries({ queryKey: listKey }))}
       onOpenDocument={isAdmin
         ? (entity, key) => void navigate({ to: "/b1/$entity/$key", params: { entity, key: String(key) } })
         : undefined}

@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, jsonb, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean, customType, index, jsonb, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid,
+} from "drizzle-orm/pg-core";
 import type { Entries, ModelDef, Outputs, QuerySource, TableRows, Val } from "@confire/config-engine";
 
 // Configurator persistence: a mutable model, and one configuration document that carries its own
@@ -160,7 +162,7 @@ export type ProjectEventPayload =
   | { inputs: ProjectInputs; prices?: PortalPrice[] }
   | RevisionDiff
   | { docEntry: number; docNum: number | null; value: number; mode: "created" | "updated"; inputs: ProjectInputs }
-  | { fileId: string };
+  | { fileId: string; name: string; size: number };
 
 // The project's timeline (spec §6, §8), append-only. project-lifecycle.ts writes every status
 // event in the same transaction as the guarded status UPDATE; comments are written beside it.
@@ -186,6 +188,33 @@ export const configProjectEvent = pgTable(
   (t) => [index("config_project_event_project_idx").on(t.projectId, t.at)],
 );
 export type ConfigProjectEvent = typeof configProjectEvent.$inferSelect;
+
+// node-postgres reads bytea as a Buffer and writes one as is.
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
+// Attachments (spec D14) in Postgres: a project's files, and the tenant's branding logo
+// (`projectId` null — the one row GET /files/:id serves without a session, D20). Append-only like
+// the timeline: nothing deletes a file. A project's are written only by project-lifecycle.ts.
+// ponytail: bytea in the main database; move `data` to S3-compatible storage (Bun's S3Client)
+// when database size or backups hurt.
+export const projectFile = pgTable(
+  "project_file",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: text("tenant_id").notNull(),
+    projectId: uuid("project_id").references(() => configProject.id, { onDelete: "cascade" }),
+    eventId: uuid("event_id").references(() => configProjectEvent.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    mime: text("mime").notNull(),
+    size: integer("size").notNull(),
+    data: bytea("data").notNull(),
+    uploadedBy: text("uploaded_by"),
+    // The download fence, as on the event: the portal serves `external` files only.
+    visibility: text("visibility").$type<"external" | "internal">().notNull().default("external"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("project_file_project_idx").on(t.projectId)],
+);
 
 // Cached values of a "query" masterdata, wholesale-replaced per sync.
 //

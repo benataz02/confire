@@ -31,6 +31,12 @@ describe("checkModel", () => {
     expect(issues[0]!.to).toBe(7);
   });
 
+  test("a rule without a message cannot be saved", () => {
+    const bad = structuredClone(model);
+    bad.constraints.push({ kind: "expr", assert: "section > 0", message: "  " });
+    expect(checkModel(bad, PRICES).map((i) => i.path)).toEqual(["constraints[2].message"]);
+  });
+
   test("qty allowed in bom but not in constraints", () => {
     const bad = structuredClone(model);
     bad.constraints.push({ kind: "expr", assert: "qty > 0", message: "x" });

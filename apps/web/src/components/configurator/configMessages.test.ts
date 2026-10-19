@@ -20,15 +20,29 @@ test("the two Calculate blockers are messages with a field to jump to", () => {
 });
 
 test("a parameter conflict jumps to that parameter and reads by its label", () => {
-  const prop = { conflicts: [{ message: "no valid values remain for 'width'", path: "parameters.width" }] } as Propagation;
+  const prop = {
+    conflicts: [{ message: "no valid values remain for 'width'", path: "parameters.width", params: ["width"] }],
+    visible: { width: true },
+  } as unknown as Propagation;
   const [msg] = configMessages({ ...base, prop });
   expect(msg!.type).toBe("Negative");
   expect(msg!.detail).toBe("Width");
   expect(msg!.anchor).toBe('[data-param="width"]');
 });
 
-test("a constraint conflict has no control on this page, so only the section", () => {
-  const prop = { conflicts: [{ message: "rule violated", path: "constraints[0]" }] } as Propagation;
+test("a rule conflict reads by the parameters it involves and jumps to the first one drawn", () => {
+  const prop = {
+    conflicts: [{ message: "Too wide for that height", path: "constraints[0]", params: ["height", "width"] }],
+    visible: { height: false, width: true },
+  } as unknown as Propagation;
+  const [msg] = configMessages({ ...base, prop });
+  expect(msg!.text).toBe("Too wide for that height");
+  expect(msg!.detail).toBe("height, Width");
+  expect(msg!.anchor).toBe('[data-param="width"]');
+});
+
+test("a rule over computed values only has no field, so only the section", () => {
+  const prop = { conflicts: [{ message: "Too heavy", path: "constraints[0]", params: [] }], visible: {} } as unknown as Propagation;
   const [msg] = configMessages({ ...base, prop });
   expect(msg!.anchor).toBeUndefined();
   expect(msg!.section).toBe("configure");

@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db, entityMeta, portalCompany, portalCompanyDomain, portalInvitation } from "@confire/db";
 import type { B1EntitySchema, B1Field } from "@confire/b1";
 import { devOutbox } from "../src/mail/mailer.ts";
+import { notificationsSettled } from "../src/notify.ts";
 import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
 import { leadKey } from "../src/portal/onboarding-form.ts";
@@ -137,7 +138,7 @@ describe("onboarding.formSchema", () => {
 
 describe("onboarding.submit", () => {
   test("creates the lead in B1, then its company, the seat as owner, the invitation accepted and the domain", async () => {
-    const { tenantId, id, email, on, as } = await invited(true);
+    const { tenantId, id, email, on, as, admin } = await invited(true);
     await call(router.portalSettings.save, { extraFields: [{ key: "Website", required: false }], leadSeries: 77 }, as);
     const before = agent.calls.length;
     const res = await call(portalRouter.onboarding.submit, {
@@ -164,6 +165,11 @@ describe("onboarding.submit", () => {
     expect(domains.map((d) => d.domain)).toEqual([email.split("@")[1]!]);
     // Used up: a second submit of the same link is refused before SAP.
     expect(await codeOf(call(portalRouter.onboarding.submit, { id, form: FORM }, on))).toBe("CONFLICT");
+    // The inviter hears of it (§5.4 step 6), and a reply reaches the new client.
+    await notificationsSettled();
+    const told = devOutbox.filter((m) => m.to === admin.email && m.subject.includes("joined your customer portal"));
+    expect(told).toHaveLength(1);
+    expect(told[0]).toMatchObject({ replyTo: email, subject: `Neu GmbH joined your customer portal (${res.cardCode})` });
   });
 
   test("no series set: B1's default lead series; the seed ships to the bill-to address", async () => {

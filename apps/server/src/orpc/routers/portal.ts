@@ -1,8 +1,9 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import {
-  db, PORTAL_ROLES, portalCompany, portalCompanyDomain, portalInvitation, user,
+  db, member, NOTIFY_EVENTS, NOTIFY_MODES, organization, PORTAL_ROLES, portalCompany, portalCompanyDomain,
+  portalInvitation, projectFile, user,
   type PortalCardType, type PortalDocFields, type PortalSettings,
 } from "@confire/db";
 import { rowsOf, type B1EntitySchema, type B1Field } from "@confire/b1";
@@ -12,7 +13,10 @@ import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../
 import { cancelInvitations, changeMember, claimDomain, companyPeople, isFreeMail, sendInvitation } from "../../portal/members.ts";
 import { DOC_DEFAULTS, DOC_ENTITIES, DocEntityZ, pickable, type DocEntity } from "../../portal/doc-fields.ts";
 import { extraPickable } from "../../portal/onboarding-form.ts";
-import { loadPortalSettings, savePortalSettings } from "../../portal/settings.ts";
+import { contrastOnWhite, loadPortalSettings, NOTIFY_LABELS, savePortalSettings } from "../../portal/settings.ts";
+import {
+  addSenderDomain, refreshSenderDomain, removeSenderDomain, SENDER_REGIONS, verifySenderDomain,
+} from "../../portal/sender-domain.ts";
 import { entitySchema } from "../../entity-meta.ts";
 import { bad } from "../../entity-read.ts";
 
@@ -23,6 +27,7 @@ import { bad } from "../../entity-read.ts";
 
 const RoleZ = z.enum(PORTAL_ROLES);
 const CardCodeZ = z.string().trim().min(1).max(50);
+const NotifyZ = z.partialRecord(z.enum(NOTIFY_EVENTS), z.enum(NOTIFY_MODES));
 const DomainZ = z.string().trim().toLowerCase().regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "Enter a domain such as kunde.de");
 
 /** A pending invitation past its expiry still reads `pending` in the table; lists show `expired`. */
@@ -119,9 +124,28 @@ export const portalCompaniesRouter = {
    *  and which email domains auto-join it. `company: null` = not on the portal yet. */
   get: adminProcedure.input(z.object({ cardCode: CardCodeZ })).handler(async ({ input, context }) => {
     const company = await companyOf(context.tenantId, input.cardCode);
-    if (!company) return { company: null, members: [], invitations: [], domains: [] };
-    return { company: { id: company.id, cardName: company.cardName, cardType: company.cardType }, ...(await companyPeople(company.id)) };
+    if (!company) return { company: null, members: [], invitations: [], domains: [], notify: null };
+    const [people, settings] = await Promise.all([companyPeople(company.id), loadPortalSettings(context.tenantId)]);
+    return {
+      company: { id: company.id, cardName: company.cardName, cardType: company.cardType },
+      ...people,
+      // The D27 override beside the tenant's setting it overrides: a missing event is the tenant's.
+      notify: {
+        company: company.notify ?? {}, tenant: settings.notify ?? {},
+        events: NOTIFY_EVENTS.map((key) => ({ key, label: NOTIFY_LABELS[key] })),
+      },
+    };
   }),
+
+  /** The D27 override for this company. Admins only, on the BP Object Page — never the company itself. */
+  setNotify: adminProcedure
+    .input(z.object({ cardCode: CardCodeZ, notify: NotifyZ }))
+    .handler(async ({ input, context }) => {
+      const c = await requireCompany(context.tenantId, input.cardCode);
+      const notify = Object.keys(input.notify).length ? input.notify : null;
+      await db.update(portalCompany).set({ notify }).where(eq(portalCompany.id, c.id));
+      return { notify: notify ?? {} };
+    }),
 
   setRole: adminProcedure
     .input(z.object({ cardCode: CardCodeZ, userId: z.string().min(1), role: RoleZ }))
@@ -164,6 +188,14 @@ export const portalCompaniesRouter = {
       ));
     }),
 };
+
+/** The workspace's people — internal members; a leftover `client` row is not one — for the
+ *  fallback picker. */
+const staffOf = (tenantId: string) => db
+  .select({ userId: user.id, name: user.name, email: user.email, role: member.role })
+  .from(member).innerJoin(user, eq(user.id, member.userId))
+  .where(and(eq(member.organizationId, tenantId), ne(member.role, "client")))
+  .orderBy(user.name);
 
 /** The SAP fields an entity can offer the portal, as the picker lists them. */
 const optionsOf = (fields: B1Field[]) => fields.map((f) => ({ key: f.name, label: f.label ?? f.name }));
@@ -231,15 +263,75 @@ export const portalSettingsRouter = {
       .filter((r) => Number.isInteger(r.series));
   }),
 
+  /** Branding and mail (P7): Postgres only, so SAP being down never costs these cards. A sender
+   *  domain that is not verified yet is re-read from Resend on open — there is no poller (D29). */
+  general: adminProcedure.handler(async ({ context }) => {
+    const [settings, [org], staff] = await Promise.all([
+      loadPortalSettings(context.tenantId),
+      db.select({ name: organization.name, logo: organization.logo }).from(organization)
+        .where(eq(organization.id, context.tenantId)).limit(1),
+      staffOf(context.tenantId),
+    ]);
+    const stored = settings.senderDomain ?? null;
+    return {
+      branding: settings.branding ?? {},
+      organization: { name: org?.name ?? "", logo: org?.logo ?? null },
+      notify: settings.notify ?? {},
+      events: NOTIFY_EVENTS.map((key) => ({ key, label: NOTIFY_LABELS[key] })),
+      // Who still works here: someone who left drops off the list without anyone editing it.
+      notifyFallback: (settings.notifyFallback ?? []).filter((id) => staff.some((m) => m.userId === id)),
+      replyTo: settings.replyTo ?? null,
+      staff,
+      senderDomain: stored && stored.status !== "verified" ? await refreshSenderDomain(context.tenantId, stored) : stored,
+      senderDomains: { enabled: !!process.env.RESEND_ADMIN_KEY, regions: SENDER_REGIONS },
+    };
+  }),
+
+  senderDomain: {
+    add: adminProcedure
+      .input(z.object({ name: z.string().trim().toLowerCase().min(1).max(253), region: z.enum(SENDER_REGIONS) }))
+      .handler(({ input, context }) => addSenderDomain(context.tenantId, input.name, input.region)),
+    verify: adminProcedure.handler(({ context }) => verifySenderDomain(context.tenantId)),
+    remove: adminProcedure.handler(async ({ context }) => {
+      await removeSenderDomain(context.tenantId);
+      return { ok: true as const };
+    }),
+  },
+
   /** Each part is optional and saved over the stored document, so each card of the tab saves only
-   *  its own. `leadSeries: null` is "B1's default lead series". */
+   *  its own. `leadSeries: null` is "B1's default lead series"; `replyTo: null` is "whoever acted". */
   save: adminProcedure
     .input(z.object({
       docFields: z.partialRecord(DocEntityZ, DocFieldsZ).optional(),
       extraFields: ExtraFieldsZ.optional(),
       leadSeries: z.number().int().positive().nullable().optional(),
+      branding: z.object({
+        displayName: z.string().trim().max(100).optional(),
+        accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, "An accent is a colour such as #0a6ed1").optional(),
+        logoFileId: z.uuid().optional(),
+      }).optional(),
+      notify: NotifyZ.optional(),
+      notifyFallback: z.array(z.string().min(1)).max(100).optional(),
+      replyTo: z.email().nullable().optional(),
     }))
     .handler(async ({ input, context }) => {
+      if (input.branding?.accent) {
+        const ratio = contrastOnWhite(input.branding.accent);
+        if (ratio < 4.5) throw new ORPCError("BAD_REQUEST", {
+          message: `White text on ${input.branding.accent} has a contrast of ${ratio.toFixed(1)}:1, under the 4.5:1 buttons need: pick a darker colour`,
+        });
+      }
+      if (input.branding?.logoFileId) {
+        const [logo] = await db.select({ id: projectFile.id }).from(projectFile).where(and(
+          eq(projectFile.id, input.branding.logoFileId), eq(projectFile.tenantId, context.tenantId), isNull(projectFile.projectId),
+        )).limit(1);
+        if (!logo) throw new ORPCError("BAD_REQUEST", { message: "Upload the logo again" });
+      }
+      if (input.notifyFallback?.length) {
+        const staff = new Set((await staffOf(context.tenantId)).map((m) => m.userId));
+        if (input.notifyFallback.some((id) => !staff.has(id)))
+          throw new ORPCError("BAD_REQUEST", { message: "Only people in this workspace can get request mail" });
+      }
       if (input.docFields) {
         const schemas = await docSchemas(context.tenantId);
         for (const [entity, fields] of Object.entries(input.docFields) as [DocEntity, PortalDocFields][]) {
@@ -263,6 +355,17 @@ export const portalSettingsRouter = {
       if (input.extraFields) next.onboarding = { extraFields: input.extraFields };
       if (input.leadSeries === null) delete next.leadSeries;
       else if (input.leadSeries !== undefined) next.leadSeries = input.leadSeries;
+      if (input.branding) {
+        const { displayName, accent, logoFileId } = input.branding;
+        next.branding = {
+          ...(displayName ? { displayName } : {}), ...(accent ? { accent: accent.toLowerCase() } : {}),
+          ...(logoFileId ? { logoFileId } : {}),
+        };
+      }
+      if (input.notify) next.notify = input.notify;
+      if (input.notifyFallback) next.notifyFallback = input.notifyFallback;
+      if (input.replyTo === null) delete next.replyTo;
+      else if (input.replyTo !== undefined) next.replyTo = input.replyTo.toLowerCase();
       await savePortalSettings(context.tenantId, next);
       return { ok: true as const };
     }),

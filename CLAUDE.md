@@ -127,8 +127,12 @@ projection in `portal/projection.ts` (pure, tested) and never a `ModelDef`, look
 that module is the fence in both directions (`acceptPortalInputs` is what a client may write).
 **`project-lifecycle.ts` is the only writer of `status` and `config_project_event`**, imported by
 both processes: `transition()` locks the row and writes the status and its events in one
-transaction; `assertWritable(…, actor)` + `writableBy(side)` say who may edit in which status; an
-internal read never sees a client's draft (`internalVisible`). Staff work requests in Portal →
+transaction (it opens its own, then notifies after commit); `assertWritable(…, actor)` +
+`writableBy(side)` say who may edit in which status; an internal read never sees a client's draft
+(`internalVisible`). **Files** (D14) are `project_file` bytea rows behind plain Hono routes,
+`files.ts`, mounted by both processes past the 2 MB RPC cap: `addFile` writes the row and its `file`
+event together, a download is always an attachment, and the one row served without a session is the
+tenant's branding logo (`projectId` null), which mail links to absolutely. Staff work requests in Portal →
 Requests (`orpc/routers/requests.ts`) and on the existing process page. The timeline is
 `project-timeline.ts`: events from Postgres, SAP document chains as a separate live read.
 
@@ -169,6 +173,17 @@ console (the server log prints each mail, links included; tests read `devOutbox`
 components (`react-email`, pinned: 6.11.3 requires a `@react-email/render` that was never
 published), one typed props object each, drawn in `layout.tsx`'s frame with a `Brand`. Sends are
 fire-and-forget and never throw — a mail is never on a request's critical path.
+
+**Who hears of what is `notify.ts`** (spec §12), fired after commit by `project-lifecycle.ts` (a
+transition, comment or file) and onboarding submit. Client mail (D27: `off`/`creator`/`buyers`, the
+company's `portal_company.notify` over the tenant's `portal_settings.notify`) wears the tenant's
+branding and goes through `portal/sender-domain.ts`'s `sendClientMail`: from the tenant's own verified
+Resend domain, and on a 403 once more from `MAIL_DOMAIN`, marking the domain failed. Staff mail (D22:
+assignee, else the BP's sales employee in B1, else `notifyFallback`, else admins and owners) is
+Confire's, from `MAIL_DOMAIN`. Recipients are read at send time; a failure lands on the event's
+`mailError`. Only the sender-domain handlers hold `RESEND_ADMIN_KEY`. **Tests never send:**
+`bunfig.toml` preloads `scripts/test-preload.ts`, which drops both Resend keys; tests read `devOutbox`
+and await `notificationsSettled()`.
 
 Email + password sign-in requires a verified address (`requireEmailVerification`): sign-up returns
 no session, and an unverified sign-in is refused with `EMAIL_NOT_VERIFIED` after mailing a fresh

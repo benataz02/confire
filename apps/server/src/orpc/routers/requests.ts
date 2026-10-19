@@ -29,10 +29,10 @@ const DecisionZ = z.object({ id: z.uuid(), note: z.string().trim().max(2000).opt
 
 const decide = (action: Action) =>
   userProcedure.input(DecisionZ).handler(async ({ input, context }) => {
-    const r = await db.transaction((tx) => transition(tx, {
+    const r = await transition({
       tenantId: context.tenantId, projectId: input.id, action, note: input.note,
       actor: { userId: context.userId, side: "internal" },
-    }));
+    });
     return { status: r.to };
   });
 

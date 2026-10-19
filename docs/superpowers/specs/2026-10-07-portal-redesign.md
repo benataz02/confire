@@ -50,6 +50,52 @@ to"; the contact's `Name` is first + last name, cut to 50. The form lives at
 The §16 P6 checks are **not done** (the Service Layer was unreachable): the code marks each
 assumption `unverified (spec §16)`. A tenant needs the `U_CF_Key` UDF (alphanumeric, 64) on OCRD
 (Business Partners) as well as on OQUT; without it, submit refuses to run.
+**P7 decided 2026-10-18** through Q&A (§6, §8, §12, D20, D22, D27, D29):
+- **Internal routing (D22):** the request's **assignee** once there is one (still a member), before that
+  the BP's sales employee, else the fallback list. The fallback list is **picked internal members**
+  (`notifyFallback: userId[]`), never free addresses, so someone who leaves stops getting mail.
+- **`revised` is folded:** it never mails on its own. A transition that writes one sends one mail that
+  lists the revision. D27's configurable events are `accepted`, `returned`, `declined`, `quoted`,
+  `comment` (staff comments **and staff files** with external visibility).
+- **Files (D14):** 10 MB cap, any type, counted on the stream. A download is always an attachment with
+  `nosniff`, so an upload can never run on either origin. Staff may mark a file internal-only, as a
+  comment; buyers and owners upload on the portal; nothing deletes a file (the timeline is
+  append-only). The file event's payload is `{ fileId, name, size }`.
+- **Branding (D20):** `branding: { displayName?, accent?, logoFileId? }`, falling back to the
+  organization's name and logo. The accent colours the portal's shell bar and emphasized buttons
+  (UI5 theme variables) and the mail button; save refuses one under 4.5:1 against white. The logo is
+  a `project_file` row with `projectId` null (PNG or JPEG, 1 MB), and such a row is the one file
+  `GET /files/:id` serves **without a session**: a mail needs an absolute public URL.
+- **Sender domain (D29):** §16's Resend checks are done (§16). The Resend plan here allows 3 domains,
+  one of them `mail.<domain>`. A name another team holds is refused by Resend itself and the handler
+  says so; a subdomain of such a name is *not* refused, so `add` keeps the ≥ 3-label rule. Any 403 on
+  a send from the tenant's domain retries once from `mail.<domain>` and records the message.
+  Settings → Portal re-reads a not-yet-verified domain from Resend on open (no poller).
+- **Reply-To:** client mail replies to `replyTo`, else the staff member who acted (an invitation: the
+  inviter, as now). Internal mail replies to the client who acted.
+- **Home:** `home.overview` (Postgres: requests by status, quotes awaiting a response) and
+  `home.documents` (live SAP: recent documents, open invoices) are separate calls, so a down agent costs
+  two cards, not the page.
+- **Dev:** mail goes through Resend only when `RESEND_API_KEY` is set; tests never send (a test
+  preload drops the keys).
+**P7 built 2026-10-19** (no plan document: built from the block above). Decided while building:
+- **An empty fallback list means the tenant's admins and owners**, so a request is never silent
+  (`notify.ts`'s `staffRecipients`). Internal notifications wear Confire's brand and name, not the tenant's.
+- **Files go in any status a comment may**, client draft included; a client's comment or file on a
+  draft mails nobody (staff cannot see it). Upload is `POST /files/:projectId?name=…[&internal=1]` with
+  the raw body; the logo is `POST /files/logo` (internal admins, PNG/JPEG by magic bytes, 1 MB). Both
+  processes mount `files.ts`; a logo row is served without a session, inline; a project file always
+  as an attachment with `nosniff` and a sandbox CSP.
+- **Home:** `home.documents` lists the 5 newest quotations, orders and deliveries together, and the 5
+  oldest open invoices with their count, `ALWAYS` fields only (no `docFields` setting widens it).
+- **Settings:** the P7 cards read `portalSettings.general` (Postgres only, plus Resend for a domain not
+  yet verified), not `get`, so SAP being down never costs them; the company override comes back on
+  `portalCompanies.get` as `notify: { company, tenant, events }`. `senderDomain` is written only by
+  the `portalSettings.senderDomain.*` handlers and a refused send, merged in SQL; `save` never writes it.
+- **`transition()` opens its own transaction** (every caller had one holding only it) and fires the
+  notification after commit, passing the `revised` event it wrote so the mail lists it.
+- The send-only key sending from every domain on the account stays `unverified (spec §16)`; adding a
+  sender domain was not exercised against Resend (it takes one of the plan's three slots).
 **Revised 2026-10-16:** onboarding is invitation-only (D7, D17, D25, D26, §5). Open
 self-registration, applications and their approval are gone.
 **Revised 2026-10-16:** this builds from the current internal-only codebase. The previous in-app
@@ -101,7 +147,7 @@ Internal users accept requests, then quote them, send them back for changes, or 
 | D19 | Doc fields | **Admin-configurable** per entity (header and line fields, UDFs included), stored per tenant and enforced server-side. A new `portalSchema` projects B1 metadata down to that list. A **hard denylist** in code (cost, gross profit, margins, purchase prices) that no setting can expose. |
 | D20 | v1 scope | Portal home overview; online quote acceptance (accept or decline the B1 quotation: a timeline event plus an internal notification; on accept internal staff create the order, a decline reopens the project, §7.3); tenant branding (logo, name, accent colour on the portal and in emails). **Not in v1:** multiple languages. |
 | D21 | Models | **Every published model** (`config_model.portal = true`) is available to every company on the tenant. |
-| D22 | Notify | Internal notifications go to the **BP's B1 sales employee** (`SalesPersonCode` → `SalesPersons` email → Confire user). If that resolves to nothing, they go to a tenant fallback list. |
+| D22 | Notify | Internal notifications go to the request's **assignee** once accepted, before that to the **BP's B1 sales employee** (`SalesPersonCode` → `SalesPersons.Email` → Confire user). If that resolves to nothing, they go to a tenant fallback list of picked members (P7). |
 | D23 | Old memberships | Leftover `member.role = "client"` rows are **not migrated**. No script turns them into portal companies. They stay locked out of the internal app. |
 | D24 | Colleagues | A company owner may invite **only addresses on the company's registered domains**. Any other address needs an internal admin. |
 | D25 | Invitations | **Two types, one link** (`/accept/<id>`). **Existing-BP**: sent from the BP Object Page (or by a company owner, D24), linked to that CardCode; the invitee joins. **New-client**: sent from the BP List Report header, no CardCode yet; the invitee fills the onboarding form. `portal_invitation.companyId` being null *is* the type, until submit sets it. |
@@ -413,7 +459,7 @@ New tables (all with `tenantId text` like the rest, no FK to `organization`):
 | `portal_member` | `companyId`, `userId`, `tenantId`, `role` (owner\|buyer\|viewer), `createdAt` | PK (companyId, userId); unique (tenantId, userId) |
 | `portal_invitation` | `id`, `tenantId`, `companyId` (null = new-client until submit), `email`, `role`, `invitedBy`, `registerDomain`, `status` (pending\|accepted\|canceled), `expiresAt`, `createdAt` | `id` is the link token; partial unique (tenantId, lower(email)) where pending |
 | `portal_company_domain` | `tenantId`, `domain`, `companyId`, `addedBy`, `addedAt` | PK (tenantId, domain) |
-| `portal_settings` | `tenantId` PK, `settings jsonb` | one document loaded and saved whole (CLAUDE.md convention): `onboarding: { extraFields: [{ key, required }] }`, `leadSeries`, `docFields: { [entity]: { header: [], lines: [] } }`, `branding: { displayName, accent, logoFileId }`, `notify: { [event]: "off" \| "creator" \| "buyers" }` (D27, defaults in §12), `senderDomain: { name, resendDomainId, region, status, records, error } \| null` (D29), `notifyFallback: string[]`, `replyTo` |
+| `portal_settings` | `tenantId` PK, `settings jsonb` | one document loaded and saved whole (CLAUDE.md convention): `onboarding: { extraFields: [{ key, required }] }`, `leadSeries`, `docFields: { [entity]: { header: [], lines: [] } }`, `branding: { displayName, accent, logoFileId }`, `notify: { [event]: "off" \| "creator" \| "buyers" }` (D27, defaults in §12), `senderDomain: { name, resendDomainId, region, status, records, error } \| null` (D29), `notifyFallback: userId[]` (picked members, P7), `replyTo` |
 | `config_project_event` | `id`, `tenantId`, `projectId`, `at`, `kind`, `actorUserId`, `actorSide` (internal\|external), `visibility` (external\|internal), `note`, `payload jsonb`, `mailError` | replaces `config_project.events` jsonb |
 | `project_file` | `id`, `tenantId`, `projectId`, `eventId`, `name`, `mime`, `size`, `data bytea`, `uploadedBy`, `visibility` | D14; also holds the branding logo (`projectId` null) |
 
@@ -444,7 +490,7 @@ Changed:
 | `quoted` | `{ docEntry, docNum, value, mode: "created" \| "updated", inputs }` | internal projects too; `inputs` is the next round's §7.4 baseline |
 | `quote_accepted`, `quote_declined` | — | `note` is the client's |
 | `comment` | — | `note` is the text |
-| `file` | `{ fileId }` | P7 |
+| `file` | `{ fileId, name, size }` | P7; the file row's `eventId` points back |
 
 Internal-only projects write `created` and `quoted` and nothing else.
 
@@ -709,7 +755,7 @@ their own `userId`). There are no shared views on the portal side.
 | `projects` | `rows`, `get`, `create`, `update` (name), `remove` (draft only), `calculate`, `queryPage`, `submit`, `withdraw`, `resubmit`, `respondQuote` | member (read) / buyer (write) |
 | `timeline` | `list`, `comment` | member |
 | `docs` | `metadata`, `rows`, `one`, `print`, `chain` | member |
-| `home` | `overview` | member |
+| `home` | `overview` (Postgres), `documents` (live SAP) | member |
 
 The Hono routes `POST /files/:projectId` and `GET /files/:id` use the same session and fence, with
 a size cap on the stream.
@@ -723,7 +769,7 @@ on the server, and `toPortalPrices` (§7.2) is the only path a number takes to t
 `configs.createQuote`, now create-or-modify), `timeline.{list, comment}` (with `visibility`),
 `entities.close` (Quotations, admin), `portalInvitations.{rows, inviteExisting, inviteNew,
 cancel}`, `portalCompanies.{get (by CardCode: members, invitations, domains, notify), setRole, removeMember,
-addDomain, removeDomain, setNotify}`, `portalSettings.{get, save, senderDomain.{add, verify,
+addDomain, removeDomain, setNotify}`, `portalSettings.{get, general, save, senderDomain.{add, verify,
 remove}}`. Settings, invitations and companies are
 `adminProcedure`; requests and timeline are `userProcedure`.
 
@@ -739,7 +785,7 @@ A failure is logged on the event row (`mailError`).
 | Event | To |
 |---|---|
 | invitation, verification, password reset | the user |
-| submitted, resubmitted, comment (external), file (external), quote response | the BP's sales employee (D22), else the fallback list |
+| submitted, resubmitted, comment (external), file (external), quote response | the assignee once accepted, else the BP's sales employee (D22), else the fallback list |
 | new client onboarded (§5.4: a lead now exists in B1) | the inviter |
 
 **Configurable (D27)**: client-facing project events. The mode is `portal_company.notify[event]`,
@@ -747,7 +793,10 @@ else `portal_settings.notify[event]`, else the default.
 
 | Event | Default | `creator` | `buyers` |
 |---|---|---|---|
-| accepted, returned, declined, quoted, revised, comment (internal, external visibility) | `buyers` | the project creator | the creator plus every company member with role buyer or owner |
+| accepted, returned, declined, quoted, comment (internal, external visibility; staff files too) | `buyers` | the project creator | the creator plus every company member with role buyer or owner |
+
+`revised` sends no mail of its own (P7): it is written with returned, declined or quoted, and that
+mail lists the revision.
 
 Recipients are resolved from `portal_member` **at send time**. A creator who has since left the
 company gets nothing, so a removed member's address never receives a project mail. Viewers get
@@ -934,8 +983,8 @@ them. Record any verified error strings in code comments, as the repo already do
 | P4 | `POST Quotations(n)/Close` on an open quotation, and what it answers for one already closed. |
 | P6 | BP POST with `Series` and no `CardCode` returns the generated `CardCode`; `BPAddresses` and `ContactEmployees` are accepted inline in the same POST, and which keys each needs (`AddressName` + `AddressType`, contact `Name`); `U_CF_Key` on OCRD (alphanumeric, 64) filters as on quotations; `Countries` reads `Code` and `Name`. |
 | P0 | Resend: `mail.<domain>` verifies (SPF, DKIM, MX for the return path), and `from` must match it exactly. The domain's **region is fixed when it is added**, so decide EU vs US first. A tenant display name with `&`, `,`, `"` or umlauts (`Müller & Söhne GmbH`) arrives intact once quoted in `from`. |
-| P7 | Resend sender domains (D29): the plan's `domains.limit` (usage endpoint) covers the tenant count; a `sending_access` key with no `domainId` can send from every domain on the account; the exact 403 body for an unverified or removed domain, so the fallback matches on its code, not its message; what `domains.create` returns for a name another Resend account already holds (claiming it would break the tenant's own sending, so the handler must refuse and say so). |
-| P7 | The `SalesPersons` entity exposes the employee email, and under which property name (read it from `$metadata`). |
+| P7 | Resend sender domains (D29): the plan's `domains.limit` (usage endpoint) covers the tenant count; a `sending_access` key with no `domainId` can send from every domain on the account; the exact 403 body for an unverified or removed domain, so the fallback matches on its code, not its message; what `domains.create` returns for a name another Resend account already holds (claiming it would break the tenant's own sending, so the handler must refuse and say so). **Checked 2026-10-18:** usage says `Domains: 0 / 3` on this plan. An unverified sender: `403 {"name":"validation_error","message":"The mail.lvh.me domain is not verified. Please, add and verify your domain on https://resend.com/domains"}` — `validation_error` is not specific, so the fallback keys on the 403 of a send from the tenant's domain. A held name: `403 validation_error` "The resend.com domain is registered to another team. You can claim it using the Domain Claim API…"; a subdomain of it (`send.resend.com`) was created (201). `create` answers `{ id, name, status: "not_started", region, records: [{ record, name, type, value, ttl, status, priority? }] }`, record names relative to the zone. Not checkable without a verified domain: the send-only key sending from every domain (marked `unverified (spec §16)`). |
+| P7 | The `SalesPersons` entity exposes the employee email, and under which property name (read it from `$metadata`). **Checked 2026-10-18** in the cached schema: `Email` (key `SalesEmployeeCode`). |
 
 ## 17. Later: AI email designer
 

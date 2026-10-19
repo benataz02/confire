@@ -80,9 +80,10 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
           return Response.json({ status: 201, data: row, etag: row["@odata.etag"] });
         }
         case "/entity": {
-          // Key by whichever field the set is actually keyed on. DocEntry for documents, and a
-          // string key (CardCode, ItemCode) for master data.
-          const found = rows.find((r) => r.DocEntry === body.key || r.CardCode === body.key || r.ItemCode === body.key);
+          // Key by whichever field the set is actually keyed on. DocEntry for documents, a string
+          // key (CardCode, ItemCode) for master data, SalesEmployeeCode for SalesPersons.
+          const found = rows.find((r) => r.DocEntry === body.key || r.CardCode === body.key || r.ItemCode === body.key
+            || r.SalesEmployeeCode === body.key);
           // The agent lifts @odata.etag out of the body into the envelope (see DirectTransport).
           return found
             ? Response.json({ status: 200, data: found, etag: found["@odata.etag"] })

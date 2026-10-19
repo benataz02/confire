@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BusyIndicator, Button, FlexBox, Input, Label, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow,
+  BusyIndicator, Button, FlexBox, Input, Label, MessageStrip, Option, Select, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow,
   TableRowAction, Text,
 } from "@ui5/webcomponents-react";
 import { orpc } from "../../orpc.ts";
+import { NOTIFY_MODE_LABEL } from "../settings/PortalMail.tsx";
 import { CompanyPeople } from "@confire/ui/portal/CompanyPeople.tsx";
 import { InviteDialog } from "@confire/ui/portal/InviteDialog.tsx";
 import { confirm } from "@confire/ui/confirm.ts";
@@ -100,7 +101,8 @@ export function BpPortalSection({ cardCode, cardName }: { cardCode: string; card
   const [domain, setDomain] = useState("");
   const addDomain = useMutation(orpc.portalCompanies.addDomain.mutationOptions({ ...opts, onSuccess: () => setDomain("") }));
   const removeDomain = useMutation(orpc.portalCompanies.removeDomain.mutationOptions(opts));
-  const busy = [setRole, removeMember, cancel, addDomain, removeDomain].some((m) => m.isPending);
+  const setNotify = useMutation(orpc.portalCompanies.setNotify.mutationOptions(opts));
+  const busy = [setRole, removeMember, cancel, addDomain, removeDomain, setNotify].some((m) => m.isPending);
   const error = q.error ?? failed;
 
   if (q.isPending) return <BusyIndicator active delay={0} />;
@@ -148,6 +150,31 @@ export function BpPortalSection({ cardCode, cardName }: { cardCode: string; card
                 </TableRow>
               ))}
             </Table>
+            {d.notify ? (
+              <FlexBox direction="Column" style={{ gap: "0.5rem" }}>
+                <Label showColon>Email notifications</Label>
+                <Text>Who at {cardName} hears about their projects. The tenant default is Settings → Portal's.</Text>
+                <Table accessibleName="Email notifications" overflowMode="Popin"
+                  headerRow={<TableHeaderRow><TableHeaderCell minWidth="12rem">When your team…</TableHeaderCell><TableHeaderCell minWidth="14rem">Mail goes to</TableHeaderCell></TableHeaderRow>}>
+                  {d.notify.events.map((e) => (
+                    <TableRow key={e.key} rowKey={e.key}>
+                      <TableCell><Text>{e.label}</Text></TableCell>
+                      <TableCell>
+                        <Select accessibleName={`${e.label}: who gets mail`} disabled={busy} style={{ width: "19rem" }} value={d.notify!.company[e.key] ?? ""}
+                          onChange={(ev) => {
+                            const v = ev.detail.selectedOption.value ?? "";
+                            const { [e.key]: _old, ...rest } = d.notify!.company;
+                            setNotify.mutate({ cardCode, notify: v ? { ...rest, [e.key]: v as "off" } : rest });
+                          }}>
+                          <Option value="">{`Tenant default (${NOTIFY_MODE_LABEL[d.notify!.tenant[e.key] ?? "buyers"]})`}</Option>
+                          {Object.entries(NOTIFY_MODE_LABEL).map(([v, l]) => <Option key={v} value={v}>{l}</Option>)}
+                        </Select>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </Table>
+              </FlexBox>
+            ) : null}
             <FlexBox style={{ gap: "0.5rem" }}>
               <Input value={domain} placeholder="kunde.de" accessibleName="Domain to register" style={{ width: "16rem" }}
                 onInput={(e) => setDomain(e.target.value)}

@@ -1,6 +1,7 @@
 import { isInternalMember, portalAuthedProcedure, seatOf, tenantFromHost } from "./base.ts";
 import { portalSeats } from "../members.ts";
-import { onboardingRouter } from "./onboarding.ts";
+import { brandOf, onboardingRouter } from "./onboarding.ts";
+import { homeRouter } from "./home.ts";
 import { companyRouter } from "./company.ts";
 import { modelsRouter, projectsRouter } from "./projects.ts";
 import { timelineRouter, viewsRouter } from "./timeline.ts";
@@ -20,7 +21,8 @@ export const portalRouter = {
     const company = internal ? null : ((await seatOf(tenant.id, id)) ?? null);
     return {
       user: { id, name, email, image: image ?? null, emailVerified },
-      tenant: { slug: tenant.slug, name: tenant.name, logo: tenant.logo },
+      // Branded (D20): the display name, logo and accent the supplier picked, over its own.
+      tenant: await brandOf(tenant.id),
       internal,
       // Where the supplier's own staff belong: the same tenant's workspace.
       internalAppUrl: internal ? appTenantUrl(tenant.slug) : null,
@@ -41,6 +43,7 @@ export const portalRouter = {
   timeline: timelineRouter,
   views: viewsRouter,
   docs: docsRouter,
+  home: homeRouter,
 };
 
 export type PortalRouter = typeof portalRouter;

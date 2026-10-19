@@ -3,6 +3,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db, configModel, configProject, configProjectEvent, user, type ProjectEventPayload } from "@confire/db";
 import { tenantConnector, viaB1 } from "./b1.ts";
 import { documentChain, type ChainDoc } from "./doc-chain.ts";
+import { modelLabels } from "./config-project.ts";
 import { internalVisible, type Actor } from "./project-lifecycle.ts";
 
 // A project's timeline (spec §8), for both sides: the events, and the SAP documents its quotations
@@ -58,10 +59,7 @@ export async function timelineEvents(tenantId: string, projectId: string, actor:
     .orderBy(asc(configProjectEvent.at));
   const [model] = await db.select({ definition: configModel.definition }).from(configModel)
     .where(eq(configModel.id, p.modelId)).limit(1);
-  const labels: Record<string, string> = Object.fromEntries([
-    ...(model?.definition.parameters ?? []).map((x) => [x.key, x.label || x.key]),
-    ...(model?.definition.tables ?? []).map((t) => [t.key, t.title || t.key]),
-  ]);
+  const labels = modelLabels(model?.definition);
   return {
     events: rows.map((r) => ({
       ...r, actorName: r.actorName ?? null,

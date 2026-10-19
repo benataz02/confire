@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db, configMasterdata, configModel, configProject, type ConfigCandidate } from "@confire/db";
 import {
   computeOutputs, DslError, enumerate, propagate, syncTables,
-  type Entries, type ResolvedLookups, type TableRows,
+  type Entries, type ModelDef, type ResolvedLookups, type TableRows,
 } from "@confire/config-engine";
 import {
   bindEntryValues, masterdataVersion, queryPageSource, resolveLookups, toResolvedTable,
@@ -43,6 +43,13 @@ export async function loadModel(tenantId: string, modelId: string) {
   return m;
 }
 export type LoadedModel = Awaited<ReturnType<typeof loadModel>>;
+
+/** Each parameter's and table's label by key. A revision stores keys (§7.4); the timeline and the
+ *  mail that lists it read them with the model as it is now. */
+export const modelLabels = (def: ModelDef | undefined): Record<string, string> => Object.fromEntries([
+  ...(def?.parameters ?? []).map((x) => [x.key, x.label || x.key]),
+  ...(def?.tables ?? []).map((t) => [t.key, t.title || t.key]),
+]);
 
 // ponytail: per-process cache keyed by model updatedAt (auto-invalidates on save);
 // Redis/LRU only if the server ever scales past one Bun process.

@@ -1,12 +1,13 @@
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import {
-  db, configProject, configProjectEvent,
+  db, configProject, configProjectEvent, projectFile,
   type ConfigProject, type ProjectEventKind, type ProjectEventPayload, type ProjectInputs, type ProjectStatus,
   type RevisionDiff,
 } from "@confire/db";
 import type { Val } from "@confire/config-engine";
 import { sameJson } from "./canon.ts";
+import { notifyInBackground } from "./notify.ts";
 
 // A project's lifecycle (spec §7): the ONLY writer of config_project.status and of
 // config_project_event. Both processes import it — the portal's buyer actions and the internal
@@ -14,7 +15,8 @@ import { sameJson } from "./canon.ts";
 //
 // Every transition locks the row, checks where it stands, and writes the new status and its
 // events in one transaction. The side that loses a race reads the status the winner left and gets
-// a message naming it, instead of a lost write.
+// a message naming it, instead of a lost write. Once a write commits, notify.ts tells whoever §12
+// says, off the request path.
 
 export type Side = "internal" | "external";
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -109,15 +111,55 @@ function fenced<T extends { portalCompanyId: string | null; status: ProjectStatu
 export const recordCreated = (q: DbOrTx, tenantId: string, projectId: string, actor: Actor) =>
   append(q, { tenantId, projectId, kind: "created", actor });
 
+async function fencedProject(q: DbOrTx, tenantId: string, projectId: string, actor: Actor) {
+  const [row] = await q.select({ portalCompanyId: configProject.portalCompanyId, status: configProject.status })
+    .from(configProject).where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId))).limit(1);
+  return fenced(row, actor);
+}
+
 /** A comment, both ways (§8). A client's is always external; staff choose. */
 export async function addComment(tenantId: string, projectId: string, actor: Actor, note: string, internalOnly: boolean) {
-  const [row] = await db.select({ portalCompanyId: configProject.portalCompanyId, status: configProject.status })
-    .from(configProject).where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId))).limit(1);
-  fenced(row, actor);
-  return append(db, {
+  await fencedProject(db, tenantId, projectId, actor);
+  const id = await append(db, {
     tenantId, projectId, kind: "comment", actor, note,
     visibility: actor.side === "internal" && internalOnly ? "internal" : "external",
   });
+  notifyInBackground(tenantId, id);
+  return id;
+}
+
+/** A file on the timeline (D14), in any status a comment may be posted in — staff may keep it
+ *  internal, as a note. The file and its event are one transaction; nothing deletes either. */
+export async function addFile(
+  tenantId: string, projectId: string, actor: Actor,
+  file: { name: string; mime: string; data: Buffer }, internalOnly: boolean,
+): Promise<{ id: string; eventId: string }> {
+  const visibility = actor.side === "internal" && internalOnly ? "internal" : "external";
+  const id = crypto.randomUUID();
+  const eventId = await db.transaction(async (tx) => {
+    await fencedProject(tx, tenantId, projectId, actor);
+    const eventId = await append(tx, {
+      tenantId, projectId, kind: "file", actor, visibility,
+      payload: { fileId: id, name: file.name, size: file.data.length },
+    });
+    await tx.insert(projectFile).values({
+      id, tenantId, projectId, eventId, name: file.name, mime: file.mime, size: file.data.length, data: file.data,
+      uploadedBy: actor.userId, visibility,
+    });
+    return eventId;
+  });
+  notifyInBackground(tenantId, eventId);
+  return { id, eventId };
+}
+
+/** A project's file as the actor may download it, or NOT_FOUND: the project fenced as for any
+ *  read, and the portal sees `external` files only — the same fence as the timeline. */
+export async function projectFileFor(tenantId: string, fileId: string, actor: Actor) {
+  const [f] = await db.select().from(projectFile)
+    .where(and(eq(projectFile.id, fileId), eq(projectFile.tenantId, tenantId))).limit(1);
+  if (!f?.projectId || (actor.side === "external" && f.visibility !== "external")) throw new ORPCError("NOT_FOUND");
+  await fencedProject(db, tenantId, f.projectId, actor);
+  return f;
 }
 
 /**
@@ -150,20 +192,27 @@ export async function assertWritable(
 }
 
 /**
- * Move a project from one status to the next, with its events, in one transaction.
+ * Move a project from one status to the next, with its events, in one transaction — then, after
+ * commit, the event's notifications.
  *
  * `expectCalculatedAt` pins submit/resubmit to the calculation the caller checked its gates
  * against: any input write nulls `calculatedAt`, and a recalculate moves it, so a match proves the
  * inputs under the lock are the ones that passed. `payload` builds the event's payload from the
  * locked row; `set` adds columns to the same UPDATE.
  */
-export async function transition(tx: Tx, o: {
+export async function transition(o: {
   tenantId: string; projectId: string; action: Action; actor: Actor;
   note?: string | null;
   expectCalculatedAt?: Date;
   payload?: (row: ConfigProject) => ProjectEventPayload | null;
   set?: Partial<typeof configProject.$inferInsert>;
 }): Promise<{ from: ProjectStatus; to: ProjectStatus; eventId: string }> {
+  const r = await db.transaction((tx) => step(tx, o));
+  notifyInBackground(o.tenantId, r.eventId, r.revisedId);
+  return { from: r.from, to: r.to, eventId: r.eventId };
+}
+
+async function step(tx: Tx, o: Parameters<typeof transition>[0]) {
   const t = TRANSITIONS[o.action];
   if (o.actor.side !== t.side) throw new ORPCError("FORBIDDEN");
   const [locked] = await tx.select().from(configProject)
@@ -186,13 +235,15 @@ export async function transition(tx: Tx, o: {
     throw new ORPCError("CONFLICT", { message: "The configuration changed while it was being checked — try again" });
 
   // One `revised` per round, written at the transition that closes it (§7.4) — never per edit.
+  // It mails nobody on its own: the transition's own mail lists it.
+  let revisedId: string | null = null;
   if ("revise" in t && !internalOnly) {
     const [base] = await tx.select({ payload: configProjectEvent.payload }).from(configProjectEvent)
       .where(and(eq(configProjectEvent.projectId, row.id), inArray(configProjectEvent.kind, INPUT_EVENTS)))
       .orderBy(desc(configProjectEvent.at)).limit(1);
     const inputs = (base?.payload as { inputs?: ProjectInputs } | null)?.inputs;
     const diff = inputs ? revisionDiff(inputs, inputsOf(row)) : null;
-    if (diff) await append(tx, { tenantId: o.tenantId, projectId: row.id, kind: "revised", actor: o.actor, payload: diff });
+    if (diff) revisedId = await append(tx, { tenantId: o.tenantId, projectId: row.id, kind: "revised", actor: o.actor, payload: diff });
   }
 
   const now = new Date();
@@ -210,5 +261,5 @@ export async function transition(tx: Tx, o: {
     tenantId: o.tenantId, projectId: row.id, kind: t.kind, actor: o.actor,
     note: o.note?.trim() || null, payload: o.payload?.(row) ?? null,
   });
-  return { from: row.status, to: t.to, eventId };
+  return { from: row.status, to: t.to, eventId, revisedId };
 }
