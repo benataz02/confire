@@ -184,6 +184,10 @@ on `https://app.confire.ai`, the portal on `https://portal.confire.ai`, the cook
 Confire's mail on `mail.confire.ai`; the apex only redirects to sign-in. Unset is dev: `localhost:5173`
 and `localhost:5180`. **Every `*.confire.ai` host receives the session cookie: never point a name
 under it at a service this stack does not control** (a subdomain takeover would collect sessions).
+The one exception is a customer's agent tunnel (`<slug>-agent.<DOMAIN>`), and only behind a Cloudflare
+Access *Service Auth* policy: a browser stops at Cloudflare's edge, so the cookie never reaches the
+customer's machine. The production runbook (Hetzner, DNS, Resend, R2 backups, agents) is `DEPLOY.md`;
+`deploy/update.sh` ships a version and the compose `backup` service dumps Postgres to R2 nightly.
 Caddy has two fixed sites plus the apex redirect, certificates from Let's Encrypt over the HTTP
 challenge (Caddy's automatic HTTPS) — no wildcard, no DNS API. There is no local full stack: dev is
 `bun run dev` on localhost, and compose has no `DOMAIN` default (unset = localhost URLs, which no

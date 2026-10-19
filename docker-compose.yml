@@ -1,5 +1,7 @@
 # Dev:  docker compose up -d db          (just Postgres; run server/web with bun)
-# Prod: docker compose --profile full up  (Postgres + both processes + Caddy)
+# Prod: docker compose --profile full up  (Postgres + both processes + Caddy + backup); the server's
+#       .env sets COMPOSE_PROFILES=full so plain `docker compose …` means that. DEPLOY.md is the runbook,
+#       deploy/update.sh ships a new version.
 #
 # A real domain is .env only, no code change and no rebuild:
 #   DOMAIN=confire.ai                 staff app and sign-in on app.confire.ai, the customer portal on
@@ -12,6 +14,8 @@
 # host receives the session cookie: never point a name at a service you don't control.
 # Resend: verify mail.<DOMAIN> (SPF, DKIM, MX for the return path). Its region is fixed when the
 # domain is added, so pick EU vs US first.
+# Backups (service `backup`): R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY; optional
+# BACKUP_AT (UTC, default 02:00) and BACKUP_PING_URL.
 # OAuth consoles: one redirect URI per provider, https://app.<DOMAIN>/api/auth/callback/{google,microsoft}.
 # Microsoft: emit the optional `xms_edov` claim (a Microsoft email counts as verified only on it).
 services:
@@ -92,6 +96,26 @@ services:
     depends_on:
       - server
       - portal
+    profiles: ["full"]
+
+  # Nightly pg_dump to Cloudflare R2 (deploy/backup.sh). Unset R2_* = it exits with the name of the
+  # missing one, and compose's restart shows that in `docker compose ps`.
+  backup:
+    build:
+      context: .
+      dockerfile: deploy/backup.Dockerfile
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-confire}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      BACKUP_AT: ${BACKUP_AT:-}
+      BACKUP_PING_URL: ${BACKUP_PING_URL:-}
+    depends_on:
+      db:
+        condition: service_healthy
     profiles: ["full"]
 
 volumes:
