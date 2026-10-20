@@ -289,8 +289,11 @@ command="/home/deploy/confire/deploy/update.sh",restrict ssh-ed25519 AAAA… git
 
 On GitHub (*Settings → Secrets and variables → Actions*): secret `DEPLOY_SSH_KEY` = the contents of
 `ci_key`, secret `DEPLOY_KNOWN_HOSTS` = `ssh-keyscan -t ed25519 <IP>`, variable `DEPLOY_HOST` = `<IP>`.
-Then delete `ci_key`. After the first push, make the package public (*github.com/benataz02 → Packages →
-confire → Package settings → Change visibility*) so the server pulls without a login.
+Then delete `ci_key`. The GHCR package needs no login: the image's `org.opencontainers.image.source`
+label links it to the repository, whose public visibility it inherits.
+
+The server's checkout must already have this `update.sh`: the forced command runs the copy on disk,
+and only then does its `git pull` fetch the new one.
 
 ## 9. Backups and restore
 

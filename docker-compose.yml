@@ -41,12 +41,10 @@ services:
       retries: 10
 
   server: &app
-    # Built by CI (.github/workflows/deploy.yml) and pulled by deploy/update.sh: the 2 GB server can OOM
-    # on the two UI5 builds. CONFIRE_TAG=<commit sha> in .env pins a version (rollback).
+    # Built only by CI (.github/workflows/deploy.yml, apps/server/Dockerfile) and pulled by
+    # deploy/update.sh: the 2 GB server can OOM on the two UI5 builds. No `build:` on purpose — with
+    # one, a failed pull silently falls back to building here. CONFIRE_TAG=<sha> in .env pins a version.
     image: ghcr.io/benataz02/confire:${CONFIRE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: apps/server/Dockerfile
     restart: unless-stopped
     environment: &app-env
       DATABASE_URL: postgres://confire:${POSTGRES_PASSWORD:-confire}@db:5432/confire
