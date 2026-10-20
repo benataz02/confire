@@ -1,14 +1,21 @@
 #!/bin/sh
-# Ship the latest main to this server (DEPLOY.md, "Updating"). Run from anywhere, as the deploy user.
+# Ship the latest main to this server (DEPLOY.md, "Updating"). As the deploy user: GitHub Actions runs it
+# after pushing the image (.github/workflows/deploy.yml), or run it by hand.
 # Needs COMPOSE_PROFILES=full in the repo's .env, so every compose command here covers the whole stack.
 set -eu
+# One block: sh has parsed all of it before `git pull` rewrites this file under it.
+{
 cd "$(dirname "$0")/.."
 
 git pull --ff-only
-docker compose build
-# The schema before the new code starts (CLAUDE.md: `drizzle-kit push` is the only migration). The old
-# containers keep serving meanwhile. It asks before anything destructive — answer it, don't script it.
-docker compose run --rm server bun --cwd packages/db drizzle-kit push
+# The app image comes from CI, built from this same commit; only the small backup image builds here.
+docker compose pull server portal
+docker compose build backup
+# The schema before the new code starts (CLAUDE.md: committed migrations, never `push` here). The old
+# containers keep serving meanwhile; a failed migration rolls back and stops the deploy here.
+docker compose run --rm -T server bun --cwd packages/db drizzle-kit migrate
 docker compose up -d
 docker image prune -f
 docker compose ps
+exit
+}

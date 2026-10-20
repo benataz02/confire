@@ -15,7 +15,8 @@ bun install
 bun run dev                             # sign in at http://localhost:5173/login; staff app
                                         # localhost:5173/<slug>/ (server :3000), portal
                                         # localhost:5180/<slug>/ (server :3001), agent :4000
-bun run db:push                         # drizzle-kit push — the ONLY schema migration 
+bun run db:push                         # drizzle-kit push: dev's schema sync, never production's
+bun run db:generate                     # a schema change's migration SQL — commit it with the change
 bun run auth:generate                   # regenerate schema/auth.ts after a Better Auth config change
 ```
 
@@ -428,7 +429,11 @@ a missing field is an error (dropping it would show *more* rows than asked for),
 - Workspace packages must be listed as **direct** dependencies — Bun's isolated install does not
   resolve transitives here. Adding an import from a new workspace package means editing that
   `package.json` and re-running `bun install`.
-- `packages/db/drizzle/` is gitignored; schema changes ship via `bun run db:push`, and new schema
+- **A schema change ships as a migration.** Dev syncs with `db:push`; then `bun run db:generate` writes
+  `packages/db/drizzle/NNNN_*.sql` (committed) and `deploy/update.sh` applies it with `drizzle-kit
+  migrate`, which never prompts — `push` asks about renames and data loss, and an unattended deploy
+  cannot answer. CI refuses an image whose schema has no migration. `0000_init` is the baseline: a
+  database built by `push` (dev's) has no migration journal, so it keeps using `push`. New schema
   files must be re-exported from `packages/db/src/schema/index.ts`.
 
 ## Design docs

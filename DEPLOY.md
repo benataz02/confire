@@ -28,8 +28,8 @@ token, and each customer's agent secret.
 1. Hetzner Cloud Console → *New project* → *Add server*:
    - **Location:** Nuremberg or Falkenstein (Germany), or Helsinki.
    - **Image:** Ubuntu 24.04.
-   - **Type:** the cheapest shared x86 plan with **4 GB RAM** (2 vCPU). The image build (two UI5 SPAs)
-     needs the memory; the running stack needs far less.
+   - **Type:** the cheapest shared x86 plan with **2 GB RAM** is enough: the image is built by GitHub
+     Actions ([§8](#8-updating)), not here.
    - **SSH key:** add yours. Do not use a root password.
    - **Firewall:** create one with inbound **TCP 22, 80, 443** (plus ICMP) and attach it.
    - Write down the **IPv4 address**.
@@ -39,9 +39,9 @@ token, and each customer's agent secret.
    ssh root@<IP>
    apt update && apt upgrade -y
    apt install -y unattended-upgrades git        # security patches install themselves
-   curl -fsSL https://get.docker.com | sh         # Docker Engine + compose plugin
+   apt install -y docker.io docker-compose-v2     # Docker Engine + compose plugin, patched by the above
 
-   # Swap: insurance for the build's memory peak
+   # Swap: insurance for the memory peaks of two Bun processes + Postgres on 2 GB
    fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
    echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
@@ -58,20 +58,15 @@ token, and each customer's agent secret.
    chown -R deploy:deploy /home/deploy/.ssh
    ```
 
-3. Give the server read access to the repository (a GitHub **deploy key**, read-only):
+3. Clone the repository (it is public; the server only ever pulls):
 
    ```bash
    ssh deploy@<IP>
-   ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
-   cat ~/.ssh/id_ed25519.pub
+   git clone https://github.com/benataz02/confire.git ~/confire
    ```
 
-   On GitHub, open `benataz02/confire` → *Settings → Deploy keys → Add deploy key*, paste the key, and
-   leave *write access* off. Then clone:
-
-   ```bash
-   git clone git@github.com:benataz02/confire.git ~/confire
-   ```
+   If the repository goes private, give the server a read-only GitHub *deploy key* and clone over SSH;
+   the GHCR package then needs a `docker login ghcr.io` with a `read:packages` token too.
 
 ## 2. DNS (Cloudflare)
 
@@ -155,8 +150,9 @@ chmod 600 .env
 ./deploy/update.sh
 ```
 
-The first run takes a few minutes. It builds the image, creates the schema, and starts db, server,
-portal, caddy and backup. Then:
+Do this after the first GitHub Actions run has pushed the image ([§8](#8-updating)); that run then calls
+`update.sh` itself. It pulls the image, applies the migrations, and starts db, server, portal, caddy
+and backup. Then:
 
 ```bash
 docker compose ps              # all "running"; backup may say "restarting" only if an R2_* is missing
@@ -268,20 +264,33 @@ being posted twice.
 
 ## 8. Updating
 
-Push to `main`, then on the server:
+Push to `main`. GitHub Actions (`.github/workflows/deploy.yml`) builds the image, refuses it if the
+schema changed without a migration, pushes it to `ghcr.io/benataz02/confire` (`:latest` and `:<sha>`)
+and runs `deploy/update.sh` on the server: pull, `drizzle-kit migrate`, restart what changed, prune old
+images. Expect a few seconds of downtime per restart. By hand: `ssh deploy@<IP> ~/confire/deploy/update.sh`.
+
+**A schema change ships as a migration.** In dev, after `bun run db:push`, run `bun run db:generate`
+and commit `packages/db/drizzle/`. Read the generated SQL: it is exactly what production runs. Any
+question (is this a rename or a drop + add?) is asked by `generate`, in dev; `migrate` asks nothing.
+
+To roll back, set `CONFIRE_TAG=<sha>` in `.env` and run `docker compose up -d server portal`; delete the
+line before the next update. A migration is not rolled back by this; restore a backup for that.
+
+### One-time: the CI deploy key
+
+Actions reaches the server with its own key, which `authorized_keys` forces to run `update.sh` and
+nothing else (`restrict`: no shell, no forwarding):
 
 ```bash
-ssh -t deploy@<IP> ~/confire/deploy/update.sh    # -t: drizzle-kit may ask a question
+ssh-keygen -t ed25519 -N "" -C github-deploy -f ci_key        # on your machine
+# on the server, appended to /home/deploy/.ssh/authorized_keys:
+command="/home/deploy/confire/deploy/update.sh",restrict ssh-ed25519 AAAA… github-deploy
 ```
 
-That pulls, rebuilds, applies schema changes (`drizzle-kit push`), restarts what changed and prunes old
-images. **If `drizzle-kit` asks about data loss** (a dropped or renamed column), read the question
-before answering: it is the only migration step there is. Expect a few seconds of downtime per
-restart.
-
-To roll back, check out the previous commit and rebuild:
-`git checkout <sha> && docker compose build && docker compose up -d`. Then `git checkout main` before
-the next update. A schema change is not rolled back by this; restore a backup for that.
+On GitHub (*Settings → Secrets and variables → Actions*): secret `DEPLOY_SSH_KEY` = the contents of
+`ci_key`, secret `DEPLOY_KNOWN_HOSTS` = `ssh-keyscan -t ed25519 <IP>`, variable `DEPLOY_HOST` = `<IP>`.
+Then delete `ci_key`. After the first push, make the package public (*github.com/benataz02 → Packages →
+confire → Package settings → Change visibility*) so the server pulls without a login.
 
 ## 9. Backups and restore
 

@@ -1,0 +1,52 @@
+# Push to main → build the app image on GitHub's runner (the 2 GB server can OOM on the two UI5 builds),
+# push it to GHCR, then run deploy/update.sh on the server (DEPLOY.md, "Updating").
+# Repo settings: secrets DEPLOY_SSH_KEY (the private half of the key the server's authorized_keys forces
+# to update.sh) and DEPLOY_KNOWN_HOSTS (the server's host key line); variable DEPLOY_HOST.
+name: deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+# One deploy at a time, in push order.
+concurrency: deploy
+permissions:
+  contents: read
+  packages: write
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: >
+          docker build -f apps/server/Dockerfile
+          --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
+      # A schema change without its migration would start new code on the old schema. generate needs no
+      # database (it diffs against the committed snapshot); its rename question cannot be answered here
+      # and would hang, hence the timeout.
+      - name: Schema changes have a migration
+        run: |
+          out=$(docker run --rm "$IMAGE:$GITHUB_SHA" timeout 60 bun --cwd packages/db drizzle-kit generate 2>&1) || true
+          echo "$out"
+          case $out in *"No schema changes"*) ;; *)
+            echo "::error::the schema changed without a migration: bun run db:generate, commit packages/db/drizzle"
+            exit 1 ;;
+          esac
+      - name: Push
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push --all-tags "$IMAGE"
+      - name: Deploy
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh deploy@"$HOST" </dev/null

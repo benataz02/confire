@@ -19,6 +19,7 @@
   },
   "scripts": {
     "db:push": "bun --env-file=../../.env --cwd packages/db drizzle-kit push",
+    "db:generate": "bun --cwd packages/db drizzle-kit generate",
     "db:studio": "bun --env-file=../../.env --cwd packages/db drizzle-kit studio",
     "auth:generate": "bun --cwd apps/server better-auth-generate",
     "dev": "bun run --parallel dev:server dev:web dev:agent dev:portal-server dev:portal",

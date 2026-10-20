@@ -41,7 +41,9 @@ services:
       retries: 10
 
   server: &app
-    image: confire-app
+    # Built by CI (.github/workflows/deploy.yml) and pulled by deploy/update.sh: the 2 GB server can OOM
+    # on the two UI5 builds. CONFIRE_TAG=<commit sha> in .env pins a version (rollback).
+    image: ghcr.io/benataz02/confire:${CONFIRE_TAG:-latest}
     build:
       context: .
       dockerfile: apps/server/Dockerfile
