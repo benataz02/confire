@@ -8,6 +8,7 @@ import {
 } from "@ui5/webcomponents-react";
 import type { NavigationLayoutDomRef, NavigationLayoutPropTypes, SideNavigationPropTypes } from "@ui5/webcomponents-react";
 import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
+import { useI18n } from "../i18n.ts";
 import { ROLE_LABEL } from "@confire/ui/portal/CompanyPeople.tsx";
 import { authClient } from "../auth-client.ts";
 import { lobbyQuery, meQuery, type Me } from "../orpc.ts";
@@ -60,6 +61,7 @@ export function PortalShell() {
   // Switching supplier only means something with more than one.
   const lobby = useQuery(lobbyQuery);
   const { theme, setTheme, density, setDensity } = useAppearance();
+  const i18n = useI18n();
   // On the document, inline: it outranks the theme's :root parameters, in every theme.
   useEffect(() => {
     if (!me.tenant.accent) return;
@@ -135,7 +137,7 @@ export function PortalShell() {
               <UserMenuItem text="Cozy" icon={density === "cozy" ? "sys-enter" : ""} onClick={() => setDensity("cozy")} />
             </UserMenuItem>
             {(lobby.data?.length ?? 0) > 1 ? (
-              <UserMenuItem text="Switch supplier" icon="switch-views" onClick={() => void hardRedirect(authUrl("/login?choose=1"))} />
+              <UserMenuItem text={i18n.getText("USER_MENU_SWITCH_SUPPLIER")} icon="switch-views" onClick={() => void hardRedirect(authUrl("/login?choose=1"))} />
             ) : null}
           </UserMenu>
         </>
@@ -147,7 +149,7 @@ export function PortalShell() {
             <SideNavigationItem text="Company" icon="building" data-to="/company" selected={pathname === "/company"} />
           ) : undefined}
         >
-          <SideNavigationItem text="Home" icon="home" data-to="/" selected={pathname === "/"} />
+          <SideNavigationItem text={i18n.getText("NAV_HOME")} icon="home" data-to="/" selected={pathname === "/"} />
           <SideNavigationItem text="Projects" icon="product" data-to="/projects"
             selected={pathname === "/projects" || pathname.startsWith("/projects/")} />
           <SideNavigationGroup text="Documents" expanded>

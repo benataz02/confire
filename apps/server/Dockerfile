@@ -6,13 +6,13 @@ WORKDIR /app
 # serves any DOMAIN.
 COPY . .
 RUN bun install --frozen-lockfile
-RUN bun run build:web && bun run build:portal
+RUN bun run build:app && bun run build:portal
 
 # After the build so it only shapes runtime. Better Auth enables rate limiting only when
 # NODE_ENV=production, and Bun never sets it — without this line sign-in is unthrottled.
 ENV NODE_ENV=production
 EXPOSE 3000 3001
 # Schema once per deploy (deploy/update.sh): bun --cwd packages/db drizzle-kit migrate
-# cwd = apps/server so ../web/dist and ../portal/dist resolve.
+# cwd = apps/server so ../app/dist and ../portal/dist resolve.
 # The internal server; compose's `portal` service runs the same image with `start:portal`.
 CMD ["bun", "run", "--cwd", "apps/server", "start"]

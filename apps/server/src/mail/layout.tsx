@@ -15,7 +15,7 @@ export type Brand = {
   accent?: string;
 };
 
-// The staff app serves apps/web/public, so the logo URL is its own.
+// The staff app serves apps/app/public, so the logo URL is its own.
 export const CONFIRE: Brand = { name: "Confire", logoUrl: `${authUrl}/confire-logo.png` };
 
 // SAP Horizon blue, the auth pages' link colour: 4.9:1 against white.

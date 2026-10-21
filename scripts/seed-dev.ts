@@ -4,7 +4,7 @@
  *
  *   bun run seed:dev [slug] [email] [password]
  *
- * Standard views are declared in code (apps/web/src/features), so there is nothing to seed for
+ * Standard views are declared in code (apps/app/src/features), so there is nothing to seed for
  * them. Idempotent: re-running skips whatever already exists.
  */
 import { eq } from "drizzle-orm";

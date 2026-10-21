@@ -5,8 +5,8 @@ dist/
 .env.development
 *.log
 .DS_Store
-apps/web/src/routeTree.gen.ts
-apps/web/tsconfig.tsbuildinfo
+apps/app/src/routeTree.gen.ts
+apps/app/tsconfig.tsbuildinfo
 apps/agent/agent.json
 apps/agent/confire-agent.exe
 apps/agent/hera-agent.exe

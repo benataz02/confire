@@ -25,6 +25,36 @@
         "@types/bun": "^1.4.0",
       },
     },
+    "apps/app": {
+      "name": "@confire/app",
+      "dependencies": {
+        "@confire/b1": "workspace:*",
+        "@confire/config-engine": "workspace:*",
+        "@confire/server": "workspace:*",
+        "@confire/ui": "workspace:*",
+        "@orpc/client": "^1.14.6",
+        "@orpc/tanstack-query": "^1.14.6",
+        "@tanstack/react-query": "^5.101.0",
+        "@tanstack/react-router": "^1.170.16",
+        "@ui5/webcomponents": "^2.27.2",
+        "@ui5/webcomponents-base": "^2.27.2",
+        "@ui5/webcomponents-fiori": "^2.27.2",
+        "@ui5/webcomponents-icons": "^2.27.2",
+        "@ui5/webcomponents-react": "^2.27.2",
+        "@ui5/webcomponents-react-charts": "^2.27.2",
+        "better-auth": "^1.7.7",
+        "react": "^19.2.7",
+        "react-dom": "^19.2.7",
+      },
+      "devDependencies": {
+        "@tanstack/router-plugin": "^1.168.18",
+        "@types/react": "^19.2.17",
+        "@types/react-dom": "^19.2.3",
+        "@vitejs/plugin-react": "^6.0.2",
+        "typescript": "^7.0.2",
+        "vite": "^8.0.16",
+      },
+    },
     "apps/portal": {
       "name": "@confire/portal",
       "dependencies": {
@@ -76,36 +106,6 @@
         "@types/react-dom": "^19.2.3",
       },
     },
-    "apps/web": {
-      "name": "@confire/web",
-      "dependencies": {
-        "@confire/b1": "workspace:*",
-        "@confire/config-engine": "workspace:*",
-        "@confire/server": "workspace:*",
-        "@confire/ui": "workspace:*",
-        "@orpc/client": "^1.14.6",
-        "@orpc/tanstack-query": "^1.14.6",
-        "@tanstack/react-query": "^5.101.0",
-        "@tanstack/react-router": "^1.170.16",
-        "@ui5/webcomponents": "^2.27.2",
-        "@ui5/webcomponents-base": "^2.27.2",
-        "@ui5/webcomponents-fiori": "^2.27.2",
-        "@ui5/webcomponents-icons": "^2.27.2",
-        "@ui5/webcomponents-react": "^2.27.2",
-        "@ui5/webcomponents-react-charts": "^2.27.2",
-        "better-auth": "^1.7.7",
-        "react": "^19.2.7",
-        "react-dom": "^19.2.7",
-      },
-      "devDependencies": {
-        "@tanstack/router-plugin": "^1.168.18",
-        "@types/react": "^19.2.17",
-        "@types/react-dom": "^19.2.3",
-        "@vitejs/plugin-react": "^6.0.2",
-        "typescript": "^7.0.2",
-        "vite": "^8.0.16",
-      },
-    },
     "packages/b1": {
       "name": "@confire/b1",
       "dependencies": {
@@ -153,6 +153,7 @@
         "@ui5/webcomponents-base": "^2.27.2",
         "@ui5/webcomponents-fiori": "^2.27.2",
         "@ui5/webcomponents-react": "^2.27.2",
+        "@ui5/webcomponents-react-base": "^2.27.2",
         "react": "^19.2.7",
         "react-dom": "^19.2.7",
         "write-excel-file": "^4.1.1",
@@ -220,6 +221,8 @@
 
     "@confire/agent": ["@confire/agent@workspace:apps/agent"],
 
+    "@confire/app": ["@confire/app@workspace:apps/app"],
+
     "@confire/b1": ["@confire/b1@workspace:packages/b1"],
 
     "@confire/config-engine": ["@confire/config-engine@workspace:packages/config-engine"],
@@ -231,8 +234,6 @@
     "@confire/server": ["@confire/server@workspace:apps/server"],
 
     "@confire/ui": ["@confire/ui@workspace:packages/ui"],
-
-    "@confire/web": ["@confire/web@workspace:apps/web"],
 
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.10.2", "", {}, "sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w=="],
 

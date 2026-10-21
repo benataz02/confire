@@ -1,6 +1,6 @@
 import "@confire/ui/global.css";
 import "@ui5/webcomponents-react/dist/Assets.js";
-import "@ui5/webcomponents-icons/dist/AllIcons.js"; // ponytail: the whole icon set, as in apps/web — per-icon imports if bundle size bites
+import "@ui5/webcomponents-icons/dist/AllIcons.js"; // ponytail: the whole icon set, as in apps/app — per-icon imports if bundle size bites
 import { Modals, ThemeProvider } from "@ui5/webcomponents-react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

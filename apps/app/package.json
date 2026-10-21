@@ -1,5 +1,5 @@
 {
-  "name": "@confire/web",
+  "name": "@confire/app",
   "type": "module",
   "private": true,
   "scripts": {

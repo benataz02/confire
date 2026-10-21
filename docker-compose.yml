@@ -1,4 +1,4 @@
-# Dev:  docker compose up -d db          (just Postgres; run server/web with bun)
+# Dev:  docker compose up -d db          (just Postgres; run server/app with bun)
 # Prod: docker compose --profile full up  (Postgres + both processes + Caddy + backup); the server's
 #       .env sets COMPOSE_PROFILES=full so plain `docker compose …` means that. DEPLOY.md is the runbook,
 #       deploy/update.sh ships a new version.

@@ -17,6 +17,7 @@
     "@ui5/webcomponents-base": "^2.27.2",
     "@ui5/webcomponents-fiori": "^2.27.2",
     "@ui5/webcomponents-react": "^2.27.2",
+    "@ui5/webcomponents-react-base": "^2.27.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "write-excel-file": "^4.1.1"

@@ -2,7 +2,7 @@ import type { EntityConstraints } from "@confire/ui/metadata.ts";
 import { DOCUMENT_STATUS } from "@confire/ui/documentStatus.ts";
 import type { EntityFeature } from "@confire/ui/types.ts";
 
-// A client's SAP documents (spec §13.1). Unlike apps/web's declared features, these pages are built
+// A client's SAP documents (spec §13.1). Unlike apps/app's declared features, these pages are built
 // from the field list the server sends: the tenant admin's D19 pick (or the code defaults), already
 // cut by the denylist. That list — not B1 metadata — decides the page, so "metadata never generates
 // a page" still holds. Labels, types and options still merge from the same constraints.

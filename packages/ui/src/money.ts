@@ -25,7 +25,7 @@ export function money(n: number, currency?: string): string {
   }
 }
 
-// --- the items grid's money (derived by apps/web's itemMoney.ts, drawn by ConfigTable) ---------
+// --- the items grid's money (derived by apps/app's itemMoney.ts, drawn by ConfigTable) ---------
 
 export type RowMoney = {
   unitCost: number;

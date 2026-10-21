@@ -8,6 +8,6 @@ export default serve({
   auth,
   router,
   files: fileRoutes("internal"),
-  spaDist: "../web/dist",
+  spaDist: "../app/dist",
   port: 3000,
 });

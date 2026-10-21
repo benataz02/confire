@@ -10,7 +10,7 @@ Confire is a multi-tenant SaaS quoting platform for SME manufacturers running on
 Everything runs on **Bun** (no npm — see `package.json` workspaces).
 
 ```bash
-docker compose up -d db                 # Postgres 17 on :5432 (dev runs server/web with bun)
+docker compose up -d db                 # Postgres 17 on :5432 (dev runs server/app with bun)
 bun install
 bun run dev                             # sign in at http://localhost:5173/login; staff app
                                         # localhost:5173/<slug>/ (server :3000), portal
@@ -28,8 +28,8 @@ tsconfig that covers everything, so a change can typecheck in one package and br
 
 ```bash
 bunx tsc -p apps/server/tsconfig.json --noEmit
-# projects: packages/{b1,config-engine,db,ui}, apps/{agent,server,web,portal}
-bun --cwd apps/web build                # also regenerates routeTree.gen.ts (gitignored)
+# projects: packages/{b1,config-engine,db,ui}, apps/{agent,server,app,portal}
+bun --cwd apps/app build                # also regenerates routeTree.gen.ts (gitignored)
 bun --cwd apps/portal build             # same, for the portal's route tree
 ```
 
@@ -39,7 +39,7 @@ are checked there rather than in a project of their own.
 ## The processes
 
 ```
-Browser: apps/web (staff)               Browser: apps/portal (the manufacturer's customers)
+Browser: apps/app (staff)               Browser: apps/portal (the manufacturer's customers)
    │ oRPC over /rpc, same-origin            │ (dev: Vite proxy; prod: each server serves its SPA)
    ▼                                        ▼
 Confire server (apps/server/src/index.ts)   Portal server (apps/server/src/portal/index.ts)
@@ -374,14 +374,14 @@ generates a page.
 
 - **The data source is injected.** The shells never import an app's oRPC client: they read and write
   through `UiSource` (`source.tsx`) — the internal router's own client and query utils, provided once in
-  `apps/web/src/main.tsx`. The query keys therefore stay the app's, so the app's own cache writes
+  `apps/app/src/main.tsx`. The query keys therefore stay the app's, so the app's own cache writes
   (`QuoteCreatePage` seeding `entities.one`) still land. `global.css` (UI5 quirks the shells need) lives
   there too. `bun run test:ui` runs its tests. The portal provides its own (`apps/portal/src/main.tsx`):
   value help over `projects.queryPage`, personal views only.
 - **Shared beyond the shells:** `configurator/` (`ConfiguratorForm`, `ConfigTable`: the internal page
   computes in the browser; the portal passes server-evaluated `badges`/`evaluated` instead), `money.ts`,
   `timeline/` (`ProjectTimeline`, `PROJECT_STATUS`) and `confirm.ts`'s `promptNote`.
-- **Features are declared.** `apps/web/src/features/b1/` (documents, business partners, items; `B1_FEATURES`
+- **Features are declared.** `apps/app/src/features/b1/` (documents, business partners, items; `B1_FEATURES`
   is the registry — the `/b1/$entity` routes accept nothing else, and the side nav and search list
   it). A feature is plain object literals: list columns, filter fields, system views, header, section
   tree. Local lists (configs, models, masterdata) declare theirs in the route file.
@@ -426,6 +426,10 @@ a missing field is an error (dropping it would show *more* rows than asked for),
 - Big configuration objects are one jsonb document loaded and saved whole (`config_model.definition`,
   `ui_view.state`), not modelled tables.
 - Imports use explicit `.ts` extensions; `verbatimModuleSyntax` is on, so `import type` matters.
+- **UI texts are UI5's i18n** (`@confire/ui/i18n.ts`): each SPA's `src/i18n/messagebundle_<locale>.properties`
+  behind its `useI18n()` (`getText("KEY", …)`). English is the base every language is laid over, so a
+  partial translation reads in English rather than as keys. The language is UI5's: the browser's, or
+  `?sap-ui-language=es`. So far only a few shell texts go through it.
 - Workspace packages must be listed as **direct** dependencies — Bun's isolated install does not
   resolve transitives here. Adding an import from a new workspace package means editing that
   `package.json` and re-running `bun install`.

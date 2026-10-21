@@ -1,6 +1,6 @@
 import type { FormField, HeaderConfig, Section } from "@confire/ui/types.ts";
 
-// The new-client onboarding form (spec §5.3), declared like apps/web's features/b1/business-partners:
+// The new-client onboarding form (spec §5.3), declared like apps/app's features/b1/business-partners:
 // a section tree the BP-create ObjectPage draws unchanged. Metadata (`onboarding.formSchema`) only
 // says what each field is — label, required, the country options. Addresses and the contact are flat
 // prefixed keys on purpose, so ObjectPage validates and sends them like any field; the server folds

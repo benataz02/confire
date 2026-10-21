@@ -366,10 +366,10 @@ The run takes a few minutes, and each restart means a few seconds of downtime. N
    and runs no tests. A type error in the server, or a failing test, ships unless you catch it here:
 
    ```bash
-   for p in packages/{b1,config-engine,db,ui} apps/{agent,server,web,portal}; do
+   for p in packages/{b1,config-engine,db,ui} apps/{agent,server,app,portal}; do
      bunx tsc -p $p/tsconfig.json --noEmit || echo "FAIL $p"
    done
-   bun run test:engine && bun run test:ui && bun run test:web && bun run test:server   # server: needs the dev db
+   bun run test:engine && bun run test:ui && bun run test:app && bun run test:server   # server: needs the dev db
    ```
 
 4. **Merge to `main`** with a PR or a push. That is the deploy.
@@ -377,7 +377,7 @@ The run takes a few minutes, and each restart means a few seconds of downtime. N
 
    | Step | Usually means | Fix |
    |---|---|---|
-   | build (`docker build`) | `bun install --frozen-lockfile` or a Vite build failed | Run `bun install` and commit `bun.lock`; `bun run build:web` / `build:portal` locally |
+   | build (`docker build`) | `bun install --frozen-lockfile` or a Vite build failed | Run `bun install` and commit `bun.lock`; `bun run build:app` / `build:portal` locally |
    | Schema changes have a migration | The schema changed but nothing was generated | `bun run db:generate`, commit `packages/db/drizzle/`, push |
    | Deploy | `git pull` refused, the pull failed, or a migration failed. The server's output is in the log | Fix, then *Re-run jobs*, or `ssh deploy@95.217.187.52 ~/confire/deploy/update.sh` |
 

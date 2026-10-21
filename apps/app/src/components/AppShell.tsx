@@ -18,6 +18,7 @@ import { GlobalSearch, type SearchEntry } from "./GlobalSearch.tsx";
 import { useRef, useState, useMemo } from "react";
 import type { MouseEvent } from "react";
 import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
+import { useI18n } from "../i18n.ts";
 
 
 // The app shell for every signed-in page. The workspace is the path's first segment; the auth gate
@@ -42,6 +43,7 @@ export function AppShell() {
     if (!navLayoutRef.current?.isSideCollapsed()) setNavMode("Collapsed");
   };
   const { theme, setTheme: setThemeState, density, setDensity } = useAppearance();
+  const i18n = useI18n();
 
   // Identity + org role in one query, already primed by $slug's beforeLoad — a cache read.
   // Role decides whether the Settings item shows; the server gates it too.
@@ -157,7 +159,7 @@ export function AppShell() {
                 </UserMenuItem>
               ))}
             </UserMenuItem>
-            <UserMenuItem text="Density" icon="person-placeholder" >
+            <UserMenuItem text={i18n.getText("USER_MENU_DENSITY")} icon="person-placeholder" >
               <UserMenuItem
                 data-id="compact"
                 text="Compact"
@@ -184,7 +186,7 @@ export function AppShell() {
               selected={pathname === "/settings"} />
           ) : undefined}
         >
-          <SideNavigationItem text="Home" icon="home" data-to="/" selected={pathname === "/"} />
+          <SideNavigationItem text={i18n.getText("NAV_HOME")} icon="home" data-to="/" selected={pathname === "/"} />
               {isAdmin ? (
                 <SideNavigationGroup text="SAP Business One" expanded>
                   {Object.values(B1_FEATURES).map((f) => (
