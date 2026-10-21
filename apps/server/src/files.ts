@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { ORPCError } from "@orpc/server";
+import * as Sentry from "@sentry/bun";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, projectFile } from "@confire/db";
 import { auth } from "./auth.ts";
@@ -93,6 +94,7 @@ const handle = (fn: (c: Context) => Promise<Response>) => async (c: Context) => 
   } catch (e) {
     if (e instanceof ORPCError) return c.json({ message: e.message }, e.status as 400);
     console.error("[files]", e);
+    Sentry.captureException(e);
     return c.json({ message: "Something went wrong" }, 500);
   }
 };

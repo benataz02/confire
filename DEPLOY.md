@@ -173,6 +173,9 @@ POSTGRES_PASSWORD=<hex from above>
 RESEND_API_KEY=re_...
 RESEND_ADMIN_KEY=re_...
 
+# Server errors to Sentry (project confire-server → Settings → Client Keys). Unset = none sent
+SENTRY_DSN=https://...@....ingest.de.sentry.io/...
+
 # Optional: Google / Microsoft sign-in. Unset leaves that button dead (Better Auth logs a warning at boot)
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
@@ -387,6 +390,7 @@ The run takes a few minutes, and each restart means a few seconds of downtime. N
    - `curl -fsS https://app.confire.ai/api/auth/ok https://portal.confire.ai/api/auth/ok`
    - Open the feature.
    - On the server: `docker compose logs --since 10m server portal`.
+   - Sentry, project `confire-server`: new issues under `release:<sha>` are this deploy's.
    - `git -C ~/confire log -1 --oneline` is the commit that is running.
 
 ### Rolling back

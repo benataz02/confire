@@ -60,6 +60,8 @@ services:
       # admin key is only for tenant sender domains (Settings → Portal); unset turns them off.
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_ADMIN_KEY: ${RESEND_ADMIN_KEY:-}
+      # Errors and traces from both processes to Sentry (apps/server/src/instrument.ts). Unset = none sent.
+      SENTRY_DSN: ${SENTRY_DSN:-}
       # Rows per Service Layer page (apps/server/src/lookups.ts); unset = 100.
       B1_PAGE_SIZE: ${B1_PAGE_SIZE:-}
       # Unset leaves that sign-in button dead: Better Auth only logs a warning at boot.

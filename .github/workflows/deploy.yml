@@ -21,6 +21,7 @@ jobs:
       - uses: actions/checkout@v5
       - run: >
           docker build -f apps/server/Dockerfile
+          --build-arg SENTRY_RELEASE=$GITHUB_SHA
           --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
       # A schema change without its migration would start new code on the old schema. generate needs no

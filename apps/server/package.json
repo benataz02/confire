@@ -9,9 +9,9 @@
   },
   "scripts": {
     "dev": "bun run --hot src/index.ts",
-    "start": "bun run src/index.ts",
+    "start": "bun run --preload ./src/instrument.ts src/index.ts",
     "better-auth-generate": "bunx auth@1.7.7 generate --config src/auth.ts --output ../../packages/db/src/schema/auth.ts -y",
-    "start:portal": "bun run src/portal/index.ts"
+    "start:portal": "bun run --preload ./src/instrument.ts src/portal/index.ts"
   },
   "dependencies": {
     "@confire/b1": "workspace:*",
@@ -19,6 +19,7 @@
     "@confire/db": "workspace:*",
     "@orpc/client": "^1.14.6",
     "@orpc/server": "^1.14.6",
+    "@sentry/bun": "^11.8.0",
     "better-auth": "^1.7.7",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.26",
