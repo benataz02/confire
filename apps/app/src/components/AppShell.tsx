@@ -18,6 +18,7 @@ import { GlobalSearch, type SearchEntry } from "./GlobalSearch.tsx";
 import { useRef, useState, useMemo } from "react";
 import type { MouseEvent } from "react";
 import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
+import { LANGUAGES, useLanguage } from "@confire/ui/i18n.ts";
 import { useI18n } from "../i18n.ts";
 
 
@@ -44,6 +45,7 @@ export function AppShell() {
   };
   const { theme, setTheme: setThemeState, density, setDensity } = useAppearance();
   const i18n = useI18n();
+  const { language, setLanguage } = useLanguage();
 
   // Identity + org role in one query, already primed by $slug's beforeLoad — a cache read.
   // Role decides whether the Settings item shows; the server gates it too.
@@ -86,6 +88,10 @@ export function AppShell() {
       })),
       { group: "Settings", text: "Compact", description: "Density", icon: "resize-horizontal", run: () => setDensity('compact') },
       { group: "Settings", text: "Cozy", description: "Density", icon: "resize-horizontal", run: () => setDensity('cozy') },
+      ...LANGUAGES.map((l) => ({
+        group: "Settings", text: l.label, description: "Language", icon: "translate",
+        run: () => setLanguage(l.id),
+      })),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, go]);
@@ -174,6 +180,12 @@ export function AppShell() {
                 onClick={() => setDensity('cozy')}
               >
               </UserMenuItem>
+            </UserMenuItem>
+            <UserMenuItem text={i18n.getText("USER_MENU_LANGUAGE")} icon="translate">
+              {LANGUAGES.map((l) => (
+                <UserMenuItem key={l.id} text={l.label} icon={language === l.id ? "sys-enter" : ""}
+                  onClick={() => setLanguage(l.id)} />
+              ))}
             </UserMenuItem>
           </UserMenu>
         </>

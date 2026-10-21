@@ -125,8 +125,10 @@ function FilterControl({ field, value, setValue }: {
   }
   if (isRangeField(field)) {
     const r = value && typeof value === "object" && !Array.isArray(value) ? value : { from: "", to: "" };
+    // The picker's :host is min-width 15rem, the FilterBar's cells 13.125rem (flex-grown): whenever a
+    // row has little width to spare it ran under the next filter. FilterBar's docs say to drop it.
     return (
-      <DateRangePicker valueFormat="yyyy-MM-dd" delimiter="~" accessibleName={field.label}
+      <DateRangePicker style={{ minWidth: "auto" }} valueFormat="yyyy-MM-dd" delimiter="~" accessibleName={field.label}
         value={r.from || r.to ? `${r.from} ~ ${r.to || r.from}` : ""}
         onChange={(e) => {
           const [from = "", to = ""] = (e.detail.value ?? "").split("~").map((s) => s.trim());
