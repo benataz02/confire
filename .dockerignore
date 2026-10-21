@@ -4,3 +4,6 @@ node_modules
 .git
 **/.env*
 *.log
+# SAP credentials live on-prem in the agent's own config and never reach the cloud (CLAUDE.md).
+apps/agent/agent.json
+apps/agent/*.exe
