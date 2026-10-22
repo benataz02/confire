@@ -11,6 +11,7 @@ import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { DeleteRows, positionOf, positions, useEditGrid } from "./useEditGrid.tsx";
 import { confirm } from "@confire/ui/confirm.ts";
+import { useI18n } from "../../i18n.ts";
 
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
 type TableConstraint = Extract<Constraint, { kind: "table" }>;
@@ -19,16 +20,6 @@ type Cell = Exclude<Val, string[]>;
 
 const FORM = { accessibleMode: "Edit", layout: "S1 M2 L2 XL2", labelSpan: "S12 M12 L12 XL12", headerLevel: "H5" } as const;
 
-const EXPR_COLUMNS: ListColumn[] = [
-  { key: "when", label: "When (optional)" },
-  { key: "assert", label: "Must hold" },
-  { key: "message", label: "Message" },
-];
-const TABLE_COLUMNS: ListColumn[] = [
-  { key: "params", label: "Parameters" },
-  { key: "mode", label: "Mode" },
-  { key: "rows", label: "Rows" },
-];
 
 // "true"/"false" -> boolean, numeric -> number, "" -> null, else string.
 export const parseLit = (s: string): Cell =>
@@ -39,6 +30,18 @@ export const parseLit = (s: string): Cell =>
 export function RulesTab({ draft, update, issues, lookups, tables = [] }: {
   draft: ModelDef; update: Update; issues: Issue[]; lookups?: ResolvedLookups; tables?: TableCols[];
 }) {
+  const i18n = useI18n();
+  const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
+  const exprColumns = useMemo<ListColumn[]>(() => [
+    { key: "when", label: t("MODEL_WHEN") },
+    { key: "assert", label: t("MODEL_MUST_HOLD") },
+    { key: "message", label: t("MODEL_MESSAGE") },
+  ], [i18n]);
+  const tableColumns = useMemo<ListColumn[]>(() => [
+    { key: "params", label: t("MODEL_SECTION_PARAMS") },
+    { key: "mode", label: t("MODEL_MODE") },
+    { key: "rows", label: t("MODEL_ROWS") },
+  ], [i18n]);
   const [editingTable, setEditingTable] = useState<number | null>(null);
   const setC = (i: number, c: Constraint) =>
     update((d) => ({ ...d, constraints: d.constraints.map((x, j) => (j === i ? c : x)) }));
@@ -55,7 +58,7 @@ export function RulesTab({ draft, update, issues, lookups, tables = [] }: {
     [draft.constraints],
   );
 
-  const exprGrid = useEditGrid(exprs, EXPR_COLUMNS, {
+  const exprGrid = useEditGrid(exprs, exprColumns, {
     when: ({ c, i }) => (
       <ExprInput optional value={c.when} model={draft} tables={tables} fieldId={`expr-constraints[${i}].when`}
         issue={issueFor(issues, `constraints[${i}].when`)}
@@ -63,7 +66,7 @@ export function RulesTab({ draft, update, issues, lookups, tables = [] }: {
     ),
     assert: ({ c, i }) => (
       <ExprInput value={c.assert} model={draft} tables={tables} fieldId={`expr-constraints[${i}].assert`}
-        issue={issueFor(issues, `constraints[${i}].assert`)} placeholder='e.g. coating != "none" || material == "steel"'
+        issue={issueFor(issues, `constraints[${i}].assert`)} placeholder={t("MODEL_ASSERT_PH")}
         onChange={(v) => setC(i, { ...c, assert: v ?? "" })} />
     ),
     message: ({ c, i }) => {
@@ -71,36 +74,36 @@ export function RulesTab({ draft, update, issues, lookups, tables = [] }: {
       // The `expr-` id is builderMessages' anchor convention for a rule's cells, not a claim about the input.
       return (
         <Input id={`expr-constraints[${i}].message`} style={{ width: "100%" }} value={c.message}
-          placeholder="Shown when violated" required
+          placeholder={t("MODEL_MESSAGE_PH")} required
           valueState={issue ? "Negative" : "None"} valueStateMessage={issue ? <div>{issue.message}</div> : undefined}
           onInput={(e) => setC(i, { ...c, message: e.target.value })} />
       );
     },
   });
 
-  const tableGrid = useEditGrid(tablesC, TABLE_COLUMNS, {
+  const tableGrid = useEditGrid(tablesC, tableColumns, {
     params: ({ c }) => c.params.join(" × ") || "—",
-    mode: ({ c }) => c.mode,
+    mode: ({ c }) => t(c.mode === "allow" ? "MODEL_MODE_ALLOW_SHORT" : "MODEL_MODE_FORBID_SHORT"),
     rows: ({ c }) => c.rows.length,
   });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <GridForm headerText="Expression constraints">
-        <Grid {...exprGrid} title="Expression constraints" fill={false} selectionMode="Multiple"
+      <GridForm headerText={t("MODEL_EXPR_CONSTRAINTS")}>
+        <Grid {...exprGrid} title={t("MODEL_EXPR_CONSTRAINTS")} fill={false} selectionMode="Multiple"
           toolbarActions={(sel) => (
             <>
               <Button icon="add" design="Transparent"
                 onClick={() => update((d) => ({ ...d, constraints: [...d.constraints, { kind: "expr", assert: "", message: "" }] }))}>
-                Add constraint
+                {t("MODEL_ADD_CONSTRAINT")}
               </Button>
               {/* Expression rows are a single line, so they delete without a prompt. */}
               <DeleteRows sel={sel} onDelete={(gone) => removeCs(new Set([...gone].map((p) => exprs[p]!.i)))} />
             </>
           )} />
       </GridForm>
-      <GridForm headerText="Combination tables">
-        <Grid {...tableGrid} title="Combination tables" fill={false} selectionMode="Multiple"
+      <GridForm headerText={t("MODEL_COMBO_TABLES")}>
+        <Grid {...tableGrid} title={t("MODEL_COMBO_TABLES")} fill={false} selectionMode="Multiple"
           onRowClick={(row) => setEditingTable(tablesC[positionOf(row)]!.i)}
           toolbarActions={(sel) => (
             <>
@@ -109,7 +112,7 @@ export function RulesTab({ draft, update, issues, lookups, tables = [] }: {
                   update((d) => ({ ...d, constraints: [...d.constraints, { kind: "table", params: [], rows: [], mode: "forbid" }] }));
                   setEditingTable(draft.constraints.length);
                 }}>
-                Add combination table
+                {t("MODEL_ADD_COMBO")}
               </Button>
               {/* Combination tables can hold a lot of hand-entered rows — confirm before discarding them. */}
               <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
@@ -117,14 +120,16 @@ export function RulesTab({ draft, update, issues, lookups, tables = [] }: {
                   const picked = [...positions(sel.rows)].map((p) => tablesC[p]!);
                   const rows = picked.reduce((n, t) => n + t.c.rows.length, 0);
                   if (rows && !await confirm({
-                    title: "Delete combination tables",
-                    message: `Delete ${picked.length === 1 ? "this combination table" : `${picked.length} combination tables`} and ${rows} row${rows === 1 ? "" : "s"}?`,
-                    actionText: "Delete", destructive: true,
+                    title: t("MODEL_DELETE_COMBOS"),
+                    message: picked.length === 1
+                      ? t(rows === 1 ? "MODEL_DELETE_COMBO_ONE_R1" : "MODEL_DELETE_COMBO_ONE_RN", String(rows))
+                      : t(rows === 1 ? "MODEL_DELETE_COMBO_N_R1" : "MODEL_DELETE_COMBO_N_RN", String(picked.length), String(rows)),
+                    actionText: t("MODEL_DELETE"), destructive: true,
                   })) return;
                   sel.clear();
                   removeCs(new Set(picked.map((t) => t.i)));
                 }}>
-                Delete
+                {t("MODEL_DELETE")}
               </Button>
             </>
           )} />
@@ -145,6 +150,8 @@ function ComboTableDialog({ draft, lookups, value, onOk, onCancel }: {
   draft: ModelDef; lookups?: ResolvedLookups; value: TableConstraint;
   onOk: (c: TableConstraint) => void; onCancel: () => void;
 }) {
+  const i18n = useI18n();
+  const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
   const [c, setCLocal] = useState<TableConstraint>(structuredClone(value));
   // Only finite params can appear in a combination table (checkModel enforces the same).
   const eligible = draft.parameters.filter((p) => !p.excludeFromDomains && (p.domain?.kind === "options" || p.type === "boolean"));
@@ -184,18 +191,18 @@ function ComboTableDialog({ draft, lookups, value, onOk, onCancel }: {
   })));
 
   return (
-    <Dialog open headerText="Combination table" onClose={onCancel} style={{ width: "min(52rem, 92vw)" }}
+    <Dialog open headerText={t("MODEL_COMBO_TABLE")} onClose={onCancel} style={{ width: "min(52rem, 92vw)" }}
       footer={
         <Bar design="Footer" endContent={
           <>
-            <Button design="Emphasized" disabled={c.params.length < 2} onClick={() => onOk(c)}>OK</Button>
-            <Button design="Transparent" onClick={onCancel}>Cancel</Button>
+            <Button design="Emphasized" disabled={c.params.length < 2} onClick={() => onOk(c)}>{t("MODEL_OK")}</Button>
+            <Button design="Transparent" onClick={onCancel}>{t("MODEL_CANCEL")}</Button>
           </>
         } />
       }>
-      <Form {...FORM} headerText="Definition">
-        <FormGroup accessibleName="Definition">
-          <FormItem labelContent={<Label required>Parameters (2+)</Label>}>
+      <Form {...FORM} headerText={t("MODEL_DEFINITION")}>
+        <FormGroup accessibleName={t("MODEL_DEFINITION")}>
+          <FormItem labelContent={<Label required>{t("MODEL_PARAMS_MIN")}</Label>}>
             <MultiComboBox style={{ width: "100%" }}
               onSelectionChange={(e) => setParams(e.detail.items.map((i) => (i as HTMLElement).getAttribute("text")!))}>
               {eligible.map((p) => (
@@ -203,29 +210,29 @@ function ComboTableDialog({ draft, lookups, value, onOk, onCancel }: {
               ))}
             </MultiComboBox>
           </FormItem>
-          <FormItem labelContent={<Label>Mode</Label>}>
+          <FormItem labelContent={<Label>{t("MODEL_MODE")}</Label>}>
             <Select style={{ width: "100%" }} value={c.mode}
               onChange={(e) => setCLocal((x) => ({ ...x, mode: e.detail.selectedOption.value as "allow" | "forbid" }))}>
-              <Option value="allow">Allow only these</Option>
-              <Option value="forbid">Forbid these</Option>
+              <Option value="allow">{t("MODEL_MODE_ALLOW")}</Option>
+              <Option value="forbid">{t("MODEL_MODE_FORBID")}</Option>
             </Select>
           </FormItem>
         </FormGroup>
       </Form>
       {c.params.length >= 2 ? (
-        <GridForm headerText="Combination rows">
-          <Grid {...grid} title="Combination rows" fill={false} selectionMode="Multiple"
+        <GridForm headerText={t("MODEL_COMBO_ROWS")}>
+          <Grid {...grid} title={t("MODEL_COMBO_ROWS")} fill={false} selectionMode="Multiple"
             toolbarActions={(sel) => (
               <>
                 <Button icon="add" design="Transparent"
                   onClick={() => setCLocal((x) => ({ ...x, rows: [...x.rows, x.params.map(() => null)] }))}>
-                  Add row
+                  {t("MODEL_ADD_ROW")}
                 </Button>
                 <DeleteRows sel={sel} onDelete={(gone) => setCLocal((x) => ({ ...x, rows: x.rows.filter((_, j) => !gone.has(j)) }))} />
               </>
             )} />
         </GridForm>
-      ) : <Text>Pick at least two parameters, then add rows.</Text>}
+      ) : <Text>{t("MODEL_PICK_TWO")}</Text>}
     </Dialog>
   );
 }

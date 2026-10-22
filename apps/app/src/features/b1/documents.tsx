@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, MessageStrip } from "@ui5/webcomponents-react";
+import { useI18n } from "../../i18n.ts";
 import { orpc } from "../../orpc.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { confirm } from "@confire/ui/confirm.ts";
@@ -19,15 +20,18 @@ import type { EntityFeature, HeaderActionContext, Row } from "@confire/ui/types.
  *  selection action. A re-quote of a client's request whose quotation is closed posts a new one,
  *  so closing is also how staff start a quotation over. Admins and owners — the server says so. */
 export function CloseQuotations({ rows, disabled, onClosed }: { rows: Row[]; disabled?: boolean; onClosed?: () => void }) {
+  const i18n = useI18n();
   const qc = useQueryClient();
   const close = useMutation(orpc.entities.close.mutationOptions());
   const open = rows.filter((r) => r.DocumentStatus === undefined || r.DocumentStatus === "bost_Open");
   const run = async () => {
     const one = open.length === 1;
     const ok = await confirm({
-      title: one ? "Close quotation" : "Close quotations",
-      message: `${one ? `Close quotation ${String(open[0]!.DocNum ?? open[0]!.DocEntry)}` : `Close ${open.length} quotations`} in SAP? A closed quotation can't be reopened; a client request quoted on it gets a new quotation on its next quote.`,
-      actionText: "Close", destructive: true,
+      title: i18n.getText(one ? "ADMIN_CLOSE_QUOTE_TITLE" : "ADMIN_CLOSE_QUOTES_TITLE"),
+      message: one
+        ? i18n.getText("ADMIN_CLOSE_QUOTE_MSG", String(open[0]!.DocNum ?? open[0]!.DocEntry))
+        : i18n.getText("ADMIN_CLOSE_QUOTES_MSG", open.length),
+      actionText: i18n.getText("ADMIN_CLOSE"), destructive: true,
     });
     if (!ok) return;
     // One at a time: each is its own SAP action, and the first refusal should stop the rest.
@@ -37,26 +41,41 @@ export function CloseQuotations({ rows, disabled, onClosed }: { rows: Row[]; dis
     } finally {
       void qc.invalidateQueries({ queryKey: orpc.entities.one.key() });
       void qc.invalidateQueries({ queryKey: orpc.entities.rows.key() });
-      if (done) { toast(done === 1 ? "Quotation closed" : `${done} quotations closed`); onClosed?.(); }
+      if (done) { toast(done === 1 ? i18n.getText("ADMIN_QUOTE_CLOSED") : i18n.getText("ADMIN_QUOTES_CLOSED", done)); onClosed?.(); }
     }
   };
   return (
     <>
       <Button icon="locked" design="Transparent" disabled={disabled || close.isPending || !open.length}
-        tooltip={open.length ? undefined : "Only an open quotation can be closed"} onClick={() => void run()}>
-        Close
+        tooltip={open.length ? undefined : i18n.getText("ADMIN_CLOSE_ONLY_OPEN")} onClick={() => void run()}>
+        {i18n.getText("ADMIN_CLOSE")}
       </Button>
       {close.error ? <MessageStrip design="Negative" hideCloseButton>{close.error.message}</MessageStrip> : null}
     </>
   );
 }
 
+const CREATED: Record<string, string> = {
+  Orders: "ADMIN_CREATED_ORDER",
+  DeliveryNotes: "ADMIN_CREATED_DELIVERY",
+  Invoices: "ADMIN_CREATED_INVOICE",
+};
+const FLOW_KEY: Record<string, string> = {
+  "Sales Quotation to Sales Order": "ADMIN_FLOW_QUOTE_TO_ORDER",
+  "Sales Order to Delivery": "ADMIN_FLOW_ORDER_TO_DELIVERY",
+  "Sales Order to Invoice": "ADMIN_FLOW_ORDER_TO_INVOICE",
+  "Delivery to A/R Invoice": "ADMIN_FLOW_DELIVERY_TO_INVOICE",
+};
+
 /** Print, and the copy flows out of this document (Quotation -> Order -> Delivery -> Invoice). */
 function DocumentActions({ entity, ctx }: { entity: string; ctx: HeaderActionContext }) {
+  const i18n = useI18n();
   const go = useEntityNav();
   const copy = useMutation(orpc.entities.copy.mutationOptions({
     onSuccess: (r) => {
-      toast(`${r.entity} ${r.docNum ?? r.docEntry} created`);
+      const key = CREATED[r.entity];
+      const num = String(r.docNum ?? r.docEntry);
+      toast(key ? i18n.getText(key, num) : `${r.entity} ${num} created`);
       go(`/b1/${r.entity}`, r.docEntry);
     },
   }));
@@ -67,12 +86,15 @@ function DocumentActions({ entity, ctx }: { entity: string; ctx: HeaderActionCon
       {ctx.constraints?.printable ? (
         <PrintActions entity={entity} docEntry={docEntry} disabled={ctx.isEditMode} />
       ) : null}
-      {(ctx.constraints?.flows ?? []).map((f) => (
-        <Button key={f.target} icon="copy" design="Transparent" disabled={copy.isPending || ctx.isEditMode}
-          onClick={() => copy.mutate({ sourceEntity: entity, targetEntity: f.target, docEntry })}>
-          {f.label}
-        </Button>
-      ))}
+      {(ctx.constraints?.flows ?? []).map((f) => {
+        const flow = FLOW_KEY[f.label];
+        return (
+          <Button key={f.target} icon="copy" design="Transparent" disabled={copy.isPending || ctx.isEditMode}
+            onClick={() => copy.mutate({ sourceEntity: entity, targetEntity: f.target, docEntry })}>
+            {flow ? i18n.getText(flow) : f.label}
+          </Button>
+        );
+      })}
       {entity === "Quotations" ? <CloseQuotations rows={[ctx.formData]} disabled={ctx.isEditMode} /> : null}
       {copy.error ? <MessageStrip design="Negative" hideCloseButton>{copy.error.message}</MessageStrip> : null}
     </>

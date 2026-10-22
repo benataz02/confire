@@ -11,6 +11,7 @@ import {
 import { percent } from "../dashboard/dashboardView.ts";
 import { money } from "@confire/ui/money.ts";
 import { useCurrency } from "../../orpc.ts";
+import { useI18n } from "../../i18n.ts";
 import { Grid, type CellTemplate, type GridState } from "@confire/ui/list-report/Grid.tsx";
 import type { ListColumn, Row } from "@confire/ui/types.ts";
 
@@ -43,6 +44,8 @@ export function PriceAnalysis({ model, entries, candidates, selection, onSelect,
   disabled?: boolean;
 }) {
   const currency = useCurrency();
+  const i18n = useI18n();
+  const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
   const [filters, setFilters] = useState<Record<string, string[]>>({});
   const keys = openKeys(model, entries, candidates);
   const best = bestByBatch(candidates);
@@ -51,13 +54,18 @@ export function PriceAnalysis({ model, entries, candidates, selection, onSelect,
   const paramLabel = (k: string) => model.parameters.find((p) => p.key === k)?.label ?? k;
 
   // Keyed on the keys' contents: openKeys hands back a new array every render.
+  const qtyText = t("CONFIG_QUANTITY");
+  const priceText = t("CONFIG_UNIT_PRICE");
+  const marginText = t("CONFIG_MARGIN");
+  const totalText = t("CONFIG_TOTAL");
+  const lowestText = t("CONFIG_LOWEST");
   const columns = useMemo<ListColumn[]>(() => [
     ...keys.map((k) => ({ key: k, label: paramLabel(k), groupable: true })),
-    { key: QTY, label: "Quantity", type: "number" as const, groupable: true },
-    { key: PRICE, label: "Unit price", type: "number" as const },
-    ...(withCost ? [{ key: MARGIN, label: "Margin", type: "number" as const }] : []),
-    { key: TOTAL, label: "Total", type: "number" as const },
-  ], [keys.join(), model.parameters, withCost]);
+    { key: QTY, label: qtyText, type: "number" as const, groupable: true },
+    { key: PRICE, label: priceText, type: "number" as const },
+    ...(withCost ? [{ key: MARGIN, label: marginText, type: "number" as const }] : []),
+    { key: TOTAL, label: totalText, type: "number" as const },
+  ], [keys.join(), model.parameters, withCost, qtyText, priceText, marginText, totalText]);
   // Sort, grouping and widths are the user's until the column set changes under them (a
   // recalculation that leaves other parameters open), then they start over.
   const sig = columns.map((c) => c.key).join();
@@ -72,7 +80,7 @@ export function PriceAnalysis({ model, entries, candidates, selection, onSelect,
   const cellTemplates = useMemo<Record<string, CellTemplate>>(() => ({
     [PRICE]: (r) => (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", width: "100%" }}>
-        {r[LOWEST] ? <Tag design="Positive">Lowest</Tag> : null}
+        {r[LOWEST] ? <Tag design="Positive">{lowestText}</Tag> : null}
         <Text>{money(r[PRICE] as number, currency)}</Text>
       </div>
     ),
@@ -82,7 +90,7 @@ export function PriceAnalysis({ model, entries, candidates, selection, onSelect,
       return <ObjectStatus state={m !== null && m < 0 ? "Negative" : "None"}>{percent(m)}</ObjectStatus>;
     },
     [TOTAL]: (r) => <Text>{money(r[TOTAL] as number, currency)}</Text>,
-  }), [currency]);
+  }), [currency, lowestText]);
 
   const all = candidates.flatMap((c, i) => c.perBatch.map((b): Row => ({
     ...Object.fromEntries(keys.map((k) => [k, String(c.assignment[k] ?? "—")])),
@@ -90,7 +98,7 @@ export function PriceAnalysis({ model, entries, candidates, selection, onSelect,
     [MARGIN]: b.unitCost === undefined ? null : margin(b.unitPrice, b.unitCost),
   })));
   // One filter per column that actually varies — a single value has nothing to narrow.
-  const domains = [...keys.map((k) => ({ key: k, label: paramLabel(k) })), { key: QTY, label: "Quantity" }]
+  const domains = [...keys.map((k) => ({ key: k, label: paramLabel(k) })), { key: QTY, label: qtyText }]
     .map((d) => ({ ...d, values: [...new Set(all.map((r) => String(r[d.key])))] }))
     .filter((d) => d.values.length > 1);
   const rows = sortRows(
@@ -109,14 +117,15 @@ export function PriceAnalysis({ model, entries, candidates, selection, onSelect,
   const chart = chartRows(candidates, selection);
   const dataset = batches.map((q, j) =>
     Object.fromEntries([["qty", q], ...chart.map((i) => [`c${i}`, candidates[i]!.perBatch[j]!.unitPrice])]));
-  const label = (i: number) => candidateLabel(keys, candidates[i]!.assignment);
+  const label = (i: number) => candidateLabel(t, keys, candidates[i]!.assignment);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
       {capped ? (
         <MessageStrip design="Critical" hideCloseButton>
-          Stopped at {candidates.length} candidates — go back and set more parameters
-          {widest ? ` (${paramLabel(widest.key)} is widest with ${widest.size} options)` : ""}.
+          {widest
+            ? t("CONFIG_CAPPED_BACK_WIDEST", String(candidates.length), paramLabel(widest.key), String(widest.size))
+            : t("CONFIG_CAPPED_BACK", String(candidates.length))}
         </MessageStrip>
       ) : null}
       {domains.length ? (
@@ -124,7 +133,7 @@ export function PriceAnalysis({ model, entries, candidates, selection, onSelect,
           {domains.map((d) => (
             <div key={d.key} style={{ display: "flex", flexDirection: "column", width: "14rem" }}>
               <Label for={`flt-${d.key}`} showColon>{d.label}</Label>
-              <MultiComboBox id={`flt-${d.key}`} placeholder="All" selectedValues={filters[d.key] ?? []}
+              <MultiComboBox id={`flt-${d.key}`} placeholder={t("CONFIG_FILTER_ALL")} selectedValues={filters[d.key] ?? []}
                 onSelectionChange={(e) =>
                   setFilters((f) => ({ ...f, [d.key]: e.detail.items.map((it) => it.value ?? "") }))}>
                 {d.values.map((v) => (
@@ -135,10 +144,10 @@ export function PriceAnalysis({ model, entries, candidates, selection, onSelect,
           ))}
         </div>
       ) : null}
-      <Text>Each ticked line becomes one line on the quotation.</Text>
-      <Grid title="Lines" columns={columns} state={state} rows={rows} keyOf={keyOf} fill={false}
+      <Text>{t("CONFIG_LINES_HINT")}</Text>
+      <Grid title={t("CONFIG_LINES")} columns={columns} state={state} rows={rows} keyOf={keyOf} fill={false}
         onStateChange={(patch) => setView({ sig, state: { ...state, ...patch } })}
-        cellTemplates={cellTemplates} noDataText="No line matches the filters."
+        cellTemplates={cellTemplates} noDataText={t("CONFIG_NO_LINES")}
         selectionMode="Multiple" selectedIds={selectedIds} expandGroups
         onSelectionChange={(picked) => {
           if (disabled) setResync((n) => n + 1);
@@ -150,10 +159,10 @@ export function PriceAnalysis({ model, entries, candidates, selection, onSelect,
       {chart.length ? (
         <>
           <Title level="H6" style={{ marginBlockStart: "1.25rem" }}>
-            {chart.length === 1 ? `Unit price by quantity — ${label(chart[0]!)}` : "Unit price by quantity"}
+            {chart.length === 1 ? t("CONFIG_CHART_ONE", label(chart[0]!)) : t("CONFIG_CHART")}
           </Title>
           <LineChart style={{ height: "16rem" }} dataset={dataset} noLegend={chart.length === 1}
-            dimensions={[{ accessor: "qty", formatter: (v) => `Qty ${fmt(Number(v))}` }]}
+            dimensions={[{ accessor: "qty", formatter: (v) => t("CONFIG_QTY_AXIS", fmt(Number(v))) }]}
             measures={chart.map((i) => ({
               accessor: `c${i}`, label: label(i), hideDataLabel: true, width: 2,
               // Keyed to the candidate, not the pick order, so unpicking one row never repaints

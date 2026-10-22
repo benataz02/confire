@@ -1,4 +1,5 @@
 import { Button } from "@ui5/webcomponents-react";
+import { useUiI18n } from "../i18n.ts";
 
 // Brand glyphs as inline SVG (no icon dependency). The sign-in host's login + signup.
 const GoogleGlyph = () => (
@@ -22,13 +23,14 @@ export type SocialProvider = "google" | "microsoft";
 
 /** Google and Microsoft sign-in. `signIn` is the app's: it owns the auth client and the callback URLs. */
 export function SocialButtons({ signIn }: { signIn: (provider: SocialProvider) => void }) {
+  const i18n = useUiI18n();
   return (
     <div className="auth-social">
       <Button onClick={() => signIn("google")}>
-        <span className="auth-social__label"><GoogleGlyph /> Continue with Google</span>
+        <span className="auth-social__label"><GoogleGlyph /> {i18n.getText("UI_CONTINUE_GOOGLE")}</span>
       </Button>
       <Button onClick={() => signIn("microsoft")}>
-        <span className="auth-social__label"><MicrosoftGlyph /> Continue with Microsoft</span>
+        <span className="auth-social__label"><MicrosoftGlyph /> {i18n.getText("UI_CONTINUE_MICROSOFT")}</span>
       </Button>
     </div>
   );

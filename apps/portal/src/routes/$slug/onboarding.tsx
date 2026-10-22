@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../../auth-client.ts";
 import { client, meQuery } from "../../orpc.ts";
 import { PortalAuthLayout } from "../../components/AuthChrome.tsx";
+import { useI18n } from "../../i18n.ts";
 import { hardRedirect, loginUrl } from "@confire/ui/host.ts";
 
 // Signed in on a supplier's portal without a seat there (spec §4.4, §9). First auto-join: a verified
@@ -33,6 +34,7 @@ function Onboarding() {
   const { me } = Route.useRouteContext();
   const queryClient = useQueryClient();
   const tenant = me.tenant.name;
+  const i18n = useI18n();
 
   // Out, and back here signed in with the other address.
   const signOut = async () => {
@@ -43,15 +45,12 @@ function Onboarding() {
 
   return (
     <PortalAuthLayout tenant={me.tenant}>
-      <h2 className="auth-h1">Ask {tenant} for an invitation</h2>
-      <p className="auth-sub">
-        {tenant}'s portal is by invitation only. You're signed in as <strong>{me.user.email}</strong>, but
-        that address isn't linked to a company on it yet. Ask your contact at {tenant} to invite you: the
-        link in their email brings you straight in.
-      </p>
+      <h2 className="auth-h1">{i18n.getText("PORTAL_ONBOARD_ASK", tenant)}</h2>
+      <p className="auth-sub">{i18n.getText("PORTAL_ONBOARD_BODY", tenant, me.user.email)}</p>
       <p className="auth-alt">
-        Used a different address with {tenant}? <a href="#" onClick={(e) => { e.preventDefault(); void signOut(); }}>Sign out</a> and
-        sign in with that one.
+        {i18n.getText("PORTAL_ONBOARD_OTHER", tenant)}{" "}
+        <a href="#" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("PORTAL_SIGN_OUT")}</a>
+        {" "}{i18n.getText("PORTAL_ONBOARD_THEN")}
       </p>
     </PortalAuthLayout>
   );

@@ -7,8 +7,6 @@ import { devOutbox, mailDomain } from "../src/mail/mailer.ts";
 import { notificationsSettled } from "../src/notify.ts";
 import { fileRoutes, imageType, cleanName } from "../src/files.ts";
 import { contrastOnWhite } from "../src/portal/settings.ts";
-import { senderNameProblem } from "../src/portal/sender-domain.ts";
-import { platformDomain } from "../src/tenant.ts";
 import {
   call, insertSeat, makePortalSeat, makePortalUser, makeTenant, makeUser, tenantHeaders, TEST_MODEL,
 } from "./harness.ts";
@@ -87,7 +85,7 @@ describe("notifications", () => {
     expect(to(s.admin.email)).toHaveLength(1);
     expect(to(s.rep.email)).toHaveLength(0);
     // Internal mail is Confire's own, and replies to the client who acted.
-    expect(to(s.owner.email)[0]).toMatchObject({ from: `"Confire" <notify@${mailDomain}>`, replyTo: s.buyer.email });
+    expect(to(s.owner.email)[0]).toMatchObject({ from: `"Confire" <notify@${mailDomain}>` });
     expect(to(s.owner.email)[0]!.text).toContain(`/configs/${id}`);
 
     // The fallback list picks who instead.
@@ -133,7 +131,7 @@ describe("notifications", () => {
     expect(to(s.colleague.email)).toHaveLength(1);
     expect(to(s.viewer.email)).toHaveLength(0);
     // Client mail: the supplier's name, Confire's domain (no sender domain), replies to whoever acted.
-    expect(to(s.buyer.email)[0]).toMatchObject({ from: `"${s.slug}" <notify@${mailDomain}>`, replyTo: s.admin.email });
+    expect(to(s.buyer.email)[0]).toMatchObject({ from: `"${s.slug}" <${s.slug}@${mailDomain}>` });
     expect(to(s.buyer.email)[0]!.text).toContain(`/projects/${id}`);
 
     // An internal note mails nobody; a comment for the client does.
@@ -145,8 +143,8 @@ describe("notifications", () => {
     expect(to(s.buyer.email)).toHaveLength(1);
     expect(to(s.buyer.email)[0]!.text).toContain("Steel is late this month");
 
-    // Tenant setting `creator`, the tenant's Reply-To; the company override `off` wins over the tenant.
-    await call(router.portalSettings.save, { notify: { returned: "creator", comment: "buyers" }, replyTo: "Sales@Example.com" }, s.as(s.owner.cookie));
+    // Tenant setting `creator`; the company override `off` wins over the tenant.
+    await call(router.portalSettings.save, { notify: { returned: "creator", comment: "buyers" } }, s.as(s.owner.cookie));
     await call(router.portalCompanies.setNotify, { cardCode: s.company.cardCode, notify: { comment: "off" } }, s.as(s.owner.cookie));
     m = await mark();
     await call(router.timeline.comment, { projectId: id, note: "Silent" }, s.as(s.admin.cookie));
@@ -157,7 +155,7 @@ describe("notifications", () => {
     expect(to(s.colleague.email)).toHaveLength(0);
     expect(to(s.buyer.email).map((x) => x.subject)).toEqual(["Changes requested on Kabel 1"]);
     const sent = to(s.buyer.email)[0]!;
-    expect(sent.replyTo).toBe("sales@example.com");
+    expect(sent).not.toHaveProperty("replyTo"); // no-reply notification mail
     expect(sent.text).toContain("Material: steel → alu");
     expect(sent.text).toContain("Aluminium is what we can do");
 
@@ -258,7 +256,7 @@ describe("files", () => {
     await call(portalRouter.projects.submit, { id }, s.on(s.buyer.cookie));
     await call(router.requests.accept, { id }, s.as(s.admin.cookie));
     const mail = (await mailSince(m))(s.buyer.email)[0]!;
-    expect(mail.from).toBe(`"Müller & Söhne" <notify@${mailDomain}>`);
+    expect(mail.from).toBe(`"Müller & Söhne" <${s.slug}@${mailDomain}>`);
     expect(mail.html).toContain(`/files/${logoId}`);
     expect(mail.html).toContain("#0a6ed1");
   });
@@ -269,8 +267,6 @@ describe("settings and home", () => {
     const s = await setup();
     const g = await call(router.portalSettings.general, undefined, s.as(s.admin.cookie));
     expect(g.staff.map((x) => x.userId).sort()).toEqual([s.owner.userId, s.admin.userId, s.rep.userId].sort());
-    expect(g.senderDomain).toBeNull();
-    expect(g.senderDomains.enabled).toBe(false); // the test preload drops RESEND_ADMIN_KEY
     expect(await codeOf(call(router.portalSettings.save, { notifyFallback: [s.buyer.userId] }, s.as(s.admin.cookie)))).toBe("BAD_REQUEST");
     expect(await codeOf(call(router.portalSettings.general, undefined, s.as(s.rep.cookie)))).toBe("FORBIDDEN");
   });
@@ -305,14 +301,6 @@ describe("pure rules", () => {
     expect(contrastOnWhite("#000000")).toBeCloseTo(21, 5);
     expect(contrastOnWhite("#0a6ed1")).toBeGreaterThan(4.5); // Horizon blue, the default accent
     expect(contrastOnWhite("#ffcc00")).toBeLessThan(4.5);
-  });
-
-  test("a sender is a subdomain of the tenant's own domain", () => {
-    expect(senderNameProblem("mail.mueller-gmbh.de")).toBeNull();
-    expect(senderNameProblem("mueller-gmbh.de")).toContain("Use a subdomain");
-    expect(senderNameProblem(`acme.${platformDomain}`)).toContain("belongs to Confire");
-    expect(senderNameProblem(mailDomain)).toContain("belongs to Confire");
-    expect(senderNameProblem("mail mueller.de")).toContain("Enter a domain");
   });
 
   test("files: a logo by its bytes, names without paths", () => {

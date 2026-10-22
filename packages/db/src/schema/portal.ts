@@ -34,16 +34,6 @@ export type PortalNotify = Partial<Record<NotifyEvent, NotifyMode>>;
 /** The supplier's look on its portal and in its client mail (D20). Absent keys fall back to the
  *  organization's name and logo, and Horizon's own colours. */
 export type PortalBranding = { displayName?: string; accent?: string; logoFileId?: string };
-/** A DNS record Resend asks for, as `domains.create`/`get` answer it (names relative to the zone). */
-export type SenderDomainRecord = {
-  record: string; name: string; type: string; value: string; ttl: string; status: string; priority?: number;
-};
-/** The tenant's own Resend sending domain (D29). `status` is Resend's, as last read: refreshed on
- *  Verify, on opening Settings while not verified, and when a send from it is refused. */
-export type SenderDomain = {
-  name: string; resendDomainId: string; region: string; status: string; records: SenderDomainRecord[];
-  error: string | null;
-};
 /** `portal_settings.settings` (spec §6): one document, loaded and saved whole. P5 writes `docFields`,
  *  P6 `onboarding` and `leadSeries` (a B1 BP numbering series; absent = B1's default for leads), P7
  *  the branding and mail keys. */
@@ -53,12 +43,9 @@ export type PortalSettings = {
   leadSeries?: number;
   branding?: PortalBranding;
   notify?: PortalNotify;
-  senderDomain?: SenderDomain | null;
   /** internal members (user ids) who get a request's mail when neither its assignee nor the BP's
    *  sales employee resolves (D22); empty = the tenant's admins and owners */
   notifyFallback?: string[];
-  /** client mail replies here; absent = the staff member who acted */
-  replyTo?: string;
 };
 
 /** A customer company: one per tenant × CardCode, the register of which CardCodes are on the portal

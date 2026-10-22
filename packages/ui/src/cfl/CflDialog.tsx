@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Bar, Button, Dialog } from "@ui5/webcomponents-react";
+import { useUiI18n } from "../i18n.ts";
 import { useUiSource } from "../source.tsx";
 import { resolveColumns, useFieldConstraints } from "../metadata.ts";
 import { buildPool, defaultState, mergeKnownColumns, toQuery } from "../views.ts";
@@ -29,6 +30,7 @@ export default function CflDialog({ config, initialSearch, multiSelect, onSelect
   onSelect: (rows: Row[]) => void;
   onClose: () => void;
 }) {
+  const i18n = useUiI18n();
   const key = keyFieldOf(config);
   const src = config.source;
   const { client, orpc, useRole } = useUiSource();
@@ -123,10 +125,10 @@ export default function CflDialog({ config, initialSearch, multiSelect, onSelect
             {/* single select has no Select: a row click is the pick */}
             {config.readOnly || !multiSelect ? null : (
               <Button design="Emphasized" disabled={!picked.length} onClick={() => choose(picked)}>
-                {picked.length ? `Select (${picked.length})` : "Select"}
+                {picked.length ? i18n.getText("UI_SELECT_N", String(picked.length)) : i18n.getText("UI_SELECT")}
               </Button>
             )}
-            <Button design="Transparent" onClick={onClose}>{config.readOnly ? "Close" : "Cancel"}</Button>
+            <Button design="Transparent" onClick={onClose}>{config.readOnly ? i18n.getText("UI_CLOSE") : i18n.getText("UI_CANCEL")}</Button>
           </>
         } />
       }>

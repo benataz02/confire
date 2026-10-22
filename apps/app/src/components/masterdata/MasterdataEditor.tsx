@@ -10,6 +10,7 @@ import {
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import type { PanelDomRef } from "@ui5/webcomponents-react";
 import type { ODataQuery, QuerySource, Val } from "@confire/config-engine";
+import { useI18n } from "../../i18n.ts";
 import { orpc } from "../../orpc.ts";
 import { colMinWidth } from "../configurator/tableWidths.ts";
 import { confirm } from "@confire/ui/confirm.ts";
@@ -57,8 +58,6 @@ const iconSlot = <span style={{ width: "1rem", flex: "none" }} />;
 /** `col-3` / `row-12` -> 3 / 12. The row key is the index; there is nothing else to key on. */
 const rowIndex = (row: unknown) => Number((row as { rowKey: string }).rowKey.split("-")[1]);
 
-const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
-
 // Drop labels/hidden for keys the Select clause no longer names; omit empty bags so the row
 // stays sparse.
 function pruneColUi(q: QueryDef): QueryDef {
@@ -73,15 +72,17 @@ function pruneColUi(q: QueryDef): QueryDef {
 }
 
 /** The same rules masterdata.save enforces, in words a person can act on — the server's are zod's. */
-function issueOf(d: Draft): string | null {
-  if (!d.name.trim()) return "The table needs a name.";
-  if (d.kind === "query") return d.query.query.entitySet ? null : "The query needs an entity set.";
-  if (!d.columns.length) return "The table needs at least one column.";
-  if (d.columns.some((c) => !c.key.trim())) return "Every column needs a key.";
+function issueOf(d: Draft, t: (key: string) => string): string | null {
+  if (!d.name.trim()) return t("ADMIN_MD_NEED_NAME");
+  if (d.kind === "query") return d.query.query.entitySet ? null : t("ADMIN_MD_NEED_ENTITY");
+  if (!d.columns.length) return t("ADMIN_MD_NEED_COLUMN");
+  if (d.columns.some((c) => !c.key.trim())) return t("ADMIN_MD_NEED_KEY");
   return null;
 }
 
 export function MasterdataEditor({ id }: { id?: string }) {
+  const i18n = useI18n();
+  const rowsText = (n: number) => i18n.getText(n === 1 ? "ADMIN_ROW_ONE" : "ADMIN_ROW_MANY", n);
   const navigate = useNavigate({ from: "/$slug" });
   const qc = useQueryClient();
   const list = useQuery(orpc.masterdata.list.queryOptions());
@@ -133,13 +134,13 @@ export function MasterdataEditor({ id }: { id?: string }) {
   // Refill this table's cache now. Invalidates the same two keys a save does: `rowCount` and
   // `syncedAt` are on the row, so the list page is as stale as this editor after one.
   const sync = useMutation(orpc.masterdata.sync.mutationOptions({
-    onSuccess: (r) => { invalidate(); toast(`Synced ${plural(r.count, "row")}`); },
+    onSuccess: (r) => { invalidate(); toast(i18n.getText(r.count === 1 ? "ADMIN_SYNCED_ONE" : "ADMIN_SYNCED_MANY", r.count)); },
   }));
   const saveOpts = orpc.masterdata.save.mutationOptions({
     onSuccess: (r) => {
       setDirty(false);
       invalidate();
-      toast("Masterdata saved");
+      toast(i18n.getText("ADMIN_MD_SAVED"));
       if (!id) void navigate({ to: "/$slug/masterdata/$id", params: { id: r.id }, replace: true });
     },
   });
@@ -151,7 +152,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
     // a query kind runs first is a link in that same chain for the same reason: it opens the
     // preview on its way through, and a query B1 refuses fails the save in that one place.
     mutationFn: async (...args: Parameters<NonNullable<typeof saveOpts.mutationFn>>) => {
-      const i = issueOf(draft!);
+      const i = issueOf(draft!, (key) => i18n.getText(key));
       if (i) throw new Error(i);
       const [input, ...rest] = args;
       if (input.kind !== "query") return saveOpts.mutationFn!(...args);
@@ -167,20 +168,20 @@ export function MasterdataEditor({ id }: { id?: string }) {
   // field afterwards would light it up again — the very thing this was meant to stop.
   const submitted = save.isError;
   const remove = useMutation(orpc.masterdata.remove.mutationOptions({
-    onSuccess: () => { setDirty(false); invalidate(); toast("Table deleted"); void navigate({ to: "/$slug/masterdata" }); },
+    onSuccess: () => { setDirty(false); invalidate(); toast(i18n.getText("ADMIN_TABLE_DELETED")); void navigate({ to: "/$slug/masterdata" }); },
   }));
   // Copies the *persisted* row, which is why the button is disabled while dirty — see the toolbar.
   const duplicate = useMutation(orpc.masterdata.duplicate.mutationOptions({
-    onSuccess: (r) => { invalidate(); toast("Table duplicated"); void navigate({ to: "/$slug/masterdata/$id", params: { id: r.id } }); },
+    onSuccess: (r) => { invalidate(); toast(i18n.getText("ADMIN_TABLE_DUPLICATED")); void navigate({ to: "/$slug/masterdata/$id", params: { id: r.id } }); },
   }));
 
   useBlocker({
     shouldBlockFn: async () => {
       if (!dirty || save.isPending) return false;
       return !(await confirm({
-        title: "Discard changes?",
-        message: "This table has unsaved changes. Leave without saving?",
-        actionText: "Discard",
+        title: i18n.getText("ADMIN_DISCARD_TITLE"),
+        message: i18n.getText("ADMIN_DISCARD_MSG"),
+        actionText: i18n.getText("ADMIN_DISCARD"),
         destructive: true,
       }));
     },
@@ -191,7 +192,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
     if (list.error)
       return <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{list.error.message}</MessageStrip>;
     if (list.data && !row)
-      return <IllustratedMessage name="NoData" design="Auto" titleText="Table not found" subtitleText="It may have been deleted." />;
+      return <IllustratedMessage name="NoData" design="Auto" titleText={i18n.getText("ADMIN_TABLE_NOT_FOUND")} subtitleText={i18n.getText("ADMIN_TABLE_NOT_FOUND_SUB")} />;
     return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
   }
   const d = draft;
@@ -211,7 +212,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
     if (!parsed.length) return;
     edit((x) => ({ ...x, rows: [...x.rows, ...parsed.map((cells) => x.columns.map((c, i) => typed(c, cells[i] ?? "")))] }));
     // A big paste lands below the fold; without this it looks like nothing happened.
-    toast(`${plural(parsed.length, "row")} added`);
+    toast(i18n.getText(parsed.length === 1 ? "ADMIN_ROWS_ADDED_ONE" : "ADMIN_ROWS_ADDED_MANY", parsed.length));
   };
 
   const setQuery = (patch: Partial<QueryDef>) => edit((x) => ({ ...x, query: pruneColUi({ ...x.query, ...patch }) }));
@@ -224,34 +225,34 @@ export function MasterdataEditor({ id }: { id?: string }) {
       titleArea={
         <ObjectPageTitle
           header={
-              <Title level="H4">{"Master data " + (d.name || (id ? "Untitled" : "New table"))}</Title>
+              <Title level="H4">{i18n.getText("ADMIN_MD_HEADING", i18n.getText("NAV_MASTERDATA"), d.name || (id ? i18n.getText("ADMIN_UNTITLED") : i18n.getText("ADMIN_NEW_TABLE")))}</Title>
           }
           snappedContent={errorStrip}
           expandedContent={errorStrip}
           actionsBar={
-            <Toolbar design="Transparent" accessibleName="Table actions">
+            <Toolbar design="Transparent" accessibleName={i18n.getText("ADMIN_TABLE_ACTIONS")}>
               {id && d.kind === "query" ? (
                 // Disabled while dirty for the same reason Duplicate is: the sync runs the SAVED
                 // query, so running it against edits still on screen would cache the wrong answer.
-                <ToolbarButton text={sync.isPending ? "Syncing…" : "Sync now"} icon="synchronize"
-                  accessibleName="Sync now" disabled={dirty || sync.isPending}
-                  tooltip={dirty ? "Save first — the sync runs the saved query." : "Refill the cache from SAP"}
+                <ToolbarButton text={sync.isPending ? i18n.getText("ADMIN_SYNCING") : i18n.getText("ADMIN_SYNC_NOW")} icon="synchronize"
+                  accessibleName={i18n.getText("ADMIN_SYNC_NOW")} disabled={dirty || sync.isPending}
+                  tooltip={dirty ? i18n.getText("ADMIN_SYNC_SAVE_FIRST") : i18n.getText("ADMIN_SYNC_TOOLTIP")}
                   onClick={() => sync.mutate({ id })} />
               ) : null}
               {id ? (
                 // Disabled while dirty: duplicate copies what is stored, not what is on screen,
                 // and a clean copy also never trips the unsaved-changes blocker on the way out.
-                <ToolbarButton text="Duplicate" icon="copy" tooltip={dirty ? "Save first" : "Duplicate table"}
-                  accessibleName="Duplicate table" disabled={dirty || duplicate.isPending}
+                <ToolbarButton text={i18n.getText("ADMIN_DUPLICATE")} icon="copy" tooltip={dirty ? i18n.getText("ADMIN_SAVE_FIRST") : i18n.getText("ADMIN_DUPLICATE_TABLE")}
+                  accessibleName={i18n.getText("ADMIN_DUPLICATE_TABLE")} disabled={dirty || duplicate.isPending}
                   onClick={() => duplicate.mutate({ id })} />
               ) : null}
               {id ? (
-                <ToolbarButton text="Delete" icon="delete" tooltip="Delete table" accessibleName="Delete table" disabled={remove.isPending}
+                <ToolbarButton text={i18n.getText("ADMIN_DELETE")} icon="delete" tooltip={i18n.getText("ADMIN_DELETE_TABLE")} accessibleName={i18n.getText("ADMIN_DELETE_TABLE")} disabled={remove.isPending}
                   onClick={async () => {
                     if (await confirm({
-                      title: "Delete table",
-                      message: `Delete "${d.name}"? A table used by a model can't be deleted. This cannot be undone.`,
-                      actionText: "Delete", destructive: true,
+                      title: i18n.getText("ADMIN_DELETE_TABLE"),
+                      message: i18n.getText("ADMIN_MD_DELETE_MSG", d.name),
+                      actionText: i18n.getText("ADMIN_DELETE"), destructive: true,
                     })) remove.mutate({ ids: [id] });
                   }} />
               ) : null}
@@ -267,37 +268,37 @@ export function MasterdataEditor({ id }: { id?: string }) {
                 ? { id, name: d.name.trim(), kind: "table", columns: d.columns, rows: d.rows }
                 : { id, name: d.name.trim(), kind: "query", query: d.query },
             )}>
-            {testFetch.isPending ? "Testing…" : save.isPending ? "Saving…" : "Save"}
+            {testFetch.isPending ? i18n.getText("ADMIN_TESTING") : save.isPending ? i18n.getText("ADMIN_SAVING") : i18n.getText("ADMIN_SAVE")}
           </Button>
         } />
       }
     >
-      <ObjectPageSection id="general" titleText="General" hideTitleText>
+      <ObjectPageSection id="general" titleText={i18n.getText("ADMIN_SECTION_GENERAL")} hideTitleText>
         <Form {...FORM}>
-          <FormGroup headerText="Details">
-            <FormItem labelContent={<Label required>Name</Label>}>
-              <Input value={d.name} placeholder="prices" required
+          <FormGroup headerText={i18n.getText("ADMIN_DETAILS")}>
+            <FormItem labelContent={<Label required>{i18n.getText("ADMIN_NAME")}</Label>}>
+              <Input value={d.name} placeholder={i18n.getText("ADMIN_NAME_PLACEHOLDER")} required
                 valueState={submitted && !d.name.trim() ? "Negative" : "None"}
-                valueStateMessage={<div>Give the source a name — this is what a model writes inside LOOKUP().</div>}
+                valueStateMessage={<div>{i18n.getText("ADMIN_NAME_HINT")}</div>}
                 onInput={(e) => edit((x) => ({ ...x, name: e.target.value }))} />
             </FormItem>
-            <FormItem labelContent={<Label required>Kind</Label>}>
+            <FormItem labelContent={<Label required>{i18n.getText("ADMIN_KIND")}</Label>}>
               {/* Fixed once saved: the two kinds store different things, and a flip would throw
                   away either the maintained rows or the query. Read-only rather than disabled —
                   the choice still has to be readable after saving. */}
-              <Select readonly={!!id} required value={d.kind} accessibleName="Kind"
+              <Select readonly={!!id} required value={d.kind} accessibleName={i18n.getText("ADMIN_KIND")}
                 onChange={(e) => edit((x) => ({ ...x, kind: e.detail.selectedOption.value as Draft["kind"] }))}>
-                <Option value="table" additionalText="Maintained here">Table</Option>
-                <Option value="query" additionalText="Read live from SAP">Query</Option>
+                <Option value="table" additionalText={i18n.getText("ADMIN_MAINTAINED_HERE")}>{i18n.getText("ADMIN_KIND_TABLE")}</Option>
+                <Option value="query" additionalText={i18n.getText("ADMIN_READ_LIVE")}>{i18n.getText("ADMIN_KIND_QUERY")}</Option>
               </Select>
             </FormItem>
           </FormGroup>
 
           {d.kind === "table" ? (
             <>
-            <FormGroup headerText="Columns" {...WIDE}>
-              <Toolbar design="Transparent" accessibleName="Column actions">
-                <ToolbarButton icon="add" design="Transparent" text="Add column" onClick={() => edit((x) => ({
+            <FormGroup headerText={i18n.getText("ADMIN_COLUMNS")} {...WIDE}>
+              <Toolbar design="Transparent" accessibleName={i18n.getText("ADMIN_COLUMN_ACTIONS")}>
+                <ToolbarButton icon="add" design="Transparent" text={i18n.getText("ADMIN_ADD_COLUMN")} onClick={() => edit((x) => ({
                   ...x,
                   columns: [...x.columns, { key: "", label: "", type: "string" }],
                   rows: x.rows.map((r) => [...r, null]),
@@ -318,35 +319,37 @@ export function MasterdataEditor({ id }: { id?: string }) {
                 }}
                 headerRow={
                   <TableHeaderRow>
-                    <TableHeaderCell minWidth="12rem">Key</TableHeaderCell>
-                    <TableHeaderCell minWidth="10rem">Label</TableHeaderCell>
-                    <TableHeaderCell width="9rem">Type</TableHeaderCell>
+                    <TableHeaderCell minWidth="12rem">{i18n.getText("ADMIN_KEY")}</TableHeaderCell>
+                    <TableHeaderCell minWidth="10rem">{i18n.getText("ADMIN_LABEL")}</TableHeaderCell>
+                    <TableHeaderCell width="9rem">{i18n.getText("ADMIN_TYPE")}</TableHeaderCell>
                   </TableHeaderRow>
                 }>
                 {d.columns.map((c, i) => (
                   <TableRow key={i} rowKey={`col-${i}`}
-                    actions={<TableRowAction icon="delete" text="Delete" />}>
+                    actions={<TableRowAction icon="delete" text={i18n.getText("ADMIN_DELETE")} />}>
                     <TableCell>
                       <div style={{ ...CELL, width: "100%" }}>
                         {/* 1st column = key, 2nd = label (refKeyCols) — the same convention the
                             query panel below states, and what a model's lookup reads. */}
                         {i < 2
-                          ? <Icon name={i === 0 ? "key" : "text"} design="Neutral" accessibleName={i === 0 ? "Lookup key" : "Label column"} />
+                          ? <Icon name={i === 0 ? "key" : "text"} design="Neutral" accessibleName={i === 0 ? i18n.getText("ADMIN_LOOKUP_KEY") : i18n.getText("ADMIN_LABEL_COLUMN")} />
                           : iconSlot}
-                        <Input placeholder="key" value={c.key} style={{ width: "100%" }}
+                        <Input placeholder={i18n.getText("ADMIN_KEY_PLACEHOLDER")} value={c.key} style={{ width: "100%" }}
                           valueState={submitted && !c.key.trim() ? "Negative" : "None"}
-                          valueStateMessage={<div>Every column needs a key — delete the row if it is not wanted.</div>}
+                          valueStateMessage={<div>{i18n.getText("ADMIN_NEED_KEY")}</div>}
                           onInput={(e) => edit((x) => ({ ...x, columns: x.columns.map((y, j) => (j === i ? { ...y, key: e.target.value } : y)) }))} />
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Input placeholder={c.key || "label"} value={c.label} style={{ width: "100%" }}
+                      <Input placeholder={c.key || i18n.getText("ADMIN_LABEL_PLACEHOLDER")} value={c.label} style={{ width: "100%" }}
                         onInput={(e) => edit((x) => ({ ...x, columns: x.columns.map((y, j) => (j === i ? { ...y, label: e.target.value } : y)) }))} />
                     </TableCell>
                     <TableCell>
-                      <Select style={{ width: "100%" }} value={c.type} accessibleName="Column type"
+                      <Select style={{ width: "100%" }} value={c.type} accessibleName={i18n.getText("ADMIN_COLUMN_TYPE")}
                         onChange={(e) => edit((x) => ({ ...x, columns: x.columns.map((y, j) => (j === i ? { ...y, type: e.detail.selectedOption.value as Col["type"] } : y)) }))}>
-                        {(["string", "number", "boolean"] as const).map((t) => <Option key={t} value={t}>{t}</Option>)}
+                        {(["string", "number", "boolean"] as const).map((type) => (
+                          <Option key={type} value={type}>{i18n.getText(type === "string" ? "ADMIN_TYPE_STRING" : type === "number" ? "ADMIN_TYPE_NUMBER" : "ADMIN_TYPE_BOOLEAN")}</Option>
+                        ))}
                       </Select>
                     </TableCell>
                   </TableRow>
@@ -354,9 +357,9 @@ export function MasterdataEditor({ id }: { id?: string }) {
               </Table>
             </FormGroup>
 
-            <FormGroup headerText="Rows" {...WIDE}>
-              <Toolbar design="Transparent" accessibleName="Row actions">
-                <ToolbarButton icon="add" design="Transparent" text="Add row" disabled={!d.columns.length}
+            <FormGroup headerText={i18n.getText("ADMIN_ROWS")} {...WIDE}>
+              <Toolbar design="Transparent" accessibleName={i18n.getText("ADMIN_ROW_ACTIONS")}>
+                <ToolbarButton icon="add" design="Transparent" text={i18n.getText("ADMIN_ADD_ROW")} disabled={!d.columns.length}
                   onClick={() => edit((x) => ({ ...x, rows: [...x.rows, x.columns.map(() => null as Cell)] }))} />
               </Toolbar>
               <div
@@ -369,8 +372,8 @@ export function MasterdataEditor({ id }: { id?: string }) {
                 }}>
                 <Table
                   noData={
-                    <IllustratedMessage name="NoData" design="Dot" titleText="No rows yet"
-                      subtitleText="Add one, or paste a block of cells straight from a spreadsheet." />
+                    <IllustratedMessage name="NoData" design="Dot" titleText={i18n.getText("ADMIN_NO_ROWS")}
+                      subtitleText={i18n.getText("ADMIN_NO_ROWS_SUB")} />
                   }
                   rowActionCount={1}
                   onRowActionClick={(e) => {
@@ -387,7 +390,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
                     </TableHeaderRow>
                   }>
                   {d.rows.map((r, ri) => (
-                    <TableRow key={ri} rowKey={`row-${ri}`} actions={<TableRowAction icon="delete" text="Delete" />}>
+                    <TableRow key={ri} rowKey={`row-${ri}`} actions={<TableRowAction icon="delete" text={i18n.getText("ADMIN_DELETE")} />}>
                       {d.columns.map((c, ci) => (
                         <TableCell key={ci}>
                           {/* The column's own type rather than a text box for everything: a boolean
@@ -410,65 +413,65 @@ export function MasterdataEditor({ id }: { id?: string }) {
             </>
           ) : (
             <>
-            <FormGroup headerText="Clauses">
-              <FormItem labelContent={<Label>Source</Label>}>
-                <Select value={d.query.target} accessibleName="Source"
+            <FormGroup headerText={i18n.getText("ADMIN_CLAUSES")}>
+              <FormItem labelContent={<Label>{i18n.getText("ADMIN_SOURCE")}</Label>}>
+                <Select value={d.query.target} accessibleName={i18n.getText("ADMIN_SOURCE")}
                   onChange={(e) => setQuery({ target: e.detail.selectedOption.value as QueryDef["target"] })}>
                   <Option value="b1">B1</Option>
                   <Option value="beas">Beas</Option>
                 </Select>
               </FormItem>
-              <FormItem labelContent={<Label required>Entity set</Label>}>
+              <FormItem labelContent={<Label required>{i18n.getText("ADMIN_ENTITY_SET")}</Label>}>
                 <Input value={d.query.query.entitySet} placeholder="Items" required
                   valueState={submitted && !d.query.query.entitySet ? "Negative" : "None"}
-                  valueStateMessage={<div>Name the Service Layer entity set to read, e.g. Items.</div>}
+                  valueStateMessage={<div>{i18n.getText("ADMIN_ENTITY_SET_HINT")}</div>}
                   onInput={(e) => setOData({ entitySet: e.target.value.trim() })} />
               </FormItem>
-              <FormItem labelContent={<Label>Select</Label>}>
+              <FormItem labelContent={<Label>{i18n.getText("ADMIN_SELECT")}</Label>}>
                 {/* Committed on change (Enter/focus-out), not on input: `columns` drives $select
                     *and* the label/visibility bags, which would be pruned mid-word on every keystroke. */}
                 <Input value={d.query.columns.join(", ")} placeholder="ItemCode, ItemName"
                   onChange={(e) => setQuery({ columns: [...new Set(e.target.value.split(/[,\s]+/).filter(Boolean))] })} />
               </FormItem>
-              <FormItem labelContent={<Label>Filter</Label>}>
+              <FormItem labelContent={<Label>{i18n.getText("ADMIN_FILTER")}</Label>}>
                 <TextArea growing growingMaxRows={4} rows={1} value={d.query.query.filter ?? ""}
                   placeholder="ItemType eq 'itItems' and Frozen eq 'tNO'"
                   onInput={(e) => setOData({ filter: e.target.value || undefined })} />
               </FormItem>
-              <FormItem labelContent={<Label>Sort</Label>}>
+              <FormItem labelContent={<Label>{i18n.getText("ADMIN_SORT")}</Label>}>
                 <Input value={d.query.query.orderby ?? ""} placeholder="ItemName"
                   onInput={(e) => setOData({ orderby: e.target.value || undefined })} />
               </FormItem>
               {/* Not a schedule — there is no job runner. It is how old the cache may get before a
                   read refreshes it in the background, so a table nobody opens never costs a call. */}
-              <FormItem labelContent={<Label>Sync every</Label>}>
-                <Input type="Number" value={d.query.syncMinutes?.toString() ?? ""} placeholder="Manual only"
-                  accessibleName="Sync frequency in minutes"
+              <FormItem labelContent={<Label>{i18n.getText("ADMIN_SYNC_EVERY")}</Label>}>
+                <Input type="Number" value={d.query.syncMinutes?.toString() ?? ""} placeholder={i18n.getText("ADMIN_MANUAL_ONLY")}
+                  accessibleName={i18n.getText("ADMIN_SYNC_MINUTES_A11Y")}
                   onInput={(e) => {
                     const n = Number(e.target.value);
                     setQuery({ syncMinutes: Number.isInteger(n) && n > 0 ? n : undefined });
                   }} />
-                <Text style={{ opacity: 0.7, whiteSpace: "nowrap" }}>minutes</Text>
+                <Text style={{ opacity: 0.7, whiteSpace: "nowrap" }}>{i18n.getText("ADMIN_MINUTES")}</Text>
               </FormItem>
             </FormGroup>
-            <FormGroup headerText="Cache">
-              <FormItem labelContent={<Label>Last synced</Label>}>
-                <Text>{row?.syncedAt ? new Date(row.syncedAt).toLocaleString() : id ? "Never" : "—"}</Text>
+            <FormGroup headerText={i18n.getText("ADMIN_CACHE")}>
+              <FormItem labelContent={<Label>{i18n.getText("ADMIN_LAST_SYNCED")}</Label>}>
+                <Text>{row?.syncedAt ? new Date(row.syncedAt).toLocaleString() : id ? i18n.getText("ADMIN_NEVER") : "—"}</Text>
               </FormItem>
-              <FormItem labelContent={<Label>Cached rows</Label>}>
-                <Text>{id ? plural(row?.rowCount ?? 0, "row") : "—"}</Text>
+              <FormItem labelContent={<Label>{i18n.getText("ADMIN_CACHED_ROWS")}</Label>}>
+                <Text>{id ? rowsText(row?.rowCount ?? 0) : "—"}</Text>
               </FormItem>
               {row?.syncError ? (
-                <FormItem labelContent={<Label>Last error</Label>}>
+                <FormItem labelContent={<Label>{i18n.getText("ADMIN_LAST_ERROR")}</Label>}>
                   <MessageStrip design="Negative" hideCloseButton>{row.syncError}</MessageStrip>
                 </FormItem>
               ) : null}
             </FormGroup>
-            <FormGroup accessibleName="Preview" {...WIDE}>
-              <Panel ref={panelRef} accessibleRole="Region" accessibleName="Preview" collapsed
+            <FormGroup accessibleName={i18n.getText("ADMIN_PREVIEW")} {...WIDE}>
+              <Panel ref={panelRef} accessibleRole="Region" accessibleName={i18n.getText("ADMIN_PREVIEW")} collapsed
                 header={
                   <div style={{ ...CELL, flex: 1, justifyContent: "space-between", minWidth: 0 }}>
-                    <Title level="H5" size="H6">Preview</Title>
+                    <Title level="H5" size="H6">{i18n.getText("ADMIN_PREVIEW")}</Title>
                     <Button design="Transparent" icon="refresh"
                       disabled={testFetch.isPending || !d.query.query.entitySet}
                       onClick={() => testFetch.mutate({
@@ -477,12 +480,12 @@ export function MasterdataEditor({ id }: { id?: string }) {
                         columns: d.query.columns,
                         top: PREVIEW_TOP,
                       })}>
-                      {testFetch.isPending ? "Loading…" : "Test fetch"}
+                      {testFetch.isPending ? i18n.getText("ADMIN_LOADING") : i18n.getText("ADMIN_TEST_FETCH")}
                     </Button>
                   </div>
                 }>
               {preview ? (
-                <Table noDataText="No rows returned."
+                <Table noDataText={i18n.getText("ADMIN_NO_ROWS_RETURNED")}
                   headerRow={
                     <TableHeaderRow>
                       {preview.cols.map((c) => (
@@ -501,26 +504,26 @@ export function MasterdataEditor({ id }: { id?: string }) {
                   ))}
                 </Table>
               ) : (
-                <IllustratedMessage name="NoData" design="Dot" titleText="No preview yet"
-                  subtitleText={`Run Test fetch to read the first ${PREVIEW_TOP} rows from SAP.`} />
+                <IllustratedMessage name="NoData" design="Dot" titleText={i18n.getText("ADMIN_NO_PREVIEW")}
+                  subtitleText={i18n.getText("ADMIN_NO_PREVIEW_SUB", PREVIEW_TOP, i18n.getText("ADMIN_TEST_FETCH"))} />
               )}
               </Panel>
             </FormGroup>
 
-            <FormGroup headerText="Query columns" {...WIDE}>
+            <FormGroup headerText={i18n.getText("ADMIN_QUERY_COLUMNS")} {...WIDE}>
               <MessageStrip design="Information" style={{ marginBlockEnd: "0.5rem" }}>
-                Labels and visibility apply to the value-help dialog only; every column still binds as a derived parameter.
+                {i18n.getText("ADMIN_QUERY_COLUMNS_NOTE")}
               </MessageStrip>
               <Table
                 noData={
-                  <IllustratedMessage name="NoData" design="Dot" titleText="No columns yet"
-                    subtitleText="Name them in the query's Select clause, or run Test fetch to read them from SAP." />
+                  <IllustratedMessage name="NoData" design="Dot" titleText={i18n.getText("ADMIN_NO_COLUMNS")}
+                    subtitleText={i18n.getText("ADMIN_NO_COLUMNS_SUB", i18n.getText("ADMIN_TEST_FETCH"))} />
                 }
                 headerRow={
                   <TableHeaderRow>
-                    <TableHeaderCell minWidth="10rem"><span>Key</span></TableHeaderCell>
-                    <TableHeaderCell minWidth="12rem"><span>Label</span></TableHeaderCell>
-                    <TableHeaderCell width="7rem"><span>Value help</span></TableHeaderCell>
+                    <TableHeaderCell minWidth="10rem"><span>{i18n.getText("ADMIN_KEY")}</span></TableHeaderCell>
+                    <TableHeaderCell minWidth="12rem"><span>{i18n.getText("ADMIN_LABEL")}</span></TableHeaderCell>
+                    <TableHeaderCell width="7rem"><span>{i18n.getText("ADMIN_VALUE_HELP")}</span></TableHeaderCell>
                   </TableHeaderRow>
                 }>
                 {/* The first two columns of the Select clause are the key and the label by
@@ -530,18 +533,18 @@ export function MasterdataEditor({ id }: { id?: string }) {
                     <TableCell>
                       <div style={CELL}>
                         {i < 2
-                          ? <Icon name={i === 0 ? "key" : "text"} design="Neutral" accessibleName={i === 0 ? "Key column" : "Label column"} />
+                          ? <Icon name={i === 0 ? "key" : "text"} design="Neutral" accessibleName={i === 0 ? i18n.getText("ADMIN_KEY_COLUMN") : i18n.getText("ADMIN_LABEL_COLUMN")} />
                           : iconSlot}
                         <Text>{c}</Text>
                       </div>
                     </TableCell>
                     <TableCell>
                       <Input placeholder={c} value={d.query.labels?.[c] ?? ""} style={{ width: "100%" }}
-                        accessibleName={`Label for ${c}`}
+                        accessibleName={i18n.getText("ADMIN_LABEL_FOR", c)}
                         onInput={(e) => setQuery({ labels: { ...d.query.labels, [c]: e.target.value } })} />
                     </TableCell>
                     <TableCell>
-                      <CheckBox checked={!d.query.hidden?.includes(c)} accessibleName="Show in value help"
+                      <CheckBox checked={!d.query.hidden?.includes(c)} accessibleName={i18n.getText("ADMIN_SHOW_IN_VH")}
                         onChange={(e) => setQuery({
                           hidden: e.target.checked
                             ? (d.query.hidden ?? []).filter((k) => k !== c)

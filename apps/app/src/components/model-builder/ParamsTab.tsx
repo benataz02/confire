@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   Bar, Button, BusyIndicator, IllustratedMessage, Input,
   SplitterElement, SplitterLayout, Table, TableCell, TableHeaderCell,
@@ -12,15 +12,28 @@ import { confirm } from "@confire/ui/confirm.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { ParamDialog } from "./ParamDialog.tsx";
 import { TableDialog, newCalcTable } from "./TableDialog.tsx";
+import { localizeItems } from "./starterModel.ts";
 import { TitleDialog, type TitleIcon } from "./TitleDialog.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { ConfiguratorForm } from "@confire/ui/configurator/ConfiguratorForm.tsx";
 import { mergeQueryPicks, setQueryPick, type QueryPicks } from "@confire/ui/configurator/formHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { applyMove, canDrop, deleteNode, duplicateParam, parseRowKey, placeParam, placeTable, rowKeyOf, tableKeyAt, type Placement, type RowRef } from "./structureOps.ts";
+import { useI18n } from "../../i18n.ts";
+import { copy, type Translate } from "./builderMessages.ts";
 
 type Tables = TableCols[];
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
+
+function paramDetail(p: Param, t: Translate): string {
+  const bits: string[] = [p.type, p.ui];
+  if (p.domain) bits.push(p.domain.kind === "range" ? t("MODEL_KIND_RANGE")
+    : p.domain.ref.source === "manual" ? t("MODEL_SRC_MANUAL")
+    : p.domain.ref.source === "query" ? t("MODEL_SRC_QUERY")
+    : t("MODEL_BADGE_TABLE"));
+  if (p.excludeFromDomains) bits.push(t("MODEL_EXCLUDED"));
+  return bits.join(" · ");
+}
 
 // mandatory by default: an unanswered field is the usual mistake, and unticking it is one click.
 const emptyParam = (): Param => ({ key: "", label: "", type: "string", ui: "select", mandatory: true });
@@ -34,13 +47,14 @@ function Gutter({ depth, children, collapse, style }: {
   collapse?: { collapsed: boolean; onToggle: () => void };
   style?: CSSProperties;
 }) {
+  const i18n = useI18n();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", paddingInlineStart: `${depth * 1.5}rem`, ...style }}>
       {collapse ? (
         // Chevron is a real button, indented with the level; stopPropagation so a toggle never enters edit (onRowClick).
         <Button design="Transparent" style={{ flex: "0 0 auto" }}
           icon={collapse.collapsed ? "slim-arrow-right" : "slim-arrow-down"}
-          tooltip={collapse.collapsed ? "Expand" : "Collapse"}
+          tooltip={collapse.collapsed ? i18n.getText("MODEL_EXPAND") : i18n.getText("MODEL_COLLAPSE")}
           accessibilityAttributes={{ expanded: collapse.collapsed ? "false" : "true" }}
           onClick={(e) => { e.stopPropagation(); collapse.onToggle(); }} />
       ) : (
@@ -70,12 +84,15 @@ if (typeof document !== "undefined" && !document.getElementById("confire-params-
 }
 
 // UI5 clips the actions-column header (a11y-only "Row Actions") inside the header-row shadow.
-function revealActionsHeader(el: TableHeaderRowDomRef | null) {
+function revealActionsHeader(el: TableHeaderRowDomRef | null, label: string) {
   const sr = el?.shadowRoot;
-  if (!sr || sr.getElementById("confire-actions-hdr")) return;
+  if (!sr) return;
+  const css = `#actions-cell-content{position:static;clip:auto;font-size:0}#actions-cell-content::after{content:"${label}";font-size:var(--sapFontSize);font-family:var(--sapFontSemiboldDuplexFamily);color:var(--sapList_HeaderTextColor)}`;
+  const existing = sr.getElementById("confire-actions-hdr");
+  if (existing) { existing.textContent = css; return; }
   const style = document.createElement("style");
   style.id = "confire-actions-hdr";
-  style.textContent = `#actions-cell-content{position:static;clip:auto;font-size:0}#actions-cell-content::after{content:"Actions";font-size:var(--sapFontSize);font-family:var(--sapFontSemiboldDuplexFamily);color:var(--sapList_HeaderTextColor)}`;
+  style.textContent = css;
   sr.appendChild(style);
 }
 
@@ -86,6 +103,11 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   modelId: string; draft: ModelDef; update: Update; issues: Issue[]; tables: Tables;
   lookups?: ResolvedLookups; lookupsFailed?: boolean; onRetryLookups: () => void; previewAt: PreviewAt;
 }) {
+  const i18n = useI18n();
+  const t: Translate = (key, ...params) => i18n.getText(key, ...params);
+  const onHeader = useCallback((el: TableHeaderRowDomRef | null) => {
+    revealActionsHeader(el, t("MODEL_ACTIONS"));
+  }, [i18n]);
   const [editing, setEditing] = useState<{ param: Param; isNew: boolean; place?: { s: number; g: number } } | null>(null);
   // Table being edited in the dialog, by key — the dialog buffers its own copy.
   const [tableEdit, setTableEdit] = useState<string | null>(null);
@@ -112,23 +134,26 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
 
   draft.structure.sections.forEach((s, si) => {
     const sId = `S:${s.key}`;
-    rows.push({ kind: "struct", key: rowKeyOf({ kind: "section", s: si }), depth: 0, label: s.title, detail: `section · ${s.key}`, ref: { kind: "section", s: si }, collapseId: sId });
+    rows.push({ kind: "struct", key: rowKeyOf({ kind: "section", s: si }), depth: 0, label: s.title, detail: t("MODEL_DETAIL_SECTION", s.key), ref: { kind: "section", s: si }, collapseId: sId });
     if (collapsed.has(sId)) return;
     s.groups.forEach((g, gi) => {
       // A table is a group, so it draws at group depth with no children and no collapse chevron.
       if (isTableGroup(g)) {
-        const t = defOf(g.table);
+        const def = defOf(g.table);
+        const cols = def
+          ? t(def.columns.length === 1 ? "MODEL_COLUMNS_ONE" : "MODEL_COLUMNS_MANY", String(def.columns.length))
+          : "";
         rows.push({
-          kind: "struct", key: rowKeyOf({ kind: "table", s: si, g: gi }), depth: 1, label: t?.title || g.table,
-          detail: t
-            ? `${t.role === "items" ? "item grid" : "calculation table"} · ${t.columns.length} column${t.columns.length === 1 ? "" : "s"}`
-            : "missing table",
+          kind: "struct", key: rowKeyOf({ kind: "table", s: si, g: gi }), depth: 1, label: def?.title || g.table,
+          detail: def
+            ? t("MODEL_DETAIL_TABLE", def.role === "items" ? t("MODEL_ITEM_GRID") : t("MODEL_CALC_TABLE"), cols)
+            : t("MODEL_MISSING_TABLE"),
           ref: { kind: "table", s: si, g: gi },
         });
         return;
       }
       const gId = `G:${s.key}/${g.key}`;
-      rows.push({ kind: "struct", key: rowKeyOf({ kind: "group", s: si, g: gi }), depth: 1, label: g.title, detail: `group · ${g.key}`, ref: { kind: "group", s: si, g: gi }, collapseId: gId });
+      rows.push({ kind: "struct", key: rowKeyOf({ kind: "group", s: si, g: gi }), depth: 1, label: g.title, detail: t("MODEL_DETAIL_GROUP", g.key), ref: { kind: "group", s: si, g: gi }, collapseId: gId });
       if (collapsed.has(gId)) return;
       g.params.forEach((k) => {
         const p = draft.parameters.find((x) => x.key === k);
@@ -136,7 +161,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
         const pId = `P:${k}`;
         rows.push({
           kind: "struct", key: rowKeyOf({ kind: "param", key: k }), depth: 2, label: p?.label || k,
-          detail: p ? `${p.type} · ${p.ui}${p.domain ? (p.domain.kind === "range" ? " · range" : ` · ${p.domain.ref.source}`) : ""}${p.excludeFromDomains ? " · excluded" : ""}` : "missing definition",
+          detail: p ? paramDetail(p, t) : t("MODEL_MISSING_PARAM"),
           ref: { kind: "param", key: k },
           // Only a parameter that anchors formulas has anything to collapse.
           collapseId: own.length ? pId : undefined,
@@ -167,20 +192,26 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       const sec = draft.structure.sections[ref.s];
       const groups = sec?.groups.length ?? 0;
       const params = sec?.groups.reduce((n, g) => n + (isTableGroup(g) ? 0 : g.params.length), 0) ?? 0;
-      if (groups > 0) message = `Delete section "${sec?.title}" with its ${groups} group${groups === 1 ? "" : "s"}${params ? ` and ${params} placed parameter${params === 1 ? "" : "s"}` : ""}?`;
+      if (groups > 0) {
+        const groupsPhrase = t(groups === 1 ? "MODEL_GROUPS_ONE" : "MODEL_GROUPS_MANY", String(groups));
+        const andParams = params
+          ? ` ${t("MODEL_AND", t(params === 1 ? "MODEL_PLACED_ONE" : "MODEL_PLACED_MANY", String(params)))}`
+          : "";
+        message = t(groups === 1 ? "MODEL_DELETE_SECTION_ONE" : "MODEL_DELETE_SECTION_MANY", sec?.title ?? "", groupsPhrase + andParams);
+      }
     } else if (ref.kind === "group") {
       const grp = draft.structure.sections[ref.s]?.groups[ref.g];
       const params = grp && !isTableGroup(grp) ? grp.params.length : 0;
-      if (params) message = `Delete group "${grp && !isTableGroup(grp) ? grp.title : ""}" and its ${params} parameter${params === 1 ? "" : "s"}?`;
+      if (params) message = t(params === 1 ? "MODEL_DELETE_GROUP_ONE" : "MODEL_DELETE_GROUP_MANY", grp && !isTableGroup(grp) ? grp.title : "", String(params));
     } else if (ref.kind === "table") {
       const key = tableKeyAt(draft, ref.s, ref.g) ?? "";
-      const t = defOf(key);
-      message = `Delete table "${t?.title || key}"? Formulas reading ${key}_count or its column sums will stop resolving.`;
+      const def = defOf(key);
+      message = t("MODEL_DELETE_TABLE_MSG", def?.title || key, `${key}_count`);
     } else {
       const p = draft.parameters.find((x) => x.key === ref.key);
-      message = `Delete parameter "${p?.label || ref.key}"? This removes its definition from the model.`;
+      message = t("MODEL_DELETE_PARAM_MSG", p?.label || ref.key);
     }
-    if (message === null || await confirm({ title: "Delete", message, actionText: "Delete", destructive: true }))
+    if (message === null || await confirm({ title: t("MODEL_DELETE"), message, actionText: t("MODEL_DELETE"), destructive: true }))
       update((d) => deleteNode(d, ref));
   };
 
@@ -203,7 +234,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   };
   const addSection = () => update((d) => ({
     ...d,
-    structure: { sections: [...d.structure.sections, { key: addKey("section", d.structure.sections.map((s) => s.key)), title: "New section", groups: [] }] },
+    structure: { sections: [...d.structure.sections, { key: addKey("section", d.structure.sections.map((s) => s.key)), title: copy(t, "MODEL_NEW_SECTION", "New section"), groups: [] }] },
   }));
   const addGroup = (s: number) => update((d) => ({
     ...d,
@@ -212,7 +243,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
         ...sec,
         groups: [...sec.groups, {
           key: addKey("group", sec.groups.flatMap((g) => (isTableGroup(g) ? [] : [g.key]))),
-          title: "New group", params: [],
+          title: copy(t, "MODEL_NEW_GROUP", "New group"), params: [],
         }],
       }),
     },
@@ -223,8 +254,8 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   }));
   // A table is a group, so it is added to a section, not into one.
   const addTable = (role: "calc" | "items", s: number) => update((d) => {
-    const t = role === "items" ? itemsTable() : newCalcTable((d.tables ?? []).map((x) => x.key));
-    return placeTable({ ...d, tables: [...(d.tables ?? []), t] }, t.key, s);
+    const table = role === "items" ? localizeItems(itemsTable(), t) : newCalcTable((d.tables ?? []).map((x) => x.key), t);
+    return placeTable({ ...d, tables: [...(d.tables ?? []), table] }, table.key, s);
   });
   // checkModel allows at most one items table, and requires exactly one.
   const hasItems = (draft.tables ?? []).some((t) => t.role === "items");
@@ -232,25 +263,25 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   // Everything a row can do is a row action: UI5 shows the first `rowActionCount` in DOM order and
   // pushes the rest into its own overflow menu, which is why Delete sits second — it stays visible
   // on every row type while the rarer table adds fall into the menu.
-  const del = <TableRowAction icon="delete" text="Delete" data-act="delete" />;
+  const del = <TableRowAction icon="delete" text={t("MODEL_DELETE")} data-act="delete" />;
   // The items grid is mandatory (checkModel enforces it), so it is the one row with no delete.
   const actionsFor = (ref: RowRef) =>
     ref.kind === "section" ? (
       <>
-        <TableRowAction icon="add" text="Add group" data-act="add" />
+        <TableRowAction icon="add" text={t("MODEL_ADD_GROUP")} data-act="add" />
         {del}
-        <TableRowAction icon="table-view" text="Add calculation table" data-act="calc" />
+        <TableRowAction icon="table-view" text={t("MODEL_ADD_CALC_TABLE")} data-act="calc" />
         {/* TableRowAction has no disabled state, so a second item grid is simply not offered. */}
-        {hasItems ? null : <TableRowAction icon="product" text="Add item grid" data-act="items" />}
+        {hasItems ? null : <TableRowAction icon="product" text={t("MODEL_ADD_ITEM_GRID")} data-act="items" />}
       </>
     )
-    : ref.kind === "group" ? <><TableRowAction icon="add" text="Add parameter" data-act="add" />{del}</>
+    : ref.kind === "group" ? <><TableRowAction icon="add" text={t("MODEL_ADD_PARAM")} data-act="add" />{del}</>
     : ref.kind === "table" ? (defOf(tableKeyAt(draft, ref.s, ref.g) ?? "")?.role === "items" ? undefined : del)
     : (
       <>
-        <TableRowAction icon="add" text="Add formula" data-act="add" />
+        <TableRowAction icon="add" text={t("MODEL_ADD_FORMULA")} data-act="add" />
         {del}
-        <TableRowAction icon="copy" text="Duplicate parameter" data-act="dup" />
+        <TableRowAction icon="copy" text={t("MODEL_DUPLICATE_PARAM")} data-act="dup" />
       </>
     );
 
@@ -296,16 +327,16 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       {/* Every other add lives on the row it adds into, so this is the only action with no row to
           hang it on. marginTop cancels the Subheader's -1px overlap, which the clip would shave. */}
       <Bar design="Subheader" style={{ borderBlockEnd: "none", marginTop: 0 }}
-        startContent={<Title level="H5">Form structure</Title>}
-        endContent={<Button icon="add" onClick={addSection}>Add section</Button>}
+        startContent={<Title level="H5">{t("MODEL_FORM_STRUCTURE")}</Title>}
+        endContent={<Button icon="add" onClick={addSection}>{t("MODEL_ADD_SECTION")}</Button>}
       />
 
       <Table
-        accessibleName="Form structure"
+        accessibleName={t("MODEL_FORM_STRUCTURE")}
         className="confire-params-struct"
         noData={
-          <IllustratedMessage name="AddColumn" design="Dot" titleText="No structure yet"
-            subtitleText="Add a section to start structuring the form, then add groups and parameters." />
+          <IllustratedMessage name="AddColumn" design="Dot" titleText={t("MODEL_NO_STRUCTURE")}
+            subtitleText={t("MODEL_NO_STRUCTURE_SUB")} />
         }
         rowActionCount={3}
         onMoveOver={(e) => {
@@ -362,9 +393,9 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
           }
         }}
         headerRow={
-          <TableHeaderRow ref={revealActionsHeader}>
-            <TableHeaderCell width="45%"><span>Structure</span></TableHeaderCell>
-            <TableHeaderCell><span>Details</span></TableHeaderCell>
+          <TableHeaderRow ref={onHeader}>
+            <TableHeaderCell width="45%"><span>{t("MODEL_STRUCTURE")}</span></TableHeaderCell>
+            <TableHeaderCell><span>{t("MODEL_DETAILS")}</span></TableHeaderCell>
           </TableHeaderRow>
         }
       >
@@ -373,12 +404,12 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
             // Read-only until clicked: a row of live Inputs is taller than a row of Text, and that
             // gap is what made the formula block look bolted on.
             <TableRow key={r.key} rowKey={r.key} interactive
-              actions={<><TableRowAction icon="add" text="Add formula" data-act="add" />{del}</>}>
+              actions={<><TableRowAction icon="add" text={t("MODEL_ADD_FORMULA")} data-act="add" />{del}</>}>
               <TableCell>
                 <Gutter depth={3}>
                   <span style={{ color: "var(--sapContent_LabelColor)", fontStyle: "italic", flex: "0 0 auto" }}>ƒ</span>
                   {fEdit === r.idx ? (
-                    <Input accessibleName="Formula key" style={{ width: "100%" }} value={draft.computed[r.idx]!.key} autoFocus
+                    <Input accessibleName={t("MODEL_FORMULA_KEY")} style={{ width: "100%" }} value={draft.computed[r.idx]!.key} autoFocus
                       onInput={(e) => update((d) => ({ ...d, computed: d.computed.map((x, j) => (j === r.idx ? { ...x, key: e.target.value } : x)) }))} />
                   ) : (
                     <Text>{draft.computed[r.idx]!.key}</Text>
@@ -466,6 +497,7 @@ function PreviewPane({ modelId, draft, issues, lookups, lookupsFailed, onRetryLo
   modelId: string; draft: ModelDef; issues: Issue[];
   lookups?: ResolvedLookups; lookupsFailed?: boolean; onRetryLookups: () => void;
 }) {
+  const i18n = useI18n();
   const [entries, setEntries] = useState<Entries>({});
   const [tables, setTables] = useState<TableRows>({});
   const [picks, setPicks] = useState<QueryPicks>({});
@@ -481,7 +513,7 @@ function PreviewPane({ modelId, draft, issues, lookups, lookupsFailed, onRetryLo
           message can carry, so the button stays here. */}
       {lookupsFailed ? (
         <div style={{ padding: "0.5rem 1rem" }}>
-          <Button icon="refresh" onClick={onRetryLookups}>Retry loading options</Button>
+          <Button icon="refresh" onClick={onRetryLookups}>{i18n.getText("MODEL_RETRY_OPTIONS")}</Button>
         </div>
       ) : null}
       <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>

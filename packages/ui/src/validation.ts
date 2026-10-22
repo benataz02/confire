@@ -15,20 +15,24 @@ export const evalDyn = <T>(
 ): T | undefined =>
   (typeof rule === "function" ? (rule as (d: Row, e: boolean, n: boolean) => T)(formData, isEditMode, isNew) : rule);
 
-/** The first rule a value breaks, in Beas' order: required, min/max, maxLength, pattern, custom. */
+type Text = (key: string, ...params: Array<string | number>) => string;
+
+/** The first rule a value breaks, in Beas' order: required, min/max, maxLength, pattern, custom.
+ *  Without `t` the messages stay the English sentences the tests assert. */
 export function getFieldValidationError(
-  f: FormField, value: unknown, formData: Row, isEditMode = true, isNew = false,
+  f: FormField, value: unknown, formData: Row, isEditMode = true, isNew = false, t?: Text,
 ): string | null {
+  const say = (key: string, fallback: string, ...params: Array<string | number>) => (t ? t(key, ...params) : fallback);
   const required = !!evalDyn(f.required, formData, isEditMode, isNew);
-  if (isEmptyValue(value)) return required ? "Enter a value." : null;
+  if (isEmptyValue(value)) return required ? say("UI_ENTER_VALUE", "Enter a value.") : null;
   const v = f.validators ?? {};
   if (typeof value === "number") {
-    if (v.min !== undefined && value < v.min) return `Must be at least ${v.min}.`;
-    if (v.max !== undefined && value > v.max) return `Must be at most ${v.max}.`;
+    if (v.min !== undefined && value < v.min) return say("UI_MIN", `Must be at least ${v.min}.`, String(v.min));
+    if (v.max !== undefined && value > v.max) return say("UI_MAX", `Must be at most ${v.max}.`, String(v.max));
   }
   if (v.maxLength !== undefined && typeof value === "string" && value.length > v.maxLength)
-    return `At most ${v.maxLength} characters.`;
-  if (v.pattern && !new RegExp(v.pattern).test(String(value))) return "Invalid format.";
+    return say("UI_MAX_LENGTH", `At most ${v.maxLength} characters.`, String(v.maxLength));
+  if (v.pattern && !new RegExp(v.pattern).test(String(value))) return say("UI_INVALID_FORMAT", "Invalid format.");
   return v.custom?.(value, formData) ?? null;
 }
 
@@ -41,7 +45,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stri
  */
 export function validateForm(
   fields: FormField[], formData: Row,
-  opts: { baseline: Row | null; isNew: boolean; isEditMode?: boolean },
+  opts: { baseline: Row | null; isNew: boolean; isEditMode?: boolean; t?: Text },
 ): Record<string, string> {
   const errors: Record<string, string> = {};
   const isEditMode = opts.isEditMode ?? true;
@@ -49,7 +53,7 @@ export function validateForm(
     if (!isFieldEditable(f, isEditMode, opts.isNew)) continue;
     if (!opts.isNew && opts.baseline && typeof f.required !== "function" && same(formData[f.key], opts.baseline[f.key]))
       continue;
-    const e = getFieldValidationError(f, formData[f.key], formData, isEditMode, opts.isNew);
+    const e = getFieldValidationError(f, formData[f.key], formData, isEditMode, opts.isNew, opts.t);
     if (e) errors[f.key] = e;
   }
   return errors;

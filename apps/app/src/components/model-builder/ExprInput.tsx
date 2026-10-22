@@ -1,6 +1,7 @@
 import { useMemo, type CSSProperties } from "react";
 import { Input, SuggestionItemCustom, TextArea } from "@ui5/webcomponents-react";
 import { DslError, parse, type Issue, type ModelDef } from "@confire/config-engine";
+import { useI18n } from "../../i18n.ts";
 import { complete, matches, scopeSuggestions, type TableCols } from "./exprHelpers.ts";
 
 // The one expression editor used everywhere in the builder: monospace, parse-on-change with
@@ -44,8 +45,12 @@ export function ExprInput({
   rows?: number;
   style?: CSSProperties;
 }) {
+  const i18n = useI18n();
   const text = value ?? "";
-  const all = useMemo(() => scopeSuggestions(model, extraVars, tables), [model, extraVars, tables]);
+  const all = useMemo(
+    () => scopeSuggestions(model, extraVars, tables, (key, ...params) => i18n.getText(key, ...params)),
+    [model, extraVars, tables, i18n],
+  );
 
   const parseError = useMemo(() => {
     if (text.trim() === "") return null; // emptiness is the caller's concern (optional/required)
@@ -58,7 +63,9 @@ export function ExprInput({
   }, [text]);
   const error = parseError ?? issue ?? null;
   const errorText = error
-    ? `${error.message}${error.from !== undefined ? ` — at «${text.slice(error.from, error.to) || "end"}»` : ""}`
+    ? `${error.message}${error.from !== undefined
+      ? i18n.getText("MODEL_EXPR_AT", text.slice(error.from, error.to) || i18n.getText("MODEL_EXPR_END"))
+      : ""}`
     : "";
 
   const sugg = matches(all, text).slice(0, 8);

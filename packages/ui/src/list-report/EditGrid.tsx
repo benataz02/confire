@@ -1,8 +1,9 @@
 import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { Button } from "@ui5/webcomponents-react";
+import { useUiI18n } from "../i18n.ts";
 import { FormField } from "../object-page/FormField.tsx";
-import { allExist } from "../cfl/existence.ts";
+import { allExist, notFoundMessage } from "../cfl/existence.ts";
 import type { UiSource } from "../source.tsx";
 import { Grid, type CellTemplate, type GridState, type Selection } from "./Grid.tsx";
 import type { FormField as Field, ListColumn, Row } from "../types.ts";
@@ -39,14 +40,17 @@ const cellEditable = (c: ListColumn) => !!c.metaEditable && !c.readonly;
  * validateCflCells(): every value-help column's distinct values probed once, every cell holding a
  * missing one marked. A failed probe counts as existing, as everywhere else.
  */
-export async function validateCflCells(qc: QueryClient, client: UiSource["client"], columns: ListColumn[], rows: Row[]): Promise<Record<string, string>> {
+export async function validateCflCells(
+  qc: QueryClient, client: UiSource["client"], columns: ListColumn[], rows: Row[],
+  t?: (key: string, ...params: Array<string | number>) => string,
+): Promise<Record<string, string>> {
   const errors: Record<string, string> = {};
   for (const c of columns) {
     if (!c.cflConfig || !cellEditable(c)) continue;
     const cfg = { dialogConfig: c.cflConfig };
     const missing = await allExist(qc, client, cfg, rows.map((r) => r[c.key]));
     rows.forEach((r, i) => {
-      if (missing.has(String(r[c.key] ?? "").trim())) errors[cellKey(i, c.key)] = `${c.cflConfig!.title} not found`;
+      if (missing.has(String(r[c.key] ?? "").trim())) errors[cellKey(i, c.key)] = notFoundMessage(cfg, t);
     });
   }
   return errors;
@@ -69,6 +73,7 @@ export function EditGrid({ title, columns, rows, onChange, readOnly, errors, too
   /** the caller's buttons, ahead of Add/Delete */
   toolbarActions?: (selection: Selection) => ReactNode;
 }) {
+  const i18n = useUiI18n();
   // The page re-applies its layout on every keystroke, which hands over a new column array whose
   // shown columns are the same objects. Keep the last array while they are: Grid builds one Cell
   // component per column off it, and a new one remounts the input under the cursor.
@@ -114,21 +119,21 @@ export function EditGrid({ title, columns, rows, onChange, readOnly, errors, too
 
   return (
     <Grid title={title} columns={gridColumns} state={state} rows={data} fill={false} showSettings={false}
-      exportName={title} noDataText="No lines" cellTemplates={cellTemplates}
+      exportName={title} noDataText={i18n.getText("UI_NO_LINES")} cellTemplates={cellTemplates}
       selectionMode={readOnly ? "None" : "Multiple"}
       toolbarActions={readOnly && !toolbarActions ? undefined : (sel) => (
         <>
           {toolbarActions?.(sel)}
           {readOnly ? null : (
             <>
-              <Button icon="add" design="Transparent" onClick={() => onChange([...rows, {}])}>Add line</Button>
+              <Button icon="add" design="Transparent" onClick={() => onChange([...rows, {}])}>{i18n.getText("UI_ADD_LINE")}</Button>
               <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
                 onClick={() => {
                   const gone = new Set(sel.rows.map((r) => r[IDX] as number));
                   // row ids are positions, so a kept selection would land on the lines that moved up
                   sel.clear();
                   onChange(rows.filter((_, j) => !gone.has(j)));
-                }}>Delete</Button>
+                }}>{i18n.getText("UI_DELETE")}</Button>
             </>
           )}
         </>

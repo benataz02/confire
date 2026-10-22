@@ -22,10 +22,31 @@ export const toPriced = (c: Candidate): PricedCandidate => ({
 
 export const fmt = (n: number): string => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
-export const statusUi = {
-  draft: { state: "None", text: "Draft" },
-  quoted: { state: "Positive", text: "Quoted" },
-} as const;
+/** `(key, ...params)` — the caller's `i18n.getText`, so this stays pure and testable. */
+export type TextFn = (key: string, ...params: string[]) => string;
+
+const STATUS_TEXT: Record<string, string> = {
+  draft: "CONFIG_STATUS_DRAFT",
+  submitted: "CONFIG_STATUS_SUBMITTED",
+  in_review: "CONFIG_STATUS_IN_REVIEW",
+  returned: "CONFIG_STATUS_RETURNED",
+  declined: "CONFIG_STATUS_DECLINED",
+  quoted: "CONFIG_STATUS_QUOTED",
+};
+
+/** The list's two statuses, colour included. A request's wider set is `projectStatusText`. */
+export function statusUi(t: TextFn) {
+  return {
+    draft: { state: "None" as const, text: t(STATUS_TEXT.draft!) },
+    quoted: { state: "Positive" as const, text: t(STATUS_TEXT.quoted!) },
+  };
+}
+
+/** Tag text for a project status. An unknown status stays as stored — it is a code, not a sentence. */
+export function projectStatusText(t: TextFn, status: string): string {
+  const key = STATUS_TEXT[status];
+  return key ? t(key) : status;
+}
 
 // Params the calculation left open (assigned per candidate, not fixed in the project's entries),
 // in model parameter order so labels are stable across candidates.
@@ -35,8 +56,8 @@ export function openKeys(model: ModelDef, entries: Entries, candidates: { assign
   return model.parameters.map((p) => p.key).filter((k) => assigned.has(k));
 }
 
-export const candidateLabel = (keys: string[], assignment: Entries): string =>
-  keys.length ? keys.map((k) => String(assignment[k] ?? "—")).join(" · ") : "Configuration";
+export const candidateLabel = (t: TextFn, keys: string[], assignment: Entries): string =>
+  keys.length ? keys.map((k) => String(assignment[k] ?? "—")).join(" · ") : t("CONFIG_CANDIDATE");
 
 // Lowest unit price per batch column -> candidate index (first wins on ties).
 export function bestByBatch(candidates: PricedCandidate[]): Record<number, number> {

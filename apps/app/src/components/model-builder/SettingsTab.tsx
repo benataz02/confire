@@ -9,7 +9,9 @@ import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { MasterdataQuerySelect } from "./MasterdataQuerySelect.tsx";
 import { orpc } from "../../orpc.ts";
+import { useI18n } from "../../i18n.ts";
 import { toast } from "@confire/ui/toast.ts";
+import type { Translate } from "./builderMessages.ts";
 
 /** Label mode: the price list's name shows, its number is what the model stores. */
 const PRICE_LIST = { dialogConfig: cfl.priceLists() };
@@ -26,6 +28,8 @@ export function SettingsTab({ modelId, draft, update, issues, tables, tried }: {
    *  five red fields on an untouched form say nothing the asterisks don't. */
   tried: boolean;
 }) {
+  const i18n = useI18n();
+  const t: Translate = (key, ...params) => i18n.getText(key, ...params);
   // Batches edited as CSV; parse on change, ignore junk. // ponytail: token editor if CSV annoys
   const [batchText, setBatchText] = useState(draft.batchDefaults.join(", "));
   const setBatches = (text: string) => {
@@ -42,34 +46,32 @@ export function SettingsTab({ modelId, draft, update, issues, tables, tried }: {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "1rem" }}>
       <Form accessibleMode="Edit" labelSpan="S12 M12 L12 XL12" layout="S1 M2 L2 XL2">
-        <FormGroup headerText="Model">
-          <FormItem labelContent={<Label for="model-name" required>Name</Label>}>
+        <FormGroup headerText={t("MODEL_GROUP_MODEL")}>
+          <FormItem labelContent={<Label for="model-name" required>{t("MODEL_NAME")}</Label>}>
             <Input id="model-name" value={draft.name} required
               valueState={bad(!draft.name.trim())}
-              valueStateMessage={<div>Give the model a name — it is what the salesperson picks from the catalog.</div>}
+              valueStateMessage={<div>{t("MODEL_NAME_HINT")}</div>}
               onInput={(e) => update((d) => ({ ...d, name: e.target.value }))} />
           </FormItem>
-          <FormItem labelContent={<Label for="model-description">Description</Label>}>
-            <Input id="model-description" value={draft.description ?? ""} placeholder="Shown under the model name"
+          <FormItem labelContent={<Label for="model-description">{t("MODEL_DESCRIPTION")}</Label>}>
+            <Input id="model-description" value={draft.description ?? ""} placeholder={t("MODEL_DESCRIPTION_PH")}
               onInput={(e) => update((d) => ({ ...d, description: e.target.value || undefined }))} />
           </FormItem>
-          <FormItem labelContent={<Label>Default batch sizes</Label>}>
-            <Input value={batchText} placeholder="1, 10, 100" onInput={(e) => setBatches(e.target.value)}
+          <FormItem labelContent={<Label>{t("MODEL_BATCHES")}</Label>}>
+            <Input value={batchText} placeholder={t("MODEL_BATCHES_PH")} onInput={(e) => setBatches(e.target.value)}
               valueState={bad(!draft.batchDefaults.length)}
-              valueStateMessage={<div>Comma-separated whole numbers above zero, e.g. 1, 10, 100 — these are the batch sizes the configurator prices side by side.</div>} />
+              valueStateMessage={<div>{t("MODEL_BATCHES_HINT")}</div>} />
           </FormItem>
         </FormGroup>
-        <FormGroup headerText="Pricing">
+        <FormGroup headerText={t("MODEL_PRICING")}>
           {/* Mandatory: BOM lines carry no price of their own — this list is where every material's
               unit price is read from, live, on each calculation. */}
-          <FormItem labelContent={<Label required>BOM price list</Label>}>
+          <FormItem labelContent={<Label required>{t("MODEL_PRICE_LIST")}</Label>}>
             {/* Wrapper, not a prop on the field: the id is only a jump target for the message
                 popover, and `field-<issue path>` is the convention for one. */}
             <div id="field-pricing.priceList" style={{ width: "100%" }}>
-            <CflField config={PRICE_LIST} value={draft.pricing.priceList ?? null} accessibleName="BOM price list"
-              error={bad(!draft.pricing.priceList) === "Negative"
-                ? "Pick the B1 price list every BOM material's unit price is read from. Without it the model cannot cost anything."
-                : null}
+            <CflField config={PRICE_LIST} value={draft.pricing.priceList ?? null} accessibleName={t("MODEL_PRICE_LIST")}
+              error={bad(!draft.pricing.priceList) === "Negative" ? t("MODEL_PRICE_LIST_ERR") : null}
               onValueChange={(v) => update((d) => ({
                 ...d,
                 pricing: { ...d.pricing, priceList: v === null || v === "" ? undefined : Number(v) },
@@ -79,24 +81,22 @@ export function SettingsTab({ modelId, draft, update, issues, tables, tried }: {
           {/* Where those prices are cached. An `Items` masterdata query with no columns selected,
               so B1 returns whole rows and the nested ItemPrices collection survives the sync —
               a $select on it is rejected. */}
-          <FormItem labelContent={<Label required>Item price source</Label>}>
+          <FormItem labelContent={<Label required>{t("MODEL_ITEM_SOURCE")}</Label>}>
             <div id="field-pricing.itemTable" style={{ width: "100%" }}>
-              <MasterdataQuerySelect required accessibleName="Item masterdata query"
+              <MasterdataQuerySelect required accessibleName={t("MODEL_ITEM_QUERY")}
                 value={draft.pricing.itemTable}
                 issue={shown("pricing.itemTable")?.message}
                 onChange={(itemTable) => update((d) => ({ ...d, pricing: { ...d.pricing, itemTable } }))} />
             </div>
           </FormItem>
-          <FormItem labelContent={<Label required>Unit price expression</Label>}>
+          <FormItem labelContent={<Label required>{t("MODEL_PRICE_EXPR")}</Label>}>
             <ExprInput value={draft.pricing.priceExpr} model={draft} extraVars={["qty", "unitCost"]} tables={tables}
               fieldId="expr-pricing.priceExpr" issue={shown("pricing.priceExpr")}
               onChange={(v) => update((d) => ({ ...d, pricing: { ...d.pricing, priceExpr: v ?? "" } }))} />
           </FormItem>
-          <FormItem labelContent={<Label required>Quote item code</Label>}>
-            <CflField config={ITEM} value={draft.pricing.quoteItemCode || null} accessibleName="Quote item code" link
-              error={bad(!draft.pricing.quoteItemCode) === "Negative"
-                ? "Pick the B1 item the quote line is written against — the configured product itself, not a material."
-                : null}
+          <FormItem labelContent={<Label required>{t("MODEL_QUOTE_ITEM")}</Label>}>
+            <CflField config={ITEM} value={draft.pricing.quoteItemCode || null} accessibleName={t("MODEL_QUOTE_ITEM")} link
+              error={bad(!draft.pricing.quoteItemCode) === "Negative" ? t("MODEL_QUOTE_ITEM_ERR") : null}
               onValueChange={(v) => update((d) => ({ ...d, pricing: { ...d.pricing, quoteItemCode: v === null ? "" : String(v) } }))} />
           </FormItem>
         </FormGroup>
@@ -105,26 +105,28 @@ export function SettingsTab({ modelId, draft, update, issues, tables, tried }: {
       <PortalSettings modelId={modelId} />
 
       <MessageStrip design="Information" hideCloseButton>
-        The tables behind LOOKUP() and table domains — maintained values and live B1/Beas queries alike — are managed on the Masterdata page and shared by every model.
+        {t("MODEL_MASTERDATA_NOTE")}
       </MessageStrip>
     </div>
   );
 }
 
 const PRICING_TEXT = {
-  indicative: "Indicative prices while configuring",
-  request: "Prices on request (none until quoted)",
+  indicative: "MODEL_PRICING_INDICATIVE",
+  request: "MODEL_PRICING_REQUEST",
 } as const;
 
 /** The customer portal (spec D15, D21). Applied as it is changed, not on Save: these are columns
  *  beside the definition, so publishing never touches the model's calculations. */
 function PortalSettings({ modelId }: { modelId?: string }) {
+  const i18n = useI18n();
+  const t: Translate = (key, ...params) => i18n.getText(key, ...params);
   const qc = useQueryClient();
   const rec = useQuery({ ...orpc.models.get.queryOptions({ input: { id: modelId! } }), enabled: !!modelId });
   const publish = useMutation(orpc.models.publish.mutationOptions({
     onSuccess: (row) => {
       qc.setQueryData(orpc.models.get.queryOptions({ input: { id: row.id } }).queryKey, row);
-      toast(row.portal ? "Published on the customer portal" : "Not on the customer portal");
+      toast(row.portal ? t("MODEL_TOAST_PUBLISHED") : t("MODEL_TOAST_UNPUBLISHED"));
     },
   }));
   const portal = rec.data?.portal ?? false;
@@ -135,22 +137,20 @@ function PortalSettings({ modelId }: { modelId?: string }) {
 
   return (
     <Form accessibleMode="Edit" labelSpan="S12 M12 L12 XL12" layout="S1 M2 L2 XL2">
-      <FormGroup headerText="Customer portal">
-        <FormItem labelContent={<Label for="model-portal">Publish on the portal</Label>}>
+      <FormGroup headerText={t("MODEL_PORTAL")}>
+        <FormItem labelContent={<Label for="model-portal">{t("MODEL_PORTAL_PUBLISH")}</Label>}>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-            <Switch id="model-portal" checked={portal} disabled={off} accessibleName="Publish on the portal"
+            <Switch id="model-portal" checked={portal} disabled={off} accessibleName={t("MODEL_PORTAL_PUBLISH")}
               onChange={(e) => set({ portal: e.target.checked })} />
             <Text style={{ fontSize: "0.75rem", color: "var(--sapContent_LabelColor)" }}>
-              {modelId
-                ? "Every customer company on the portal can configure it. Applies at once, without Save."
-                : "Save the model first."}
+              {modelId ? t("MODEL_PORTAL_HINT") : t("MODEL_PORTAL_SAVE_FIRST")}
             </Text>
           </div>
         </FormItem>
-        <FormItem labelContent={<Label for="model-portal-pricing">Prices shown to clients</Label>}>
+        <FormItem labelContent={<Label for="model-portal-pricing">{t("MODEL_PORTAL_PRICES")}</Label>}>
           <Select id="model-portal-pricing" value={pricing} disabled={off} style={{ width: "100%" }}
             onChange={(e) => set({ portalPricing: (e.detail.selectedOption.value ?? "request") as "indicative" | "request" })}>
-            {Object.entries(PRICING_TEXT).map(([v, t]) => <Option key={v} value={v}>{t}</Option>)}
+            {Object.entries(PRICING_TEXT).map(([v, key]) => <Option key={v} value={v}>{t(key)}</Option>)}
           </Select>
         </FormItem>
       </FormGroup>

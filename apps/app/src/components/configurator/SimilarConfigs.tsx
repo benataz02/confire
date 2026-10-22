@@ -5,6 +5,7 @@ import "@ui5/webcomponents-fiori/dist/illustrations/BeforeSearch.js";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoEntries.js";
 import type { Entries, ModelDef, Val } from "@confire/config-engine";
 import { money } from "@confire/ui/money.ts";
+import { useI18n } from "../../i18n.ts";
 import { orpc } from "../../orpc.ts";
 
 // "Similar configurations": the process page's fuzzy help, ranking the model's cached history
@@ -54,6 +55,8 @@ export function SimilarConfigs({ projectId, model, entries, onCopy }: {
   entries: Entries;
   onCopy: (v: Record<string, Val>) => void;
 }) {
+  const i18n = useI18n();
+  const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
   const h = model.history;
   // Debounce the page's own object (its identity only changes on an edit), then narrow: a subset
   // rebuilt every render would restart the timer on every render.
@@ -74,17 +77,17 @@ export function SimilarConfigs({ projectId, model, entries, onCopy }: {
   // The process page does not mount this when history has no mappings.
   if (!h?.mappings.length) return null;
   if (!anyFilled)
-    return empty("BeforeSearch", "Nothing to compare yet", "Fill a mapped parameter to find similar past configurations.");
+    return empty("BeforeSearch", t("CONFIG_NOTHING_COMPARE"), t("CONFIG_NOTHING_COMPARE_SUB"));
   if (q.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "2rem" }} />;
   if (q.error) return <MessageStrip design="Negative" hideCloseButton>{q.error.message}</MessageStrip>;
   if (!q.data.results.length)
-    return empty("NoEntries", "No history yet", "An admin can press \"Sync now\" in the model's History tab.");
+    return empty("NoEntries", t("CONFIG_NO_HISTORY"), t("CONFIG_NO_HISTORY_SUB"));
 
   return (
     // The dim stays, and List's own `loading` is deliberately NOT used here: paired with
     // keepPreviousData it re-ranks in place, where a loading overlay would flash per keystroke.
     <div style={{ opacity: q.isFetching ? 0.6 : 1 }}>
-      <List accessibleName="Similar past configurations" separators="Inner">
+      <List accessibleName={t("CONFIG_SIMILAR_LIST")} separators="Inner">
         {q.data.results.map((r, i) => {
           // display columns identify the row — the author ordered them. Values alone on one line,
           // the labelled form kept as the tooltip so nothing is lost.
@@ -96,11 +99,11 @@ export function SimilarConfigs({ projectId, model, entries, onCopy }: {
                 {/* Score on the headline line, evidence beneath it across the full width — same
                     shape as Documents, where the price sits on line 1. */}
                 <div style={ROW}>
-                  <div style={{ ...MAIN, ...CLIP }}>{values || "Past configuration"}</div>
+                  <div style={{ ...MAIN, ...CLIP }}>{values || t("CONFIG_PAST")}</div>
                   <span style={FIGURE}>{`${Math.round(r.score * 100)}%`}</span>
                   {/* Transparent, not Emphasized: up to 10 results render here (scoreRows caps at
                       top=10) and Fiori allows one emphasized button per page, not ten. */}
-                  <Button design="Transparent" icon="copy" tooltip="Use these values"
+                  <Button design="Transparent" icon="copy" tooltip={t("CONFIG_USE_VALUES")}
                     onClick={() => onCopy(r.values)} />
                 </div>
                 <div style={CHIPS}>

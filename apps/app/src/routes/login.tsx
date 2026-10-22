@@ -2,15 +2,29 @@ import { createFileRoute, redirect, useRouter, Link } from "@tanstack/react-rout
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Input, Button, MessageStrip, List, ListItemStandard } from "@ui5/webcomponents-react";
-import { ROLE_LABEL } from "@confire/ui/portal/CompanyPeople.tsx";
 import { authClient, sessionQuery } from "../auth-client.ts";
 import { lobbyQuery } from "../orpc.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { SocialButtons } from "../components/SocialButtons.tsx";
 import { authUrl, hardRedirect, currentSlug, safeRedirect } from "@confire/ui/host.ts";
 import { authErrorMessage, notVerifiedMessage } from "@confire/ui/auth/messages.ts";
+import { useI18n } from "../i18n.ts";
 
-type Place = { url: string; active: boolean; title: string; description: string; icon: string; role?: string };
+type Place = {
+  url: string;
+  active: boolean;
+  title: string;
+  icon: string;
+  kind: "workspace" | "portal";
+  cardName?: string;
+  role?: string;
+};
+
+const ROLE_KEY: Record<string, string> = {
+  owner: "SHELL_ROLE_OWNER",
+  buyer: "SHELL_ROLE_BUYER",
+  viewer: "SHELL_ROLE_VIEWER",
+};
 
 // The one sign-in for staff and customers, and the dispatcher (spec 2026-10-19-path-tenancy-design.md).
 // Signed out it is the form. Signed in it sends the user on: to `redirect` (the page a 401 bounced
@@ -34,8 +48,11 @@ export const Route = createFileRoute("/login")({
     if (!workspace && !portals.length) throw redirect({ to: "/onboarding" });
     if (workspace?.needsAgent) throw redirect({ to: "/onboarding" });
     const places: Place[] = [
-      ...(workspace ? [{ url: workspace.url, active: workspace.active, title: workspace.name, description: "Your workspace", icon: "building" }] : []),
-      ...portals.map((p) => ({ url: p.url, active: p.active, title: p.tenantName, description: `${p.cardName} · customer portal`, icon: "supplier", role: ROLE_LABEL[p.role] })),
+      ...(workspace ? [{ url: workspace.url, active: workspace.active, title: workspace.name, icon: "building", kind: "workspace" as const }] : []),
+      ...portals.map((p) => ({
+        url: p.url, active: p.active, title: p.tenantName, icon: "supplier", kind: "portal" as const,
+        cardName: p.cardName, role: p.role,
+      })),
     ];
     if (!search.choose) {
       const next = places.length === 1 ? places[0] : places.find((p) => p.active);
@@ -52,6 +69,7 @@ function Login() {
 }
 
 function SignIn() {
+  const i18n = useI18n();
   const router = useRouter();
   const { redirect: redirectTo, error: oauthError } = Route.useSearch();
   const [email, setEmail] = useState("");
@@ -67,7 +85,7 @@ function SignIn() {
       const res = await authClient.signIn.email(vars);
       // Unverified: Better Auth has just mailed a fresh link (sendOnSignIn), so say where it went.
       if (res.error?.code === "EMAIL_NOT_VERIFIED") throw new Error(notVerifiedMessage(vars.email));
-      if (res.error) throw new Error(res.error.message ?? "Sign in failed");
+      if (res.error) throw new Error(res.error.message ?? i18n.getText("SHELL_AUTH_SIGN_IN_FAILED"));
       return res.data;
     },
     onSuccess: async () => {
@@ -83,15 +101,15 @@ function SignIn() {
 
   return (
     <AuthLayout>
-      <h2 className="auth-h1">Welcome back</h2>
-      <p className="auth-sub">Sign in to Confire.</p>
+      <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_WELCOME")}</h2>
+      <p className="auth-sub">{i18n.getText("SHELL_AUTH_SIGN_IN_SUB")}</p>
       {error ? <MessageStrip design="Negative" hideCloseButton>{error}</MessageStrip> : null}
       <label className="auth-field">
-        <span>Email</span>
+        <span>{i18n.getText("SHELL_AUTH_EMAIL")}</span>
         <Input type="Email" value={email} onInput={(e) => setEmail(e.target.value)} />
       </label>
       <label className="auth-field">
-        <span>Password</span>
+        <span>{i18n.getText("SHELL_AUTH_PASSWORD")}</span>
         <Input
           type="Password"
           value={password}
@@ -100,13 +118,13 @@ function SignIn() {
         />
       </label>
       <Button design="Emphasized" disabled={signIn.isPending} onClick={submit}>
-        {signIn.isPending ? "Signing in…" : "Sign in"}
+        {signIn.isPending ? i18n.getText("SHELL_AUTH_SIGN_IN_PENDING") : i18n.getText("SHELL_AUTH_SIGN_IN")}
       </Button>
-      <p className="auth-alt"><Link to="/forgot-password">Forgot your password?</Link></p>
-      <div className="auth-or">or</div>
+      <p className="auth-alt"><Link to="/forgot-password">{i18n.getText("SHELL_AUTH_FORGOT")}</Link></p>
+      <div className="auth-or">{i18n.getText("SHELL_AUTH_OR")}</div>
       <SocialButtons redirect={redirectTo} />
       <p className="auth-alt">
-        New to Confire? <Link to="/signup" search={{ redirect: redirectTo }}>Create an account</Link>
+        {i18n.getText("SHELL_AUTH_NEW")} <Link to="/signup" search={{ redirect: redirectTo }}>{i18n.getText("SHELL_AUTH_CREATE_ACCOUNT_LINK")}</Link>
       </p>
     </AuthLayout>
   );
@@ -114,6 +132,7 @@ function SignIn() {
 
 /** More than one place (spec S6): the workspace first, then each supplier portal. */
 function WhereTo({ places }: { places: Place[] }) {
+  const i18n = useI18n();
   const queryClient = useQueryClient();
   const signOut = async () => {
     await authClient.signOut();
@@ -122,21 +141,32 @@ function WhereTo({ places }: { places: Place[] }) {
   };
   return (
     <AuthLayout>
-      <h2 className="auth-h1">Where to?</h2>
+      <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_WHERE")}</h2>
       <List
         onItemClick={(e) => {
           const url = (e.detail.item as HTMLElement).dataset.url;
           if (url) void hardRedirect(url);
         }}
       >
-        {places.map((p) => (
-          <ListItemStandard key={p.url} data-url={p.url} icon={p.icon} description={p.description} additionalText={p.role}>
-            {p.title}
-          </ListItemStandard>
-        ))}
+        {places.map((p) => {
+          const roleKey = p.role ? ROLE_KEY[p.role] : undefined;
+          return (
+            <ListItemStandard
+              key={p.url}
+              data-url={p.url}
+              icon={p.icon}
+              description={p.kind === "workspace"
+                ? i18n.getText("SHELL_AUTH_YOUR_WORKSPACE")
+                : i18n.getText("SHELL_AUTH_CUSTOMER_PORTAL", p.cardName ?? "")}
+              additionalText={roleKey ? i18n.getText(roleKey) : p.role}
+            >
+              {p.title}
+            </ListItemStandard>
+          );
+        })}
       </List>
       <p className="auth-alt">
-        <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>Sign out</a>
+        <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("SHELL_AUTH_SIGN_OUT")}</a>
       </p>
     </AuthLayout>
   );

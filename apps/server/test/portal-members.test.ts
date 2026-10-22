@@ -178,8 +178,7 @@ describe("sendInvitation", () => {
     });
 
     const mail = await mailTo(email);
-    expect(mail.from).toBe(`"${slug}" <notify@${mailDomain}>`);
-    expect(mail.replyTo).toBe(inviter.email);
+    expect(mail.from).toBe(`"${slug}" <${slug}@${mailDomain}>`);
     expect(mail.text).toContain(portalTenantUrl(slug, `/accept/${id}`));
     expect(mail.text).toContain("Ines Inviter");
     expect(mail.text).toContain("Müller & Söhne GmbH");

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { BusyIndicator } from "@ui5/webcomponents-react";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
@@ -9,6 +9,7 @@ import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import type { ListQuery, Row } from "@confire/ui/types.ts";
 import { orpc } from "../../../../orpc.ts";
 import { docFeature, isDocEntity, type DocEntity } from "../../../../features/documents.ts";
+import { useI18n } from "../../../../i18n.ts";
 
 // Documents ▸ <entity> (spec §9, §13.1): the company's own SAP documents, columns from the tenant's
 // field list. The server fences every page to the company; there is no customer column to filter.
@@ -28,8 +29,9 @@ function DocsPage() {
 const NO_QUERY: ListQuery = { select: [], filter: [], orderby: [] };
 
 function DocList({ entity }: { entity: DocEntity }) {
+  const i18n = useI18n();
   const meta = useFieldConstraints(entity);
-  const feature = useMemo(() => (meta.data ? docFeature(entity, meta.data) : null), [entity, meta.data]);
+  const feature = meta.data ? docFeature(entity, meta.data, i18n.getText.bind(i18n)) : null;
   const [query, setQuery] = useState<ListQuery | null>(null);
   // The cursor is B1's own @odata.nextLink, sealed to this company server-side; page 1 asks for the count.
   const data = useListView(
@@ -45,7 +47,7 @@ function DocList({ entity }: { entity: DocEntity }) {
   );
 
   if (meta.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
-  if (meta.error || !feature) return <PageError error={meta.error ?? new Error("No metadata")} />;
+  if (meta.error || !feature) return <PageError error={meta.error ?? new Error(i18n.getText("PORTAL_NO_METADATA"))} />;
   return (
     <ListReport
       feature={feature.list}

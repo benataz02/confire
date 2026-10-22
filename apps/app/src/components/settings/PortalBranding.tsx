@@ -6,6 +6,7 @@ import {
 import { sameState } from "@confire/ui/views.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { logoUrl, uploadLogo } from "@confire/ui/files.ts";
+import { useI18n } from "../../i18n.ts";
 import { client, orpc } from "../../orpc.ts";
 
 // Settings → Portal → Branding (spec D20): the name, accent colour and logo the portal and its client
@@ -36,14 +37,16 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 const HORIZON_BLUE = "#0a6ed1";
 
 export function PortalBranding() {
+  const i18n = useI18n();
   return (
-    <GeneralCard title="Branding" subtitle="How your customer portal and your client mail look">
+    <GeneralCard title={i18n.getText("ADMIN_BRANDING")} subtitle={i18n.getText("ADMIN_BRANDING_SUB")}>
       {(current) => <BrandingForm current={current} />}
     </GeneralCard>
   );
 }
 
 function BrandingForm({ current }: { current: General }) {
+  const i18n = useI18n();
   const qc = useQueryClient();
   const stored = {
     displayName: current.branding.displayName ?? "", accent: current.branding.accent ?? "",
@@ -57,7 +60,7 @@ function BrandingForm({ current }: { current: General }) {
   const [picks, setPicks] = useState(0);
   const save = useMutation(orpc.portalSettings.save.mutationOptions({
     onSuccess: () => {
-      toast("Branding saved");
+      toast(i18n.getText("ADMIN_BRANDING_SAVED"));
       void qc.invalidateQueries({ queryKey: orpc.portalSettings.general.key() });
     },
   }));
@@ -83,42 +86,41 @@ function BrandingForm({ current }: { current: General }) {
     <FlexBox direction="Column" style={{ padding: "1rem", gap: "1rem" }}>
       {save.error ? <MessageStrip design="Negative" hideCloseButton>{save.error.message}</MessageStrip> : null}
       <Form accessibleMode="Edit" labelSpan="S12 M4 L4 XL4" layout="S1 M1 L1 XL1">
-        <FormItem labelContent={<Label for="brand-name">Display name</Label>}>
+        <FormItem labelContent={<Label for="brand-name">{i18n.getText("ADMIN_DISPLAY_NAME")}</Label>}>
           <Input id="brand-name" value={draft.displayName} placeholder={current.organization.name} maxlength={100}
             onInput={(e) => setDraft((d) => ({ ...d, displayName: e.target.value }))} />
         </FormItem>
-        <FormItem labelContent={<Label for="brand-accent">Accent colour</Label>}>
+        <FormItem labelContent={<Label for="brand-accent">{i18n.getText("ADMIN_ACCENT")}</Label>}>
           <FlexBox style={{ gap: "0.5rem", alignItems: "center", width: "100%" }}>
             {/* The platform's own picker; the text field takes a pasted hex code. */}
-            <input type="color" aria-label="Pick the accent colour" value={HEX.test(draft.accent) ? draft.accent : HORIZON_BLUE}
+            <input type="color" aria-label={i18n.getText("ADMIN_PICK_ACCENT")} value={HEX.test(draft.accent) ? draft.accent : HORIZON_BLUE}
               style={{ inlineSize: "2.25rem", blockSize: "2.25rem", padding: 0, border: "none", background: "none", cursor: "pointer" }}
               onChange={(e) => setDraft((d) => ({ ...d, accent: e.target.value }))} />
-            <Input id="brand-accent" value={draft.accent} placeholder={`${HORIZON_BLUE} (SAP blue)`} style={{ flex: 1 }}
-              valueState={accentBad ? "Negative" : "None"} valueStateMessage={<div>A colour such as #0a6ed1</div>}
+            <Input id="brand-accent" value={draft.accent} placeholder={i18n.getText("ADMIN_ACCENT_PLACEHOLDER", HORIZON_BLUE)} style={{ flex: 1 }}
+              valueState={accentBad ? "Negative" : "None"} valueStateMessage={<div>{i18n.getText("ADMIN_ACCENT_HINT")}</div>}
               onInput={(e) => setDraft((d) => ({ ...d, accent: e.target.value.trim() }))} />
-            <Button design="Transparent" disabled={!draft.accent} onClick={() => setDraft((d) => ({ ...d, accent: "" }))}>Default</Button>
+            <Button design="Transparent" disabled={!draft.accent} onClick={() => setDraft((d) => ({ ...d, accent: "" }))}>{i18n.getText("ADMIN_DEFAULT")}</Button>
           </FlexBox>
         </FormItem>
-        <FormItem labelContent={<Label>Logo</Label>}>
+        <FormItem labelContent={<Label>{i18n.getText("ADMIN_LOGO")}</Label>}>
           <FlexBox style={{ gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
-            {logo ? <img src={logo} alt="Logo" style={{ blockSize: "2.5rem", maxInlineSize: "10rem", objectFit: "contain" }} />
-              : <Text style={{ color: "var(--sapContent_LabelColor)" }}>None</Text>}
+            {logo ? <img src={logo} alt={i18n.getText("ADMIN_LOGO")} style={{ blockSize: "2.5rem", maxInlineSize: "10rem", objectFit: "contain" }} />
+              : <Text style={{ color: "var(--sapContent_LabelColor)" }}>{i18n.getText("ADMIN_NONE")}</Text>}
             <FileUploader key={picks} hideInput accept=".png,.jpg,.jpeg" maxFileSize={1} disabled={uploading}
-              accessibleName="Upload a logo"
-              onFileSizeExceed={() => { setPicks((n) => n + 1); setUploadError("A logo can be up to 1 MB"); }}
+              accessibleName={i18n.getText("ADMIN_UPLOAD_LOGO")}
+              onFileSizeExceed={() => { setPicks((n) => n + 1); setUploadError(i18n.getText("ADMIN_LOGO_TOO_BIG")); }}
               onChange={(e) => void pickLogo(e.detail.files?.[0])}>
-              <Button icon="upload" disabled={uploading}>{uploading ? "Uploading…" : "Upload"}</Button>
+              <Button icon="upload" disabled={uploading}>{uploading ? i18n.getText("ADMIN_UPLOADING") : i18n.getText("ADMIN_UPLOAD")}</Button>
             </FileUploader>
             {draft.logoFileId ? (
-              <Button design="Transparent" onClick={() => setDraft((d) => ({ ...d, logoFileId: null }))}>Remove</Button>
+              <Button design="Transparent" onClick={() => setDraft((d) => ({ ...d, logoFileId: null }))}>{i18n.getText("ADMIN_REMOVE")}</Button>
             ) : null}
           </FlexBox>
         </FormItem>
       </Form>
       {uploadError ? <MessageStrip design="Negative" hideCloseButton>{uploadError}</MessageStrip> : null}
       <Text style={{ color: "var(--sapContent_LabelColor)" }}>
-        The accent colours the portal's shell bar and main buttons, and the button in your client mail. White text has to
-        stay readable on it, so very light colours are refused. The logo is a PNG or JPEG of up to 1 MB, shown at 32 px.
+        {i18n.getText("ADMIN_BRANDING_HELP")}
       </Text>
       <Button design="Emphasized" style={{ alignSelf: "start" }}
         disabled={sameState(draft, stored) || accentBad || uploading || save.isPending}
@@ -129,7 +131,7 @@ function BrandingForm({ current }: { current: General }) {
             ...(draft.logoFileId ? { logoFileId: draft.logoFileId } : {}),
           },
         })}>
-        {save.isPending ? "Saving…" : "Save"}
+        {save.isPending ? i18n.getText("ADMIN_SAVING") : i18n.getText("ADMIN_SAVE")}
       </Button>
     </FlexBox>
   );

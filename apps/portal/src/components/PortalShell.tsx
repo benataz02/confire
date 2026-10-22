@@ -8,8 +8,9 @@ import {
 } from "@ui5/webcomponents-react";
 import type { NavigationLayoutDomRef, NavigationLayoutPropTypes, SideNavigationPropTypes } from "@ui5/webcomponents-react";
 import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
+import { LANGUAGES, useLanguage } from "@confire/ui/i18n.ts";
 import { useI18n } from "../i18n.ts";
-import { ROLE_LABEL } from "@confire/ui/portal/CompanyPeople.tsx";
+import { ROLE_KEY } from "../features/labels.ts";
 import { authClient } from "../auth-client.ts";
 import { lobbyQuery, meQuery, type Me } from "../orpc.ts";
 import { authUrl, hardRedirect, tenantPath } from "@confire/ui/host.ts";
@@ -20,8 +21,6 @@ import { DOC_PAGES } from "../features/documents.ts";
 // pattern as the internal AppShell, wearing the supplier's name and logo (D20). Fiori: no shell-bar
 // Back button (the browser's does that), the branding element leads home, the profile opens the
 // user menu.
-
-export const roleLabel = (role: keyof typeof ROLE_LABEL) => ROLE_LABEL[role];
 
 const initials = (name: string) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
@@ -61,6 +60,7 @@ export function PortalShell() {
   // Switching supplier only means something with more than one.
   const lobby = useQuery(lobbyQuery);
   const { theme, setTheme, density, setDensity } = useAppearance();
+  const { language, setLanguage } = useLanguage();
   const i18n = useI18n();
   // On the document, inline: it outranks the theme's :root parameters, in every theme.
   useEffect(() => {
@@ -99,7 +99,7 @@ export function PortalShell() {
       header={
         <>
           <ShellBar
-            startButton={<Button icon="menu" tooltip="Menu" onClick={toggleNav} />}
+            startButton={<Button icon="menu" tooltip={i18n.getText("PORTAL_MENU")} onClick={toggleNav} />}
             branding={
               <ShellBarBranding
                 logo={me.tenant.logo
@@ -123,18 +123,23 @@ export function PortalShell() {
                 avatarInitials={initials(me.user.name)}
                 titleText={me.user.name}
                 subtitleText={me.user.email}
-                description={`${me.company.cardName} · ${roleLabel(me.company.role)}`}
+                description={`${me.company.cardName} · ${i18n.getText(ROLE_KEY[me.company.role])}`}
               />
             }
           >
-            <UserMenuItem text="Theme" icon="palette">
+            <UserMenuItem text={i18n.getText("PORTAL_USER_MENU_THEME")} icon="palette">
               {THEMES.map((t) => (
                 <UserMenuItem key={t.id} text={t.label} icon={theme === t.id ? "sys-enter" : ""} onClick={() => setTheme(t.id)} />
               ))}
             </UserMenuItem>
-            <UserMenuItem text="Density" icon="resize-horizontal">
-              <UserMenuItem text="Compact" icon={density === "compact" ? "sys-enter" : ""} onClick={() => setDensity("compact")} />
-              <UserMenuItem text="Cozy" icon={density === "cozy" ? "sys-enter" : ""} onClick={() => setDensity("cozy")} />
+            <UserMenuItem text={i18n.getText("PORTAL_USER_MENU_DENSITY")} icon="resize-horizontal">
+              <UserMenuItem text={i18n.getText("PORTAL_USER_MENU_COMPACT")} icon={density === "compact" ? "sys-enter" : ""} onClick={() => setDensity("compact")} />
+              <UserMenuItem text={i18n.getText("PORTAL_USER_MENU_COZY")} icon={density === "cozy" ? "sys-enter" : ""} onClick={() => setDensity("cozy")} />
+            </UserMenuItem>
+            <UserMenuItem text={i18n.getText("PORTAL_USER_MENU_LANGUAGE")} icon="translate">
+              {LANGUAGES.map((l) => (
+                <UserMenuItem key={l.id} text={l.label} icon={language === l.id ? "sys-enter" : ""} onClick={() => setLanguage(l.id)} />
+              ))}
             </UserMenuItem>
             {(lobby.data?.length ?? 0) > 1 ? (
               <UserMenuItem text={i18n.getText("USER_MENU_SWITCH_SUPPLIER")} icon="switch-views" onClick={() => void hardRedirect(authUrl("/login?choose=1"))} />
@@ -146,15 +151,15 @@ export function PortalShell() {
         <SideNavigation
           onSelectionChange={onSelect}
           fixedItems={me.company.role === "owner" ? (
-            <SideNavigationItem text="Company" icon="building" data-to="/company" selected={pathname === "/company"} />
+            <SideNavigationItem text={i18n.getText("PORTAL_COMPANY")} icon="building" data-to="/company" selected={pathname === "/company"} />
           ) : undefined}
         >
           <SideNavigationItem text={i18n.getText("NAV_HOME")} icon="home" data-to="/" selected={pathname === "/"} />
-          <SideNavigationItem text="Projects" icon="product" data-to="/projects"
+          <SideNavigationItem text={i18n.getText("PORTAL_PROJECTS")} icon="product" data-to="/projects"
             selected={pathname === "/projects" || pathname.startsWith("/projects/")} />
-          <SideNavigationGroup text="Documents" expanded>
+          <SideNavigationGroup text={i18n.getText("PORTAL_DOCUMENTS")} expanded>
             {Object.entries(DOC_PAGES).map(([entity, p]) => (
-              <SideNavigationItem key={entity} text={p.label} icon={p.icon} data-to={`/docs/${entity}`}
+              <SideNavigationItem key={entity} text={i18n.getText(p.labelKey)} icon={p.icon} data-to={`/docs/${entity}`}
                 selected={pathname === `/docs/${entity}` || pathname.startsWith(`/docs/${entity}/`)} />
             ))}
           </SideNavigationGroup>

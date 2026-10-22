@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Bar, Button, Dialog, Form, FormGroup, FormItem, Input, Label, Option, Select } from "@ui5/webcomponents-react";
+import { useI18n } from "../../i18n.ts";
 import { NONE, W, optValue } from "./ParamDialog.tsx";
 
 // ponytail: curated icons, so a Select can show each one and there is no name to mistype. Swap in a
@@ -20,31 +21,34 @@ export function TitleDialog({ initial, withIcon, onCancel, onOk }: {
   onCancel: () => void;
   onOk: (v: TitleIcon) => void;
 }) {
+  const i18n = useI18n();
+  const t = (key: string) => i18n.getText(key);
   const [v, setV] = useState(initial);
+  const heading = withIcon ? t("MODEL_SECTION") : t("MODEL_GROUP");
   return (
-    <Dialog open onClose={onCancel} className="confire-pd" headerText={withIcon ? "Section" : "Group"}
+    <Dialog open onClose={onCancel} className="confire-pd" headerText={heading}
       style={{ width: "min(28rem, 96vw)" }}
       footer={
         <Bar design="Footer" endContent={
           <>
-            <Button design="Emphasized" onClick={() => onOk(v)}>Save</Button>
-            <Button onClick={onCancel}>Cancel</Button>
+            <Button design="Emphasized" onClick={() => onOk(v)}>{t("MODEL_SAVE")}</Button>
+            <Button onClick={onCancel}>{t("MODEL_CANCEL")}</Button>
           </>
         } />
       }
     >
       <Form labelSpan="S12 M12 L12 XL12" style={{ padding: "1rem" }}>
-        <FormGroup accessibleName={withIcon ? "Section" : "Group"}>
-          <FormItem labelContent={<Label>Title</Label>}>
+        <FormGroup accessibleName={heading}>
+          <FormItem labelContent={<Label>{t("MODEL_TITLE")}</Label>}>
             <Input value={v.title} style={W} autoFocus
               onInput={(e) => setV((x) => ({ ...x, title: e.target.value }))}
               onKeyDown={(e) => { if (e.key === "Enter") onOk(v); }} />
           </FormItem>
           {withIcon ? (
-            <FormItem labelContent={<Label>Icon</Label>}>
+            <FormItem labelContent={<Label>{t("MODEL_ICON")}</Label>}>
               <Select value={v.icon ?? NONE} style={W}
                 onChange={(e) => { const i = optValue(e); setV((x) => ({ ...x, icon: i === NONE ? undefined : i })); }}>
-                <Option value={NONE}>None</Option>
+                <Option value={NONE}>{t("MODEL_ICON_NONE")}</Option>
                 {ICONS.map((i) => <Option key={i} value={i} icon={i}>{i}</Option>)}
               </Select>
             </FormItem>

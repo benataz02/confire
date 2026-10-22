@@ -21,6 +21,26 @@ import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 import { LANGUAGES, useLanguage } from "@confire/ui/i18n.ts";
 import { useI18n } from "../i18n.ts";
 
+const B1_NAV_KEY: Record<string, string> = {
+  Quotations: "NAV_QUOTATIONS",
+  Orders: "NAV_ORDERS",
+  DeliveryNotes: "NAV_DELIVERIES",
+  BusinessPartners: "NAV_BP",
+  Items: "NAV_ITEMS",
+};
+
+const THEME_KEY: Record<string, string> = {
+  sap_horizon: "SHELL_THEME_MORNING_HORIZON",
+  sap_horizon_dark: "SHELL_THEME_EVENING_HORIZON",
+  sap_horizon_hcb: "SHELL_THEME_HCB",
+  sap_horizon_hcw: "SHELL_THEME_HCW",
+  sap_horizon_auto: "SHELL_THEME_AUTO",
+  sap_horizon_hc_auto: "SHELL_THEME_HC_AUTO",
+  sap_fiori_3: "SHELL_THEME_QUARTZ_LIGHT",
+  sap_fiori_3_dark: "SHELL_THEME_QUARTZ_DARK",
+  sap_fiori_3_hcb: "SHELL_THEME_QUARTZ_HCB",
+  sap_fiori_3_hcw: "SHELL_THEME_QUARTZ_HCW",
+};
 
 // The app shell for every signed-in page. The workspace is the path's first segment; the auth gate
 // lives in the $slug route (beforeLoad), this only renders the chrome. Nav targets and `pathname`
@@ -62,39 +82,51 @@ export function AppShell() {
   // What the shellbar search can reach besides objects: the same targets as the side nav, plus the
   // appearance settings that otherwise only live in the user menu.
   const searchEntries = useMemo<SearchEntry[]>(() => {
+    // `group` is a stable section id. GlobalSearch translates the header, and the scope filter
+    // compares ids, so a language switch does not empty the list.
     const page = (text: string, to: string, icon: string) => ({ group: "Menus", text, icon, run: () => go(to) });
+    const label = (key: string) => i18n.getText(key);
     return [
-      page("Home", "/", "home"),
-      page("Configurations", "/configs", "sales-quote"),
-      page("Portal requests", "/requests", "inbox"),
+      page(label("NAV_HOME"), "/", "home"),
+      page(label("NAV_CONFIGS"), "/configs", "sales-quote"),
+      page(label("SHELL_SEARCH_PORTAL_REQUESTS"), "/requests", "inbox"),
       ...(isAdmin
         ? [
-            ...Object.values(B1_FEATURES).map((f) => ({
-              group: "Menus" as const,
-              text: f.label,
-              description: "SAP Business One",
-              icon: f.icon,
-              run: () => go(`/b1/${f.entity}`),
-            })),
-            page("Configurator models", "/models", "tree"),
-            page("Masterdata", "/masterdata", "table-view"),
-            page("Portal invitations", "/portal/invitations", "paper-plane"),
-            page("Settings", "/settings", "action-settings"),
+            ...Object.values(B1_FEATURES).map((f) => {
+              const navKey = B1_NAV_KEY[f.entity];
+              return {
+                group: "Menus" as const,
+                text: navKey ? label(navKey) : f.entity,
+                description: label("NAV_SAP"),
+                icon: f.icon,
+                run: () => go(`/b1/${f.entity}`),
+              };
+            }),
+            page(label("NAV_MODELS"), "/models", "tree"),
+            page(label("SHELL_SEARCH_MASTERDATA"), "/masterdata", "table-view"),
+            page(label("SHELL_SEARCH_PORTAL_INVITATIONS"), "/portal/invitations", "paper-plane"),
+            page(label("NAV_SETTINGS"), "/settings", "action-settings"),
           ]
         : []),
-      ...THEMES.map((t) => ({
-        group: "Settings", text: t.label, description: "Theme", icon: "palette",
-        run: () => setThemeState(t.id),
-      })),
-      { group: "Settings", text: "Compact", description: "Density", icon: "resize-horizontal", run: () => setDensity('compact') },
-      { group: "Settings", text: "Cozy", description: "Density", icon: "resize-horizontal", run: () => setDensity('cozy') },
+      ...THEMES.map((item) => {
+        const themeKey = THEME_KEY[item.id];
+        return {
+          group: "Settings",
+          text: themeKey ? label(themeKey) : item.label,
+          description: label("SHELL_SEARCH_THEME"),
+          icon: "palette",
+          run: () => setThemeState(item.id),
+        };
+      }),
+      { group: "Settings", text: label("NAV_COMPACT"), description: label("USER_MENU_DENSITY"), icon: "resize-horizontal", run: () => setDensity('compact') },
+      { group: "Settings", text: label("NAV_COZY"), description: label("USER_MENU_DENSITY"), icon: "resize-horizontal", run: () => setDensity('cozy') },
       ...LANGUAGES.map((l) => ({
-        group: "Settings", text: l.label, description: "Language", icon: "translate",
+        group: "Settings", text: l.label, description: label("USER_MENU_LANGUAGE"), icon: "translate",
         run: () => setLanguage(l.id),
       })),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, go]);
+  }, [isAdmin, go, i18n]);
 
   const signOut = async () => {
     await authClient.signOut();
@@ -114,12 +146,12 @@ export function AppShell() {
               <>
                 <Button
                   icon="nav-back"
-                  tooltip='Back'
+                  tooltip={i18n.getText("SHELL_BACK")}
                   onClick={() => router.history.back()}
                 />
                 <Button
                   icon="menu"
-                  tooltip='Menu'
+                  tooltip={i18n.getText("SHELL_MENU")}
                   onClick={toggleNav}
                 />
               </>
@@ -154,28 +186,31 @@ export function AppShell() {
             showManageAccount
             showOtherAccounts
           >
-            <UserMenuItem text="Themes" icon="person-placeholder" >
-              {THEMES.map((t) => (
-                <UserMenuItem
-                  key={t.id}
-                  text={t.label}
-                  icon={theme === t.id ? "sys-enter" : ""}
-                  onClick={() => setThemeState(t.id)}
-                >
-                </UserMenuItem>
-              ))}
+            <UserMenuItem text={i18n.getText("NAV_THEMES")} icon="person-placeholder" >
+              {THEMES.map((item) => {
+                const themeKey = THEME_KEY[item.id];
+                return (
+                  <UserMenuItem
+                    key={item.id}
+                    text={themeKey ? i18n.getText(themeKey) : item.label}
+                    icon={theme === item.id ? "sys-enter" : ""}
+                    onClick={() => setThemeState(item.id)}
+                  >
+                  </UserMenuItem>
+                );
+              })}
             </UserMenuItem>
             <UserMenuItem text={i18n.getText("USER_MENU_DENSITY")} icon="person-placeholder" >
               <UserMenuItem
                 data-id="compact"
-                text="Compact"
+                text={i18n.getText("NAV_COMPACT")}
                 icon={density === "compact" ? "sys-enter" : ""}
                 onClick={() => setDensity('compact')}
               >
               </UserMenuItem>
               <UserMenuItem
                 data-id="cozy"
-                text="Cozy"
+                text={i18n.getText("NAV_COZY")}
                 icon={density === "cozy" ? "sys-enter" : ""}
                 onClick={() => setDensity('cozy')}
               >
@@ -194,23 +229,28 @@ export function AppShell() {
         <SideNavigation
           onSelectionChange={onSelect}
           fixedItems={isAdmin ? (
-            <SideNavigationItem text="Settings" icon="action-settings" data-to="/settings"
+            <SideNavigationItem text={i18n.getText("NAV_SETTINGS")} icon="action-settings" data-to="/settings"
               selected={pathname === "/settings"} />
           ) : undefined}
         >
           <SideNavigationItem text={i18n.getText("NAV_HOME")} icon="home" data-to="/" selected={pathname === "/"} />
               {isAdmin ? (
-                <SideNavigationGroup text="SAP Business One" expanded>
-                  {Object.values(B1_FEATURES).map((f) => (
-                    <SideNavigationItem key={f.entity} text={f.label} icon={f.icon}
-                      data-to={`/b1/${f.entity}`}
-                      selected={pathname === `/b1/${f.entity}` || pathname.startsWith(`/b1/${f.entity}/`)} />
-                  ))}
+                <SideNavigationGroup text={i18n.getText("NAV_SAP")} expanded>
+                  {Object.values(B1_FEATURES).map((f) => {
+                    const navKey = B1_NAV_KEY[f.entity];
+                    return (
+                      <SideNavigationItem key={f.entity}
+                        text={navKey ? i18n.getText(navKey) : f.entity}
+                        icon={f.icon}
+                        data-to={`/b1/${f.entity}`}
+                        selected={pathname === `/b1/${f.entity}` || pathname.startsWith(`/b1/${f.entity}/`)} />
+                    );
+                  })}
                 </SideNavigationGroup>
               ) : null}
-              <SideNavigationGroup text="Configurator" expanded>
+              <SideNavigationGroup text={i18n.getText("NAV_CONFIGURATOR")} expanded>
                 <SideNavigationItem
-                  text="Configurations"
+                  text={i18n.getText("NAV_CONFIGS")}
                   icon="sales-quote"
                   data-to="/configs"
                   selected={pathname === "/configs" || pathname.startsWith("/configs/")}
@@ -218,13 +258,13 @@ export function AppShell() {
                 {isAdmin ? (
                   <>
                     <SideNavigationItem
-                      text="Configurator models"
+                      text={i18n.getText("NAV_MODELS")}
                       icon="tree"
                       data-to="/models"
                       selected={pathname === "/models" || pathname.startsWith("/models/")}
                     />
                     <SideNavigationItem
-                      text="Master data"
+                      text={i18n.getText("NAV_MASTERDATA")}
                       icon="table-view"
                       data-to="/masterdata"
                       selected={pathname === "/masterdata" || pathname.startsWith("/masterdata/")}
@@ -233,11 +273,11 @@ export function AppShell() {
                 ) : null}
               </SideNavigationGroup>
               {/* The customer portal (spec §10): Requests for every member, the rest for admins. */}
-              <SideNavigationGroup text="Portal" expanded>
-                <SideNavigationItem text="Requests" icon="inbox" data-to="/requests"
+              <SideNavigationGroup text={i18n.getText("NAV_PORTAL")} expanded>
+                <SideNavigationItem text={i18n.getText("NAV_REQUESTS")} icon="inbox" data-to="/requests"
                   selected={pathname === "/requests"} />
                 {isAdmin ? (
-                  <SideNavigationItem text="Invitations" icon="paper-plane" data-to="/portal/invitations"
+                  <SideNavigationItem text={i18n.getText("NAV_INVITATIONS")} icon="paper-plane" data-to="/portal/invitations"
                     selected={pathname === "/portal/invitations"} />
                 ) : null}
               </SideNavigationGroup>

@@ -1,14 +1,45 @@
 import { describe, expect, test } from "bun:test";
 import type { Outputs } from "@confire/config-engine";
 import {
-  chartRows, margin, mergeSelection, sortRows, unpricedItems, type Candidate, type PricedCandidate,
+  candidateLabel, chartRows, margin, mergeSelection, projectStatusText, sortRows, statusUi, unpricedItems,
+  type Candidate, type PricedCandidate,
 } from "./runView.ts";
+
+/** English sentences, not the properties file — `{n}` is filled in order. */
+const EN: Record<string, string> = {
+  CONFIG_CANDIDATE: "Configuration",
+  CONFIG_STATUS_DRAFT: "Draft",
+  CONFIG_STATUS_QUOTED: "Quoted",
+  CONFIG_STATUS_SUBMITTED: "Submitted",
+  CONFIG_STATUS_IN_REVIEW: "In review",
+  CONFIG_STATUS_RETURNED: "Changes requested",
+  CONFIG_STATUS_DECLINED: "Declined",
+};
+const t = (key: string, ...params: string[]) => {
+  const template = EN[key];
+  if (template === undefined) throw new Error(`missing English text for ${key}`);
+  return template.replace(/\{(\d+)\}/g, (_, i: string) => params[Number(i)] ?? "");
+};
 
 const cand = (...prices: number[]): PricedCandidate => ({
   assignment: {},
   perBatch: prices.map((unitPrice, i) => ({ batchQty: (i + 1) * 10, unitPrice, total: unitPrice * (i + 1) * 10 })),
 });
 const cands = [cand(12, 9), cand(11, 10), cand(13, 8)];
+
+describe("labels", () => {
+  test("a candidate with nothing open is just the configuration", () => {
+    expect(candidateLabel(t, [], {})).toBe("Configuration");
+    expect(candidateLabel(t, ["width"], { width: 12 })).toBe("12");
+    expect(candidateLabel(t, ["width"], {})).toBe("—");
+  });
+  test("list statuses and the request tag read as sentences", () => {
+    expect(statusUi(t).draft).toEqual({ state: "None", text: "Draft" });
+    expect(statusUi(t).quoted).toEqual({ state: "Positive", text: "Quoted" });
+    expect(projectStatusText(t, "in_review")).toBe("In review");
+    expect(projectStatusText(t, "custom")).toBe("custom");
+  });
+});
 
 describe("chartRows", () => {
   test("one line per picked configuration, in pick order", () => {

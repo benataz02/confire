@@ -4,11 +4,12 @@
 // call sends it as `x-tenant`; a file route carries it in its own path. Sign-in is a page of the staff app, the one
 // sign-in host. The server re-validates against membership — this is only for UX and redirects.
 
-/** Never a slug: the staff SPA's own top-level pages, the server's routes, a few names kept back. */
+/** Never a slug: the staff SPA's own top-level pages, the server's routes, a few names kept back, the mail names. */
 const RESERVED = new Set([
   "login", "signup", "forgot-password", "reset-password", "onboarding",
   "api", "rpc", "files", "assets",
   "app", "portal", "www", "auth", "admin", "static",
+  "notify", "noreply", "no-reply", "postmaster", "abuse", "hostmaster", "webmaster", "security", "mailer-daemon",
 ]);
 
 export const isReserved = (slug: string) => RESERVED.has(slug);

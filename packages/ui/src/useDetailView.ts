@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { coerceKey, parseKeyParam, type Key } from "@confire/b1";
+import { useUiI18n } from "./i18n.ts";
 import { useUiSource } from "./source.tsx";
 import { toast } from "./toast.ts";
 import { useFieldConstraints, type EntityConstraints } from "./metadata.ts";
@@ -27,6 +28,7 @@ export function useDetailView({ entity, routeKey, route, isNew = false }: {
   const qc = useQueryClient();
   const open = useEntityNav();
   const { client, orpc } = useUiSource();
+  const i18n = useUiI18n();
   const meta = useFieldConstraints(entity);
   const constraints = meta.data;
 
@@ -59,24 +61,24 @@ export function useDetailView({ entity, routeKey, route, isNew = false }: {
     qc.setQueryData(orpc.entities.one.queryOptions({ input: { entity, key: k } }).queryKey, { row, etag });
 
   const save = async (diff: Row, { createAction }: { createAction: CreateAction }) => {
-    if (!constraints) throw new Error("This record is read-only");
+    if (!constraints) throw new Error(i18n.getText("UI_READ_ONLY"));
     if (isNew) {
       const r = await create.mutateAsync({ entity, data: diff });
       const field = constraints.keys[0]!;
       const newKey = keyOf(constraints, String(r.row[field] ?? ""));
       seed(newKey, r.row, r.etag);
-      toast(`${constraints.label} created`);
+      toast(i18n.getText("UI_CREATED", constraints.label));
       if (createAction === "view") open(route, newKey);
       else if (createAction === "new") setCreateEpoch((n) => n + 1);
       else open(route);
       return;
     }
-    if (key === undefined) throw new Error("No record");
+    if (key === undefined) throw new Error(i18n.getText("UI_NO_RECORD"));
     const etag = one.data?.etag;
-    if (!etag) throw new Error("SAP sent no ETag with this record, so it cannot be changed safely.");
+    if (!etag) throw new Error(i18n.getText("UI_NO_ETAG"));
     const r = await update.mutateAsync({ entity, key, etag, data: diff });
     seed(key, r.row, r.etag);
-    toast("Saved to SAP");
+    toast(i18n.getText("UI_SAVED_SAP"));
   };
 
   /** Walk the single key field (entities.neighbor); no next/previous record means stay put. */
@@ -84,7 +86,7 @@ export function useDetailView({ entity, routeKey, route, isNew = false }: {
     setNavBusy(true);
     try {
       const r = await client.entities.neighbor({ entity, dir, ...(dir === "prev" || dir === "next" ? { key: key as string | number } : {}) });
-      if (r.key === null) toast(dir === "next" || dir === "last" ? "This is the last record" : "This is the first record");
+      if (r.key === null) toast(i18n.getText(dir === "next" || dir === "last" ? "UI_LAST_RECORD" : "UI_FIRST_RECORD"));
       else open(route, r.key);
     } finally {
       setNavBusy(false);
@@ -96,7 +98,7 @@ export function useDetailView({ entity, routeKey, route, isNew = false }: {
     row: one.data?.row as Row | undefined,
     etag: one.data?.etag ?? null,
     loading: meta.isPending || (!isNew && key !== undefined && one.isPending),
-    error: meta.error ?? (isNew ? null : one.error) ?? (constraints && !isNew && key === undefined ? new Error("Invalid record key") : null),
+    error: meta.error ?? (isNew ? null : one.error) ?? (constraints && !isNew && key === undefined ? new Error(i18n.getText("UI_INVALID_KEY")) : null),
     save,
     createEpoch,
     navigation: isNew ? undefined : {

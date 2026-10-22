@@ -16,9 +16,6 @@ import {
 import { DOC_DEFAULTS, DOC_ENTITIES, DocEntityZ, pickable, type DocEntity } from "../../portal/doc-fields.ts";
 import { extraPickable } from "../../portal/onboarding-form.ts";
 import { contrastOnWhite, loadPortalSettings, NOTIFY_LABELS, savePortalSettings } from "../../portal/settings.ts";
-import {
-  addSenderDomain, refreshSenderDomain, removeSenderDomain, SENDER_REGIONS, verifySenderDomain,
-} from "../../portal/sender-domain.ts";
 import { entitySchema } from "../../entity-meta.ts";
 import { bad } from "../../entity-read.ts";
 
@@ -265,8 +262,7 @@ export const portalSettingsRouter = {
       .filter((r) => Number.isInteger(r.series));
   }),
 
-  /** Branding and mail (P7): Postgres only, so SAP being down never costs these cards. A sender
-   *  domain that is not verified yet is re-read from Resend on open — there is no poller (D29). */
+  /** Branding and mail (P7): Postgres only, so SAP being down never costs these cards. */
   general: adminProcedure.handler(async ({ context }) => {
     const [settings, [org], staff] = await Promise.all([
       loadPortalSettings(context.tenantId),
@@ -274,7 +270,6 @@ export const portalSettingsRouter = {
         .where(eq(organization.id, context.tenantId)).limit(1),
       staffOf(context.tenantId),
     ]);
-    const stored = settings.senderDomain ?? null;
     return {
       branding: settings.branding ?? {},
       organization: { name: org?.name ?? "", logo: org?.logo ?? null },
@@ -282,26 +277,12 @@ export const portalSettingsRouter = {
       events: NOTIFY_EVENTS.map((key) => ({ key, label: NOTIFY_LABELS[key] })),
       // Who still works here: someone who left drops off the list without anyone editing it.
       notifyFallback: (settings.notifyFallback ?? []).filter((id) => staff.some((m) => m.userId === id)),
-      replyTo: settings.replyTo ?? null,
       staff,
-      senderDomain: stored && stored.status !== "verified" ? await refreshSenderDomain(context.tenantId, stored) : stored,
-      senderDomains: { enabled: !!process.env.RESEND_ADMIN_KEY, regions: SENDER_REGIONS },
     };
   }),
 
-  senderDomain: {
-    add: adminProcedure
-      .input(z.object({ name: z.string().trim().toLowerCase().min(1).max(253), region: z.enum(SENDER_REGIONS) }))
-      .handler(({ input, context }) => addSenderDomain(context.tenantId, input.name, input.region)),
-    verify: adminProcedure.handler(({ context }) => verifySenderDomain(context.tenantId)),
-    remove: adminProcedure.handler(async ({ context }) => {
-      await removeSenderDomain(context.tenantId);
-      return { ok: true as const };
-    }),
-  },
-
   /** Each part is optional and saved over the stored document, so each card of the tab saves only
-   *  its own. `leadSeries: null` is "B1's default lead series"; `replyTo: null` is "whoever acted". */
+   *  its own. `leadSeries: null` is "B1's default lead series". */
   save: adminProcedure
     .input(z.object({
       docFields: z.partialRecord(DocEntityZ, DocFieldsZ).optional(),
@@ -314,7 +295,6 @@ export const portalSettingsRouter = {
       }).optional(),
       notify: NotifyZ.optional(),
       notifyFallback: z.array(z.string().min(1)).max(100).optional(),
-      replyTo: z.email().nullable().optional(),
     }))
     .handler(async ({ input, context }) => {
       if (input.branding?.accent) {
@@ -366,8 +346,6 @@ export const portalSettingsRouter = {
       }
       if (input.notify) next.notify = input.notify;
       if (input.notifyFallback) next.notifyFallback = input.notifyFallback;
-      if (input.replyTo === null) delete next.replyTo;
-      else if (input.replyTo !== undefined) next.replyTo = input.replyTo.toLowerCase();
       await savePortalSettings(context.tenantId, next);
       return { ok: true as const };
     }),

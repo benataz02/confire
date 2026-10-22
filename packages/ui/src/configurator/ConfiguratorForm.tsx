@@ -13,6 +13,7 @@ import { TABLE_ITEM } from "../list-report/Grid.tsx";
 import { ConfigTable } from "./ConfigTable.tsx";
 import { displayValue, rowTable, setEntry } from "./formHelpers.ts";
 import { money, type ItemMoney } from "../money.ts";
+import { useUiI18n } from "../i18n.ts";
 import { useUiSource } from "../source.tsx";
 
 /** The ref's display columns for one option value, joined — shown next to the option. */
@@ -32,10 +33,12 @@ function extraOf(ref: LookupRef, t: ResolvedTable | undefined, val: Val): string
 /** The signature answer to "is this consistent and how big is it?" — one component so the
  *  string stays identical in the page footer and the preview. */
 export function ConsistencyStatus({ prop }: { prop: Propagation }) {
+  const i18n = useUiI18n();
   const conflict = prop.conflicts.length ? prop.conflicts.map((c) => c.message).join(" · ") : null;
+  const open = prop.open.length;
   return (
     <ObjectStatus state={conflict ? "Negative" : "Positive"}>
-      {conflict ?? `✓ Consistent · ${prop.open.length} open`}
+      {conflict ?? (open === 1 ? i18n.getText("UI_CONSISTENT_ONE") : i18n.getText("UI_CONSISTENT", String(open)))}
     </ObjectStatus>
   );
 }
@@ -46,14 +49,14 @@ export const UNPLACED_TABLES_SECTION = "__tables";
 /** The sections the form renders: the model's own, plus a trailing one holding any table the
  *  author forgot to place. A table nobody can reach is a table whose sums are permanently zero —
  *  and for an items table it would be the quotation's lines going missing. */
-function formSections(model: ModelDef): { key: string; title: string; icon?: string; tables: string[] }[] {
+function formSections(model: ModelDef, tablesTitle: string): { key: string; title: string; icon?: string; tables: string[] }[] {
   const placed = new Set(placedTables(model));
   const orphans = (model.tables ?? []).filter((t) => !placed.has(t.key));
   // A placed table renders inside its group, in the group's own order, so a section's own list
   // only ever holds orphans.
   const own = model.structure.sections.map((s) => ({ key: s.key, title: s.title, icon: s.icon, tables: [] as string[] }));
   if (!orphans.length) return own;
-  const title = orphans.length === 1 ? orphans[0]!.title : "Tables";
+  const title = orphans.length === 1 ? orphans[0]!.title : tablesTitle;
   return [...own, { key: UNPLACED_TABLES_SECTION, title, tables: orphans.map((t) => t.key) }];
 }
 
@@ -99,6 +102,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
    *  evalTableRows — the browser holds no formula to evaluate — and makes formula cells read-only. */
   evaluated?: Record<string, Record<string, Val>[]>;
 }) {
+  const i18n = useUiI18n();
   const currency = useUiSource().useCurrency();
   // Same source the rail's Costs card reads, so a badge and the card can never disagree.
   const priceOf = useMemo(
@@ -150,7 +154,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       valueState: rule || (req && (v === undefined || v === null || v === "")) ? "Negative" : "None",
       // UI5's default message is "Invalid entry", which is the wrong complaint: nothing was
       // entered. Name the field instead — the popup can sit over a field scrolled away from its label.
-      valueStateMessage: ruleMessage ?? <div>{`${p.label || p.key} has to be answered before this configuration can be quoted.`}</div>,
+      valueStateMessage: ruleMessage ?? <div>{i18n.getText("UI_MUST_ANSWER", p.label || p.key)}</div>,
     } as const;
 
     if (p.ui === "radio")
@@ -162,7 +166,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
               valueState={v === o.value ? ruleState : "None"}
               disabled={disabled || !!o.eliminatedBy}
               // tooltip is a runtime ui5 prop the React typing omits (like Option's disabled).
-              {...(o.eliminatedBy ? ({ tooltip: `Unavailable: ${o.eliminatedBy}` } as Record<string, unknown>) : {})}
+              {...(o.eliminatedBy ? ({ tooltip: i18n.getText("UI_UNAVAILABLE", o.eliminatedBy) } as Record<string, unknown>) : {})}
               onChange={() => set(key, o.value)} />
           ))}
         </div>
@@ -174,7 +178,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       return (
         <CheckBox checked={v === true} disabled={disabled || !!blocked} valueState={ruleState}
           // tooltip is a runtime ui5 prop the React typing omits.
-          {...(blocked ? ({ tooltip: `Unavailable: ${blocked}` } as Record<string, unknown>) : {})}
+          {...(blocked ? ({ tooltip: i18n.getText("UI_UNAVAILABLE", blocked) } as Record<string, unknown>) : {})}
           onChange={(e) => set(key, e.target.checked)} />
       );
     }
@@ -230,8 +234,8 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
           <Option value="" data-j="">—</Option>
           {dom.map((o, i) => (
             <Option key={i} value={JSON.stringify(o.value)} data-j={JSON.stringify(o.value)}
-              tooltip={o.eliminatedBy ? `Unavailable: ${o.eliminatedBy}` : undefined}
-              additionalText={o.eliminatedBy ? "unavailable" : tref ? extraOf(tref, tbl, o.value) : undefined}
+              tooltip={o.eliminatedBy ? i18n.getText("UI_UNAVAILABLE", o.eliminatedBy) : undefined}
+              additionalText={o.eliminatedBy ? i18n.getText("UI_UNAVAILABLE_SHORT") : tref ? extraOf(tref, tbl, o.value) : undefined}
               // Option supports disabled at runtime (ListItemBase); the React typing omits it.
               {...(o.eliminatedBy ? ({ disabled: true } as Record<string, unknown>) : {})}>
               {o.label}
@@ -262,7 +266,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   // ordinary label-and-field group.
   const byKey = new Map(model.structure.sections.map((s) => [s.key, s]));
   const defOf = (k: string) => (model.tables ?? []).find((t) => t.key === k);
-  const shown = formSections(model);
+  const shown = formSections(model, i18n.getText("UI_TABLES"));
   const tableRows = tables ?? {};
   const setRows = (key: string, rows: Record<string, Val>[]) =>
     onTablesChange?.({ ...tableRows, [key]: rows });
@@ -282,14 +286,14 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
       const bs = batches ?? [];
       const batchPick = onItemBatchChange && bs.length > 1
         && groups.some((g) => isTableGroup(g) && defOf(g.table)?.role === "items") ? (
-          <SegmentedButton accessibleName="Batch quantity the items are priced at" itemsFitContent
+          <SegmentedButton accessibleName={i18n.getText("UI_BATCH_PRICED_AT")} itemsFitContent
             style={{ marginInlineStart: "auto" }}
             onSelectionChange={(e) => {
               const q = Number((e.detail.selectedItems[0] as HTMLElement | undefined)?.dataset.qty);
               if (q) onItemBatchChange(q);
             }}>
             {bs.map((b) => (
-              <SegmentedButtonItem key={b} data-qty={b} selected={b === itemBatch}>{`Qty ${b}`}</SegmentedButtonItem>
+              <SegmentedButtonItem key={b} data-qty={b} selected={b === itemBatch}>{i18n.getText("UI_QTY", String(b))}</SegmentedButtonItem>
             ))}
           </SegmentedButton>
         ) : null;
@@ -362,11 +366,11 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
                     <div data-param={k} style={{ display: "flex", flexDirection: "column", gap: "0.125rem", width: "100%" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
                         {control(k)}
-                        {prop.defaulted.has(k) ? <ObjectStatus state="Information">auto</ObjectStatus> : null}
+                        {prop.defaulted.has(k) ? <ObjectStatus state="Information">{i18n.getText("UI_AUTO")}</ObjectStatus> : null}
                       </div>
                       {showEliminatedNote ? (
                         <Text style={{ fontSize: "0.75rem", color: "var(--sapContent_LabelColor)" }}>
-                          {eliminated} option{eliminated === 1 ? "" : "s"} unavailable due to rules
+                          {i18n.getText(eliminated === 1 ? "UI_OPTION_UNAVAILABLE" : "UI_OPTIONS_UNAVAILABLE", String(eliminated))}
                         </Text>
                       ) : null}
                       {ruleNote ? broken[k]!.map((m, i) => (

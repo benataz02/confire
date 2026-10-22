@@ -7,6 +7,7 @@ import {
 import { ColumnsTab, type ColumnItem } from "@confire/ui/list-report/GridSettingsDialog.tsx";
 import { sameState } from "@confire/ui/views.ts";
 import { toast } from "@confire/ui/toast.ts";
+import { useI18n } from "../../i18n.ts";
 import { client, orpc } from "../../orpc.ts";
 
 // Settings → Portal → Document fields (spec §13.1, D19): which SAP fields clients see on their
@@ -19,18 +20,19 @@ type Entity = keyof Get["options"];
 type Part = "header" | "lines";
 type DocFields = Partial<Record<Entity, { header: string[]; lines: string[] }>>;
 
-const ENTITIES: { entity: Entity; label: string }[] = [
-  { entity: "Quotations", label: "Quotations" },
-  { entity: "Orders", label: "Sales orders" },
-  { entity: "DeliveryNotes", label: "Deliveries" },
-  { entity: "Invoices", label: "Invoices" },
-];
-const PART_LABEL: Record<Part, string> = { header: "header fields", lines: "line fields" };
+const ENTITY_KEY: Record<Entity, string> = {
+  Quotations: "NAV_QUOTATIONS",
+  Orders: "NAV_ORDERS",
+  DeliveryNotes: "NAV_DELIVERIES",
+  Invoices: "ADMIN_INVOICES",
+};
+const PART_KEY: Record<Part, string> = { header: "ADMIN_PART_HEADER", lines: "ADMIN_PART_LINES" };
 
 export function PortalDocFields() {
+  const i18n = useI18n();
   const settings = useQuery(orpc.portalSettings.get.queryOptions());
   return (
-    <Card header={<CardHeader titleText="Document fields" subtitleText="What clients see on their documents on the portal" />}>
+    <Card header={<CardHeader titleText={i18n.getText("ADMIN_DOC_FIELDS")} subtitleText={i18n.getText("ADMIN_DOC_FIELDS_SUB")} />}>
       {settings.data ? <DocFieldsForm current={settings.data} />
         : settings.error ? <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{settings.error.message}</MessageStrip>
         : <BusyIndicator active style={{ margin: "1rem" }} />}
@@ -39,6 +41,7 @@ export function PortalDocFields() {
 }
 
 function DocFieldsForm({ current }: { current: Get }) {
+  const i18n = useI18n();
   const qc = useQueryClient();
   const [draft, setDraft] = useState<DocFields>(current.docFields as DocFields);
   const [editing, setEditing] = useState<{ entity: Entity; label: string; part: Part } | null>(null);
@@ -47,7 +50,7 @@ function DocFieldsForm({ current }: { current: Get }) {
 
   const save = useMutation(orpc.portalSettings.save.mutationOptions({
     onSuccess: () => {
-      toast("Portal settings saved");
+      toast(i18n.getText("ADMIN_PORTAL_SAVED"));
       void qc.invalidateQueries({ queryKey: orpc.portalSettings.get.key() });
     },
   }));
@@ -58,42 +61,43 @@ function DocFieldsForm({ current }: { current: Get }) {
   const reset = (entity: Entity) => setDraft(({ [entity]: _, ...rest }) => rest as DocFields);
   const dirty = !sameState(draft, current.docFields);
 
-  const count = (entity: Entity, part: Part) => (draft[entity] ? String(draft[entity]![part].length) : "Default");
+  const count = (entity: Entity, part: Part) => (draft[entity] ? String(draft[entity]![part].length) : i18n.getText("ADMIN_DEFAULT"));
+  const entities = (Object.keys(ENTITY_KEY) as Entity[]).map((entity) => ({ entity, label: i18n.getText(ENTITY_KEY[entity]!) }));
 
   return (
     <FlexBox direction="Column" style={{ padding: "1rem", gap: "1rem" }}>
       {save.error ? <MessageStrip design="Negative" hideCloseButton>{save.error.message}</MessageStrip> : null}
-      <Table accessibleName="Document fields" headerRow={
+      <Table accessibleName={i18n.getText("ADMIN_DOC_FIELDS")} headerRow={
         <TableHeaderRow>
-          <TableHeaderCell>Document</TableHeaderCell>
-          <TableHeaderCell>Header fields</TableHeaderCell>
-          <TableHeaderCell>Line fields</TableHeaderCell>
+          <TableHeaderCell>{i18n.getText("ADMIN_COL_DOCUMENT")}</TableHeaderCell>
+          <TableHeaderCell>{i18n.getText("ADMIN_COL_HEADER_FIELDS")}</TableHeaderCell>
+          <TableHeaderCell>{i18n.getText("ADMIN_COL_LINE_FIELDS")}</TableHeaderCell>
           <TableHeaderCell width="6rem"><span /></TableHeaderCell>
         </TableHeaderRow>
       }>
-        {ENTITIES.map(({ entity, label }) => (
+        {entities.map(({ entity, label }) => (
           <TableRow key={entity} rowKey={entity}>
             <TableCell><Text>{label}</Text></TableCell>
             {(["header", "lines"] as const).map((part) => (
               <TableCell key={part}>
                 <Text>{count(entity, part)}</Text>
-                <Link style={{ marginInlineStart: "0.5rem" }} onClick={() => setEditing({ entity, label, part })}>Edit</Link>
+                <Link style={{ marginInlineStart: "0.5rem" }} onClick={() => setEditing({ entity, label, part })}>{i18n.getText("ADMIN_EDIT")}</Link>
               </TableCell>
             ))}
-            <TableCell>{draft[entity] ? <Link onClick={() => reset(entity)}>Reset</Link> : null}</TableCell>
+            <TableCell>{draft[entity] ? <Link onClick={() => reset(entity)}>{i18n.getText("ADMIN_RESET")}</Link> : null}</TableCell>
           </TableRow>
         ))}
       </Table>
       <Text style={{ color: "var(--sapContent_LabelColor)" }}>
-        Always shown: Doc. no., Posting date, Status, Total, Currency. Cost, margin and purchase-price fields are never offered.
+        {i18n.getText("ADMIN_DOC_FIELDS_NOTE")}
       </Text>
       <Button design="Emphasized" style={{ alignSelf: "start" }} disabled={!dirty || save.isPending}
         onClick={() => save.mutate({ docFields: draft })}>
-        {save.isPending ? "Saving…" : "Save"}
+        {save.isPending ? i18n.getText("ADMIN_SAVING") : i18n.getText("ADMIN_SAVE")}
       </Button>
       {editing ? (
         <FieldPicker
-          title={`${editing.label}: ${PART_LABEL[editing.part]}`}
+          title={`${editing.label}: ${i18n.getText(PART_KEY[editing.part])}`}
           selected={listOf(editing.entity)[editing.part]}
           options={current.options[editing.entity][editing.part]}
           onConfirm={(keys) => { setPart(editing.entity, editing.part, keys); setEditing(null); }}
@@ -106,6 +110,7 @@ function DocFieldsForm({ current }: { current: Get }) {
 /** The grids' own p13n panel (search, tick, reorder): the picked fields first, in order, then the
  *  rest in SAP's order. A picked key the options no longer offer (a UDF since removed) is dropped. */
 export function FieldPicker({ title, selected, options, onConfirm, onClose }: {
+  // labels in `title` and `options` are already translated by the caller, except SAP field names.
   title: string;
   selected: string[];
   options: { key: string; label: string }[];
@@ -117,14 +122,15 @@ export function FieldPicker({ title, selected, options, onConfirm, onClose }: {
     const picked = selected.flatMap((k) => (byKey.has(k) ? [{ ...byKey.get(k)!, visible: true }] : []));
     return [...picked, ...options.filter((o) => !selected.includes(o.key)).map((o) => ({ ...o, visible: false }))];
   });
+  const i18n = useI18n();
   return (
     <Dialog open onClose={onClose} headerText={title} resizable className="confire-flush"
       style={{ width: "min(40rem, 95vw)", height: "min(36rem, 85vh)" }}
       footer={
         <Bar design="Footer" endContent={
           <>
-            <Button design="Emphasized" onClick={() => onConfirm(items.filter((i) => i.visible).map((i) => i.key))}>OK</Button>
-            <Button design="Transparent" onClick={onClose}>Cancel</Button>
+            <Button design="Emphasized" onClick={() => onConfirm(items.filter((i) => i.visible).map((i) => i.key))}>{i18n.getText("ADMIN_OK")}</Button>
+            <Button design="Transparent" onClick={onClose}>{i18n.getText("ADMIN_CANCEL")}</Button>
           </>
         } />
       }>

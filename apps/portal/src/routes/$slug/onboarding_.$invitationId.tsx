@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { createFileRoute, Navigate, redirect, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar, Link, MessageStrip, ShellBar, ShellBarBranding } from "@ui5/webcomponents-react";
@@ -9,6 +8,7 @@ import { client, meQuery, orpc } from "../../orpc.ts";
 import { PortalAuthLayout } from "../../components/AuthChrome.tsx";
 import { authUrl, hardRedirect, loginUrl } from "@confire/ui/host.ts";
 import { invitationGuard } from "../../lib/invitation.ts";
+import { useI18n } from "../../i18n.ts";
 import { ONBOARDING_HEADER, ONBOARDING_LOCKED, onboardingSections } from "../../features/onboarding.ts";
 
 // The new-client form (spec §5.3): the BP-create ObjectPage, unchanged, over the section tree in
@@ -36,7 +36,8 @@ function OnboardingForm() {
     ...orpc.onboarding.formSchema.queryOptions({ input: { id: invitationId } }),
     enabled: inv.data?.type === "new", retry: false, staleTime: Infinity, refetchOnWindowFocus: false,
   });
-  const sections = useMemo(() => onboardingSections(schema.data?.extras ?? []), [schema.data]);
+  const i18n = useI18n();
+  const sections = onboardingSections(schema.data?.extras ?? [], i18n.getText.bind(i18n));
   const tenant = me.tenant.name;
 
   const switchAccount = async () => {
@@ -50,11 +51,12 @@ function OnboardingForm() {
   if (error) {
     return (
       <PortalAuthLayout tenant={me.tenant}>
-        <h2 className="auth-h1">This invitation can't be used</h2>
+        <h2 className="auth-h1">{i18n.getText("PORTAL_INVITE_UNUSABLE")}</h2>
         <MessageStrip design="Negative" hideCloseButton>{error.message}</MessageStrip>
-        <p className="auth-sub">Ask your contact at {tenant} to send you a new invitation.</p>
+        <p className="auth-sub">{i18n.getText("PORTAL_INVITE_ASK_NEW", tenant)}</p>
         <p className="auth-alt">
-          Signed in as {me.user.email}. <a href="#" onClick={(e) => { e.preventDefault(); void switchAccount(); }}>Use another account</a>
+          {i18n.getText("PORTAL_SIGNED_IN_AS", me.user.email)}{" "}
+          <a href="#" onClick={(e) => { e.preventDefault(); void switchAccount(); }}>{i18n.getText("PORTAL_OTHER_ACCOUNT")}</a>
         </p>
       </PortalAuthLayout>
     );
@@ -79,16 +81,18 @@ function OnboardingForm() {
             constraints={schema.data}
             data={schema.data.seed}
             sections={sections}
-            header={ONBOARDING_HEADER}
+            header={{ ...ONBOARDING_HEADER, createTitle: i18n.getText("PORTAL_YOUR_COMPANY") }}
             lockedFields={ONBOARDING_LOCKED}
             localViews
-            createLabel="Submit"
+            createLabel={i18n.getText("PORTAL_SUBMIT")}
             notice={
               <MessageStrip design="Information" hideCloseButton>
-                {inv.data.inviterName ? `${inv.data.inviterName} invited you` : "You're invited"} to {tenant}'s customer portal.
-                Tell {tenant} about your company: once you submit, your account is ready and you are its owner on the portal.
-                Signed in as {me.user.email}.{" "}
-                <Link onClick={() => void switchAccount()}>Use another account</Link>
+                {inv.data.inviterName
+                  ? i18n.getText("PORTAL_ONBOARD_NOTICE_NAMED", inv.data.inviterName, tenant)
+                  : i18n.getText("PORTAL_ONBOARD_NOTICE_ANON", tenant)}
+                {" "}
+                {i18n.getText("PORTAL_SIGNED_IN_AS", me.user.email)}{" "}
+                <Link onClick={() => void switchAccount()}>{i18n.getText("PORTAL_OTHER_ACCOUNT")}</Link>
               </MessageStrip>
             }
             onSave={async (diff) => {

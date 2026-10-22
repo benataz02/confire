@@ -13,16 +13,30 @@ setFetchDefaultLanguage(true);
 
 type Files = Record<string, () => Promise<string>>;
 
-/** One loader per `messagebundle_<locale>.properties` (`pt_BR`: UI5's locale ids use `_`). Each
- *  language is laid over English: UI5 loads one locale's file and shows a key that file lacks as
- *  the key itself, so a text nobody has translated yet reads in English instead. */
+/** `messagebundle_<locale>.properties`, or a part file `name.<locale>.properties` (`pt_BR`: UI5's
+ *  locale ids use `_`). Several files for one locale merge in path order; each language is then
+ *  laid over English. UI5 loads one locale and shows a key that file lacks as the key itself, so
+ *  a text nobody has translated yet reads in English instead. */
+export function localeOf(path: string): string | undefined {
+  return /messagebundle_(\w+)\.properties$/.exec(path)?.[1] ?? /\.([a-z]{2}(?:_[A-Z]{2})?)\.properties$/.exec(path)?.[1];
+}
+
 export function messageLoaders(files: Files) {
-  const byLocale: Files = {};
-  for (const [path, load] of Object.entries(files)) byLocale[/messagebundle_(\w+)\.properties$/.exec(path)![1]!] = load;
+  const byLocale: Record<string, [string, () => Promise<string>][]> = {};
+  for (const [path, load] of Object.entries(files)) {
+    const locale = localeOf(path);
+    if (locale) (byLocale[locale] ??= []).push([path, load]);
+  }
+  for (const group of Object.values(byLocale)) group.sort((a, b) => (a[0] < b[0] ? -1 : 1));
   const read = async (load: () => Promise<string>) => parse(await load()) as Record<string, string>;
+  const merged = async (locale: string) => {
+    const out: Record<string, string> = {};
+    for (const [, load] of byLocale[locale] ?? []) Object.assign(out, await read(load));
+    return out;
+  };
   const loaders: Record<string, () => Promise<Record<string, string>>> = {};
-  for (const [locale, load] of Object.entries(byLocale)) {
-    loaders[locale] = async () => ({ ...(await read(byLocale.en!)), ...(await read(load)) });
+  for (const locale of Object.keys(byLocale)) {
+    loaders[locale] = async () => (locale === "en" ? merged("en") : { ...(await merged("en")), ...(await merged(locale)) });
   }
   return loaders;
 }
@@ -37,6 +51,12 @@ export function messageBundle(name: string, files: Files) {
   const chosen = localStorage.getItem("language");
   if (chosen && !getLanguage()) void applyLanguage(chosen);
   return () => useI18nBundle(name);
+}
+
+/** Shared shells (List Report, Object Page, value help). Each app registers `@confire/ui`
+ *  from packages/ui/src/i18n in its own i18n.ts — the glob has to sit in the app. */
+export function useUiI18n() {
+  return useI18nBundle("@confire/ui");
 }
 
 // Each language in its own name, so a user finds theirs whatever the page is showing.

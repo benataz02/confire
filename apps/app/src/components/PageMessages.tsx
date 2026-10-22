@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Bar, Button, MessageItem, MessageView, MessageViewButton, ResponsivePopover } from "@ui5/webcomponents-react";
+import { useI18n } from "../i18n.ts";
 
 /** One row in a page's message popover. */
 export type PageMessage = {
@@ -53,6 +54,7 @@ export function PageMessages({ messages, okText, onSection }: {
   okText: string;
   onSection: (id: string) => void;
 }) {
+  const i18n = useI18n();
   const [opener, setOpener] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
   const worst = SEVERITY.find((t) => messages.some((m) => m.type === t)) ?? "Positive";
@@ -67,13 +69,15 @@ export function PageMessages({ messages, okText, onSection }: {
   return (
     <>
       <MessageViewButton type={worst} counter={counter}
-        tooltip={messages.length ? `${messages.length} message${messages.length === 1 ? "" : "s"}` : okText}
+        tooltip={messages.length
+          ? i18n.getText(messages.length === 1 ? "SHELL_MSG_COUNT_ONE" : "SHELL_MSG_COUNT_MANY", String(messages.length))
+          : okText}
         onClick={(e) => { setOpener(e.currentTarget); setOpen(true); }} />
-      <ResponsivePopover className="confire-msgpop" headerText="Messages" opener={opener} open={open}
+      <ResponsivePopover className="confire-msgpop" headerText={i18n.getText("SHELL_MESSAGES")} opener={opener} open={open}
         onClose={() => setOpen(false)}
         footer={
           <Bar design="Footer"
-            endContent={<Button design="Transparent" onClick={() => setOpen(false)}>Close</Button>} />
+            endContent={<Button design="Transparent" onClick={() => setOpen(false)}>{i18n.getText("SHELL_CLOSE")}</Button>} />
         }>
         {/* MessageView lays its two panes out at height:100%, so the popover cannot size itself to
             the list. ponytail: one row per message with a cap; tune the 3rem if the rows grow. */}

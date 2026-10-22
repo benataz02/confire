@@ -6,6 +6,7 @@ import {
 } from "@ui5/webcomponents-react";
 import { sameState } from "@confire/ui/views.ts";
 import { toast } from "@confire/ui/toast.ts";
+import { useI18n } from "../../i18n.ts";
 import { client, orpc } from "../../orpc.ts";
 import { FieldPicker } from "./PortalDocFields.tsx";
 
@@ -19,9 +20,10 @@ type Extra = Get["extraFields"][number];
 type Draft = { extraFields: Extra[]; leadSeries: number | null };
 
 export function PortalOnboarding() {
+  const i18n = useI18n();
   const settings = useQuery(orpc.portalSettings.get.queryOptions());
   return (
-    <Card header={<CardHeader titleText="New-client onboarding" subtitleText="What a new client fills in on the portal, and how SAP numbers their lead" />}>
+    <Card header={<CardHeader titleText={i18n.getText("ADMIN_ONBOARDING")} subtitleText={i18n.getText("ADMIN_ONBOARDING_SUB")} />}>
       {settings.data ? <OnboardingForm current={settings.data} />
         : settings.error ? <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{settings.error.message}</MessageStrip>
         : <BusyIndicator active style={{ margin: "1rem" }} />}
@@ -30,6 +32,7 @@ export function PortalOnboarding() {
 }
 
 function OnboardingForm({ current }: { current: Get }) {
+  const i18n = useI18n();
   const qc = useQueryClient();
   const stored: Draft = { extraFields: current.extraFields, leadSeries: current.leadSeries };
   const [draft, setDraft] = useState<Draft>(stored);
@@ -41,7 +44,7 @@ function OnboardingForm({ current }: { current: Get }) {
 
   const save = useMutation(orpc.portalSettings.save.mutationOptions({
     onSuccess: () => {
-      toast("Portal settings saved");
+      toast(i18n.getText("ADMIN_PORTAL_SAVED"));
       void qc.invalidateQueries({ queryKey: orpc.portalSettings.get.key() });
     },
   }));
@@ -65,42 +68,42 @@ function OnboardingForm({ current }: { current: Get }) {
       {save.error ? <MessageStrip design="Negative" hideCloseButton>{save.error.message}</MessageStrip> : null}
 
       <FlexBox direction="Column" style={{ gap: "0.25rem" }}>
-        <Label for="lead-series" showColon>Lead numbering series</Label>
+        <Label for="lead-series" showColon>{i18n.getText("ADMIN_LEAD_SERIES")}</Label>
         <Select id="lead-series" style={{ width: "min(24rem, 100%)" }} disabled={series.isPending}
           value={draft.leadSeries === null ? "" : String(draft.leadSeries)}
           onChange={(e) => {
             const v = e.detail.selectedOption.value ?? "";
             setDraft((d) => ({ ...d, leadSeries: v ? Number(v) : null }));
           }}>
-          <Option value="">SAP's default series for leads</Option>
+          <Option value="">{i18n.getText("ADMIN_LEAD_SERIES_DEFAULT")}</Option>
           {options.map((o) => <Option key={o.series} value={String(o.series)}>{o.name}</Option>)}
-          {missing ? <Option value={String(draft.leadSeries)}>Series {draft.leadSeries}</Option> : null}
+          {missing ? <Option value={String(draft.leadSeries)}>{i18n.getText("ADMIN_SERIES_MISSING", String(draft.leadSeries))}</Option> : null}
         </Select>
         {series.error ? (
-          <MessageStrip design="Critical" hideCloseButton>Can't read the lead series from SAP: {series.error.message}</MessageStrip>
+          <MessageStrip design="Critical" hideCloseButton>{i18n.getText("ADMIN_LEAD_SERIES_ERROR", series.error.message)}</MessageStrip>
         ) : null}
       </FlexBox>
 
       <FlexBox direction="Column">
         <Toolbar design="Transparent">
-          <Title level="H6">Additional fields ({draft.extraFields.length})</Title>
+          <Title level="H6">{i18n.getText("ADMIN_EXTRA_FIELDS", draft.extraFields.length)}</Title>
           <ToolbarSpacer />
-          <ToolbarButton design="Transparent" icon="action-settings" text="Choose fields" onClick={() => setPicking(true)} />
+          <ToolbarButton design="Transparent" icon="action-settings" text={i18n.getText("ADMIN_CHOOSE_FIELDS")} onClick={() => setPicking(true)} />
         </Toolbar>
-        <Table accessibleName="Additional onboarding fields" overflowMode="Popin" rowActionCount={1}
-          noDataText="No additional fields: the form asks only for the standard ones."
+        <Table accessibleName={i18n.getText("ADMIN_EXTRA_A11Y")} overflowMode="Popin" rowActionCount={1}
+          noDataText={i18n.getText("ADMIN_EXTRA_EMPTY")}
           onRowActionClick={(e) => remove((e.detail.row as unknown as { rowKey: string }).rowKey)}
           headerRow={
             <TableHeaderRow sticky>
-              <TableHeaderCell minWidth="12rem">Additional field</TableHeaderCell>
-              <TableHeaderCell width="8rem">Required</TableHeaderCell>
+              <TableHeaderCell minWidth="12rem">{i18n.getText("ADMIN_COL_EXTRA")}</TableHeaderCell>
+              <TableHeaderCell width="8rem">{i18n.getText("ADMIN_REQUIRED")}</TableHeaderCell>
             </TableHeaderRow>
           }>
           {draft.extraFields.map((x) => (
-            <TableRow key={x.key} rowKey={x.key} actions={<TableRowAction icon="decline" text="Remove field" />}>
+            <TableRow key={x.key} rowKey={x.key} actions={<TableRowAction icon="decline" text={i18n.getText("ADMIN_REMOVE_FIELD")} />}>
               <TableCell><Text>{label.get(x.key) ?? x.key}</Text></TableCell>
               <TableCell>
-                <CheckBox checked={x.required} accessibleName={`${label.get(x.key) ?? x.key} required`}
+                <CheckBox checked={x.required} accessibleName={i18n.getText("ADMIN_REQUIRED_A11Y", label.get(x.key) ?? x.key)}
                   onChange={(e) => setRequired(x.key, e.target.checked)} />
               </TableCell>
             </TableRow>
@@ -108,17 +111,16 @@ function OnboardingForm({ current }: { current: Get }) {
         </Table>
       </FlexBox>
       <Text style={{ color: "var(--sapContent_LabelColor)" }}>
-        Always on the form: BP name, federal tax ID, telephone, email, bill-to and ship-to address, and the contact person.
-        Credit, pricing, payment terms and sales employee are never offered.
+        {i18n.getText("ADMIN_ONBOARDING_NOTE")}
       </Text>
 
       <Button design="Emphasized" style={{ alignSelf: "start" }} disabled={!dirty || save.isPending}
         onClick={() => save.mutate(draft)}>
-        {save.isPending ? "Saving…" : "Save"}
+        {save.isPending ? i18n.getText("ADMIN_SAVING") : i18n.getText("ADMIN_SAVE")}
       </Button>
       {picking ? (
         <FieldPicker
-          title="Onboarding form: additional fields"
+          title={i18n.getText("ADMIN_PICK_EXTRA")}
           selected={draft.extraFields.map((x) => x.key)}
           options={current.extraOptions}
           onConfirm={(keys) => { pick(keys); setPicking(false); }}

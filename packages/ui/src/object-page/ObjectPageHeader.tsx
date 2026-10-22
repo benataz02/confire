@@ -4,6 +4,8 @@ import {
   type ObjectPageHeaderPropTypes, type ObjectPageTitlePropTypes,
 } from "@ui5/webcomponents-react";
 import { formatValue } from "../format.ts";
+import { useUiI18n } from "../i18n.ts";
+import { documentStatusText } from "../documentStatus.ts";
 import { isIntegerType, type FieldConstraint } from "../metadata.ts";
 import type { Facet, HeaderActionContext, HeaderConfig, Row } from "../types.ts";
 
@@ -31,11 +33,12 @@ export function objectPageTitle(o: {
   navigation?: RecordNavigation;
   /** the layout view selector + Adapt layout */
   layout?: ReactNode;
+  t: (key: string, ...params: Array<string | number>) => string;
 }): ReactElement<ObjectPageTitlePropTypes> {
   const { header, formData, ctx } = o;
   const fields = ctx.constraints?.fields;
   const title = ctx.isNew
-    ? header.createTitle ?? `New ${o.label}`
+    ? header.createTitle ?? o.t("UI_NEW", o.label)
     : formatField(formData, fields, header.titleField);
   const subtitle = ctx.isNew ? "" : (header.subtitleFields ?? [])
     .map((k) => formatField(formData, fields, k))
@@ -51,20 +54,20 @@ export function objectPageTitle(o: {
         <Toolbar design="Transparent">
           {/* Same overflowGroup: the four moves stay together. A bar that cannot fit all of them
               puts every one in the overflow menu, rather than leaving First visible and Last hidden. */}
-          <ToolbarButton overflowGroup="record" design="Transparent" icon="media-rewind" tooltip="First" accessibleName="First"
+          <ToolbarButton overflowGroup="record" design="Transparent" icon="media-rewind" tooltip={o.t("UI_FIRST")} accessibleName={o.t("UI_FIRST")}
             disabled={o.navigation.busy} onClick={o.navigation.first} />
-          <ToolbarButton overflowGroup="record" design="Transparent" icon="navigation-left-arrow" tooltip="Previous" accessibleName="Previous"
+          <ToolbarButton overflowGroup="record" design="Transparent" icon="navigation-left-arrow" tooltip={o.t("UI_PREVIOUS")} accessibleName={o.t("UI_PREVIOUS")}
             disabled={o.navigation.busy} onClick={o.navigation.prev} />
-          <ToolbarButton overflowGroup="record" design="Transparent" icon="navigation-right-arrow" tooltip="Next" accessibleName="Next"
+          <ToolbarButton overflowGroup="record" design="Transparent" icon="navigation-right-arrow" tooltip={o.t("UI_NEXT")} accessibleName={o.t("UI_NEXT")}
             disabled={o.navigation.busy} onClick={o.navigation.next} />
-          <ToolbarButton overflowGroup="record" design="Transparent" icon="media-forward" tooltip="Last" accessibleName="Last"
+          <ToolbarButton overflowGroup="record" design="Transparent" icon="media-forward" tooltip={o.t("UI_LAST")} accessibleName={o.t("UI_LAST")}
             disabled={o.navigation.busy} onClick={o.navigation.last} />
         </Toolbar>
       ) : undefined}
       actionsBar={
         <Toolbar design="Transparent">
           {o.onEdit && !ctx.isEditMode ? (
-            <ToolbarButton design="Emphasized" icon="edit" text="Edit" disabled={o.editDisabled} onClick={o.onEdit} />
+            <ToolbarButton design="Emphasized" icon="edit" text={o.t("UI_EDIT")} disabled={o.editDisabled} onClick={o.onEdit} />
           ) : null}
           {/* A Toolbar child has to be a ToolbarButton/Select or be wrapped, or it never overflows. */}
           {actions ? <ToolbarItem>{actions}</ToolbarItem> : null}
@@ -75,10 +78,13 @@ export function objectPageTitle(o: {
 }
 
 function FacetValue({ facet, formData, meta }: { facet: Facet; formData: Row; meta: FieldConstraint | undefined }) {
+  const i18n = useUiI18n();
   const v = formData[facet.field];
   if (facet.type === "status") {
-    const m = facet.statusMapping?.[String(v)];
-    return <ObjectStatus state={m?.state ?? "None"}>{m?.text ?? formatValue(v, meta?.Type, meta?.Options, isIntegerType(meta?.EdmType))}</ObjectStatus>;
+    const code = String(v ?? "");
+    const m = facet.statusMapping?.[code];
+    const text = documentStatusText(code, m?.text ?? formatValue(v, meta?.Type, meta?.Options, isIntegerType(meta?.EdmType)), i18n.getText.bind(i18n));
+    return <ObjectStatus state={m?.state ?? "None"}>{text}</ObjectStatus>;
   }
   if (facet.type === "date") return <Text>{formatValue(v, "date")}</Text>;
   const unit = facet.unitField ? formData[facet.unitField] : undefined;

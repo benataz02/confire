@@ -5,7 +5,8 @@ import {
 } from "@ui5/webcomponents-react";
 import { CflField } from "../cfl/CflField.tsx";
 import { keysToTokens, tokensToKeys } from "../cfl/cfl-configs.ts";
-import { cleanValues, isEmptyFilter, isMultiField, isRangeField, type ViewsApi } from "../views.ts";
+import { useUiI18n } from "../i18n.ts";
+import { cleanValues, isEmptyFilter, isMultiField, isRangeField, STANDARD_ID, type ViewsApi } from "../views.ts";
 import type { FilterField, FilterValue, Row, ViewState } from "../types.ts";
 
 // beas-header (LIST-REPORT-OBJECT-PAGE.md §3.3), split in two because DynamicPage takes the title
@@ -33,16 +34,18 @@ export const ViewTitle = memo(function ViewTitle({ slot, title, views, size }: {
   /** the object page's layout selector is a small one */
   size?: "H4" | "H5" | "H6";
 }) {
+  const i18n = useUiI18n();
+  const standard = i18n.getText("UI_STANDARD_VIEW");
   const items = useMemo(
     () =>
       views.views.map((v) => (
         <VariantItem key={v.id} data-view-id={v.id} selected={v.id === views.active?.id}
           isDefault={v.isDefault} global={v.visibility === "shared"} author={v.author}
-          readOnly={!v.canEdit} labelReadOnly={!v.canEdit} hideDelete={!v.canEdit}>
-          {v.name}
+          readOnly={!v.canEdit} labelReadOnly={!v.canEdit}           hideDelete={!v.canEdit}>
+          {v.id === STANDARD_ID ? standard : v.name}
         </VariantItem>
       )),
-    [views.views, views.active],
+    [views.views, views.active, standard],
   );
   if (views.local && views.views.length < 2) return <Title slot={slot} level="H4">{title}</Title>;
   return (
@@ -91,6 +94,7 @@ export type FilterTemplate = (ctx: { value: FilterValue | undefined; setValue: (
 function FilterControl({ field, value, setValue }: {
   field: FilterField; value: FilterValue | undefined; setValue: (v: FilterValue) => void;
 }) {
+  const i18n = useUiI18n();
   if (field.cfl) {
     // Filters never say "not found", and are multi-select unless the dialog says otherwise (`g()`).
     const multi = isMultiField(field);
@@ -119,7 +123,8 @@ function FilterControl({ field, value, setValue }: {
     // A filter has a third state a checkbox field does not: unfiltered. Any -> Yes -> No -> Any.
     const on = value === true || value === "true" ? true : value === false || value === "false" ? false : undefined;
     return (
-      <CheckBox checked={on === true} indeterminate={on === undefined} text={on === undefined ? "Any" : on ? "Yes" : "No"}
+      <CheckBox checked={on === true} indeterminate={on === undefined}
+        text={on === undefined ? i18n.getText("UI_ANY") : on ? i18n.getText("UI_YES") : i18n.getText("UI_NO")}
         onChange={() => setValue(on === undefined ? true : on ? false : null)} />
     );
   }
@@ -162,6 +167,7 @@ export const FilterHeader = memo(function FilterHeader({
   filterTemplates?: Record<string, FilterTemplate>;
   searchPlaceholder?: string;
 }) {
+  const i18n = useUiI18n();
   const [draft, setDraft] = useState({ values: state.filterValues, search: state.searchTerm });
   // A view switch, a restore or a URL rewrite replaces the applied filters; copy them into the bar.
   useEffect(() => setDraft({ values: state.filterValues, search: state.searchTerm }), [state.filterValues, state.searchTerm]);
@@ -206,7 +212,7 @@ export const FilterHeader = memo(function FilterHeader({
         apply({ adaptFilterKeys: order.filter((k) => selected.has(k)) });
       }}
       search={showSearch ? (
-        <Input placeholder={searchPlaceholder ?? "Search"} value={draft.search} showClearIcon
+        <Input placeholder={searchPlaceholder ?? i18n.getText("UI_SEARCH")} value={draft.search} showClearIcon
           onInput={(e) => setDraft((d) => ({ ...d, search: e.target.value ?? "" }))}
           onKeyDown={(e) => { if (e.key === "Enter") apply({ searchTerm: (e.target as HTMLInputElement).value?.trim() ?? draft.search }); }} />
       ) : undefined}

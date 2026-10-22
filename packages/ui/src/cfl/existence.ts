@@ -63,6 +63,10 @@ export async function allExist(qc: QueryClient, client: Client, cfg: CflFieldCon
   return missing;
 }
 
-/** "Business partner not found" — the dialog title names the entity (Beas `Du()`). */
-export const notFoundMessage = (cfg: CflFieldConfig) =>
-  cfg.dialogConfig.title ? `${cfg.dialogConfig.title} not found` : "Entry not found";
+/** "Business partner not found" — the dialog title names the entity (Beas `Du()`).
+ *  Without `t` the sentence stays English, which is what a caller that has no bundle still shows. */
+export const notFoundMessage = (cfg: CflFieldConfig, t?: (key: string, ...params: Array<string | number>) => string) => {
+  const title = cfg.dialogConfig.title;
+  if (t) return title ? t("UI_NOT_FOUND", title) : t("UI_ENTRY_NOT_FOUND");
+  return title ? `${title} not found` : "Entry not found";
+};

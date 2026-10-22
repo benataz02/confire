@@ -13,3 +13,13 @@ test("each language is laid over English, so an untranslated key reads in Englis
   expect(await loaders.pt_BR!()).toEqual({ NAV_HOME: "Início", USER_MENU_DENSITY: "Density" });
   expect(await loaders.en!()).toEqual({ NAV_HOME: "Home", USER_MENU_DENSITY: "Density" });
 });
+
+test("part files for one language merge, and that language still lays over English", async () => {
+  const loaders = messageLoaders({
+    "./i18n/messagebundle_en.properties": async () => "NAV_HOME=Home",
+    "./i18n/parts/shell.en.properties": async () => "NAV_SETTINGS=Settings",
+    "./i18n/parts/shell.es.properties": async () => "NAV_SETTINGS=Configuración",
+  });
+  expect(await loaders.en!()).toEqual({ NAV_HOME: "Home", NAV_SETTINGS: "Settings" });
+  expect(await loaders.es!()).toEqual({ NAV_HOME: "Home", NAV_SETTINGS: "Configuración" });
+});

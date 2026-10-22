@@ -3,7 +3,9 @@ import { createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BusyIndicator, Toolbar, ToolbarButton } from "@ui5/webcomponents-react";
 import { client, orpc } from "../../../../orpc.ts";
+import { useI18n } from "../../../../i18n.ts";
 import { b1Feature } from "../../../../features/b1/index.ts";
+import { localizedB1Feature } from "../../../../features/b1/localize.ts";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
 import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
@@ -29,14 +31,20 @@ export const Route = createFileRoute("/$slug/_admin/b1/$entity")({
 
 function EntityPage() {
   const { entity } = Route.useParams();
+  const i18n = useI18n();
   const hash = useLocation({ select: (l) => l.hash });
-  const feature = b1Feature(entity)!;
+  // beforeLoad already checked the English registry. This copy is what the page draws.
+  const feature = useMemo(
+    () => localizedB1Feature(entity, (key, ...args) => i18n.getText(key, ...args))!,
+    [entity, i18n],
+  );
   return hash === "create" ? <EntityCreate key={entity} feature={feature} /> : <EntityList key={entity} feature={feature} />;
 }
 
 const NO_QUERY: ListQuery = { select: [], filter: [], orderby: [] };
 
 function EntityList({ feature }: { feature: EntityFeature }) {
+  const i18n = useI18n();
   const { entity } = feature;
   const qc = useQueryClient();
   const meta = useFieldConstraints(entity);
@@ -78,9 +86,9 @@ function EntityList({ feature }: { feature: EntityFeature }) {
           <Toolbar design="Transparent">
             {/* A new client, no CardCode yet (spec §5.1). /b1 is admin/owner only, as is the call. */}
             {entity === "BusinessPartners" ? (
-              <ToolbarButton design="Transparent" icon="paper-plane" text="Invite new client" onClick={() => setInviting(true)} />
+              <ToolbarButton design="Transparent" icon="paper-plane" text={i18n.getText("ADMIN_INVITE_NEW_CLIENT")} onClick={() => setInviting(true)} />
             ) : null}
-            <ToolbarButton design="Transparent" icon="refresh" tooltip="Refresh SAP fields" accessibleName="Refresh SAP fields"
+            <ToolbarButton design="Transparent" icon="refresh" tooltip={i18n.getText("ADMIN_REFRESH_SAP_FIELDS")} accessibleName={i18n.getText("ADMIN_REFRESH_SAP_FIELDS")}
               disabled={refresh.isPending} onClick={() => refresh.mutate()} />
           </Toolbar>
         }
@@ -99,6 +107,7 @@ function EntityList({ feature }: { feature: EntityFeature }) {
 }
 
 function EntityCreate({ feature }: { feature: EntityFeature }) {
+  const i18n = useI18n();
   const open = useEntityNav();
   const route = `/b1/${feature.entity}`;
   const d = useDetailView({ entity: feature.entity, route, isNew: true });
@@ -106,8 +115,8 @@ function EntityCreate({ feature }: { feature: EntityFeature }) {
   const seed = useMemo(() => feature.detail.createDefaults?.() ?? {}, [feature, d.createEpoch]);
 
   if (d.loading) return <ObjectPageSkeleton />;
-  if (d.error || !d.constraints) return <PageError error={d.error ?? new Error("No metadata")} />;
-  if (!d.constraints.writable) return <PageError error={new Error(`${d.constraints.label} is read-only in Confire.`)} />;
+  if (d.error || !d.constraints) return <PageError error={d.error ?? new Error(i18n.getText("ADMIN_NO_METADATA"))} />;
+  if (!d.constraints.writable) return <PageError error={new Error(i18n.getText("ADMIN_READONLY", d.constraints.label))} />;
   return (
     <ObjectPage key={d.createEpoch} isNew entity={feature.entity} constraints={d.constraints} data={seed}
       sections={feature.detail.sections} header={feature.detail.header}

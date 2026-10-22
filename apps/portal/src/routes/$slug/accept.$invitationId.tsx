@@ -1,8 +1,9 @@
 import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, MessageStrip } from "@ui5/webcomponents-react";
-import { ROLE_HELP, ROLE_LABEL } from "@confire/ui/portal/CompanyPeople.tsx";
 import { authClient } from "../../auth-client.ts";
+import { ROLE_HELP_KEY, ROLE_KEY } from "../../features/labels.ts";
+import { useI18n } from "../../i18n.ts";
 import { meQuery, orpc } from "../../orpc.ts";
 import { PortalAuthLayout } from "../../components/AuthChrome.tsx";
 import { hardRedirect, loginUrl } from "@confire/ui/host.ts";
@@ -31,6 +32,7 @@ function Accept() {
     },
   }));
   const tenant = me.tenant.name;
+  const i18n = useI18n();
 
   // Signed in with the wrong address: out, and back to this link with another one.
   const switchAccount = async () => {
@@ -40,23 +42,24 @@ function Accept() {
   };
   const signedInAs = (
     <p className="auth-alt">
-      Signed in as {me.user.email}. <a href="#" onClick={(e) => { e.preventDefault(); void switchAccount(); }}>Use another account</a>
+      {i18n.getText("PORTAL_SIGNED_IN_AS", me.user.email)}{" "}
+      <a href="#" onClick={(e) => { e.preventDefault(); void switchAccount(); }}>{i18n.getText("PORTAL_OTHER_ACCOUNT")}</a>
     </p>
   );
 
   if (inv.isPending) {
-    return <PortalAuthLayout tenant={me.tenant}><p className="auth-sub">Opening your invitation…</p></PortalAuthLayout>;
+    return <PortalAuthLayout tenant={me.tenant}><p className="auth-sub">{i18n.getText("PORTAL_INVITE_OPENING")}</p></PortalAuthLayout>;
   }
 
   if (inv.error) {
     return (
       <PortalAuthLayout tenant={me.tenant}>
-        <h2 className="auth-h1">This invitation can't be used</h2>
+        <h2 className="auth-h1">{i18n.getText("PORTAL_INVITE_UNUSABLE")}</h2>
         <MessageStrip design="Negative" hideCloseButton>{inv.error.message}</MessageStrip>
         {me.company ? (
-          <Button design="Emphasized" onClick={() => void navigate({ to: "/$slug" })}>Go to {tenant}'s portal</Button>
+          <Button design="Emphasized" onClick={() => void navigate({ to: "/$slug" })}>{i18n.getText("PORTAL_INVITE_GO_PORTAL", tenant)}</Button>
         ) : (
-          <p className="auth-sub">Ask your contact at {tenant} to send you a new invitation.</p>
+          <p className="auth-sub">{i18n.getText("PORTAL_INVITE_ASK_NEW", tenant)}</p>
         )}
         {signedInAs}
       </PortalAuthLayout>
@@ -68,14 +71,15 @@ function Accept() {
 
   return (
     <PortalAuthLayout tenant={me.tenant}>
-      <h2 className="auth-h1">Join {d.companyName}</h2>
+      <h2 className="auth-h1">{i18n.getText("PORTAL_JOIN", d.companyName ?? "")}</h2>
       <p className="auth-sub">
-        {d.inviterName ? `${d.inviterName} invited you` : "You're invited"} to {tenant}'s customer portal as
-        part of <strong>{d.companyName}</strong>, with the role <strong>{ROLE_LABEL[d.role]}</strong>: {ROLE_HELP[d.role].toLowerCase()}.
+        {d.inviterName
+          ? i18n.getText("PORTAL_ACCEPT_BODY_NAMED", d.inviterName, tenant, d.companyName ?? "", i18n.getText(ROLE_KEY[d.role]), i18n.getText(ROLE_HELP_KEY[d.role]))
+          : i18n.getText("PORTAL_ACCEPT_BODY_ANON", tenant, d.companyName ?? "", i18n.getText(ROLE_KEY[d.role]), i18n.getText(ROLE_HELP_KEY[d.role]))}
       </p>
       {accept.error ? <MessageStrip design="Negative" hideCloseButton>{accept.error.message}</MessageStrip> : null}
       <Button design="Emphasized" disabled={accept.isPending} onClick={() => accept.mutate({ id: d.id })}>
-        {accept.isPending ? "Joining…" : "Accept invitation"}
+        {accept.isPending ? i18n.getText("PORTAL_JOINING") : i18n.getText("PORTAL_ACCEPT_INVITATION")}
       </Button>
       {signedInAs}
     </PortalAuthLayout>

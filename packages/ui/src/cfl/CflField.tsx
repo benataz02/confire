@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button, MultiInput, SuggestionItemCustom, Text, Token, type MultiInputDomRef,
 } from "@ui5/webcomponents-react";
+import { useUiI18n } from "../i18n.ts";
 import { useUiSource } from "../source.tsx";
 import { EntityLink, useCanOpen, useEntityNav } from "../EntityLink.tsx";
 import { formatValue } from "../format.ts";
@@ -23,8 +24,6 @@ const CflDialog = lazy(() => import("./CflDialog.tsx"));
 
 const isBlank = (v: unknown) => v === undefined || v === null || (typeof v === "string" && v.trim() === "");
 const trimmed = (v: unknown) => (typeof v === "string" ? v.trim() : v);
-const showAll = (n: number) => `Show all (${n})`;
-
 export function CflField({
   config, value, onValueChange, onRowSelect, onExistenceError, onCheckStarted,
   editable = true, disabled, placeholder, maxLength, error, required, link, formData, mustExist: mustExistProp,
@@ -52,6 +51,8 @@ export function CflField({
   mustExist?: boolean;
   accessibleName?: string;
 }) {
+  const i18n = useUiI18n();
+  const showAll = (n: number) => i18n.getText("UI_SHOW_ALL_N", String(n));
   const d = config.dialogConfig;
   const key = keyFieldOf(d);
   const multi = !!d.multiSelect;
@@ -109,7 +110,7 @@ export function CflField({
     const row = await p;
     if (row === null) {
       setMissing(v);
-      setErr(notFoundMessage(config));
+      setErr(notFoundMessage(config, i18n.getText.bind(i18n)));
     } else {
       setMissing(undefined);
       setErr(null);
@@ -162,7 +163,7 @@ export function CflField({
     const next = [...tokens, ...fresh];
     onValueChange(next);
     if (mustExist) void allExist(qc, client, config, next.map((t) => t[key])).then((gone) =>
-      setErr(gone.size ? `${notFoundMessage(config)}: ${[...gone].join(", ")}` : null));
+      setErr(gone.size ? `${notFoundMessage(config, i18n.getText.bind(i18n))}: ${[...gone].join(", ")}` : null));
   };
 
   const pick = (row: Row) => {
@@ -230,13 +231,13 @@ export function CflField({
     ) : <Text>{shownText}</Text>;
   }
 
-  const err = error ?? ownError ?? (required && (multi ? !tokens.length : isBlank(value)) ? "Pick a value." : null);
+  const err = error ?? ownError ?? (required && (multi ? !tokens.length : isBlank(value)) ? i18n.getText("UI_PICK_VALUE") : null);
   const inputValue = multi ? (typed ?? "") : labelMode ? (focused ? (typed ?? "") : shownText) : (typed ?? raw);
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", width: "100%" }}>
       {target ? (
-        <Button icon="navigation-right-arrow" design="Transparent" tooltip="Open" accessibleName="Open"
+        <Button icon="navigation-right-arrow" design="Transparent" tooltip={i18n.getText("UI_OPEN")} accessibleName={i18n.getText("UI_OPEN")}
           onClick={() => (target.action ? target.action(value, formData ?? {}) : target.route && go(target.route, target.target))} />
       ) : null}
       <MultiInput

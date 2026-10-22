@@ -2,6 +2,7 @@ import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@ui5/webcomponents-react";
 import type { CellTemplate, GridState, Selection } from "@confire/ui/list-report/Grid.tsx";
 import type { ListColumn, Row } from "@confire/ui/types.ts";
+import { useI18n } from "../../i18n.ts";
 
 // Grid over a model array edited in place (BOM, routing, constraints, mappings) — ConfigTable's
 // pattern, shared by the builder's tables: every cell is the caller's editor, and Grid only
@@ -19,6 +20,7 @@ export const positions = (rows: Row[]) => new Set(rows.map(positionOf));
 /** The toolbar's Delete: hands over the selected positions. The selection goes first — row ids are
  *  positions, so a kept one would land on the rows that moved up. */
 export function DeleteRows({ sel, onDelete }: { sel: Selection; onDelete: (gone: Set<number>) => void }) {
+  const i18n = useI18n();
   return (
     <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
       onClick={() => {
@@ -26,7 +28,7 @@ export function DeleteRows({ sel, onDelete }: { sel: Selection; onDelete: (gone:
         sel.clear();
         onDelete(gone);
       }}>
-      Delete
+      {i18n.getText("MODEL_DELETE")}
     </Button>
   );
 }

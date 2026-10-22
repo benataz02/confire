@@ -6,6 +6,7 @@ import { useNavigate } from "@tanstack/react-router";
 // `collapsed`, so the field stays open. Same base component otherwise — scopes, items, popover.
 import { Search, SearchItem, SearchItemGroup, SearchScope } from "@ui5/webcomponents-react";
 import { orpc } from "../orpc.ts";
+import { useI18n } from "../i18n.ts";
 
 // ShellBar's `content` slot only knows left/right (it splits on a single ShellBarSpacer), so a
 // truly centred field has to leave the flow. The bar spans the full viewport width and sits at
@@ -26,13 +27,21 @@ ui5-search.confire-shellbar-search{background-image:none}
   document.head.appendChild(el);
 }
 
-/** One thing the search can jump to or do. `group` is the popover section header. */
+/** One thing the search can jump to or do. `group` is a section id
+ *  (`Menus`, `Configurations`, `Models`, `Settings`); the popover header is translated. */
 export type SearchEntry = {
   group: string;
   text: string;
   description?: string;
   icon?: string;
   run: () => void;
+};
+
+const GROUP_KEY: Record<string, string> = {
+  Menus: "SHELL_SEARCH_MENUS",
+  Configurations: "NAV_CONFIGS",
+  Models: "SHELL_SEARCH_MODELS",
+  Settings: "NAV_SETTINGS",
 };
 
 // Scope values double as the group headers, so filtering is `entry.group === scope` — no mapping.
@@ -45,6 +54,11 @@ const CAP = { all: 6, scoped: 20 };
 // ponytail: client-side substring match over the two list endpoints the app already caches. Add a
 // server-side search procedure when a tenant outgrows a single list response.
 export function GlobalSearch({ entries, isAdmin }: { entries: SearchEntry[]; isAdmin: boolean }) {
+  const i18n = useI18n();
+  const groupText = (id: string) => {
+    const key = GROUP_KEY[id];
+    return key ? i18n.getText(key) : id;
+  };
   const navigate = useNavigate({ from: "/$slug" });
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
@@ -67,7 +81,7 @@ export function GlobalSearch({ entries, isAdmin }: { entries: SearchEntry[]; isA
       ...(models.data ?? []).map((m) => ({
         group: "Models",
         text: m.name,
-        description: "Configurator model",
+        description: i18n.getText("SHELL_SEARCH_CONFIG_MODEL"),
         icon: "tree",
         run: () => navigate({ to: "/$slug/models/$id", params: { id: m.id } }),
       })),
@@ -77,7 +91,7 @@ export function GlobalSearch({ entries, isAdmin }: { entries: SearchEntry[]; isA
         (scope === ALL || e.group === scope) &&
         (e.text.toLowerCase().includes(needle) || (e.description ?? "").toLowerCase().includes(needle)),
     );
-  }, [needle, scope, entries, configs.data, models.data, navigate]);
+  }, [needle, scope, entries, configs.data, models.data, navigate, i18n]);
 
   // Keep first-seen group order so menus stay above objects and settings.
   const groups = useMemo(() => {
@@ -101,7 +115,7 @@ export function GlobalSearch({ entries, isAdmin }: { entries: SearchEntry[]; isA
     <div className="confire-shell-search" slot="content" data-hide-order="99">
       <Search
         className="confire-shellbar-search"
-        placeholder="Search menus, objects and settings"
+        placeholder={i18n.getText("SHELL_SEARCH_PLACEHOLDER")}
         value={q}
         showClearIcon
         noTypeahead
@@ -110,11 +124,11 @@ export function GlobalSearch({ entries, isAdmin }: { entries: SearchEntry[]; isA
         scopeValue={scope}
         scopes={
           <>
-            <SearchScope value={ALL} text="All" />
-            <SearchScope value="Menus" text="Menus" />
-            <SearchScope value="Configurations" text="Configurations" />
-            {isAdmin ? <SearchScope value="Models" text="Models" /> : null}
-            <SearchScope value="Settings" text="Settings" />
+            <SearchScope value={ALL} text={i18n.getText("SHELL_SEARCH_ALL")} />
+            <SearchScope value="Menus" text={i18n.getText("SHELL_SEARCH_MENUS")} />
+            <SearchScope value="Configurations" text={i18n.getText("NAV_CONFIGS")} />
+            {isAdmin ? <SearchScope value="Models" text={i18n.getText("SHELL_SEARCH_MODELS")} /> : null}
+            <SearchScope value="Settings" text={i18n.getText("NAV_SETTINGS")} />
           </>
         }
         onScopeChange={(e) => setScope(e.detail.scope?.value ?? ALL)}
@@ -124,7 +138,7 @@ export function GlobalSearch({ entries, isAdmin }: { entries: SearchEntry[]; isA
         onSearch={() => { if (hits[0]) pick(hits[0]); }}
       >
         {groups.map(([name, items]) => (
-          <SearchItemGroup key={name} headerText={name}>
+          <SearchItemGroup key={name} headerText={groupText(name)}>
             {items.map((it, i) => (
               <SearchItem
                 key={`${name}:${i}`}

@@ -19,7 +19,8 @@ import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import { ProjectTimeline } from "@confire/ui/timeline/ProjectTimeline.tsx";
 import { uploadFile } from "@confire/ui/files.ts";
 import { toast } from "@confire/ui/toast.ts";
-import { toPriced, unpricedItems, type Sel } from "./runView.ts";
+import { useI18n } from "../../i18n.ts";
+import { projectStatusText, toPriced, unpricedItems, type Sel } from "./runView.ts";
 import { ConfiguratorForm, ConsistencyStatus } from "@confire/ui/configurator/ConfiguratorForm.tsx";
 import { CflField } from "@confire/ui/cfl/CflField.tsx";
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
@@ -57,6 +58,9 @@ const PANEL_BODY = { display: "flex", flexDirection: "column", gap: "0.75rem", p
 // `new` (/configs/new) is the General form alone: there is no id yet, and nothing that reads one
 // runs before the configuration exists.
 export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string; new?: boolean }) {
+  const i18n = useI18n();
+  // getText reads `this`; a bare pass into the pure helpers would lose it.
+  const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
   const qc = useQueryClient();
   const navigate = useNavigate({ from: "/$slug" });
   const currency = useCurrency();
@@ -128,17 +132,19 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
     onSuccess: (r) => { invalidateLists(); void navigate({ to: "/$slug/configs/$id", params: { id: r.id }, replace: true }); },
   }));
   const duplicate = useMutation(orpc.configs.duplicate.mutationOptions({
-    onSuccess: (r) => { invalidateLists(); toast("Configuration duplicated"); void navigate({ to: "/$slug/configs/$id", params: { id: r.id } }); },
+    onSuccess: (r) => { invalidateLists(); toast(t("CONFIG_TOAST_DUPLICATED")); void navigate({ to: "/$slug/configs/$id", params: { id: r.id } }); },
   }));
   const remove = useMutation(orpc.configs.remove.mutationOptions({
-    onSuccess: () => { invalidateLists(); toast("Configuration deleted"); void navigate({ to: "/$slug/configs" }); },
+    onSuccess: () => { invalidateLists(); toast(t("CONFIG_TOAST_DELETED")); void navigate({ to: "/$slug/configs" }); },
   }));
   // Refill the cache the form is drawn from. Not setProject: the answer changes the *lookups*, not
   // the project, so the lookups query is what gets invalidated.
   const sync = useMutation(orpc.configs.sync.mutationOptions({
     onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: lookupsKey });
-      toast(r.tables ? `Synced ${r.count} rows from ${r.tables} ${r.tables === 1 ? "query" : "queries"}` : "Nothing to sync");
+      toast(!r.tables ? t("CONFIG_TOAST_SYNC_NONE")
+        : r.tables === 1 ? t("CONFIG_TOAST_SYNCED_ONE", String(r.count))
+        : t("CONFIG_TOAST_SYNCED_MANY", String(r.count), String(r.tables)));
     },
   }));
 
@@ -151,9 +157,9 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
     void qc.invalidateQueries({ queryKey: orpc.timeline.list.queryKey({ input: { projectId: id } }) });
     toast(msg);
   };
-  const accept = useMutation(orpc.requests.accept.mutationOptions({ onSuccess: decided("Request accepted — it is yours to review") }));
-  const sendBack = useMutation(orpc.requests.sendBack.mutationOptions({ onSuccess: decided("Sent back to the client for changes") }));
-  const decline = useMutation(orpc.requests.decline.mutationOptions({ onSuccess: decided("Request declined") }));
+  const accept = useMutation(orpc.requests.accept.mutationOptions({ onSuccess: decided(t("CONFIG_TOAST_ACCEPTED")) }));
+  const sendBack = useMutation(orpc.requests.sendBack.mutationOptions({ onSuccess: decided(t("CONFIG_TOAST_SENT_BACK")) }));
+  const decline = useMutation(orpc.requests.decline.mutationOptions({ onSuccess: decided(t("CONFIG_TOAST_DECLINED")) }));
   const deciding = accept.isPending || sendBack.isPending || decline.isPending;
 
   const project = q.data?.project;
@@ -261,7 +267,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
       if ((cur === undefined || cur === null || cur === "") && v !== null && v !== undefined) { next[k] = v; n++; }
     }
     if (n) edit({ entries: next });
-    toast(n ? `Filled ${n} field${n === 1 ? "" : "s"}` : "Those fields already have values");
+    toast(n === 0 ? t("CONFIG_TOAST_FILLED_NONE") : n === 1 ? t("CONFIG_TOAST_FILLED_ONE") : t("CONFIG_TOAST_FILLED_MANY", String(n)));
   };
 
   // The configuration's own attributes. No draft state: each control commits on change (UI5 fires
@@ -271,23 +277,23 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   // accessibleMode only announces it.
   // A Panel like each ConfiguratorForm section, the Form inside it only laying out the fields.
   const general = (
-    <Panel accessibleRole="Form" headerText="General" headerLevel="H5">
-    <Form accessibleName="General" labelSpan="S12 M12 L12 XL12" layout="S1 M2 L4 XL4"
+    <Panel accessibleRole="Form" headerText={t("CONFIG_GENERAL")} headerLevel="H5">
+    <Form accessibleName={t("CONFIG_GENERAL")} labelSpan="S12 M12 L12 XL12" layout="S1 M2 L4 XL4"
       accessibleMode={locked ? "Display" : "Edit"} itemSpacing={locked ? "Large" : "Normal"}>
       <FormGroup>
-        <FormItem labelContent={<Label for={locked ? undefined : "cfg-name"} required>Name</Label>}>
+        <FormItem labelContent={<Label for={locked ? undefined : "cfg-name"} required>{t("CONFIG_NAME")}</Label>}>
           {locked ? <Text>{head.name}</Text> : (
           <Input id="cfg-name" value={head.name} style={{ width: "100%" }}
             disabled={saving}
             valueState={head.name.trim() || !head.modelId ? "None" : "Negative"}
-            valueStateMessage={<div>Give the configuration a name — it is how it shows up in the list.</div>}
+            valueStateMessage={<div>{t("CONFIG_NAME_HINT")}</div>}
             onChange={(e) => {
               const v = (e.target.value ?? "").trim();
               if (v && v !== head.name) save({ name: v });
             }} />
           )}
         </FormItem>
-        <FormItem labelContent={<Label required>Model</Label>}>
+        <FormItem labelContent={<Label required>{t("CONFIG_MODEL")}</Label>}>
           {/* A request's model was the client's pick, and its customer is the company. */}
           {locked || request ? (
             <Text>{model?.name}</Text>
@@ -314,7 +320,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
           </Select>
           )}
         </FormItem>
-        <FormItem labelContent={<Label required>Customer</Label>}>
+        <FormItem labelContent={<Label required>{t("CONFIG_CUSTOMER")}</Label>}>
           {locked || request ? <Text>{head.customer?.cardName ?? ""}</Text> : (
           /* Wrapper, not a prop: the id is only a jump target for the message popover. */
           <div id="cfg-customer" style={{ width: "100%" }}>
@@ -323,7 +329,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
               the field clears the customer. */}
           <CflField config={CUSTOMER} value={head.customer?.cardCode ?? null} link
             disabled={saving}
-            error={head.customer?.cardCode || !head.modelId ? null : "Pick the customer the quote is written for — SAP needs a business partner on the document."}
+            error={head.customer?.cardCode || !head.modelId ? null : t("CONFIG_CUSTOMER_ERROR")}
             onValueChange={(v) => {
               if ((v === null || v === "") && head.customer) save({ customer: null });
             }}
@@ -335,14 +341,14 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
         </FormItem>
         {/* A new configuration takes its model's batch defaults on create. */}
         {isNew ? null : (
-          <FormItem labelContent={<Label required>Batch quantities</Label>}>
+          <FormItem labelContent={<Label required>{t("CONFIG_BATCHES")}</Label>}>
             {locked ? <Text>{batches.join(", ")}</Text> : (
             /* Type a quantity, Enter (or leaving the field) makes it a token. Uncontrolled: the
                typed text is cleared by hand once it has become one. */
             <MultiInput type="Number" data-param={BATCHES} style={{ width: "100%" }}
-              placeholder="Type a quantity, press Enter" accessibleName="Batch quantities"
+              placeholder={t("CONFIG_BATCHES_PLACEHOLDER")} accessibleName={t("CONFIG_BATCHES")}
               valueState={batches.length ? "None" : "Negative"}
-              valueStateMessage={<div>Add at least one batch quantity.</div>}
+              valueStateMessage={<div>{t("CONFIG_BATCHES_HINT")}</div>}
               tokens={batches.map((b) => <Token key={b} text={String(b)} />)}
               onChange={(e) => {
                 edit({ batches: addBatch(batches, e.target.value ?? "") });
@@ -364,8 +370,8 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
 
   if (isNew) {
     return (
-      <ObjectPage hidePinButton titleArea={<ObjectPageTitle header={<Title>New configuration</Title>} />}>
-        <ObjectPageSection id="configure" titleText="Configure">
+      <ObjectPage hidePinButton titleArea={<ObjectPageTitle header={<Title>{t("CONFIG_NEW")}</Title>} />}>
+        <ObjectPageSection id="configure" titleText={t("CONFIG_SECTION_CONFIGURE")}>
           {create.error ? <MessageStrip design="Negative" hideCloseButton>{create.error.message}</MessageStrip> : null}
           {general}
         </ObjectPageSection>
@@ -382,8 +388,8 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const canDecide = !!request && (project.status === "submitted" || project.status === "in_review");
   const decide = async (kind: "sendBack" | "decline") => {
     const note = await promptNote(kind === "sendBack"
-      ? { title: "Send back for changes", actionText: "Send back", message: `${request!.cardName} can edit the request again and resubmit it. Say what should change — the client sees this note.` }
-      : { title: "Decline request", actionText: "Decline", message: `This closes the request for good. ${request!.cardName} sees the decision and this note.` });
+      ? { title: t("CONFIG_SEND_BACK_TITLE"), actionText: t("CONFIG_SEND_BACK"), message: t("CONFIG_SEND_BACK_MESSAGE", request!.cardName) }
+      : { title: t("CONFIG_DECLINE_TITLE"), actionText: t("CONFIG_DECLINE"), message: t("CONFIG_DECLINE_MESSAGE", request!.cardName) });
     if (note === null) return;
     (kind === "sendBack" ? sendBack : decline).mutate({ id, ...(note ? { note } : {}) });
   };
@@ -403,7 +409,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   // What the quote waits on beyond name and customer, in form order. buildQuoteSeed refuses on the
   // same missingInputs(), so a hidden button and a refused quote cannot disagree.
   const gaps = [
-    ...(batches.length ? [] : [{ key: BATCHES, message: "Add at least one batch quantity" }]),
+    ...(batches.length ? [] : [{ key: BATCHES, message: t("CONFIG_BATCHES_MISSING") }]),
     ...(lk && prop ? missingInputs(model.definition, lk, prop, tables) : []),
   ];
   // The footer holds the finalizing action, so it exists only once there is something to finalize.
@@ -436,7 +442,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           {prop ? <ConsistencyStatus prop={prop} /> : null}
           {shouldCalc || calcBusy ? <BusyIndicator active delay={0} size="S" /> : null}
-          {selection.length ? <Text>Selected: {formatMoney(selectedTotal, currency)}</Text> : null}
+          {selection.length ? <Text>{t("CONFIG_SELECTED", formatMoney(selectedTotal, currency))}</Text> : null}
         </div>
       }
       endContent={
@@ -446,20 +452,20 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
               Accept is the positive semantic action. */}
           {ready ? (
             <Button design="Emphasized" disabled={conflicted || busy || deciding}
-              tooltip={conflicted || calc.isError || select.isError ? "Resolve the issues in the messages first"
-                : busy ? "Calculating…" : undefined}
+              tooltip={conflicted || calc.isError || select.isError ? t("CONFIG_RESOLVE_FIRST")
+                : busy ? t("CONFIG_CALCULATING") : undefined}
               onClick={finalize}>
-              {mustPick ? "Select candidate" : project.b1DocEntry !== null ? "Update quote" : "Create quote"}
+              {mustPick ? t("CONFIG_SELECT_CANDIDATE") : project.b1DocEntry !== null ? t("CONFIG_UPDATE_QUOTE") : t("CONFIG_CREATE_QUOTE")}
             </Button>
           ) : null}
           {canDecide && project.status === "submitted" ? (
-            <Button design="Positive" disabled={deciding} onClick={() => accept.mutate({ id })}>Accept</Button>
+            <Button design="Positive" disabled={deciding} onClick={() => accept.mutate({ id })}>{t("CONFIG_ACCEPT")}</Button>
           ) : null}
           {/* Not while an edit is still saving: the decision locks the request, and the edit with it. */}
           {canDecide ? (
             <>
-              <Button design="Default" disabled={deciding || unsaved} onClick={() => void decide("sendBack")}>Send back</Button>
-              <Button design="Negative" disabled={deciding || unsaved} onClick={() => void decide("decline")}>Decline</Button>
+              <Button design="Default" disabled={deciding || unsaved} onClick={() => void decide("sendBack")}>{t("CONFIG_SEND_BACK")}</Button>
+              <Button design="Negative" disabled={deciding || unsaved} onClick={() => void decide("decline")}>{t("CONFIG_DECLINE")}</Button>
             </>
           ) : null}
         </>
@@ -469,6 +475,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   // No ObjectPageHeader and no message strips: everything the page has to say is one list behind
   // the title's MessageViewButton, grouped by the section it belongs to.
   const messages = configMessages({
+    t,
     model: model.definition,
     name: project.name,
     customer: !!project.customer?.cardCode,
@@ -493,31 +500,31 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
       {...sectionParam.props}
       titleArea={
         <ObjectPageTitle
-          header={<Title>{project.name.trim() || "New configuration"}</Title>}
+          header={<Title>{project.name.trim() || t("CONFIG_NEW")}</Title>}
           subHeader={request ? (
-            <Text>{`${request.cardName} · ${request.assigneeName ? `Assigned to ${request.assigneeName}` : "Not accepted yet"}`}</Text>
+            <Text>{t("CONFIG_REQUEST_SUB", request.cardName, request.assigneeName ? t("CONFIG_ASSIGNED", request.assigneeName) : t("CONFIG_NOT_ACCEPTED"))}</Text>
           ) : project.customer?.cardName ? <Text>{project.customer.cardName}</Text> : undefined}
           navigationBar={
             <Toolbar design="Transparent">
               {/* A Toolbar only measures — and overflows — its own item types: the two plain
                   controls are wrapped, everything else is a ToolbarButton. */}
               <ToolbarItem overflowPriority="NeverOverflow">
-                <PageMessages messages={messages} okText="No issues — everything checks out."
+                <PageMessages messages={messages} okText={t("CONFIG_OK")}
                   onSection={sectionParam.go} />
               </ToolbarItem>
               {/* A toggle, so the pressed state is announced — Fiori's trigger for side content. */}
               <ToolbarItem overflowPriority="NeverOverflow">
                 <ToggleButton design="Transparent" disabled={locked} pressed={railShown}
                   icon={railShown ? "close-command-field" : "open-command-field"}
-                  tooltip={locked ? "Read-only — there is nothing left to configure"
-                    : railShown ? "Hide insights" : "Show insights"}
+                  tooltip={locked ? t("CONFIG_READONLY_RAIL")
+                    : railShown ? t("CONFIG_HIDE_INSIGHTS") : t("CONFIG_SHOW_INSIGHTS")}
                   onClick={() => setRailOpen((o) => !o)} />
               </ToolbarItem>
               <ToolbarButton icon="synchronize" design="Transparent" disabled={sync.isPending}
-                tooltip="Refresh the SAP data this model reads"
+                tooltip={t("CONFIG_REFRESH_SAP")}
                 onClick={() => sync.mutate({ id })} />
               {project.b1DocEntry !== null && isAdmin ? (
-                <ToolbarButton icon="document-text" design="Transparent" text="Open quotation"
+                <ToolbarButton icon="document-text" design="Transparent" text={t("CONFIG_OPEN_QUOTE")}
                   onClick={() => navigate({
                     to: "/$slug/b1/$entity/$key",
                     params: { entity: "Quotations", key: String(project.b1DocEntry) },
@@ -528,39 +535,39 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
           actionsBar={
             <Toolbar design="Transparent">
               <ToolbarButton icon="copy" design="Transparent" disabled={draft !== null || duplicate.isPending}
-                tooltip={draft !== null ? "Calculate first" : "Duplicate configuration"}
-                text={duplicate.isPending ? "Duplicating…" : "Duplicate"}
+                tooltip={draft !== null ? t("CONFIG_CALC_FIRST") : t("CONFIG_DUPLICATE_TIP")}
+                text={duplicate.isPending ? t("CONFIG_DUPLICATING") : t("CONFIG_DUPLICATE")}
                 onClick={() => duplicate.mutate({ id })} />
               {/* A client's request is declined, never deleted (the server refuses it too). */}
               {request ? null : <ToolbarButton icon="delete" design="Transparent" disabled={locked || remove.isPending}
-                tooltip={locked ? "A quoted configuration cannot be deleted" : "Delete configuration"}
-                text="Delete"
+                tooltip={locked ? t("CONFIG_DELETE_LOCKED") : t("CONFIG_DELETE_TIP")}
+                text={t("CONFIG_DELETE")}
                 onClick={async () => {
                   if (await confirm({
-                    title: "Delete configuration",
+                    title: t("CONFIG_DELETE_TITLE"),
                     // Same fallback as the title: a configuration is created unnamed.
-                    message: `Delete "${project.name.trim() || "New configuration"}"? This can't be undone.`,
-                    actionText: "Delete", destructive: true,
+                    message: t("CONFIG_DELETE_ONE", project.name.trim() || t("CONFIG_NEW")),
+                    actionText: t("CONFIG_DELETE"), destructive: true,
                   })) remove.mutate({ ids: [id] });
                 }} />}
             </Toolbar>
           }>
           <Tag design={st.state === "None" ? "Neutral" : st.state} style={{ alignSelf: "center" }}>
-            {st.text}
+            {projectStatusText(t, project.status)}
           </Tag>
           {/* The client's answer to the quotation (D20). A decline reopens the request in review. */}
           {request && project.quoteResponse ? (
             <Tag design={project.quoteResponse === "accepted" ? "Positive" : "Critical"} style={{ alignSelf: "center" }}>
-              {project.quoteResponse === "accepted" ? "Accepted by client" : "Declined by client"}
+              {project.quoteResponse === "accepted" ? t("CONFIG_ACCEPTED_CLIENT") : t("CONFIG_DECLINED_CLIENT")}
             </Tag>
           ) : null}
         </ObjectPageTitle>
       }
       footerArea={footerUp ? footer : undefined}
     >
-      <ObjectPageSection id="configure" titleText="Configure" >
+      <ObjectPageSection id="configure" titleText={t("CONFIG_SECTION_CONFIGURE")} >
         <DynamicSideContent style={{ flex: 1, minHeight: 0 }} sideContentVisibility="AlwaysShow"
-          hideSideContent={!railShown} accessibilityAttributes={{ sideContent: { ariaLabel: "Insights" } }}
+          hideSideContent={!railShown} accessibilityAttributes={{ sideContent: { ariaLabel: t("CONFIG_INSIGHTS") } }}
           sideContent={
             // No padding on top: the rail's first panel lines up with the General panel.
             // The form column has none, and both are Panel headers.
@@ -568,13 +575,13 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
               {/* The total rides in headerText rather than a `header` slot: a custom header is only
                   toggled by its arrow, this one by the whole bar — and the figure survives collapsing. */}
               <Panel accessibleRole="Form" headerLevel="H5"
-                headerText={totals ? `Cost elements · ${formatMoney(totals.cost, currency)}` : "Cost elements"}>
+                headerText={totals ? t("CONFIG_COST_ELEMENTS_TOTAL", formatMoney(totals.cost, currency)) : t("CONFIG_COST_ELEMENTS")}>
                 <div style={PANEL_BODY}>
                   {money && totals ? (
                     <CostBody rows={itemRows} money={money} totals={totals} cur={currency} />
                   ) : (
-                    <IllustratedMessage name="NoData" design="ExtraSmall" titleText="No costs yet"
-                      subtitleText="Add at least one item with a quantity — the calculation fills this in." />
+                    <IllustratedMessage name="NoData" design="ExtraSmall" titleText={t("CONFIG_NO_COSTS")}
+                      subtitleText={t("CONFIG_NO_COSTS_SUB")} />
                   )}
                   {optionPrices.length ? <OptionPrices rows={optionPrices} cur={currency} /> : null}
                 </div>
@@ -582,7 +589,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
               {/* No mappings means the History tab was never filled in — an empty "not set up"
                   panel is just noise in the rail. Copy is an edit, so it waits for General too. */}
               {headReady && model.definition.history?.mappings.length ? (
-                <Panel accessibleRole="Form" headerLevel="H5" headerText="Similar configurations" collapsed>
+                <Panel accessibleRole="Form" headerLevel="H5" headerText={t("CONFIG_SIMILAR")} collapsed>
                   <div style={PANEL_BODY}>
                     <SimilarConfigs projectId={id} model={model.definition} entries={entries} onCopy={copyValues} />
                   </div>
@@ -596,8 +603,8 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
             {general}
             {/* Read-only has no edit to lose, so a locked page shows its configuration regardless. */}
             {!headReady && !locked ? (
-              <IllustratedMessage name="NoData" design="Small" titleText="Complete General first"
-                subtitleText="The configurator opens once the configuration has a name, a customer and a batch quantity." />
+              <IllustratedMessage name="NoData" design="Small" titleText={t("CONFIG_COMPLETE_GENERAL")}
+                subtitleText={t("CONFIG_COMPLETE_GENERAL_SUB")} />
             ) : lookups.data && lk && prop ? (
               <ConfiguratorForm model={model.definition} lookups={lookups.data} lk={lk} prop={prop}
                 entries={entries} readOnly={locked} querySource={{ modelId: project.modelId }}
@@ -608,14 +615,14 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
             ) : lookups.error ? (
               /* Why the options are missing is a page message; the retry it needs is not something
                  a message can carry, so the button stays here. */
-              <Button icon="refresh" onClick={() => void lookups.refetch()}>Retry loading options</Button>
+              <Button icon="refresh" onClick={() => void lookups.refetch()}>{t("CONFIG_RETRY_OPTIONS")}</Button>
             ) : <BusyIndicator active delay={0} />}
           </div>
         </DynamicSideContent>
       </ObjectPageSection>
       {/* The count rides in the tab, like the model builder's issue counts — the Fiori anchor-bar
           counter. The real one, not prop.candidateEstimate: by the time it shows, it has calculated. */}
-      <ObjectPageSection id="candidates" titleText={runReady ? `Candidates (${candidates.length})` : "Candidates"}>
+      <ObjectPageSection id="candidates" titleText={runReady ? t("CONFIG_CANDIDATES_COUNT", String(candidates.length)) : t("CONFIG_SECTION_CANDIDATES")}>
         {/* capped/widest are not passed: this page reports them in its message popover. No lookups
             needed either — the prices are the calculation's own, so they render with the agent off.
             A pending edit is about to replace these candidates, so they stop taking picks. */}
@@ -625,13 +632,13 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
             onSelect={(s) => { if (select.isError) select.reset(); setSel(s); }}
             disabled={locked || draft !== null} />
         ) : (
-          <IllustratedMessage name="NoData" design="Medium" titleText="No candidates yet"
-            subtitleText="They appear here once the configuration is complete and has calculated." />
+          <IllustratedMessage name="NoData" design="Medium" titleText={t("CONFIG_NO_CANDIDATES")}
+            subtitleText={t("CONFIG_NO_CANDIDATES_SUB")} />
         )}
       </ObjectPageSection>
       {/* ObjectPage's children are sections or booleans — not null. */}
       {!!request && (
-        <ObjectPageSection id="timeline" titleText="Timeline">
+        <ObjectPageSection id="timeline" titleText={t("CONFIG_SECTION_TIMELINE")}>
           <RequestTimeline id={id} />
         </ObjectPageSection>
       )}

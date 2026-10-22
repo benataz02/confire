@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { Bar, Button, CheckBox, Dialog, Input, Label, MessageStrip, Option, Select } from "@ui5/webcomponents-react";
 import type { PortalRole } from "@confire/db";
-import { ROLE_HELP, ROLE_LABEL, ROLES } from "./CompanyPeople.tsx";
+import { useUiI18n } from "../i18n.ts";
+import { ROLE_HELP_KEY, ROLE_TEXT_KEY, ROLES } from "./CompanyPeople.tsx";
 
 // Invite someone into a customer company (spec §5.1). Shared: an internal admin invites from the BP
 // Object Page (and may register the address's domain), a company owner from the portal's company
@@ -26,6 +27,7 @@ export function InviteDialog(p: {
   onSubmit: (v: InviteValues) => void;
   onClose: () => void;
 }) {
+  const i18n = useUiI18n();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<PortalRole>(p.defaultRole ?? "owner");
   const [registerDomain, setRegisterDomain] = useState(false);
@@ -38,31 +40,31 @@ export function InviteDialog(p: {
       footer={
         <Bar design="Footer" endContent={
           <>
-            <Button design="Emphasized" disabled={!ok} onClick={submit}>{p.busy ? "Sending…" : "Send invitation"}</Button>
-            <Button onClick={p.onClose}>Cancel</Button>
+            <Button design="Emphasized" disabled={!ok} onClick={submit}>{p.busy ? i18n.getText("UI_SENDING") : i18n.getText("UI_SEND_INVITATION")}</Button>
+            <Button onClick={p.onClose}>{i18n.getText("UI_CANCEL")}</Button>
           </>
         } />
       }>
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", padding: "0.5rem 0" }}>
         {p.error ? <MessageStrip design="Negative" hideCloseButton>{p.error}</MessageStrip> : null}
         {p.intro}
-        <Label for="invite-email" required showColon>Email</Label>
+        <Label for="invite-email" required showColon>{i18n.getText("UI_EMAIL")}</Label>
         <Input id="invite-email" type="Email" value={email} style={{ width: "100%" }}
           onInput={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
         {p.defaultRole ? (
           <>
-            <Label for="invite-role" showColon>Role</Label>
+            <Label for="invite-role" showColon>{i18n.getText("UI_ROLE")}</Label>
             <Select id="invite-role" value={role} style={{ width: "100%" }}
               onChange={(e) => setRole(e.detail.selectedOption.value as PortalRole)}>
-              {ROLES.map((r) => <Option key={r} value={r} additionalText={ROLE_HELP[r]}>{ROLE_LABEL[r]}</Option>)}
+              {ROLES.map((r) => <Option key={r} value={r} additionalText={i18n.getText(ROLE_HELP_KEY[r])}>{i18n.getText(ROLE_TEXT_KEY[r])}</Option>)}
             </Select>
           </>
         ) : null}
         {p.registerDomainFor ? (
           <CheckBox checked={registerDomain} wrappingType="Normal" onChange={(e) => setRegisterDomain(e.target.checked)}
             text={domain
-              ? `Anyone with a verified @${domain} address may join ${p.registerDomainFor} as viewer (not for free-mail addresses)`
-              : `Anyone with a verified address on the same domain may join ${p.registerDomainFor} as viewer`} />
+              ? i18n.getText("UI_DOMAIN_KNOWN", domain, p.registerDomainFor)
+              : i18n.getText("UI_DOMAIN_ANY", p.registerDomainFor)} />
         ) : null}
       </div>
     </Dialog>

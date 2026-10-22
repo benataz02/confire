@@ -1,6 +1,16 @@
 import { isTableGroup, type Issue, type ModelDef } from "@confire/config-engine";
 import type { PageMessage } from "../PageMessages.tsx";
 
+/** `i18n.getText`, passed in so this module stays free of the bundle. */
+export type Translate = (key: string, ...params: string[]) => string;
+
+/** Bundle text, or the English `fallback` while the bundle is still loading — a default written
+ *  onto the model must not be the raw key. */
+export function copy(t: Translate, key: string, fallback: string): string {
+  const v = t(key);
+  return v && v !== key ? v : fallback;
+}
+
 /** The ObjectPageSection an issue path belongs to. BOM and routing share Item Structure, and
  *  tables live in the structure tree on Parameters, so every one of those lands there. */
 export function sectionOf(path: string): string {
@@ -13,12 +23,17 @@ export function sectionOf(path: string): string {
   return "settings"; // pricing.*
 }
 
-/** Section id -> tab label. The page titles its tabs from this too, so a message's group header and
- *  the tab it jumps to cannot drift apart. */
-export const SECTION_TITLE: Record<string, string> = {
-  settings: "Settings", params: "Parameters", rules: "Rules",
-  outputs: "Item Structure", history: "History",
+/** Section id -> tab-label key. The page titles its tabs from this too, so a message's group header
+ *  and the tab it jumps to cannot drift apart. */
+const SECTION_KEYS: Record<string, string> = {
+  settings: "MODEL_SECTION_SETTINGS", params: "MODEL_SECTION_PARAMS", rules: "MODEL_SECTION_RULES",
+  outputs: "MODEL_SECTION_OUTPUTS", history: "MODEL_SECTION_HISTORY",
 };
+
+export function sectionTitle(t: Translate, id: string): string {
+  const key = SECTION_KEYS[id];
+  return key ? t(key) : id;
+}
 
 const expr = (path: string) => `[id="expr-${path}"]`;
 
@@ -70,30 +85,32 @@ export function builderMessages(a: {
   actionError?: Error | null;
   /** the preview's value help could not be resolved (agent offline, broken query) */
   lookupsError?: Error | null;
+  t: Translate;
 }): PageMessage[] {
+  const { t } = a;
   const out: PageMessage[] = [];
   const validate = a.tried !== false;
 
   if (validate && !a.draft.name.trim())
     out.push({
-      id: "name", type: "Negative", text: "Enter a model name",
-      detail: "A model cannot be saved unnamed.",
-      group: SECTION_TITLE.settings!, section: "settings", anchor: "#model-name",
+      id: "name", type: "Negative", text: t("MODEL_NAME_REQUIRED"),
+      detail: t("MODEL_NAME_UNNAMED"),
+      group: sectionTitle(t, "settings"), section: "settings", anchor: "#model-name",
     });
 
   if (validate) a.issues.forEach((issue, i) => {
     const section = sectionOf(issue.path);
     out.push({
       id: `${issue.path}:${i}`, type: "Negative", text: issue.message, detail: issue.path,
-      group: SECTION_TITLE[section]!, section, anchor: anchorOf(issue.path, a.draft),
+      group: sectionTitle(t, section), section, anchor: anchorOf(issue.path, a.draft),
     });
   });
 
   if (a.lookupsError)
     out.push({
       id: "lookups", type: "Negative", text: a.lookupsError.message,
-      detail: "Option lists could not be loaded",
-      group: SECTION_TITLE.params!, section: "params",
+      detail: t("MODEL_LOOKUPS_FAILED"),
+      group: sectionTitle(t, "params"), section: "params",
     });
 
   // The preview falls back to the last valid draft while the model has errors; without saying so it
@@ -101,15 +118,15 @@ export function builderMessages(a: {
   if (validate && a.issues.length)
     out.push({
       id: "preview", type: "Critical",
-      text: `Preview shows the last valid version — fix ${a.issues.length} error${a.issues.length === 1 ? "" : "s"} to preview the current draft.`,
-      group: SECTION_TITLE.params!, section: "params",
+      text: t(a.issues.length === 1 ? "MODEL_PREVIEW_STALE" : "MODEL_PREVIEW_STALE_N", String(a.issues.length)),
+      group: sectionTitle(t, "params"), section: "params",
     });
 
   // No section: these are about the model as a whole, so there is nowhere to jump.
   if (a.saveError)
-    out.push({ id: "save", type: "Negative", text: a.saveError.message, detail: "Save failed", group: "Model" });
+    out.push({ id: "save", type: "Negative", text: a.saveError.message, detail: t("MODEL_SAVE_FAILED"), group: t("MODEL_GROUP_MODEL") });
   if (a.actionError)
-    out.push({ id: "action", type: "Negative", text: a.actionError.message, detail: "Action failed", group: "Model" });
+    out.push({ id: "action", type: "Negative", text: a.actionError.message, detail: t("MODEL_ACTION_FAILED"), group: t("MODEL_GROUP_MODEL") });
 
   return out;
 }

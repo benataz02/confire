@@ -4,8 +4,9 @@ import {
   BusyIndicator, Button, FlexBox, Input, Label, MessageStrip, Option, Select, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow,
   TableRowAction, Text,
 } from "@ui5/webcomponents-react";
+import { useI18n } from "../../i18n.ts";
 import { orpc } from "../../orpc.ts";
-import { NOTIFY_MODE_LABEL } from "../settings/PortalMail.tsx";
+import { notifyEventLabel, notifyModeLabel, } from "../settings/PortalMail.tsx";
 import { CompanyPeople } from "@confire/ui/portal/CompanyPeople.tsx";
 import { InviteDialog } from "@confire/ui/portal/InviteDialog.tsx";
 import { confirm } from "@confire/ui/confirm.ts";
@@ -29,6 +30,7 @@ function useRefresh(cardCode: string) {
 }
 
 export function InviteToPortal({ cardCode, cardName }: { cardCode: string; cardName: string }) {
+  const i18n = useI18n();
   const [open, setOpen] = useState(false);
   const company = useQuery(companyQuery(cardCode));
   const refresh = useRefresh(cardCode);
@@ -36,7 +38,7 @@ export function InviteToPortal({ cardCode, cardName }: { cardCode: string; cardN
     onSuccess: (_r, v) => {
       refresh();
       setOpen(false);
-      toast(`Invitation sent to ${v.email}`);
+      toast(i18n.getText("ADMIN_INVITE_SENT", v.email));
     },
   }));
   // The first person in becomes its owner by default (spec §5.1): someone has to invite the rest.
@@ -44,14 +46,14 @@ export function InviteToPortal({ cardCode, cardName }: { cardCode: string; cardN
   return (
     <>
       <Button icon="paper-plane" disabled={company.isPending} onClick={() => { invite.reset(); setOpen(true); }}>
-        Invite to portal
+        {i18n.getText("ADMIN_INVITE_PORTAL")}
       </Button>
       {open ? (
         <InviteDialog
-          headerText="Invite to portal"
+          headerText={i18n.getText("ADMIN_INVITE_PORTAL")}
           intro={<Text>{first
-            ? `Nobody from ${cardName} is on your customer portal yet. The first person is usually its owner: they can invite their colleagues.`
-            : `They join ${cardName} on your customer portal.`}</Text>}
+            ? i18n.getText("ADMIN_INVITE_FIRST", cardName)
+            : i18n.getText("ADMIN_INVITE_JOIN", cardName)}</Text>}
           defaultRole={first ? "owner" : "buyer"}
           registerDomainFor={cardName}
           busy={invite.isPending}
@@ -66,19 +68,20 @@ export function InviteToPortal({ cardCode, cardName }: { cardCode: string; cardN
 /** *Invite new client* (spec §5.1, D25), from the BP List Report header: no CardCode yet. The
  *  invitee fills the onboarding form, whose submit creates the lead in SAP; they are its owner. */
 export function InviteNewClientDialog({ onClose }: { onClose: () => void }) {
+  const i18n = useI18n();
   const qc = useQueryClient();
   const invite = useMutation(orpc.portalInvitations.inviteNew.mutationOptions({
     onSuccess: (_r, v) => {
       void qc.invalidateQueries({ queryKey: orpc.portalInvitations.rows.key() });
       onClose();
-      toast(`Invitation sent to ${v.email}`);
+      toast(i18n.getText("ADMIN_INVITE_SENT", v.email));
     },
   }));
   return (
     <InviteDialog
-      headerText="Invite new client"
-      intro={<Text>They fill in their company's details on your customer portal. Submitting creates a lead in SAP, and they become its owner on the portal.</Text>}
-      registerDomainFor="their company"
+      headerText={i18n.getText("ADMIN_INVITE_NEW_CLIENT")}
+      intro={<Text>{i18n.getText("ADMIN_INVITE_NEW_INTRO")}</Text>}
+      registerDomainFor={i18n.getText("ADMIN_THEIR_COMPANY")}
       busy={invite.isPending}
       error={invite.error?.message}
       onSubmit={({ email, registerDomain }) => invite.mutate({ email, registerDomain })}
@@ -89,6 +92,7 @@ export function InviteNewClientDialog({ onClose }: { onClose: () => void }) {
 const rowKeyOf = (row: unknown) => (row as { rowKey: string }).rowKey;
 
 export function BpPortalSection({ cardCode, cardName }: { cardCode: string; cardName: string }) {
+  const i18n = useI18n();
   const q = useQuery(companyQuery(cardCode));
   const refresh = useRefresh(cardCode);
   // The last edit's refusal only: each new edit clears it. onSettled, not onSuccess: a refused role
@@ -112,7 +116,7 @@ export function BpPortalSection({ cardCode, cardName }: { cardCode: string; card
       {error ? <MessageStrip design="Negative" hideCloseButton>{error.message}</MessageStrip> : null}
       {!d?.company ? (
         <MessageStrip design="Information" hideCloseButton>
-          Nobody from {cardName} is on your customer portal yet. Use Invite to portal to send the first invitation.
+          {i18n.getText("ADMIN_PORTAL_EMPTY", cardName, i18n.getText("ADMIN_INVITE_PORTAL"))}
         </MessageStrip>
       ) : (
         <>
@@ -121,17 +125,17 @@ export function BpPortalSection({ cardCode, cardName }: { cardCode: string; card
           <CompanyPeople key={q.dataUpdatedAt} members={d.members} invitations={d.invitations} busy={busy}
             onSetRole={(m, role) => setRole.mutate({ cardCode, userId: m.userId, role })}
             onRemove={async (m) => {
-              if (await confirm({ title: "Remove from portal", message: `Remove ${m.name} (${m.email}) from ${cardName}? They lose access at once.`, actionText: "Remove", destructive: true }))
+              if (await confirm({ title: i18n.getText("ADMIN_REMOVE_PORTAL_TITLE"), message: i18n.getText("ADMIN_REMOVE_PORTAL_MSG", m.name, m.email, cardName), actionText: i18n.getText("ADMIN_REMOVE"), destructive: true }))
                 removeMember.mutate({ cardCode, userId: m.userId });
             }}
             onCancelInvite={async (i) => {
-              if (await confirm({ title: "Cancel invitation", message: `Cancel the invitation to ${i.email}? Its link stops working.`, actionText: "Cancel invitation", destructive: true }))
+              if (await confirm({ title: i18n.getText("ADMIN_CANCEL_INVITE_TITLE"), message: i18n.getText("ADMIN_CANCEL_INVITE_MSG", i.email), actionText: i18n.getText("ADMIN_CANCEL_INVITE"), destructive: true }))
                 cancel.mutate({ ids: [i.id] });
             }} />
           <FlexBox direction="Column" style={{ gap: "0.5rem" }}>
-            <Label showColon>Registered email domains</Label>
-            <Text>A verified sign-in on one of these domains joins {cardName} as viewer, without an invitation.</Text>
-            <Table accessibleName="Registered email domains" overflowMode="Popin" noDataText="No domain registered."
+            <Label showColon>{i18n.getText("ADMIN_DOMAINS")}</Label>
+            <Text>{i18n.getText("ADMIN_DOMAINS_HELP", cardName)}</Text>
+            <Table accessibleName={i18n.getText("ADMIN_DOMAINS")} overflowMode="Popin" noDataText={i18n.getText("ADMIN_NO_DOMAIN")}
               rowActionCount={1}
               onRowActionClick={(e) => {
                 const name = rowKeyOf(e.detail.row);
@@ -139,12 +143,12 @@ export function BpPortalSection({ cardCode, cardName }: { cardCode: string; card
               }}
               headerRow={
                 <TableHeaderRow>
-                  <TableHeaderCell minWidth="12rem">Domain</TableHeaderCell>
-                  <TableHeaderCell width="8rem">Added</TableHeaderCell>
+                  <TableHeaderCell minWidth="12rem">{i18n.getText("ADMIN_DOMAIN")}</TableHeaderCell>
+                  <TableHeaderCell width="8rem">{i18n.getText("ADMIN_ADDED")}</TableHeaderCell>
                 </TableHeaderRow>
               }>
               {d.domains.map((x) => (
-                <TableRow key={x.domain} rowKey={x.domain} actions={<TableRowAction icon="delete" text="Remove domain" />}>
+                <TableRow key={x.domain} rowKey={x.domain} actions={<TableRowAction icon="delete" text={i18n.getText("ADMIN_REMOVE_DOMAIN")} />}>
                   <TableCell><Text>{x.domain}</Text></TableCell>
                   <TableCell><Text>{formatValue(x.addedAt, "date")}</Text></TableCell>
                 </TableRow>
@@ -152,35 +156,38 @@ export function BpPortalSection({ cardCode, cardName }: { cardCode: string; card
             </Table>
             {d.notify ? (
               <FlexBox direction="Column" style={{ gap: "0.5rem" }}>
-                <Label showColon>Email notifications</Label>
-                <Text>Who at {cardName} hears about their projects. The tenant default is Settings → Portal's.</Text>
-                <Table accessibleName="Email notifications" overflowMode="Popin"
-                  headerRow={<TableHeaderRow><TableHeaderCell minWidth="12rem">When your team…</TableHeaderCell><TableHeaderCell minWidth="14rem">Mail goes to</TableHeaderCell></TableHeaderRow>}>
-                  {d.notify.events.map((e) => (
+                <Label showColon>{i18n.getText("ADMIN_EMAIL_NOTIFICATIONS")}</Label>
+                <Text>{i18n.getText("ADMIN_NOTIFY_COMPANY", cardName)}</Text>
+                <Table accessibleName={i18n.getText("ADMIN_EMAIL_NOTIFICATIONS")} overflowMode="Popin"
+                  headerRow={<TableHeaderRow><TableHeaderCell minWidth="12rem">{i18n.getText("ADMIN_WHEN_TEAM")}</TableHeaderCell><TableHeaderCell minWidth="14rem">{i18n.getText("ADMIN_MAIL_GOES_TO")}</TableHeaderCell></TableHeaderRow>}>
+                  {d.notify.events.map((e) => {
+                    const event = notifyEventLabel((k) => i18n.getText(k), e.key, e.label);
+                    return (
                     <TableRow key={e.key} rowKey={e.key}>
-                      <TableCell><Text>{e.label}</Text></TableCell>
+                      <TableCell><Text>{event}</Text></TableCell>
                       <TableCell>
-                        <Select accessibleName={`${e.label}: who gets mail`} disabled={busy} style={{ width: "19rem" }} value={d.notify!.company[e.key] ?? ""}
+                        <Select accessibleName={i18n.getText("ADMIN_NOTIFY_WHO", event)} disabled={busy} style={{ width: "19rem" }} value={d.notify!.company[e.key] ?? ""}
                           onChange={(ev) => {
                             const v = ev.detail.selectedOption.value ?? "";
                             const { [e.key]: _old, ...rest } = d.notify!.company;
                             setNotify.mutate({ cardCode, notify: v ? { ...rest, [e.key]: v as "off" } : rest });
                           }}>
-                          <Option value="">{`Tenant default (${NOTIFY_MODE_LABEL[d.notify!.tenant[e.key] ?? "buyers"]})`}</Option>
-                          {Object.entries(NOTIFY_MODE_LABEL).map(([v, l]) => <Option key={v} value={v}>{l}</Option>)}
+                          <Option value="">{i18n.getText("ADMIN_TENANT_DEFAULT", notifyModeLabel((k) => i18n.getText(k), d.notify!.tenant[e.key] ?? "buyers"))}</Option>
+                          {(["buyers", "creator", "off"] as const).map((v) => <Option key={v} value={v}>{notifyModeLabel((k) => i18n.getText(k), v)}</Option>)}
                         </Select>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </Table>
               </FlexBox>
             ) : null}
             <FlexBox style={{ gap: "0.5rem" }}>
-              <Input value={domain} placeholder="kunde.de" accessibleName="Domain to register" style={{ width: "16rem" }}
+              <Input value={domain} placeholder="kunde.de" accessibleName={i18n.getText("ADMIN_DOMAIN_INPUT")} style={{ width: "16rem" }}
                 onInput={(e) => setDomain(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && domain.trim() && addDomain.mutate({ cardCode, domain })} />
               <Button icon="add" disabled={!domain.trim() || busy} onClick={() => addDomain.mutate({ cardCode, domain })}>
-                Register domain
+                {i18n.getText("ADMIN_REGISTER_DOMAIN")}
               </Button>
             </FlexBox>
           </FlexBox>

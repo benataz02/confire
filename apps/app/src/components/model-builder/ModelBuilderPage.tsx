@@ -10,8 +10,9 @@ import type { Issue, ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { useDraftModel } from "./useDraftModel.ts";
 import { useSectionParam } from "../../lib/sectionParam.ts";
+import { useI18n } from "../../i18n.ts";
 import { PageMessages } from "../PageMessages.tsx";
-import { builderMessages, SECTION_TITLE } from "./builderMessages.ts";
+import { builderMessages, sectionTitle, type Translate } from "./builderMessages.ts";
 import { confirm } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { SettingsTab } from "./SettingsTab.tsx";
@@ -28,16 +29,18 @@ const EMPTY_MODEL: ModelDef = {
   bom: [], routing: [], pricing: { priceExpr: "0", quoteItemCode: "X" }, batchDefaults: [1],
 };
 
-const PREVIEW_AT: { key: PreviewAt; icon: string; tooltip: string }[] = [
-  { key: "left", icon: "arrow-left", tooltip: "Preview on the left" },
-  { key: "top", icon: "arrow-top", tooltip: "Preview above" },
-  { key: "bottom", icon: "arrow-bottom", tooltip: "Preview below" },
-  { key: "right", icon: "arrow-right", tooltip: "Preview on the right" },
-  { key: "hidden", icon: "hide", tooltip: "Hide preview" },
+const PREVIEW_AT: { key: PreviewAt; icon: string; tip: string }[] = [
+  { key: "left", icon: "arrow-left", tip: "MODEL_PREVIEW_LEFT" },
+  { key: "top", icon: "arrow-top", tip: "MODEL_PREVIEW_ABOVE" },
+  { key: "bottom", icon: "arrow-bottom", tip: "MODEL_PREVIEW_BELOW" },
+  { key: "right", icon: "arrow-right", tip: "MODEL_PREVIEW_RIGHT" },
+  { key: "hidden", icon: "hide", tip: "MODEL_PREVIEW_HIDE" },
 ];
 const PREVIEW_AT_KEY = "modelBuilder.previewAt";
 
 export function ModelBuilderPage({ id }: { id?: string }) {
+  const i18n = useI18n();
+  const t: Translate = (key, ...params) => i18n.getText(key, ...params);
   const m = useDraftModel(id);
   const navigate = useNavigate({ from: "/$slug" });
   const qc = useQueryClient();
@@ -54,10 +57,10 @@ export function ModelBuilderPage({ id }: { id?: string }) {
   // Copies the *persisted* model, hence disabled while dirty. Delete is not dirty-gated —
   // discarding the edits is the point — so it clears the flag before the blocker can ask.
   const duplicate = useMutation(orpc.models.duplicate.mutationOptions({
-    onSuccess: (r) => { invalidateLists(); toast("Model duplicated"); void navigate({ to: "/$slug/models/$id", params: { id: r.id } }); },
+    onSuccess: (r) => { invalidateLists(); toast(t("MODEL_TOAST_DUPLICATED")); void navigate({ to: "/$slug/models/$id", params: { id: r.id } }); },
   }));
   const remove = useMutation(orpc.models.remove.mutationOptions({
-    onSuccess: () => { m.setDirty(false); invalidateLists(); toast("Model deleted"); void navigate({ to: "/$slug/models" }); },
+    onSuccess: () => { m.setDirty(false); invalidateLists(); toast(t("MODEL_TOAST_DELETED")); void navigate({ to: "/$slug/models" }); },
   }));
 
   // Guard against losing an unsaved draft: intercept in-app navigation (including switching models,
@@ -67,9 +70,9 @@ export function ModelBuilderPage({ id }: { id?: string }) {
       if (current.pathname === next.pathname) return false;
       if (!m.dirty || m.saving) return false;
       return !(await confirm({
-        title: "Discard changes?",
-        message: "This model has unsaved changes. Leave without saving?",
-        actionText: "Discard",
+        title: t("MODEL_DISCARD_TITLE"),
+        message: t("MODEL_DISCARD_MSG"),
+        actionText: t("MODEL_DISCARD"),
         destructive: true,
       }));
     },
@@ -96,10 +99,12 @@ export function ModelBuilderPage({ id }: { id?: string }) {
     saveError: m.saveError,
     actionError: (remove.error ?? duplicate.error) as Error | null,
     lookupsError: lookups.error as Error | null,
+    t,
   });
   const secTitle = (secId: string) => {
+    const title = sectionTitle(t, secId);
     const n = messages.filter((x) => x.section === secId && x.type === "Negative").length;
-    return n ? `${SECTION_TITLE[secId]} (${n})` : SECTION_TITLE[secId]!;
+    return n ? t("MODEL_TAB_COUNT", title, String(n)) : title;
   };
 
   return (
@@ -113,8 +118,8 @@ export function ModelBuilderPage({ id }: { id?: string }) {
             header={
               // Trailing * is the unsaved-changes mark; the native tooltip is what says so, since
               // ObjectPageTitle has no draft-indicator slot of its own.
-              <Title level="H4" title={m.dirty ? "Unsaved changes" : undefined}>
-                {(draft.name.trim() || "New model") + (m.dirty ? " *" : "")}
+              <Title level="H4" title={m.dirty ? t("MODEL_UNSAVED") : undefined}>
+                {(draft.name.trim() || t("MODEL_NEW")) + (m.dirty ? " *" : "")}
               </Title>
             }
             subHeader={draft.description ? <Text>{draft.description}</Text> : undefined}
@@ -124,15 +129,15 @@ export function ModelBuilderPage({ id }: { id?: string }) {
                 <ToolbarItem overflowPriority="NeverOverflow">
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                     <Icon name="show" />
-                    <Label>Preview</Label>
-                    <SegmentedButton accessibleName="Preview position" itemsFitContent
+                    <Label>{t("MODEL_PREVIEW")}</Label>
+                    <SegmentedButton accessibleName={t("MODEL_PREVIEW_POSITION")} itemsFitContent
                       onSelectionChange={(e) => {
                         const key = (e.detail.selectedItems[0] as HTMLElement | undefined)?.dataset.key as PreviewAt | undefined;
                         if (key) { setPreviewAt(key); localStorage.setItem(PREVIEW_AT_KEY, key); }
                       }}>
                       {PREVIEW_AT.map((p) => (
-                        <SegmentedButtonItem key={p.key} data-key={p.key} icon={p.icon} tooltip={p.tooltip}
-                          accessibleName={p.tooltip} selected={previewAt === p.key} />
+                        <SegmentedButtonItem key={p.key} data-key={p.key} icon={p.icon} tooltip={t(p.tip)}
+                          accessibleName={t(p.tip)} selected={previewAt === p.key} />
                       ))}
                     </SegmentedButton>
                   </div>
@@ -145,27 +150,25 @@ export function ModelBuilderPage({ id }: { id?: string }) {
                     this is the only place they are reported, so it sits before the actions it
                     explains the disabled state of. */}
                 <PageMessages messages={messages}
-                  okText={m.tried
-                    ? "No issues — the model is valid."
-                    : "Nothing reported yet — Save checks the model."}
+                  okText={m.tried ? t("MODEL_OK_VALID") : t("MODEL_OK_UNTRIED")}
                   onSection={sectionParam.go} />
                 {id ? (
                   <Button icon="copy" design="Transparent" disabled={m.dirty || duplicate.isPending}
-                    tooltip={m.dirty ? "Save first" : "Duplicate model"}
+                    tooltip={m.dirty ? t("MODEL_SAVE_FIRST") : t("MODEL_DUPLICATE_TIP")}
                     onClick={() => duplicate.mutate({ id })}>
-                    Duplicate
+                    {t("MODEL_DUPLICATE")}
                   </Button>
                 ) : null}
                 {id ? (
                   <Button icon="delete" design="Transparent" disabled={remove.isPending}
                     onClick={async () => {
                       if (await confirm({
-                        title: "Delete model",
-                        message: `Delete "${draft.name || "this model"}"? A model used by a configuration can't be deleted. This cannot be undone.`,
-                        actionText: "Delete", destructive: true,
+                        title: t("MODEL_DELETE_TITLE"),
+                        message: t("MODEL_DELETE_IN_USE", draft.name || t("MODEL_THIS_MODEL")),
+                        actionText: t("MODEL_DELETE"), destructive: true,
                       })) remove.mutate({ ids: [id] });
                     }}>
-                    Delete
+                    {t("MODEL_DELETE")}
                   </Button>
                 ) : null}
               </Toolbar>
@@ -179,11 +182,11 @@ export function ModelBuilderPage({ id }: { id?: string }) {
                   and the popover above already carries the list. */}
               <Button design="Emphasized" disabled={!m.dirty || m.saving}
                 onClick={() => void m.save()}>
-                {m.saving ? "Saving…" : "Save"}
+                {m.saving ? t("MODEL_SAVING") : t("MODEL_SAVE")}
               </Button>
               {/* No setDirty(false) here, unlike Delete: leaving with edits is exactly the case the
                   blocker's "Discard changes?" exists for. */}
-              <Button disabled={m.saving} onClick={() => void navigate({ to: "/$slug/models" })}>Cancel</Button>
+              <Button disabled={m.saving} onClick={() => void navigate({ to: "/$slug/models" })}>{t("MODEL_CANCEL")}</Button>
             </>
           } />
         }

@@ -13,6 +13,8 @@ export type Brand = {
   logoUrl?: string | null;
   /** button colour; white text on it must reach 4.5:1 */
   accent?: string;
+  /** the From address's local part, `<sender>@mail.<domain>`: a tenant's slug; absent = notify */
+  sender?: string;
 };
 
 // The staff app serves apps/app/public, so the logo URL is its own.
@@ -43,8 +45,11 @@ export function Layout({ brand, preview, children }: { brand: Brand; preview: st
           </Section>
           <Section style={{ padding: "8px 32px 24px" }}>{children}</Section>
         </Container>
-        <Text style={{ color: "#8a97b8", fontSize: 12, textAlign: "center", margin: "16px 0 0" }}>
+        {/* Every mail is a no-reply notification: mail.<domain> receives nothing (mailer.ts). */}
+        <Text style={{ color: "#8a97b8", fontSize: 12, lineHeight: "18px", textAlign: "center", margin: "16px 0 0" }}>
           {brand.name === CONFIRE.name ? "Confire" : `${brand.name} · sent with Confire`}
+          <br />
+          This is an automated message. Replies to this address are not received.
         </Text>
       </Body>
     </Html>

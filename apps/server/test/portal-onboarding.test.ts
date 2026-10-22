@@ -166,11 +166,11 @@ describe("onboarding.submit", () => {
     expect(domains.map((d) => d.domain)).toEqual([email.split("@")[1]!]);
     // Used up: a second submit of the same link is refused before SAP.
     expect(await codeOf(call(portalRouter.onboarding.submit, { id, form: FORM }, on))).toBe("CONFLICT");
-    // The inviter hears of it (§5.4 step 6), and a reply reaches the new client.
+    // The inviter hears of it (§5.4 step 6).
     await notificationsSettled();
     const told = devOutbox.filter((m) => m.to === admin.email && m.subject.includes("joined your customer portal"));
     expect(told).toHaveLength(1);
-    expect(told[0]).toMatchObject({ replyTo: email, subject: `Neu GmbH joined your customer portal (${res.cardCode})` });
+    expect(told[0]).toMatchObject({ subject: `Neu GmbH joined your customer portal (${res.cardCode})` });
   });
 
   test("no series set: B1's default lead series; the seed ships to the bill-to address", async () => {

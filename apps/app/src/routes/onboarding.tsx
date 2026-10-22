@@ -1,5 +1,5 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Input, Button, MessageStrip, CheckBox } from "@ui5/webcomponents-react";
 import { authClient, sessionQuery } from "../auth-client.ts";
@@ -7,6 +7,15 @@ import { AuthLayout } from "../components/AuthLayout.tsx";
 import { lobbyQuery, orpc } from "../orpc.ts";
 import { authUrl, currentSlug, hardRedirect, isReserved, tenantUrl } from "@confire/ui/host.ts";
 import { copyInput, generateAgentSecret } from "../lib/agent-secret.ts";
+import { useI18n } from "../i18n.ts";
+
+/** Wrap the JSON key `secret` so the hint stays one sentence in either language. */
+function withCode(text: string): ReactNode {
+  const word = "secret";
+  const at = text.indexOf(word);
+  if (at < 0) return text;
+  return <>{text.slice(0, at)}<code>{word}</code>{text.slice(at + word.length)}</>;
+}
 
 export const Route = createFileRoute("/onboarding")({
   // Outside any workspace. A user with a company and an agent row belongs *in* the tenant;
@@ -31,6 +40,7 @@ const toSlug = (name: string) =>
 const SLUG_RE = /^[a-z][a-z0-9-]{1,30}$/;
 
 function Onboarding() {
+  const i18n = useI18n();
   const { agentSetupSlug } = Route.useRouteContext();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -68,7 +78,7 @@ function Onboarding() {
   const create = useMutation({
     mutationFn: async () => {
       const res = await authClient.organization.create({ name: company.trim(), slug });
-      if (res.error || !res.data) throw new Error(res.error?.message ?? "Could not create company");
+      if (res.error || !res.data) throw new Error(res.error?.message ?? i18n.getText("SHELL_AUTH_CREATE_FAILED"));
     },
     onSuccess: () => setStep("agent"),
   });
@@ -94,12 +104,12 @@ function Onboarding() {
   if (step === "agent") {
     return (
       <AuthLayout>
-        <h2 className="auth-h1">Connect your SAP agent</h2>
-        <p className="auth-sub">The cloud reaches B1 through the on-prem agent. Put this secret in agent.json.</p>
+        <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_CONNECT_TITLE")}</h2>
+        <p className="auth-sub">{i18n.getText("SHELL_AUTH_CONNECT_SUB")}</p>
         {errMsg ? <MessageStrip design="Negative" hideCloseButton>{errMsg}</MessageStrip> : null}
 
         <label className="auth-field">
-          <span>Agent URL</span>
+          <span>{i18n.getText("SHELL_AUTH_AGENT_URL")}</span>
           <Input
             value={agentUrl}
             placeholder={DEFAULT_AGENT_URL}
@@ -108,7 +118,7 @@ function Onboarding() {
         </label>
 
         <label className="auth-field">
-          <span>Shared secret</span>
+          <span>{i18n.getText("SHELL_AUTH_SHARED_SECRET")}</span>
           <input
             className="auth-secret"
             value={secret}
@@ -118,28 +128,29 @@ function Onboarding() {
           />
           <div className="auth-inline">
             <button type="button" className="auth-textbtn" onClick={() => { if (copyInput(document.querySelector<HTMLInputElement>(".auth-secret"))) setCopied(true); }}>
-              Copy
+              {i18n.getText("SHELL_AUTH_COPY")}
             </button>
             <button type="button" className="auth-textbtn" onClick={() => { setSecret(generateAgentSecret()); setCopied(false); }}>
-              Regenerate
+              {i18n.getText("SHELL_AUTH_REGENERATE")}
             </button>
           </div>
           <small className="auth-sub">
-            {copied ? "Copied. " : ""}Must match <code>secret</code> in the agent’s agent.json.
+            {copied ? `${i18n.getText("SHELL_AUTH_COPIED")} ` : ""}
+            {withCode(i18n.getText("SHELL_AUTH_SECRET_HINT"))}
           </small>
         </label>
 
         <label className="auth-field">
-          <span>Cloudflare Access client ID</span>
+          <span>{i18n.getText("SHELL_AUTH_CF_ID")}</span>
           <Input
             value={accessId}
-            placeholder="leave empty in local dev"
+            placeholder={i18n.getText("SHELL_AUTH_CF_ID_PLACEHOLDER")}
             onInput={(e) => setAccessId(e.target.value)}
           />
         </label>
 
         <label className="auth-field">
-          <span>Cloudflare Access client secret</span>
+          <span>{i18n.getText("SHELL_AUTH_CF_SECRET")}</span>
           <Input
             type="Password"
             value={accessSecret}
@@ -149,7 +160,7 @@ function Onboarding() {
 
         <CheckBox
           className="auth-check"
-          text="Beas is enabled"
+          text={i18n.getText("SHELL_AUTH_BEAS")}
           checked={beas}
           onChange={(e) => setBeas(e.target.checked)}
         />
@@ -165,11 +176,11 @@ function Onboarding() {
             beasEnabled: beas,
           })}
         >
-          {connect.isPending ? "Connecting…" : "Connect agent"}
+          {connect.isPending ? i18n.getText("SHELL_AUTH_CONNECTING") : i18n.getText("SHELL_AUTH_CONNECT")}
         </Button>
 
         <p className="auth-alt">
-          Not now? <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>Sign out</a>
+          {i18n.getText("SHELL_AUTH_NOT_NOW")} <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("SHELL_AUTH_SIGN_OUT")}</a>
         </p>
       </AuthLayout>
     );
@@ -177,12 +188,12 @@ function Onboarding() {
 
   return (
     <AuthLayout>
-      <h2 className="auth-h1">Set up your workspace</h2>
-      <p className="auth-sub">Create your company to get started.</p>
+      <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_SETUP_TITLE")}</h2>
+      <p className="auth-sub">{i18n.getText("SHELL_AUTH_SETUP_SUB")}</p>
       {errMsg ? <MessageStrip design="Negative" hideCloseButton>{errMsg}</MessageStrip> : null}
 
       <label className="auth-field">
-        <span>Company name</span>
+        <span>{i18n.getText("SHELL_AUTH_COMPANY_NAME")}</span>
         <Input
           value={company}
           placeholder="ACME GmbH"
@@ -191,7 +202,7 @@ function Onboarding() {
       </label>
 
       <label className="auth-field">
-        <span>Workspace URL</span>
+        <span>{i18n.getText("SHELL_AUTH_WORKSPACE_URL")}</span>
         <Input
           value={slug}
           placeholder="acme"
@@ -199,11 +210,11 @@ function Onboarding() {
           onKeyDown={(e) => e.key === "Enter" && canCreate && create.mutate()}
         />
         <small className="auth-sub">
-          {`${window.location.host}/${slug || "your-company"}`}
-          {slug && !slugValid ? " · use a-z, 0-9, hyphens" : ""}
-          {slugValid && avail.isFetching ? " · checking…" : ""}
-          {available ? " · ✓ available" : ""}
-          {slugValid && avail.data === false ? " · ✗ taken" : ""}
+          {`${window.location.host}/${slug || i18n.getText("SHELL_AUTH_SLUG_EXAMPLE")}`}
+          {slug && !slugValid ? ` ${i18n.getText("SHELL_AUTH_SLUG_INVALID")}` : ""}
+          {slugValid && avail.isFetching ? ` ${i18n.getText("SHELL_AUTH_SLUG_CHECKING")}` : ""}
+          {available ? ` ${i18n.getText("SHELL_AUTH_SLUG_AVAILABLE")}` : ""}
+          {slugValid && avail.data === false ? ` ${i18n.getText("SHELL_AUTH_SLUG_TAKEN")}` : ""}
         </small>
       </label>
 
@@ -212,11 +223,11 @@ function Onboarding() {
         disabled={!canCreate}
         onClick={() => create.mutate()}
       >
-        {create.isPending ? "Setting up…" : "Create company"}
+        {create.isPending ? i18n.getText("SHELL_AUTH_SETTING_UP") : i18n.getText("SHELL_AUTH_CREATE_COMPANY")}
       </Button>
 
       <p className="auth-alt">
-        Not now? <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>Sign out</a>
+        {i18n.getText("SHELL_AUTH_NOT_NOW")} <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("SHELL_AUTH_SIGN_OUT")}</a>
       </p>
     </AuthLayout>
   );

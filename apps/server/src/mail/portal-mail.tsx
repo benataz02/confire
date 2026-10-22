@@ -37,13 +37,12 @@ export function PortalInvitation({ brand, inviterName, companyName, url, expires
   );
 }
 
-/** The invitation as a Mail: from the supplier's name, replying to the tenant's sales address or
- *  else whoever sent it. The key makes a retried send the original send. */
-export const invitationMail = (p: InvitationProps & { id: string; to: string; replyTo: string }): Mail => ({
+/** The invitation as a Mail, from the supplier's name. The key makes a retried send the original send. */
+export const invitationMail = (p: InvitationProps & { id: string; to: string }): Mail => ({
   to: p.to,
   subject: `${p.inviterName} invited you to ${p.brand.name}'s customer portal`,
   fromName: p.brand.name,
-  replyTo: p.replyTo,
+  sender: p.brand.sender,
   idempotencyKey: `invite/${p.id}`,
   body: <PortalInvitation brand={p.brand} inviterName={p.inviterName} companyName={p.companyName} url={p.url} expiresAt={p.expiresAt} />,
 });
@@ -121,8 +120,8 @@ export function ClientProjectMail(p: ClientProjectProps) {
   );
 }
 
-export const clientProjectMail = (p: ClientProjectProps & { to: string; replyTo?: string }): Mail => ({
-  to: p.to, subject: CLIENT_COPY[p.kind](p).subject, fromName: p.brand.name, replyTo: p.replyTo,
+export const clientProjectMail = (p: ClientProjectProps & { to: string }): Mail => ({
+  to: p.to, subject: CLIENT_COPY[p.kind](p).subject, fromName: p.brand.name, sender: p.brand.sender,
   body: <ClientProjectMail {...p} />,
 });
 
@@ -181,8 +180,8 @@ export function StaffRequestMail(p: StaffRequestProps) {
   );
 }
 
-export const staffRequestMail = (p: StaffRequestProps & { to: string; replyTo?: string }): Mail => ({
-  to: p.to, subject: STAFF_COPY[p.kind](p).subject, fromName: p.brand.name, replyTo: p.replyTo,
+export const staffRequestMail = (p: StaffRequestProps & { to: string }): Mail => ({
+  to: p.to, subject: STAFF_COPY[p.kind](p).subject, fromName: p.brand.name,
   body: <StaffRequestMail {...p} />,
 });
 
@@ -202,8 +201,8 @@ export function ClientOnboardedMail(p: ClientOnboardedProps) {
   );
 }
 
-export const clientOnboardedMail = (p: ClientOnboardedProps & { to: string; replyTo?: string; invitationId: string }): Mail => ({
-  to: p.to, subject: `${p.cardName} joined your customer portal (${p.cardCode})`, fromName: p.brand.name, replyTo: p.replyTo,
+export const clientOnboardedMail = (p: ClientOnboardedProps & { to: string; invitationId: string }): Mail => ({
+  to: p.to, subject: `${p.cardName} joined your customer portal (${p.cardCode})`, fromName: p.brand.name,
   idempotencyKey: `onboarded/${p.invitationId}`,
   body: <ClientOnboardedMail {...p} />,
 });

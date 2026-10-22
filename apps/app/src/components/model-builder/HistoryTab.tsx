@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Button, Form, FormGroup, FormItem, Label, MessageStrip,
@@ -10,6 +11,7 @@ import type { ListColumn } from "@confire/ui/types.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { DeleteRows, useEditGrid } from "./useEditGrid.tsx";
 import { MasterdataQuerySelect } from "./MasterdataQuerySelect.tsx";
+import { useI18n } from "../../i18n.ts";
 
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
 type History = NonNullable<ModelDef["history"]>;
@@ -17,12 +19,7 @@ type Mapping = History["mappings"][number];
 const EMPTY: History = { mappings: [], display: [] };
 
 const FORM = { accessibleMode: "Edit", layout: "S1 M1 L1 XL1", labelSpan: "S12 M12 L12 XL12", headerLevel: "H5" } as const;
-const MAPPING_COLUMNS: ListColumn[] = [
-  { key: "param", label: "Parameter" },
-  { key: "column", label: "Column" },
-  { key: "match", label: "Match" },
-  { key: "weight", label: "Weight", width: 160 },
-];
+const MATCH_KEY = { exact: "MODEL_MATCH_EXACT", closeness: "MODEL_MATCH_CLOSENESS", contains: "MODEL_MATCH_CONTAINS" } as const;
 
 // Admin config for the process page's "Similar configurations" pane: which masterdata query to
 // rank against, param↔column mappings with match type + weight, and the columns each result shows.
@@ -38,6 +35,14 @@ export function HistoryTab({ draft, update, issues }: {
   update: Update;
   issues: Issue[];
 }) {
+  const i18n = useI18n();
+  const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
+  const mappingColumns = useMemo<ListColumn[]>(() => [
+    { key: "param", label: t("MODEL_PARAM") },
+    { key: "column", label: t("MODEL_COLUMN") },
+    { key: "match", label: t("MODEL_MATCH") },
+    { key: "weight", label: t("MODEL_WEIGHT"), width: 160 },
+  ], [i18n]);
   const h = draft.history ?? EMPTY;
   const setH = (patch: Partial<History>) => update((d) => ({ ...d, history: { ...EMPTY, ...d.history, ...patch } }));
 
@@ -53,7 +58,7 @@ export function HistoryTab({ draft, update, issues }: {
   });
   const setM = (i: number, patch: Partial<Mapping>) =>
     setH({ mappings: h.mappings.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
-  const mappings = useEditGrid(h.mappings, MAPPING_COLUMNS, {
+  const mappings = useEditGrid(h.mappings, mappingColumns, {
     param: (m, i) => (
       <Select style={{ width: "100%" }} value={m.param} onChange={(e) => setM(i, { param: e.detail.selectedOption.value })}>
         {draft.parameters.map((p) => <Option key={p.key} value={p.key}>{p.key}</Option>)}
@@ -67,7 +72,7 @@ export function HistoryTab({ draft, update, issues }: {
     match: (m, i) => (
       <Select style={{ width: "100%" }} value={m.match}
         onChange={(e) => setM(i, { match: e.detail.selectedOption.value as Mapping["match"] })}>
-        {(["exact", "closeness", "contains"] as const).map((t) => <Option key={t} value={t}>{t}</Option>)}
+        {(["exact", "closeness", "contains"] as const).map((mode) => <Option key={mode} value={mode}>{t(MATCH_KEY[mode])}</Option>)}
       </Select>
     ),
     weight: (m, i) => (
@@ -80,21 +85,21 @@ export function HistoryTab({ draft, update, issues }: {
   // is the local echo.
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <Form {...FORM} headerText="History query">
-        <FormGroup accessibleName="History query">
-          <FormItem labelContent={<Label>Query</Label>}>
+      <Form {...FORM} headerText={t("MODEL_HISTORY_QUERY")}>
+        <FormGroup accessibleName={t("MODEL_HISTORY_QUERY")}>
+          <FormItem labelContent={<Label>{t("MODEL_QUERY")}</Label>}>
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", width: "100%" }}>
-              <MasterdataQuerySelect accessibleName="Masterdata query"
+              <MasterdataQuerySelect accessibleName={t("MODEL_MD_QUERY")}
                 value={h.table} issue={errMsg("history.table")}
                 onChange={(table) => setH({ table })} />
               {h.table && !cols.length ? (
                 <MessageStrip design="Information" hideCloseButton>
-                  Open the query in Masterdata and save it so its columns are stored.
+                  {t("MODEL_HISTORY_COLS_HINT")}
                 </MessageStrip>
               ) : null}
             </div>
           </FormItem>
-          <FormItem labelContent={<Label>Columns shown on each result</Label>}>
+          <FormItem labelContent={<Label>{t("MODEL_HISTORY_DISPLAY")}</Label>}>
             <MultiComboBox style={{ width: "100%" }}
               selectedValues={h.display}
               {...vs(h.display.map((_, i) => errMsg(`history.display[${i}]`)).find(Boolean))}
@@ -104,14 +109,14 @@ export function HistoryTab({ draft, update, issues }: {
           </FormItem>
         </FormGroup>
       </Form>
-      <GridForm headerText="Parameter mappings">
-        <Grid {...mappings} title="Parameter mappings" fill={false} selectionMode="Multiple"
+      <GridForm headerText={t("MODEL_MAPPINGS")}>
+        <Grid {...mappings} title={t("MODEL_MAPPINGS")} fill={false} selectionMode="Multiple"
           toolbarActions={(sel) => (
             <>
               <Button icon="add" design="Transparent"
                 disabled={!cols.length || !draft.parameters.length}
                 onClick={() => setH({ mappings: [...h.mappings, { param: draft.parameters[0]!.key, column: cols[0]!, match: "exact", weight: 1 }] })}>
-                Add mapping
+                {t("MODEL_ADD_MAPPING")}
               </Button>
               <DeleteRows sel={sel} onDelete={(gone) => setH({ mappings: h.mappings.filter((_, j) => !gone.has(j)) })} />
             </>

@@ -12,11 +12,13 @@ import { NONE, PAIRS, W, lbl, optValue } from "./ParamDialog.tsx";
 import { masterdataRef, modelWithTable, rowVars, sourceBadge, type TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { positions, useEditGrid } from "./useEditGrid.tsx";
+import { useI18n } from "../../i18n.ts";
+import { copy, type Translate } from "./builderMessages.ts";
 
 /** What is wrong with a table or field key, in the author's words — formulas read both by key. */
-const keyProblem = (key: string) =>
-  !key ? "Enter a key: formulas use it to read this value."
-  : !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key) ? "Use letters, digits and underscores only, and don't start with a digit."
+const keyProblem = (key: string, t: Translate) =>
+  !key ? t("MODEL_KEY_EMPTY")
+  : !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key) ? t("MODEL_KEY_CHARS")
   : undefined;
 
 const newKey = (prefix: string, taken: string[]) => {
@@ -46,28 +48,14 @@ const lockedColumns = (t: TableDef): Set<string> =>
 
 // One row per TableColumn. Module constants: useEditGrid rebuilds its cell templates when the
 // column set changes, and a rebuild remounts the input under the cursor.
-const COLUMNS: ListColumn[] = [
-  { key: "key", label: "Key", width: 160 },
-  { key: "label", label: "Label", width: 180 },
-  { key: "type", label: "Type", width: 128 },
-  { key: "unit", label: "Unit", width: 96 },
-  { key: "cell", label: "Cell", width: 160 },
-  { key: "value", label: "Options / formula" },
-];
-// The items table also says which columns every line must fill, and where each lands on the line.
-const ITEM_COLUMNS: ListColumn[] = [
-  ...COLUMNS,
-  { key: "required", label: "Mandatory", width: 112 },
-  { key: "map", label: "B1 line field", width: 240 },
-];
 
 /** A new calculation table. The role is not a choice: a model has exactly one items table, seeded
  *  by starterModel and undeletable, and every table added in the builder is a calc table. */
-export const newCalcTable = (taken: string[]): TableDef => ({
+export const newCalcTable = (taken: string[], t: Translate): TableDef => ({
   key: newKey("table", taken),
-  title: "Table",
+  title: copy(t, "MODEL_DEFAULT_TABLE", "Table"),
   role: "calc",
-  columns: [{ key: "value", label: "Value", type: "number", cell: { kind: "input" } }],
+  columns: [{ key: "value", label: copy(t, "MODEL_COL_VALUE", "Value"), type: "number", cell: { kind: "input" } }],
 });
 
 // Buffer-and-commit, like ParamDialog: edits land on a local copy so a half-renamed key never runs
@@ -79,6 +67,21 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
   onCancel: () => void;
   onOk: (t: TableDef) => void;
 }) {
+  const i18n = useI18n();
+  const tr: Translate = (key, ...params) => i18n.getText(key, ...params);
+  const columns = useMemo<ListColumn[]>(() => [
+    { key: "key", label: tr("MODEL_KEY"), width: 160 },
+    { key: "label", label: tr("MODEL_COL_LABEL"), width: 180 },
+    { key: "type", label: tr("MODEL_COL_TYPE"), width: 128 },
+    { key: "unit", label: tr("MODEL_COL_UNIT"), width: 96 },
+    { key: "cell", label: tr("MODEL_COL_CELL"), width: 160 },
+    { key: "value", label: tr("MODEL_COL_OPTIONS") },
+  ], [i18n]);
+  const itemColumns = useMemo<ListColumn[]>(() => [
+    ...columns,
+    { key: "required", label: tr("MODEL_MANDATORY"), width: 112 },
+    { key: "map", label: tr("MODEL_B1_FIELD"), width: 240 },
+  ], [columns, i18n]);
   const [t, setT] = useState<TableDef>(initial);
   // Nothing is wrong until the author says they are done: a half-typed key or an empty option
   // list is a work in progress, not a mistake. Save is the moment that judgement is asked for.
@@ -115,14 +118,14 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
   // builder's message rather than locking Save.
   const issueAt = (sub: string) => (tried ? mine.find((x) => x.path === `tables[${at}]${sub}`)?.message : undefined);
   const tableKeyError = tried
-    ? (keyProblem(t.key) ?? (keyTaken ? `Another table is already called '${t.key}'.` : issueAt("")))
+    ? (keyProblem(t.key, tr) ?? (keyTaken ? tr("MODEL_TABLE_KEY_TAKEN", t.key) : issueAt("")))
     : undefined;
   const colKeyError = (key: string, j: number) =>
-    tried ? (keyProblem(key) ?? issueAt(`.columns[${j}]`) ?? issueAt(`.columns[${j}].key`)) : undefined;
-  const blocked = !!keyProblem(t.key) || keyTaken || !t.columns.length
-    || t.columns.some((c) => keyProblem(c.key)) || mine.some((x) => x.path !== `tables[${at}].map`);
+    tried ? (keyProblem(key, tr) ?? issueAt(`.columns[${j}]`) ?? issueAt(`.columns[${j}].key`)) : undefined;
+  const blocked = !!keyProblem(t.key, tr) || keyTaken || !t.columns.length
+    || t.columns.some((c) => keyProblem(c.key, tr)) || mine.some((x) => x.path !== `tables[${at}].map`);
 
-  const grid = useEditGrid(t.columns, isItems ? ITEM_COLUMNS : COLUMNS, {
+  const grid = useEditGrid(t.columns, isItems ? itemColumns : columns, {
     key: (c, j) => (
       <Input style={W} value={c.key} readonly={locked.has(c.key)}
         valueState={colKeyError(c.key, j) ? "Negative" : "None"}
@@ -152,9 +155,9 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
               : { kind: "input" },
           });
         }}>
-        <Option value="input">Typed in</Option>
-        <Option value="options">Options</Option>
-        <Option value="formula">Computed</Option>
+        <Option value="input">{tr("MODEL_CELL_INPUT")}</Option>
+        <Option value="options">{tr("MODEL_CELL_OPTIONS")}</Option>
+        <Option value="formula">{tr("MODEL_CELL_FORMULA")}</Option>
       </Select>
     ),
     value: (c, j) =>
@@ -170,11 +173,11 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
         <OptionsCell lookup={c.cell.ref} type={c.type} tables={tables} error={issueAt(`.columns[${j}].cell`)}
           onChange={(ref) => setCol(j, { cell: { kind: "options", ref } })} />
       ) : (
-        <Text>Typed in by the salesperson</Text>
+        <Text>{tr("MODEL_CELL_INPUT_HINT")}</Text>
       ),
     // Code, name and quantity are what make a row a quotation line: ticked, and not the author's to untick.
     required: (c, j) => (
-      <CheckBox accessibleName={`${c.label || c.key} is mandatory`}
+      <CheckBox accessibleName={tr("MODEL_IS_MANDATORY", c.label || c.key)}
         checked={!!c.required || REQUIRED_ITEM_COLS.has(c.key)} disabled={REQUIRED_ITEM_COLS.has(c.key)}
         onChange={(e) => setCol(j, { required: e.target.checked || undefined })} />
     ),
@@ -200,38 +203,38 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
   return (
     // Draggable and resizable: the column grid is wide, and the author may want the model behind it.
     <Dialog open onClose={onCancel} className="confire-pd" draggable resizable
-      accessibleName={`Edit table ${initial.title || initial.key}`}
+      accessibleName={tr("MODEL_EDIT_TABLE", initial.title || initial.key)}
       style={{ width: "min(76rem, 96vw)" }}
-      headerText={`${isItems ? "Item grid" : "Calculation table"} · ${initial.title || initial.key}`}
+      headerText={tr("MODEL_DETAIL_TABLE", isItems ? tr("MODEL_ITEM_GRID") : tr("MODEL_CALC_TABLE"), initial.title || initial.key)}
       footer={
         <Bar design="Footer" endContent={
           <>
             <Button design="Emphasized"
-              onClick={() => (blocked ? setTried(true) : onOk(t))}>Save</Button>
-            <Button design="Transparent" onClick={onCancel}>Cancel</Button>
+              onClick={() => (blocked ? setTried(true) : onOk(t))}>{tr("MODEL_SAVE")}</Button>
+            <Button design="Transparent" onClick={onCancel}>{tr("MODEL_CANCEL")}</Button>
           </>
         } />
       }
     >
 
-      <Form {...PAIRS} accessibleMode="Edit" headerText="Definition">
-        <FormGroup accessibleName="Definition" columnSpan={2}>
-          <FormItem labelContent={lbl("Key", "The name formulas use. This table contributes <key>_count and one sum per numeric column to every expression scope.", true)}>
+      <Form {...PAIRS} accessibleMode="Edit" headerText={tr("MODEL_DEFINITION")}>
+        <FormGroup accessibleName={tr("MODEL_DEFINITION")} columnSpan={2}>
+          <FormItem labelContent={lbl(tr("MODEL_KEY"), tr("MODEL_KEY_HELP"), true)}>
             <Input value={t.key} style={W} valueState={tableKeyError ? "Negative" : "None"}
               valueStateMessage={<div>{tableKeyError}</div>}
               onInput={(e) => edit({ key: e.target.value })} />
           </FormItem>
-          <FormItem labelContent={lbl("Title", "The heading the salesperson sees above the grid on the configuration form.")}>
+          <FormItem labelContent={lbl(tr("MODEL_TITLE"), tr("MODEL_TITLE_HELP"))}>
             <Input value={t.title} style={W}
               onInput={(e) => edit({ title: e.target.value })} />
           </FormItem>
           {t.role === "calc" ? (
             <>
-              <FormItem labelContent={lbl("Minimum rows", "Rows the grid starts with and refuses to drop below. Zero lets the salesperson leave it empty.")}>
+              <FormItem labelContent={lbl(tr("MODEL_MIN_ROWS"), tr("MODEL_MIN_ROWS_HELP"))}>
                 <StepInput style={W} min={0} value={t.minRows ?? 0}
                   onChange={(e) => edit({ minRows: e.target.value || undefined })} />
               </FormItem>
-              <FormItem labelContent={lbl("Maximum rows", "Caps how many rows can be added. Zero means no cap.")}>
+              <FormItem labelContent={lbl(tr("MODEL_MAX_ROWS"), tr("MODEL_MAX_ROWS_HELP"))}>
                 <StepInput style={W} min={0} value={t.maxRows ?? 0}
                   onChange={(e) => edit({ maxRows: e.target.value || undefined })} />
               </FormItem>
@@ -245,9 +248,9 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
           // columnSpan={2} alone is not enough: a group's span is also its inner column-count, so
           // the one item would sit in the left half. ui5-form-group is display:contents, which
           // makes the item a direct child of that multicol box — so column-span reaches it.
-          <FormGroup accessibleName="Cost basis" columnSpan={2}>
+          <FormGroup accessibleName={tr("MODEL_COST_BASIS")} columnSpan={2}>
             <FormItem style={{ columnSpan: "all" }}
-              labelContent={lbl("Cost basis", "How the configuration's price is divided between rows: evaluated once per row, with that row's own columns in scope, then weighted by the row's quantity. Leave it at 1 to split by quantity alone.", true)}>
+              labelContent={lbl(tr("MODEL_COST_BASIS"), tr("MODEL_COST_BASIS_HELP"), true)}>
               <ExprInput value={t.basisExpr} model={scope} tables={tables} rows={2} style={W}
                 extraVars={rowVars(t.columns, tables)}
                 fieldId={`expr-tables[${at}].basisExpr`}
@@ -258,10 +261,10 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
         ) : null}
       </Form>
 
-      <GridForm headerText="Fields">
+      <GridForm headerText={tr("MODEL_FIELDS")}>
         {/* Not an empty-state hint: the one place "no fields" (which blocks Save) is reported. */}
-        <Grid {...grid} title="Fields" fill={false} selectionMode="Multiple"
-          noDataText={tried ? "Add at least one field: the salesperson needs something to fill in." : undefined}
+        <Grid {...grid} title={tr("MODEL_FIELDS")} fill={false} selectionMode="Multiple"
+          noDataText={tried ? tr("MODEL_FIELDS_EMPTY") : undefined}
           toolbarActions={(sel) => {
             // Locked fields stay put — their key is read-only for the same reason.
             const gone = new Set([...positions(sel.rows)].filter((j) => !locked.has(t.columns[j]?.key ?? "")));
@@ -270,14 +273,14 @@ export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
                 <Button icon="add" design="Transparent" onClick={() =>
                   editCols((cs) => [
                     ...cs,
-                    { key: newKey("col", cs.map((c) => c.key)), label: "Field", type: "number", cell: { kind: "input" } },
-                  ])}>Add field</Button>
+                    { key: newKey("col", cs.map((c) => c.key)), label: copy(tr, "MODEL_DEFAULT_FIELD", "Field"), type: "number", cell: { kind: "input" } },
+                  ])}>{tr("MODEL_ADD_FIELD")}</Button>
                 <Button icon="delete" design="Transparent" disabled={!gone.size}
                   onClick={() => {
                     // row ids are positions, so a kept selection would land on the rows that moved up
                     sel.clear();
                     editCols((cs) => cs.filter((_, k) => !gone.has(k)));
-                  }}>Delete</Button>
+                  }}>{tr("MODEL_DELETE")}</Button>
               </>
             );
           }} />
@@ -297,6 +300,7 @@ function OptionsCell({ lookup, type, tables, error, onChange }: {
   error?: string;
   onChange: (ref: LookupRef) => void;
 }) {
+  const i18n = useI18n();
   return (
     <div style={{ display: "flex", gap: "0.25rem", width: "100%" }}>
       <Select style={{ flex: 1 }} value={lookup.source === "manual" ? NONE : lookup.table}
@@ -307,13 +311,13 @@ function OptionsCell({ lookup, type, tables, error, onChange }: {
             ? { source: "manual", options: [] }
             : masterdataRef(tables.find((t) => t.name === name)));
         }}>
-        <Option value={NONE}>List...</Option>
+        <Option value={NONE}>{i18n.getText("MODEL_LIST_DOTS")}</Option>
         {tables.map((t) => (
-          <Option key={t.name} value={t.name} additionalText={sourceBadge(t)}>{t.name}</Option>
+          <Option key={t.name} value={t.name} additionalText={sourceBadge(t, (key, ...params) => i18n.getText(key, ...params))}>{t.name}</Option>
         ))}
       </Select>
       {lookup.source === "manual" ? (
-        <Input style={{ flex: 2 }} placeholder="circular, rectangular" value={manualText(lookup)}
+        <Input style={{ flex: 2 }} placeholder={i18n.getText("MODEL_MANUAL_PH")} value={manualText(lookup)}
           onInput={(e) => onChange(parseManual(type, e.target.value))} />
       ) : null}
     </div>
@@ -346,11 +350,12 @@ function LineFieldHelp({ value, fields, loading, error, onChange }: {
   // The items mount on first focus, not with the grid: a tenant's DocumentLine has ~260 fields, and
   // one ComboBoxItem per field per row was ~530ms of the dialog's ~920ms open. Typing and the
   // picker both need focus first, so nothing waits on them.
+  const i18n = useI18n();
   const [used, setUsed] = useState(false);
   if (!fields)
     return (
       <Input style={W} value={value} disabled={loading}
-        placeholder={loading ? "reading SAP..." : "U_... (SAP unreachable)"}
+        placeholder={loading ? i18n.getText("MODEL_READING_SAP") : i18n.getText("MODEL_SAP_UNREACHABLE")}
         valueState={error ? "Negative" : "None"} valueStateMessage={<div>{error}</div>}
         onInput={(e) => onChange(e.target.value)} />
     );
@@ -359,11 +364,9 @@ function LineFieldHelp({ value, fields, loading, error, onChange }: {
   // a 400 from B1 at the moment the quote is posted.
   const missing = !!value && !fields.some((f) => f.name === value);
   return (
-    <ComboBox style={W} value={value} filter="Contains" accessibleName="DocumentLine field"
+    <ComboBox style={W} value={value} filter="Contains" accessibleName={i18n.getText("MODEL_DOCLINE_FIELD")}
       valueState={error ? "Negative" : missing ? "Critical" : "None"}
-      valueStateMessage={<div>{error ?? (missing
-        ? `${value} isn't a field on this company's quotation lines — create the UDF in B1, or pick another field.`
-        : "")}</div>}
+      valueStateMessage={<div>{error ?? (missing ? i18n.getText("MODEL_FIELD_MISSING", value) : "")}</div>}
       onFocus={() => setUsed(true)}
       onChange={(e) => onChange((e.target.value ?? "").trim())}>
       {used && fields.map((f) => (

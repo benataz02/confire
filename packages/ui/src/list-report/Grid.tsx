@@ -8,6 +8,7 @@ import {
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import { decodeBool } from "@confire/b1";
 import { EntityLink, useCanOpen } from "../EntityLink.tsx";
+import { useUiI18n } from "../i18n.ts";
 import { endAligned, formatValue, optionLabel, parseIsoDate } from "../format.ts";
 import { linkValue } from "../navigation.ts";
 import { GridSettingsDialog } from "./GridSettingsDialog.tsx";
@@ -153,6 +154,7 @@ export function Grid({
   expandGroups?: boolean;
 }) {
   const canOpen = useCanOpen();
+  const i18n = useUiI18n();
   const [selected, setSelected] = useState(NO_SELECTION);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -286,19 +288,22 @@ export function Grid({
   const NoData = useMemo(
     () =>
       function NoData({ noDataReason }: { noDataReason: "Empty" | "Filtered" }) {
+        // getText reads the loaded language, so a switch updates the next render of this cell.
         return noDataReason === "Filtered" || !title ? (
-          <IllustratedMessage name="NoData" design="Auto" titleText={noDataText ?? "Nothing in this view"}
-            subtitleText="Try a different filter or pick another view." />
+          <IllustratedMessage name="NoData" design="Auto" titleText={noDataText ?? i18n.getText("UI_NOTHING_IN_VIEW")}
+            subtitleText={i18n.getText("UI_TRY_DIFFERENT_FILTER")} />
         ) : (
-          <IllustratedMessage name="NoData" design="Auto" titleText={noDataText ?? `No ${title.toLowerCase()} yet`} />
+          <IllustratedMessage name="NoData" design="Auto"
+            titleText={noDataText ?? i18n.getText("UI_EMPTY_LIST", title.toLowerCase())} />
         );
       },
-    [title, noDataText],
+    // The stand-in bundle and the loaded one are different objects; once loaded, getText is live.
+    [title, noDataText, i18n],
   );
 
   // A controlled selection may arrive before any click, and may name rows that are not loaded.
   const selCount = selectedIds && keyOf ? rows.filter((r) => selectedIds[keyOf(r)]).length : selected.rows.length;
-  const fullScreenLabel = maximized ? "Exit full screen" : "Full screen";
+  const fullScreenLabel = i18n.getText(maximized ? "UI_EXIT_FULL_SCREEN" : "UI_FULL_SCREEN");
   const toolbar = (
     <Bar
       startContent={title ? (
@@ -320,7 +325,7 @@ export function Grid({
             </div>
           ) : null}
           {exportName ? (
-            <Button icon="excel-attachment" design="Transparent" tooltip="Export to Excel" accessibleName="Export to Excel"
+            <Button icon="excel-attachment" design="Transparent" tooltip={i18n.getText("UI_EXPORT_EXCEL")} accessibleName={i18n.getText("UI_EXPORT_EXCEL")}
               disabled={exporting || !rows.length}
               onClick={async () => {
                 setExporting(true);
@@ -334,7 +339,7 @@ export function Grid({
           <Button icon={maximized ? "exit-full-screen" : "full-screen"} design="Transparent"
             tooltip={fullScreenLabel} accessibleName={fullScreenLabel} onClick={toggleMaximized} />
           {showSettings && onStateChange ? (
-            <Button icon="action-settings" design="Transparent" tooltip="View settings" accessibleName="View settings"
+            <Button icon="action-settings" design="Transparent" tooltip={i18n.getText("UI_VIEW_SETTINGS")} accessibleName={i18n.getText("UI_VIEW_SETTINGS")}
               onClick={() => setSettingsOpen(true)} />
           ) : null}
         </>

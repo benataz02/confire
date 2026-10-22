@@ -8,6 +8,7 @@ import {
 import type { ListData } from "../useListView.ts";
 import { FilterHeader, ViewTitle, type FilterTemplate } from "./FilterHeader.tsx";
 import { Grid, type CellTemplate, type GridState, type Selection } from "./Grid.tsx";
+import { useUiI18n } from "../i18n.ts";
 import type { ListFeature, ListQuery, Row, ViewState } from "../types.ts";
 
 // app-list-report (LIST-REPORT-OBJECT-PAGE.md §3): a declared list — columns, filters, system
@@ -50,6 +51,7 @@ export function ListReport({
   error?: Error | null;
 }) {
   const navigate = useNavigate();
+  const i18n = useUiI18n();
   const search = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
 
   const columns = useMemo(() => {
@@ -142,7 +144,7 @@ export function ListReport({
               toolbarActions={(sel) => (
                 <>
                   {data.onCreate && !readOnly ? (
-                    <Button design="Transparent" icon="add" onClick={data.onCreate}>Create</Button>
+                    <Button design="Transparent" icon="add" onClick={data.onCreate}>{i18n.getText("UI_CREATE")}</Button>
                   ) : null}
                   {toolbarActions?.(sel)}
                 </>

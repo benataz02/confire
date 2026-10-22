@@ -124,18 +124,16 @@ hostnames, which sit behind Cloudflare Access ([§8](#8-connecting-a-customers-s
 
 ## 3. Mail (Resend)
 
-Sign-up verification, password resets, invitations and notifications all go out from
-`notify@mail.confire.ai`. Without a key, the app prints mail to the log and nobody can verify an
+Sign-up verification, password resets and staff notifications go out from
+`notify@mail.confire.ai`; a tenant's client mail (invitations, project updates) from
+`<slug>@mail.confire.ai` under its own name. Without a key, the app prints mail to the log and nobody can verify an
 account. You need the key before the first sign-in.
 
 1. resend.com → *Domains → Add domain* → `mail.confire.ai`. Set the **region to EU (Ireland)**. The
    region cannot be changed later.
 2. Add the DNS records Resend shows (DKIM, MX and SPF, set to **DNS only**), then click *Verify*.
 3. Add DMARC yourself: a `TXT` record named `_dmarc` with content `v=DMARC1; p=none`.
-4. *API Keys → Create*:
-   - **Sending access** for `mail.confire.ai`. This is `RESEND_API_KEY`.
-   - Optional: **Full access**, as `RESEND_ADMIN_KEY`. It turns on per-tenant sender domains in
-     Settings → Portal. Leave it unset to keep them off.
+4. *API Keys → Create* → **Sending access** for `mail.confire.ai`. This is `RESEND_API_KEY`.
 
 ## 4. Backups bucket (Cloudflare R2)
 
@@ -171,7 +169,6 @@ DOMAIN=confire.ai
 BETTER_AUTH_SECRET=<base64 from above>
 POSTGRES_PASSWORD=<hex from above>
 RESEND_API_KEY=re_...
-RESEND_ADMIN_KEY=re_...
 
 # Server errors to Sentry (project confire-server → Settings → Client Keys). Unset = none sent
 SENTRY_DSN=https://...@....ingest.de.sentry.io/...

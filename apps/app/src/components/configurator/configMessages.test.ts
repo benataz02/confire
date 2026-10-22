@@ -2,13 +2,55 @@ import { expect, test } from "bun:test";
 import type { ModelDef, Propagation } from "@confire/config-engine";
 import { configMessages } from "./configMessages.ts";
 
+/** English sentences, not the properties file — `{n}` is filled in order. */
+const EN: Record<string, string> = {
+  CONFIG_SECTION_CONFIGURE: "Configure",
+  CONFIG_SECTION_CANDIDATES: "Candidates",
+  CONFIG_LOCK_QUOTED: "Quoted — this configuration is read-only",
+  CONFIG_LOCK_QUOTED_DETAIL: "The quotation it produced is what SAP holds now.",
+  CONFIG_LOCK_SUBMITTED: "Accept the request to edit it",
+  CONFIG_LOCK_SUBMITTED_DETAIL: "It stays exactly as the client submitted it until someone takes it into review.",
+  CONFIG_LOCK_RETURNED: "With the client for changes",
+  CONFIG_LOCK_RETURNED_DETAIL: "The client edits it now; it comes back when they resubmit.",
+  CONFIG_LOCK_DECLINED: "Declined — this request is closed",
+  CONFIG_LOCK_DECLINED_DETAIL: "Nothing can change on it any more.",
+  CONFIG_LOCK_AWAITING: "Quoted — waiting for the client's answer",
+  CONFIG_LOCK_AWAITING_DETAIL: "A decline reopens the request in review.",
+  CONFIG_LOCK_ACCEPTED: "Quote accepted by the client",
+  CONFIG_LOCK_ACCEPTED_DETAIL: "Create the sales order in SAP from the quotation.",
+  CONFIG_ENTER_NAME: "Enter a name",
+  CONFIG_REQUIRED_OPEN: "Required before the configurator opens.",
+  CONFIG_PICK_BP: "Pick a business partner",
+  CONFIG_REQUIRED_QUOTE: "Required before the configuration can be quoted.",
+  CONFIG_LOOKUPS_FAILED: "Option lists could not be loaded",
+  CONFIG_CHANGE_FAILED: "The last change did not go through",
+  CONFIG_SYNC_FAILED_TABLE: "'{0}' could not be refreshed: {1}",
+  CONFIG_SYNC_SHOWING: "Showing the {0} rows from the last good sync.",
+  CONFIG_SYNC_NONE: "No data has been cached yet.",
+  CONFIG_SYNC_NEVER: "'{0}' has not been synced yet",
+  CONFIG_SYNC_NEVER_DETAIL: "Its options are empty until the first sync finishes. Press Sync data.",
+  CONFIG_SYNC_ERROR: "Sync failed",
+  CONFIG_CAPPED: "Stopped at {0} candidates — set more parameters",
+  CONFIG_WIDEST: "{0} is widest with {1} options",
+  CONFIG_UNPRICED_LIST: "No price for {0} in price list {1}",
+  CONFIG_UNPRICED: "No price for {0} in the price list",
+  CONFIG_UNPRICED_DETAIL: "Its material is costed at 0 until the item has a price and the data is synced.",
+  CONFIG_SELECT_FAILED: "Selection not saved",
+};
+
+const t = (key: string, ...params: string[]) => {
+  const template = EN[key];
+  if (template === undefined) throw new Error(`missing English text for ${key}`);
+  return template.replace(/\{(\d+)\}/g, (_, i: string) => params[Number(i)] ?? "");
+};
+
 const model = {
   name: "T",
   parameters: [{ key: "width", label: "Width", type: "number", ui: "input" }],
 } as unknown as ModelDef;
 
 const base = {
-  model, name: "Q1", customer: true, prop: null, candidates: 0,
+  t, model, name: "Q1", customer: true, prop: null, candidates: 0,
   capped: false, locked: false,
 } as const;
 

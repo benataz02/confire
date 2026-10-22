@@ -16,9 +16,9 @@ export type Suggestion = {
  *  `target` is the query's system, for the badge a picker shows; absent on maintained rows. */
 export type TableCols = { name: string; kind: "table" | "query"; columns: string[]; target?: "b1" | "beas" };
 
-/** Where a source's rows live, as one word next to its name in a picker. */
-export const sourceBadge = (t: TableCols) =>
-  t.kind !== "query" ? "table" : t.target === "beas" ? "Beas" : "SAP";
+/** Where a source's rows live, as one word next to its name in a picker. Beas and SAP stay as names. */
+export const sourceBadge = (table: TableCols, t: (key: string, ...params: string[]) => string) =>
+  table.kind !== "query" ? t("MODEL_BADGE_TABLE") : table.target === "beas" ? "Beas" : "SAP";
 
 /** A ref to one masterdata table. `source` is the picked row's kind, never a question the builder
  *  asks: the two could only ever disagree. Key and label columns are convention (refKeyCols), so
@@ -51,7 +51,12 @@ export function rowVars(cols: TableColumn[], tables: TableCols[] = []): string[]
   });
 }
 
-export function scopeSuggestions(model: ModelDef, extraVars: string[] = [], tables: TableCols[] = []): Suggestion[] {
+export function scopeSuggestions(
+  model: ModelDef,
+  extraVars: string[] = [],
+  tables: TableCols[] = [],
+  t?: (key: string, ...params: string[]) => string,
+): Suggestion[] {
   const colsOf = (name: string) => tables.find((t) => t.name === name)?.columns;
   const derived = model.parameters.flatMap((p) => {
     const ref = p.domain?.kind === "options" ? p.domain.ref : undefined;
@@ -65,11 +70,11 @@ export function scopeSuggestions(model: ModelDef, extraVars: string[] = [], tabl
   // Mirror of check.ts's `base`: what a table contributes to every expression scope. These two
   // lists drifting apart is the standing hazard — an author would see "unknown identifier" on a
   // name the engine happily resolves, or get no completion for one that does.
-  const aggregates = (model.tables ?? []).flatMap((t) => [
-    { text: aggregateKey(t.key, "count"), kind: "aggregate" as const, label: `rows in ${t.title}` },
-    ...t.columns
+  const aggregates = (model.tables ?? []).flatMap((table) => [
+    { text: aggregateKey(table.key, "count"), kind: "aggregate" as const, label: t ? t("MODEL_AGG_ROWS", table.title) : `rows in ${table.title}` },
+    ...table.columns
       .filter((c) => c.type === "number")
-      .map((c) => ({ text: aggregateKey(t.key, c.key), kind: "aggregate" as const, label: `Σ ${c.label}` })),
+      .map((c) => ({ text: aggregateKey(table.key, c.key), kind: "aggregate" as const, label: `Σ ${c.label}` })),
   ]);
   return [
     ...model.parameters.map((p) => ({ text: p.key, kind: "param" as const, label: p.label })),

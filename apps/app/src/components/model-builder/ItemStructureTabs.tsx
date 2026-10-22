@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Button, Input } from "@ui5/webcomponents-react";
 import type { Issue, ModelDef } from "@confire/config-engine";
 import { CflField } from "@confire/ui/cfl/CflField.tsx";
@@ -8,6 +9,7 @@ import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { DeleteRows, useEditGrid } from "./useEditGrid.tsx";
+import { useI18n } from "../../i18n.ts";
 
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
 type Props = { draft: ModelDef; update: Update; issues: Issue[]; tables?: TableCols[] };
@@ -23,22 +25,6 @@ const newId = (prefix: string, taken: string[]) => {
 // A line's id is not shown any more: it is an internal key (error messages name it), not something
 // a modeller names. The visible counter is the row's position, so deleting a row renumbers the
 // column without touching the id.
-const BOM_COLUMNS: ListColumn[] = [
-  { key: "n", label: "#", width: 48 },
-  { key: "itemCode", label: "Item", width: 240 },
-  { key: "desc", label: "Description" },
-  { key: "condition", label: "Condition" },
-  { key: "qty", label: "Qty per unit", width: 144 },
-];
-const ROUTING_COLUMNS: ListColumn[] = [
-  { key: "n", label: "#", width: 48 },
-  { key: "resource", label: "Resource" },
-  { key: "desc", label: "Description" },
-  { key: "condition", label: "Condition" },
-  { key: "setupMin", label: "Setup (min)" },
-  { key: "runMinPerUnit", label: "Run / unit (min)" },
-  { key: "ratePerHour", label: "Rate / hour" },
-];
 
 // An item code is still an expression — the value help just writes the common case, a quoted
 // literal. `asCode` reads that case back out so the picker can show what was picked; anything
@@ -49,6 +35,24 @@ const asCode = (expr: string): string | undefined => LITERAL.exec(expr)?.[1];
 // Each table in a Form of its own (GridForm): the Form titles it, the Grid toolbar repeats the
 // name with its row count.
 export function ItemStructureTab({ draft, update, issues, tables }: Props) {
+  const i18n = useI18n();
+  const t = (key: string) => i18n.getText(key);
+  const bomColumns = useMemo<ListColumn[]>(() => [
+    { key: "n", label: "#", width: 48 },
+    { key: "itemCode", label: t("MODEL_ITEM"), width: 240 },
+    { key: "desc", label: t("MODEL_DESC") },
+    { key: "condition", label: t("MODEL_CONDITION") },
+    { key: "qty", label: t("MODEL_QTY_PER"), width: 144 },
+  ], [i18n]);
+  const routingColumns = useMemo<ListColumn[]>(() => [
+    { key: "n", label: "#", width: 48 },
+    { key: "resource", label: t("MODEL_RESOURCE") },
+    { key: "desc", label: t("MODEL_DESC") },
+    { key: "condition", label: t("MODEL_CONDITION") },
+    { key: "setupMin", label: t("MODEL_SETUP") },
+    { key: "runMinPerUnit", label: t("MODEL_RUN") },
+    { key: "ratePerHour", label: t("MODEL_RATE") },
+  ], [i18n]);
   const setBom = (i: number, patch: Partial<ModelDef["bom"][number]>) =>
     update((d) => ({ ...d, bom: d.bom.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
   const bomCell = (i: number, field: "condition" | "qty", optional = false, placeholder?: string) => (
@@ -65,37 +69,37 @@ export function ItemStructureTab({ draft, update, issues, tables }: Props) {
       onChange={(v) => setOp(i, { [field]: optional ? v : (v ?? "") } as Partial<ModelDef["routing"][number]>)} />
   );
 
-  const bom = useEditGrid(draft.bom, BOM_COLUMNS, {
+  const bom = useEditGrid(draft.bom, bomColumns, {
     n: (_, i) => i + 1,
     itemCode: (l, i) => (
       // Picking fills the description too, and both stay editable afterwards.
-      <CflField config={ITEM} accessibleName="Item"
+      <CflField config={ITEM} accessibleName={t("MODEL_ITEM")}
         value={asCode(l.itemCode) ?? (l.itemCode.trim() || null)}
-        error={l.itemCode.trim() ? null : "Pick the item this line consumes — its unit price comes from the model's price list."}
+        error={l.itemCode.trim() ? null : t("MODEL_ITEM_ERR")}
         onValueChange={(v) => setBom(i, { itemCode: v === null || v === "" ? "" : JSON.stringify(String(v)) })}
         onRowSelect={(row) => { if (row.ItemName != null) setBom(i, { desc: String(row.ItemName) }); }} />
     ),
     // Plain text, not an expression: the item's name as B1 spells it, editable.
     desc: (l, i) => (
-      <Input style={{ width: "100%" }} value={l.desc ?? ""} placeholder="from the picked item"
+      <Input style={{ width: "100%" }} value={l.desc ?? ""} placeholder={t("MODEL_DESC_FROM_ITEM")}
         onInput={(e) => setBom(i, { desc: e.target.value || undefined })} />
     ),
-    condition: (_, i) => bomCell(i, "condition", true, "always applies when empty"),
+    condition: (_, i) => bomCell(i, "condition", true, t("MODEL_COND_EMPTY")),
     qty: (_, i) => bomCell(i, "qty"),
   });
 
-  const routing = useEditGrid(draft.routing, ROUTING_COLUMNS, {
+  const routing = useEditGrid(draft.routing, routingColumns, {
     n: (_, i) => i + 1,
     resource: (o, i) => (
-      <Input style={{ width: "100%" }} value={o.resource} placeholder="e.g. SAW-01"
+      <Input style={{ width: "100%" }} value={o.resource} placeholder={t("MODEL_RESOURCE_PH")}
         onInput={(e) => setOp(i, { resource: e.target.value })} />
     ),
     // Plain text, like the BOM's: what the salesperson reads next to the operation.
     desc: (o, i) => (
-      <Input style={{ width: "100%" }} value={o.desc ?? ""} placeholder="what this operation does"
+      <Input style={{ width: "100%" }} value={o.desc ?? ""} placeholder={t("MODEL_OP_DESC_PH")}
         onInput={(e) => setOp(i, { desc: e.target.value || undefined })} />
     ),
-    condition: (_, i) => opCell(i, "condition", true, "always runs when empty"),
+    condition: (_, i) => opCell(i, "condition", true, t("MODEL_OP_COND_EMPTY")),
     setupMin: (_, i) => opCell(i, "setupMin"),
     runMinPerUnit: (_, i) => opCell(i, "runMinPerUnit"),
     ratePerHour: (_, i) => opCell(i, "ratePerHour"),
@@ -103,8 +107,8 @@ export function ItemStructureTab({ draft, update, issues, tables }: Props) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <GridForm headerText="BOM">
-        <Grid {...bom} title="BOM" fill={false} selectionMode="Multiple"
+      <GridForm headerText={t("MODEL_BOM")}>
+        <Grid {...bom} title={t("MODEL_BOM")} fill={false} selectionMode="Multiple"
           toolbarActions={(sel) => (
             <>
               <Button icon="add" design="Transparent"
@@ -112,14 +116,14 @@ export function ItemStructureTab({ draft, update, issues, tables }: Props) {
                   ...d,
                   bom: [...d.bom, { id: newId("line", d.bom.map((l) => l.id)), itemCode: '""', qty: "1" }],
                 }))}>
-                Add line
+                {t("MODEL_ADD_LINE")}
               </Button>
               <DeleteRows sel={sel} onDelete={(gone) => update((d) => ({ ...d, bom: d.bom.filter((_, j) => !gone.has(j)) }))} />
             </>
           )} />
       </GridForm>
-      <GridForm headerText="Routing">
-        <Grid {...routing} title="Routing" fill={false} selectionMode="Multiple"
+      <GridForm headerText={t("MODEL_ROUTING")}>
+        <Grid {...routing} title={t("MODEL_ROUTING")} fill={false} selectionMode="Multiple"
           toolbarActions={(sel) => (
             <>
               <Button icon="add" design="Transparent"
@@ -127,7 +131,7 @@ export function ItemStructureTab({ draft, update, issues, tables }: Props) {
                   ...d,
                   routing: [...d.routing, { id: newId("op", d.routing.map((o) => o.id)), resource: "", setupMin: "0", runMinPerUnit: "0", ratePerHour: "60" }],
                 }))}>
-                Add operation
+                {t("MODEL_ADD_OP")}
               </Button>
               <DeleteRows sel={sel} onDelete={(gone) => update((d) => ({ ...d, routing: d.routing.filter((_, j) => !gone.has(j)) }))} />
             </>

@@ -4,6 +4,7 @@ import {
   TableHeaderRow, TableRow, TableRowAction, TableSelectionMulti, ToggleButton,
 } from "@ui5/webcomponents-react";
 import type { GridState } from "./Grid.tsx";
+import { useUiI18n } from "../i18n.ts";
 import { sameState } from "../views.ts";
 import type { ListColumn } from "../types.ts";
 
@@ -35,6 +36,7 @@ export function ColumnsTab({ items, onChange }: {
   items: ColumnItem[];
   onChange: (items: ColumnItem[]) => void;
 }) {
+  const i18n = useUiI18n();
   const [search, setSearch] = useState("");
   const [onlySelected, setOnlySelected] = useState(false);
   const [active, setActive] = useState<string>();
@@ -54,8 +56,8 @@ export function ColumnsTab({ items, onChange }: {
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <Bar
         startContent={
-          <Input value={search} placeholder="Search" showClearIcon icon={<Icon name="search" />}
-            accessibleName="Search columns" style={{ width: "16rem" }}
+          <Input value={search} placeholder={i18n.getText("UI_SEARCH")} showClearIcon icon={<Icon name="search" />}
+            accessibleName={i18n.getText("UI_SEARCH_COLUMNS")} style={{ width: "16rem" }}
             onInput={(e) => setSearch(e.target.value)} />
         }
         endContent={
@@ -64,19 +66,19 @@ export function ColumnsTab({ items, onChange }: {
                 width so the toolbar does not shift: "Show selected" measures 90px in 72 at 14px,
                 ~110px with the cozy padding. */}
             <ToggleButton pressed={onlySelected} onClick={() => setOnlySelected((v) => !v)} style={{ width: "7.5rem" }}>
-              {onlySelected ? "Show all" : "Show selected"}
+              {onlySelected ? i18n.getText("UI_SHOW_ALL") : i18n.getText("UI_SHOW_SELECTED")}
             </ToggleButton>
-            <Button icon="collapse-group" design="Transparent" tooltip="Move to top" accessibleName="Move to top"
+            <Button icon="collapse-group" design="Transparent" tooltip={i18n.getText("UI_MOVE_TOP")} accessibleName={i18n.getText("UI_MOVE_TOP")}
               disabled={at <= 0} onClick={() => moveTo(shown[0], false)} />
-            <Button icon="navigation-up-arrow" design="Transparent" tooltip="Move up" accessibleName="Move up"
+            <Button icon="navigation-up-arrow" design="Transparent" tooltip={i18n.getText("UI_MOVE_UP")} accessibleName={i18n.getText("UI_MOVE_UP")}
               disabled={at <= 0} onClick={() => moveTo(shown[at - 1], false)} />
-            <Button icon="navigation-down-arrow" design="Transparent" tooltip="Move down" accessibleName="Move down"
+            <Button icon="navigation-down-arrow" design="Transparent" tooltip={i18n.getText("UI_MOVE_DOWN")} accessibleName={i18n.getText("UI_MOVE_DOWN")}
               disabled={at < 0 || at === last} onClick={() => moveTo(shown[at + 1], true)} />
-            <Button icon="expand-group" design="Transparent" tooltip="Move to bottom" accessibleName="Move to bottom"
+            <Button icon="expand-group" design="Transparent" tooltip={i18n.getText("UI_MOVE_BOTTOM")} accessibleName={i18n.getText("UI_MOVE_BOTTOM")}
               disabled={at < 0 || at === last} onClick={() => moveTo(shown[last], true)} />
           </>
         } />
-      <Table style={{ flex: 1, minHeight: 0 }} noDataText="No columns."
+      <Table style={{ flex: 1, minHeight: 0 }} noDataText={i18n.getText("UI_NO_COLUMNS")}
         features={
           <TableSelectionMulti selected={selected.map((d) => d.key).join(" ")}
             onChange={(e) => {
@@ -90,7 +92,7 @@ export function ColumnsTab({ items, onChange }: {
         }
         headerRow={
           <TableHeaderRow sticky>
-            <TableHeaderCell><span style={{ fontWeight: "bold" }}>Select all ({selected.length}/{items.length})</span></TableHeaderCell>
+            <TableHeaderCell><span style={{ fontWeight: "bold" }}>{i18n.getText("UI_SELECT_ALL", String(selected.length), String(items.length))}</span></TableHeaderCell>
           </TableHeaderRow>
         }
         onRowClick={(e) => setActive(rowKeyOf(e.detail.row))}
@@ -120,22 +122,23 @@ function RulesTab<R extends { field: string }>({ rules, fields, render, add, onC
   onChange: (rules: R[]) => void;
   addText: string;
 }) {
+  const i18n = useUiI18n();
   const free = fields.filter((f) => !rules.some((r) => r.field === f.key));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", paddingBottom: "0.5rem" }}>
-      <Table rowActionCount={1} noDataText="None."
+      <Table rowActionCount={1} noDataText={i18n.getText("UI_NONE")}
         onRowActionClick={(e) => {
           const i = Number((e.detail.row as unknown as HTMLElement).dataset.idx);
           onChange(rules.filter((_, j) => j !== i));
         }}
         headerRow={
           <TableHeaderRow>
-            <TableHeaderCell><span>Field</span></TableHeaderCell>
+            <TableHeaderCell><span>{i18n.getText("UI_FIELD")}</span></TableHeaderCell>
             <TableHeaderCell><span /></TableHeaderCell>
           </TableHeaderRow>
         }>
         {rules.map((r, i) => (
-          <TableRow key={r.field} rowKey={r.field} data-idx={String(i)} actions={<TableRowAction icon="delete" text="Remove" />}>
+          <TableRow key={r.field} rowKey={r.field} data-idx={String(i)} actions={<TableRowAction icon="delete" text={i18n.getText("UI_REMOVE")} />}>
             <TableCell>
               <Select style={{ width: "100%" }} value={r.field}
                 onChange={(e) => onChange(rules.map((x, j) => (j === i ? { ...x, field: e.detail.selectedOption.value ?? x.field } : x)))}>
@@ -161,6 +164,7 @@ export function GridSettingsDialog({ columns, state, onConfirm, onClose }: {
   onConfirm: (patch: Partial<GridState>) => void;
   onClose: () => void;
 }) {
+  const i18n = useUiI18n();
   const toItems = (visible: string[]): ColumnItem[] => {
     const shown = visible.map((k) => columns.find((c) => c.key === k)).filter((c): c is ListColumn => !!c);
     const hidden = columns.filter((c) => !visible.includes(c.key));
@@ -183,36 +187,36 @@ export function GridSettingsDialog({ columns, state, onConfirm, onClose }: {
 
   return (
     // A fixed size, so filtering the list or switching tabs does not make the dialog jump.
-    <Dialog open onClose={onClose} headerText="View settings" resizable className="confire-flush"
+    <Dialog open onClose={onClose} headerText={i18n.getText("UI_VIEW_SETTINGS")} resizable className="confire-flush"
       style={{ width: "min(56rem, 95vw)", height: "min(40rem, 85vh)" }}
       footer={
         <Bar design="Footer"
           endContent={
             <>
-              <Button design="Emphasized" onClick={confirm}>OK</Button>
-              <Button design="Transparent" onClick={onClose}>Cancel</Button>
-              <Button design="Transparent" disabled={atDefault} onClick={restore}>Restore</Button>
+              <Button design="Emphasized" onClick={confirm}>{i18n.getText("UI_OK")}</Button>
+              <Button design="Transparent" onClick={onClose}>{i18n.getText("UI_CANCEL")}</Button>
+              <Button design="Transparent" disabled={atDefault} onClick={restore}>{i18n.getText("UI_RESTORE")}</Button>
             </>
           } />
       }>
       <TabContainer className="confire-flush" style={{ height: "100%" }}>
-        <Tab text="Columns" selected>
+        <Tab text={i18n.getText("UI_COLUMNS")} selected>
           <ColumnsTab items={items} onChange={setItems} />
         </Tab>
-        <Tab text="Sort">
+        <Tab text={i18n.getText("UI_SORT")}>
           <RulesTab rules={sortBy} fields={columns.filter((c) => c.sortable !== false && c.type !== "collection")}
-            add={(field) => ({ field, direction: "asc" as const })} onChange={setSortBy} addText="Add sort"
+            add={(field) => ({ field, direction: "asc" as const })} onChange={setSortBy} addText={i18n.getText("UI_ADD_SORT")}
             render={(r, set) => (
               <Select style={{ width: "100%" }} value={r.direction}
                 onChange={(e) => set({ ...r, direction: e.detail.selectedOption.value === "desc" ? "desc" : "asc" })}>
-                <Option value="asc">Ascending</Option>
-                <Option value="desc">Descending</Option>
+                <Option value="asc">{i18n.getText("UI_ASCENDING")}</Option>
+                <Option value="desc">{i18n.getText("UI_DESCENDING")}</Option>
               </Select>
             )} />
         </Tab>
-        <Tab text="Group">
+        <Tab text={i18n.getText("UI_GROUP")}>
           <RulesTab rules={groupBy} fields={columns.filter((c) => c.groupable === true)}
-            add={(field) => ({ field })} onChange={setGroupBy} addText="Add group" render={() => null} />
+            add={(field) => ({ field })} onChange={setGroupBy} addText={i18n.getText("UI_ADD_GROUP")} render={() => null} />
         </Tab>
       </TabContainer>
     </Dialog>

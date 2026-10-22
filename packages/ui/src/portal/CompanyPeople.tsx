@@ -3,6 +3,7 @@ import {
   Label, ObjectStatus, Option, Select, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text,
 } from "@ui5/webcomponents-react";
 import type { PortalRole } from "@confire/db";
+import { useUiI18n } from "../i18n.ts";
 import { formatValue } from "../format.ts";
 
 // Who is in a customer company and who is invited (spec §9, §10). Presentational: the internal BP
@@ -16,6 +17,10 @@ export const ROLE_HELP: Record<PortalRole, string> = {
   viewer: "Read requests, quotes and documents",
 };
 export const ROLES = Object.keys(ROLE_LABEL) as PortalRole[];
+
+/** Keys for the labels above. The English maps stay so a caller can keep using them as ids. */
+export const ROLE_TEXT_KEY: Record<PortalRole, string> = { owner: "UI_ROLE_OWNER", buyer: "UI_ROLE_BUYER", viewer: "UI_ROLE_VIEWER" };
+export const ROLE_HELP_KEY: Record<PortalRole, string> = { owner: "UI_ROLE_OWNER_HELP", buyer: "UI_ROLE_BUYER_HELP", viewer: "UI_ROLE_VIEWER_HELP" };
 
 export type PortalMemberRow = { userId: string; name: string; email: string; role: PortalRole; createdAt: Date | string };
 export type PendingInviteRow = { id: string; email: string; role: PortalRole; expiresAt: Date | string; expired: boolean };
@@ -34,15 +39,17 @@ export function CompanyPeople(p: {
   /** above the members table: an Invite button, say */
   toolbar?: ReactNode;
 }) {
+  const i18n = useUiI18n();
+  const roleLabel = (r: PortalRole) => i18n.getText(ROLE_TEXT_KEY[r]);
   const byId = new Map(p.members.map((m) => [m.userId, m]));
   const inviteById = new Map(p.invitations.map((i) => [i.id, i]));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem", width: "100%" }}>
       {p.toolbar}
       <Table
-        accessibleName="Members"
+        accessibleName={i18n.getText("UI_MEMBERS")}
         overflowMode="Popin"
-        noDataText="Nobody yet."
+        noDataText={i18n.getText("UI_NOBODY")}
         rowActionCount={p.onRemove ? 1 : 0}
         onRowActionClick={(e) => {
           const m = byId.get(rowKeyOf(e.detail.row));
@@ -50,25 +57,25 @@ export function CompanyPeople(p: {
         }}
         headerRow={
           <TableHeaderRow>
-            <TableHeaderCell minWidth="10rem">Name</TableHeaderCell>
-            <TableHeaderCell minWidth="12rem">Email</TableHeaderCell>
-            <TableHeaderCell width="10rem">Role</TableHeaderCell>
-            <TableHeaderCell width="8rem">Joined</TableHeaderCell>
+            <TableHeaderCell minWidth="10rem">{i18n.getText("UI_NAME")}</TableHeaderCell>
+            <TableHeaderCell minWidth="12rem">{i18n.getText("UI_EMAIL")}</TableHeaderCell>
+            <TableHeaderCell width="10rem">{i18n.getText("UI_ROLE")}</TableHeaderCell>
+            <TableHeaderCell width="8rem">{i18n.getText("UI_JOINED")}</TableHeaderCell>
           </TableHeaderRow>
         }
       >
         {p.members.map((m) => (
           <TableRow key={m.userId} rowKey={m.userId}
-            actions={p.onRemove ? <TableRowAction icon="delete" text="Remove" /> : undefined}>
-            <TableCell><Text>{m.name}{m.userId === p.selfId ? " (you)" : ""}</Text></TableCell>
+            actions={p.onRemove ? <TableRowAction icon="delete" text={i18n.getText("UI_REMOVE")} /> : undefined}>
+            <TableCell><Text>{m.name}{m.userId === p.selfId ? ` (${i18n.getText("UI_YOU")})` : ""}</Text></TableCell>
             <TableCell><Text>{m.email}</Text></TableCell>
             <TableCell>
               {p.onSetRole ? (
-                <Select value={m.role} disabled={p.busy} accessibleName={`Role of ${m.name}`} style={{ width: "100%" }}
+                <Select value={m.role} disabled={p.busy} accessibleName={i18n.getText("UI_ROLE_OF", m.name)} style={{ width: "100%" }}
                   onChange={(e) => p.onSetRole!(m, e.detail.selectedOption.value as PortalRole)}>
-                  {ROLES.map((r) => <Option key={r} value={r} tooltip={ROLE_HELP[r]}>{ROLE_LABEL[r]}</Option>)}
+                  {ROLES.map((r) => <Option key={r} value={r} tooltip={i18n.getText(ROLE_HELP_KEY[r])}>{roleLabel(r)}</Option>)}
                 </Select>
-              ) : <Text>{ROLE_LABEL[m.role]}</Text>}
+              ) : <Text>{roleLabel(m.role)}</Text>}
             </TableCell>
             <TableCell><Text>{formatValue(m.createdAt, "date")}</Text></TableCell>
           </TableRow>
@@ -76,9 +83,9 @@ export function CompanyPeople(p: {
       </Table>
       {p.invitations.length ? (
         <>
-          <Label showColon>Invited, not yet joined</Label>
+          <Label showColon>{i18n.getText("UI_INVITED")}</Label>
           <Table
-            accessibleName="Pending invitations"
+            accessibleName={i18n.getText("UI_PENDING_INVITES")}
             overflowMode="Popin"
             rowActionCount={p.onCancelInvite ? 1 : 0}
             onRowActionClick={(e) => {
@@ -87,20 +94,20 @@ export function CompanyPeople(p: {
             }}
             headerRow={
               <TableHeaderRow>
-                <TableHeaderCell minWidth="12rem">Email</TableHeaderCell>
-                <TableHeaderCell width="10rem">Role</TableHeaderCell>
-                <TableHeaderCell width="8rem">Expires</TableHeaderCell>
+                <TableHeaderCell minWidth="12rem">{i18n.getText("UI_EMAIL")}</TableHeaderCell>
+                <TableHeaderCell width="10rem">{i18n.getText("UI_ROLE")}</TableHeaderCell>
+                <TableHeaderCell width="8rem">{i18n.getText("UI_EXPIRES")}</TableHeaderCell>
               </TableHeaderRow>
             }
           >
             {p.invitations.map((i) => (
               <TableRow key={i.id} rowKey={i.id}
-                actions={p.onCancelInvite ? <TableRowAction icon="decline" text="Cancel invitation" /> : undefined}>
+                actions={p.onCancelInvite ? <TableRowAction icon="decline" text={i18n.getText("UI_CANCEL_INVITE")} /> : undefined}>
                 <TableCell><Text>{i.email}</Text></TableCell>
-                <TableCell><Text>{ROLE_LABEL[i.role]}</Text></TableCell>
+                <TableCell><Text>{roleLabel(i.role)}</Text></TableCell>
                 <TableCell>
                   {i.expired
-                    ? <ObjectStatus state="Critical">Expired</ObjectStatus>
+                    ? <ObjectStatus state="Critical">{i18n.getText("UI_EXPIRED")}</ObjectStatus>
                     : <Text>{formatValue(i.expiresAt, "date")}</Text>}
                 </TableCell>
               </TableRow>

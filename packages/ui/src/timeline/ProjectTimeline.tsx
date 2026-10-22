@@ -4,7 +4,9 @@ import {
   TimelineItem,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoActivities.js";
+import { useUiI18n } from "../i18n.ts";
 import { money } from "../money.ts";
+import { documentStatusText } from "../documentStatus.ts";
 import { PrintActions } from "../PrintActions.tsx";
 import { FILE_MAX_MB, fileSize, fileUrl } from "../files.ts";
 
@@ -29,51 +31,56 @@ export type TimelineDoc = {
 };
 export type TimelineDocuments = { quotations: { quotation: TimelineDoc; chain: TimelineDoc[]; current: boolean }[] };
 
-const ENTITY: Record<string, { one: string; icon: string }> = {
-  Quotations: { one: "Quotation", icon: "sales-quote" },
-  Orders: { one: "Sales order", icon: "sales-order" },
-  DeliveryNotes: { one: "Delivery", icon: "shipping-status" },
-  Invoices: { one: "Invoice", icon: "receipt" },
+const ENTITY: Record<string, { key: string; icon: string }> = {
+  Quotations: { key: "UI_DOC_QUOTATION", icon: "sales-quote" },
+  Orders: { key: "UI_DOC_ORDER", icon: "sales-order" },
+  DeliveryNotes: { key: "UI_DOC_DELIVERY", icon: "shipping-status" },
+  Invoices: { key: "UI_DOC_INVOICE", icon: "receipt" },
 };
-const DOC_STATUS: Record<string, string> = { bost_Open: "Open", bost_Close: "Closed", bost_Paid: "Paid", bost_Delivered: "Delivered" };
 
 type State = "None" | "Positive" | "Critical" | "Negative" | "Information";
-/** Title, icon and value state per event kind. `who` is the other side as the reader names it. */
+/** Title key, icon and value state per event kind. `title` is an i18n key. */
 const KIND: Record<string, { title: (side: "internal" | "external") => string; icon: string; state?: State }> = {
-  created: { title: () => "Project created", icon: "add-document" },
-  submitted: { title: () => "Submitted", icon: "paper-plane", state: "Information" },
-  resubmitted: { title: () => "Resubmitted", icon: "paper-plane", state: "Information" },
-  withdrawn: { title: () => "Withdrawn", icon: "undo" },
-  accepted: { title: () => "In review", icon: "accept", state: "Information" },
-  returned: { title: () => "Changes requested", icon: "edit", state: "Critical" },
-  declined: { title: () => "Declined", icon: "decline", state: "Negative" },
-  revised: { title: () => "Configuration revised", icon: "edit-outside" },
-  quoted: { title: () => "Quotation sent", icon: "sales-quote", state: "Positive" },
-  quote_accepted: { title: (s) => (s === "external" ? "You accepted the quotation" : "Quotation accepted"), icon: "approvals", state: "Positive" },
-  quote_declined: { title: (s) => (s === "external" ? "You declined the quotation" : "Quotation declined"), icon: "cancel", state: "Critical" },
-  comment: { title: () => "Comment", icon: "comment" },
-  file: { title: () => "File", icon: "attachment" },
+  created: { title: () => "UI_EVT_CREATED", icon: "add-document" },
+  submitted: { title: () => "UI_STATUS_SUBMITTED", icon: "paper-plane", state: "Information" },
+  resubmitted: { title: () => "UI_EVT_RESUBMITTED", icon: "paper-plane", state: "Information" },
+  withdrawn: { title: () => "UI_EVT_WITHDRAWN", icon: "undo" },
+  accepted: { title: () => "UI_STATUS_IN_REVIEW", icon: "accept", state: "Information" },
+  returned: { title: () => "UI_STATUS_CHANGES", icon: "edit", state: "Critical" },
+  declined: { title: () => "UI_STATUS_DECLINED", icon: "decline", state: "Negative" },
+  revised: { title: () => "UI_EVT_REVISED", icon: "edit-outside" },
+  quoted: { title: () => "UI_EVT_QUOTED", icon: "sales-quote", state: "Positive" },
+  quote_accepted: { title: (s) => (s === "external" ? "UI_EVT_ACCEPTED_YOU" : "UI_EVT_ACCEPTED"), icon: "approvals", state: "Positive" },
+  quote_declined: { title: (s) => (s === "external" ? "UI_EVT_DECLINED_YOU" : "UI_EVT_DECLINED_QUOTE"), icon: "cancel", state: "Critical" },
+  comment: { title: () => "UI_EVT_COMMENT", icon: "comment" },
+  file: { title: () => "UI_EVT_FILE", icon: "attachment" },
 };
 
-const show = (v: unknown): string =>
+const show = (v: unknown, yes: string, no: string): string =>
   v === undefined || v === null || v === "" ? "—"
   : Array.isArray(v) ? v.join(", ")
-  : typeof v === "boolean" ? (v ? "Yes" : "No")
+  : typeof v === "boolean" ? (v ? yes : no)
   : String(v);
 
 const when = (d: Date) => d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 /** A revision as readable lines: the model's labels, old → new. */
 function Revision({ payload, labels }: { payload: unknown; labels: Record<string, string> }) {
+  const i18n = useUiI18n();
+  const yes = i18n.getText("UI_YES");
+  const no = i18n.getText("UI_NO");
+  const cell = (v: unknown) => show(v, yes, no);
   const p = payload as {
     entries?: Record<string, [unknown, unknown]>; batches?: [number[], number[]]; tables?: Record<string, [number, number]>;
   } | null;
   if (!p) return null;
   const lines = [
-    ...Object.entries(p.entries ?? {}).map(([k, [a, b]]) => `${labels[k] ?? k}: ${show(a)} → ${show(b)}`),
-    ...(p.batches ? [`Batch quantities: ${show(p.batches[0])} → ${show(p.batches[1])}`] : []),
+    ...Object.entries(p.entries ?? {}).map(([k, [a, b]]) => `${labels[k] ?? k}: ${cell(a)} → ${cell(b)}`),
+    ...(p.batches ? [i18n.getText("UI_BATCH_QTY", cell(p.batches[0]), cell(p.batches[1]))] : []),
     ...Object.entries(p.tables ?? {}).map(([k, [a, b]]) =>
-      `${labels[k] ?? k}: ${a === b ? `${b} row${b === 1 ? "" : "s"} changed` : `${a} → ${b} rows`}`),
+      `${labels[k] ?? k}: ${a === b
+        ? i18n.getText(b === 1 ? "UI_ROW_CHANGED" : "UI_ROWS_CHANGED", String(b))
+        : i18n.getText("UI_ROWS_TO", String(a), String(b))}`),
   ];
   return (
     <ul style={{ margin: 0, paddingInlineStart: "1.25rem" }}>
@@ -111,6 +118,7 @@ export function ProjectTimeline({
    *  server lets print (any seat on the portal, admins internally) */
   canPreview?: boolean;
 }) {
+  const i18n = useUiI18n();
   const [note, setNote] = useState("");
   const [internalOnly, setInternalOnly] = useState(false);
   const [posting, setPosting] = useState(false);
@@ -147,7 +155,7 @@ export function ProjectTimeline({
   const attach = (file: File | undefined) => {
     setPicks((n) => n + 1);
     if (!file || !onUpload) return;
-    if (file.size > FILE_MAX_MB * 1024 * 1024) return setPostError(`A file can be up to ${FILE_MAX_MB} MB`);
+    if (file.size > FILE_MAX_MB * 1024 * 1024) return setPostError(i18n.getText("UI_FILE_MAX", String(FILE_MAX_MB)));
     void busy(() => onUpload(file, side === "internal" && internalOnly), () => {});
   };
 
@@ -156,24 +164,24 @@ export function ProjectTimeline({
       {canComment || onUpload ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           <TextArea value={note} rows={2} growing growingMaxRows={8} maxlength={4000} disabled={posting}
-            placeholder={side === "internal" ? "Comment on this request" : "Ask a question or add a note"}
-            accessibleName="Comment" onInput={(e) => setNote(e.target.value ?? "")} />
+            placeholder={i18n.getText(side === "internal" ? "UI_COMMENT_STAFF" : "UI_COMMENT_CLIENT")}
+            accessibleName={i18n.getText("UI_COMMENT")} onInput={(e) => setNote(e.target.value ?? "")} />
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             {side === "internal" ? (
               // Off by default: a comment or file on a client's request is for the client unless said otherwise.
-              <CheckBox text="Internal note (not shown to the client)" checked={internalOnly} disabled={posting}
+              <CheckBox text={i18n.getText("UI_INTERNAL_TOGGLE")} checked={internalOnly} disabled={posting}
                 onChange={(e) => setInternalOnly(e.target.checked)} />
             ) : null}
             {onUpload ? (
               <FileUploader key={picks} hideInput maxFileSize={FILE_MAX_MB} disabled={posting} style={{ marginInlineStart: "auto" }}
-                accessibleName="Attach a file"
-                onFileSizeExceed={() => { setPicks((n) => n + 1); setPostError(`A file can be up to ${FILE_MAX_MB} MB`); }}
+                accessibleName={i18n.getText("UI_ATTACH_NAME")}
+                onFileSizeExceed={() => { setPicks((n) => n + 1); setPostError(i18n.getText("UI_FILE_MAX", String(FILE_MAX_MB))); }}
                 onChange={(e) => attach(e.detail.files?.[0])}>
-                <Button design="Transparent" icon="attachment" disabled={posting}>Attach file</Button>
+                <Button design="Transparent" icon="attachment" disabled={posting}>{i18n.getText("UI_ATTACH")}</Button>
               </FileUploader>
             ) : null}
             <Button design="Default" icon="paper-plane" disabled={posting || !note.trim()}
-              style={onUpload ? undefined : { marginInlineStart: "auto" }} onClick={() => void post()}>Post</Button>
+              style={onUpload ? undefined : { marginInlineStart: "auto" }} onClick={() => void post()}>{i18n.getText("UI_POST")}</Button>
           </div>
           {postError ? <MessageStrip design="Negative" hideCloseButton>{postError}</MessageStrip> : null}
         </div>
@@ -181,28 +189,29 @@ export function ProjectTimeline({
       {error ? <MessageStrip design="Negative" hideCloseButton>{error.message}</MessageStrip> : null}
       {documentsError ? (
         <MessageStrip design="Critical" hideCloseButton>
-          {`The SAP documents can't be shown right now: ${documentsError.message}`}
+          {i18n.getText("UI_SAP_UNAVAILABLE", documentsError.message)}
         </MessageStrip>
       ) : null}
       {!loading && !entries.length ? (
-        <IllustratedMessage name="NoActivities" design="Small" titleText="Nothing here yet"
-          subtitleText="Events, comments and documents of this project appear here." />
+        <IllustratedMessage name="NoActivities" design="Small" titleText={i18n.getText("UI_TIMELINE_EMPTY_TITLE")}
+          subtitleText={i18n.getText("UI_TIMELINE_EMPTY_SUB")} />
       ) : (
-        <Timeline loading={loading} accessibleName="Project timeline">
+        <Timeline loading={loading} accessibleName={i18n.getText("UI_TIMELINE")}>
           {entries.map((x) => {
             if (x.kind === "doc") {
-              const meta = ENTITY[x.d.entity] ?? { one: x.d.entity, icon: "document" };
+              const meta = ENTITY[x.d.entity];
+              const docName = meta ? i18n.getText(meta.key) : x.d.entity;
               return (
-                <TimelineItem key={`${x.d.entity}:${x.d.docEntry}`} icon={meta.icon}
-                  titleText={`${meta.one} ${x.d.docNum}${x.superseded ? " (superseded)" : ""}`}
+                <TimelineItem key={`${x.d.entity}:${x.d.docEntry}`} icon={meta?.icon ?? "document"}
+                  titleText={i18n.getText(x.superseded ? "UI_DOC_TITLE_SUPERSEDED" : "UI_DOC_TITLE", docName, String(x.d.docNum))}
                   subtitleText={x.d.docDate ? new Date(x.d.docDate).toLocaleDateString() : undefined}>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
                     <Text>{money(x.d.docTotal, currency)}</Text>
                     <ObjectStatus state={x.d.docStatus === "bost_Open" ? "Information" : "None"}>
-                      {DOC_STATUS[x.d.docStatus] ?? x.d.docStatus}
+                      {documentStatusText(x.d.docStatus, x.d.docStatus, i18n.getText.bind(i18n))}
                     </ObjectStatus>
                     {onOpenDocument ? (
-                      <Link onClick={() => onOpenDocument(x.d.entity, x.d.docEntry)}>Open</Link>
+                      <Link onClick={() => onOpenDocument(x.d.entity, x.d.docEntry)}>{i18n.getText("UI_OPEN")}</Link>
                     ) : null}
                     {canPreview ? <PrintActions entity={x.d.entity} docEntry={x.d.docEntry} /> : null}
                   </div>
@@ -210,17 +219,18 @@ export function ProjectTimeline({
               );
             }
             const e = x.e;
-            const k = KIND[e.kind] ?? { title: () => e.kind, icon: "history" };
+            const known = KIND[e.kind];
+            const k = known ?? { title: () => e.kind, icon: "history" };
             const q = e.payload as { docNum?: number | null; mode?: string; value?: number } | null;
             const f = e.kind === "file" ? e.payload as { fileId: string; name: string; size: number } | null : null;
             const title = e.kind === "quoted" && q
-              ? `Quotation ${q.docNum ?? ""} ${q.mode === "updated" ? "updated" : "sent"}`.replace(/\s+/g, " ")
-              : k.title(side);
+              ? i18n.getText(q.mode === "updated" ? "UI_QUOTE_UPDATED" : "UI_QUOTE_SENT", q.docNum == null ? "" : String(q.docNum)).replace(/\s+/g, " ")
+              : known ? i18n.getText(k.title(side)) : k.title(side);
             return (
               <TimelineItem key={e.id} icon={k.icon} state={k.state ?? "None"} titleText={title}
                 name={e.actorName ?? undefined} subtitleText={when(new Date(e.at))}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-                  {e.visibility === "internal" ? <Tag design="Set2" colorScheme="8" style={{ alignSelf: "flex-start" }}>Internal note</Tag> : null}
+                  {e.visibility === "internal" ? <Tag design="Set2" colorScheme="8" style={{ alignSelf: "flex-start" }}>{i18n.getText("UI_INTERNAL_TAG")}</Tag> : null}
                   {e.kind === "revised" ? <Revision payload={e.payload} labels={labels} /> : null}
                   {e.kind === "quoted" && q?.value !== undefined ? <Text>{money(q.value, currency)}</Text> : null}
                   {f ? <Link href={fileUrl(f.fileId)} icon="download">{`${f.name} (${fileSize(f.size)})`}</Link> : null}

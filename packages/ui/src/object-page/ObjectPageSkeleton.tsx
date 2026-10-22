@@ -1,11 +1,13 @@
 import { MessageStrip, ObjectPage } from "@ui5/webcomponents-react";
+import { useUiI18n } from "../i18n.ts";
 
 /** The object page while its record loads. Bars copy AnalyticalTable's TablePlaceholder (not a
  *  public export); the styles are global.css' confire-op-skel-*. */
 export function ObjectPageSkeleton() {
+  const i18n = useUiI18n();
   return (
     <ObjectPage placeholder={
-      <div className="confire-op-skel" role="progressbar" aria-valuetext="Busy" title="Please wait">
+      <div className="confire-op-skel" role="progressbar" aria-valuetext={i18n.getText("UI_BUSY")} title={i18n.getText("UI_PLEASE_WAIT")}>
         <div aria-hidden="true">
           <div className="confire-op-skel-header">
             <div className="confire-op-skel-heading">

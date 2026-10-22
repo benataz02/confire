@@ -1,5 +1,8 @@
+import { useMemo } from "react";
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { useI18n } from "../../../../i18n.ts";
 import { b1Feature } from "../../../../features/b1/index.ts";
+import { localizedB1Feature } from "../../../../features/b1/localize.ts";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
 import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import { useDetailView } from "@confire/ui/useDetailView.ts";
@@ -16,12 +19,16 @@ export const Route = createFileRoute("/$slug/_admin/b1/$entity_/$key")({
 });
 
 function EntityRecord() {
+  const i18n = useI18n();
   const { entity, key } = Route.useParams();
-  const feature = b1Feature(entity)!;
+  const feature = useMemo(
+    () => localizedB1Feature(entity, (k, ...args) => i18n.getText(k, ...args))!,
+    [entity, i18n],
+  );
   const d = useDetailView({ entity, routeKey: key, route: `/b1/${entity}` });
 
   if (d.loading) return <ObjectPageSkeleton />;
-  if (d.error || !d.constraints || !d.row) return <PageError error={d.error ?? new Error("Not found")} />;
+  if (d.error || !d.constraints || !d.row) return <PageError error={d.error ?? new Error(i18n.getText("ADMIN_NOT_FOUND"))} />;
   return (
     <ObjectPage {...feature.detail.templates} entity={entity} constraints={d.constraints} data={d.row}
       sections={feature.detail.sections} header={feature.detail.header}

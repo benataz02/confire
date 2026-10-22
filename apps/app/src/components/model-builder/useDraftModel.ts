@@ -3,8 +3,10 @@ import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { checkModel, type Issue, type ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
+import { useI18n } from "../../i18n.ts";
 import type { TableCols } from "./exprHelpers.ts";
 import { toast } from "@confire/ui/toast.ts";
+import { type Translate } from "./builderMessages.ts";
 import { starterModel } from "./starterModel.ts";
 
 export const issueFor = (issues: Issue[], path: string) => issues.find((i) => i.path === path);
@@ -24,10 +26,18 @@ function colKeys(columns: unknown): string[] {
 export function useDraftModel(id?: string) {
   const qc = useQueryClient();
   const navigate = useNavigate({ from: "/$slug" });
+  const i18n = useI18n();
+  const t: Translate = (key, ...params) => i18n.getText(key, ...params);
   const rec = useQuery({ ...orpc.models.get.queryOptions({ input: { id: id! } }), enabled: !!id });
   const tablesQ = useQuery(orpc.masterdata.list.queryOptions());
-  const [draft, setDraft] = useState<ModelDef | null>(() => (id ? null : starterModel("")));
+  const [draft, setDraft] = useState<ModelDef | null>(() => (id ? null : starterModel("", t)));
   const [dirty, setDirty] = useState(false);
+  // The bundle loads after the first paint. An untouched new model is seeded again once the
+  // texts exist, so a section title is never the raw key. Edits set dirty and stay as typed.
+  useEffect(() => {
+    if (id || dirty) return;
+    setDraft((d) => (d && !d.name.trim() ? starterModel("", t) : d));
+  }, [id, dirty, i18n]);
   const [serverIssues, setServerIssues] = useState<Issue[]>([]);
   // A brand-new model is empty by definition, so painting its mandatory fields red — and listing
   // them in the message popover — before the author has touched anything is noise. Like
@@ -71,7 +81,7 @@ export function useDraftModel(id?: string) {
         qc.invalidateQueries({ queryKey: orpc.models.rows.key() });
         // save RETURNs the saved row, so seed the cache with it instead of refetching models.get.
         qc.setQueryData(orpc.models.get.queryOptions({ input: { id: row.id } }).queryKey, row);
-        toast("Model saved");
+        toast(t("MODEL_TOAST_SAVED"));
         if (!id) void navigate({ to: "/$slug/models/$id", params: { id: row.id }, replace: true });
       },
       onError: (e) => {

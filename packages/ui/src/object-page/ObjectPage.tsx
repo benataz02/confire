@@ -6,6 +6,7 @@ import {
 } from "@ui5/webcomponents-react";
 import { confirm } from "../confirm.ts";
 import { exists, notFoundMessage } from "../cfl/existence.ts";
+import { useUiI18n } from "../i18n.ts";
 import { useUiSource } from "../source.tsx";
 import { validateCflCells } from "../list-report/EditGrid.tsx";
 import { ColumnsTab, type ColumnItem } from "../list-report/GridSettingsDialog.tsx";
@@ -24,7 +25,6 @@ import type { FormField, HeaderConfig, ObjectViewState, Row, Section } from "../
 // hands the diff to the caller, and a failed save maps SAP's complaint onto the field it names.
 
 export type CreateAction = "view" | "new" | "back";
-const CREATE_TEXT: Record<CreateAction, string> = { view: "Create and view", new: "Create and new", back: "Create and back" };
 
 /** Object views are stored under `<entity>::object` (OBJECT_TABLE_SUFFIX on the server). */
 const objectTableId = (entity: string) => `${entity}::object`;
@@ -56,6 +56,10 @@ export function ObjectPage(p: Templates & {
   notice?: ReactNode;
 }) {
   const { constraints, isNew = false } = p;
+  const i18n = useUiI18n();
+  const t = (key: string, ...params: Array<string | number>) => i18n.getText(key, ...params);
+  const createText = (a: CreateAction) =>
+    a === "new" ? t("UI_CREATE_AND_NEW") : a === "back" ? t("UI_CREATE_AND_BACK") : t("UI_CREATE_AND_VIEW");
   const fields = constraints.fields;
   const qc = useQueryClient();
   const { client } = useUiSource();
@@ -149,7 +153,7 @@ export function ObjectPage(p: Templates & {
       for (const f of allFields) {
         if (!touched.current.has(f.key) && typeof f.required !== "function" && !(f.key in prev)) continue;
         const e = isEditable(f) || (f.type === "collection" && isTableEditable(f.key))
-          ? getFieldValidationError(f, formData[f.key], formData, isEditMode, isNew)
+          ? getFieldValidationError(f, formData[f.key], formData, isEditMode, isNew, t)
           : null;
         if (e) next[f.key] = e;
         else delete next[f.key];
@@ -183,9 +187,9 @@ export function ObjectPage(p: Templates & {
       if (!isNewRef.current && current.pathname === next.pathname) return false;
       if (!dirtyRef.current || savingRef.current) return false;
       return !(await confirm({
-        title: "Discard changes?",
-        message: "This record has unsaved changes. Leave without saving?",
-        actionText: "Discard",
+        title: t("UI_DISCARD_TITLE"),
+        message: t("UI_DISCARD_LEAVE"),
+        actionText: t("UI_DISCARD"),
         destructive: true,
       }));
     },
@@ -242,26 +246,26 @@ export function ObjectPage(p: Templates & {
         if (!f.cfl || f.cfl.mustExist === false || !isEditable(f)) continue;
         const v = formData[f.key];
         if (isEmptyValue(v) || sameState(v, baseline?.[f.key])) continue;
-        if (!(await exists(qc, client, f.cfl, v))) ex[f.key] = notFoundMessage(f.cfl);
+        if (!(await exists(qc, client, f.cfl, v))) ex[f.key] = notFoundMessage(f.cfl, t);
       }
       // 3. the lines grid's value-help cells
       const cells: Record<string, Record<string, string>> = {};
       for (const s of shown) {
         if (!s.table || !isTableEditable(s.table.key)) continue;
-        const ce = await validateCflCells(qc, client, s.table.columns, (formData[s.table.key] as Row[] | undefined) ?? []);
+        const ce = await validateCflCells(qc, client, s.table.columns, (formData[s.table.key] as Row[] | undefined) ?? [], t);
         if (Object.keys(ce).length) cells[s.table.key] = ce;
       }
       // 4. the field rules
       const errs = validateForm(
         allFields.map((f) => (f.type === "collection" ? { ...f, metaEditable: isTableEditable(f.key) } : f)).filter((f) => !locked.has(f.key)),
-        formData, { baseline, isNew },
+        formData, { baseline, isNew, t },
       );
       const allEx = { ...Object.fromEntries(Object.entries(existence).filter(([k]) => !(k in ex))), ...ex };
       setErrors(errs);
       setExistence(allEx);
       setCellErrors(cells);
       if (Object.keys(errs).length || Object.keys(allEx).length || Object.keys(cells).length) {
-        setPageError("Check the highlighted fields.");
+        setPageError(t("UI_CHECK_FIELDS"));
         return;
       }
       const diff = diffOf();
@@ -285,7 +289,7 @@ export function ObjectPage(p: Templates & {
   };
 
   const cancel = async () => {
-    if (dirty && !(await confirm({ title: "Discard changes?", message: "Discard your changes to this record?", actionText: "Discard", destructive: true })))
+    if (dirty && !(await confirm({ title: t("UI_DISCARD_TITLE"), message: t("UI_DISCARD_RECORD"), actionText: t("UI_DISCARD"), destructive: true })))
       return;
     if (isNew) {
       dirtyRef.current = false;
@@ -340,8 +344,8 @@ export function ObjectPage(p: Templates & {
 
   const layoutControl = p.localViews ? undefined : (
     <FlexBox alignItems="Center" style={{ gap: "0.25rem" }}>
-      <ViewTitle title="Layout" views={layout} size="H6" />
-      <Button design="Transparent" icon="action-settings" tooltip="Adapt layout" accessibleName="Adapt layout"
+      <ViewTitle title={t("UI_LAYOUT")} views={layout} size="H6" />
+      <Button design="Transparent" icon="action-settings" tooltip={t("UI_ADAPT_LAYOUT")} accessibleName={t("UI_ADAPT_LAYOUT")}
         disabled={!layout.state} onClick={() => setLayoutOpen(true)} />
     </FlexBox>
   );
@@ -354,6 +358,7 @@ export function ObjectPage(p: Templates & {
           header: p.header, formData, label: constraints.label,
           ctx: { formData, isEditMode, isNew, constraints },
           onEdit: !p.readonly && constraints.writable ? () => { setBaseline(formData); setEditing(true); } : undefined,
+          t,
           editDisabled: p.editDisabled,
           navigation: p.navigation,
           layout: layoutControl,
@@ -364,20 +369,20 @@ export function ObjectPage(p: Templates & {
             <>
               {!isNew ? (
                 <Button design="Emphasized" disabled={saving || !dirty} onClick={() => void save("view")}>
-                  {saving ? "Saving…" : "Save"}
+                  {saving ? t("UI_SAVING") : t("UI_SAVE")}
                 </Button>
               ) : p.createLabel ? (
                 <Button design="Emphasized" disabled={saving} onClick={() => void save("view")}>
-                  {saving ? "Creating…" : p.createLabel}
+                  {saving ? t("UI_CREATING") : p.createLabel}
                 </Button>
               ) : (
                 <SplitButton id={menuId} design="Emphasized" disabled={saving}
                   accessibilityAttributes={{ arrowButton: { hasPopup: "menu", expanded: createMenu } }}
                   onClick={() => void save(createAction)} onArrowClick={() => setCreateMenu(true)}>
-                  {saving ? "Creating…" : CREATE_TEXT[createAction]}
+                  {saving ? t("UI_CREATING") : createText(createAction)}
                 </SplitButton>
               )}
-              <Button disabled={saving} onClick={() => void cancel()}>Cancel</Button>
+              <Button disabled={saving} onClick={() => void cancel()}>{t("UI_CANCEL")}</Button>
             </>
           } />
         ) : undefined}
@@ -393,8 +398,8 @@ export function ObjectPage(p: Templates & {
             localStorage.setItem(storageKey, a);
             void save(a);
           }}>
-          {(Object.keys(CREATE_TEXT) as CreateAction[]).map((a) => (
-            <MenuItem key={a} data-action={a} text={CREATE_TEXT[a]} icon={a === createAction ? "accept" : undefined} />
+          {(["view", "new", "back"] as CreateAction[]).map((a) => (
+            <MenuItem key={a} data-action={a} text={createText(a)} icon={a === createAction ? "accept" : undefined} />
           ))}
         </Menu>
       ) : null}
@@ -416,6 +421,7 @@ function LayoutDialog({ sections, state, mustShow, onConfirm, onClose }: {
   onConfirm: (next: ObjectViewState) => void;
   onClose: () => void;
 }) {
+  const i18n = useUiI18n();
   const [draft, setDraft] = useState(state);
   const byId = new Map(sections.map((s) => [s.id, s]));
   const labelOf = (s: Section, key: string) =>
@@ -428,18 +434,18 @@ function LayoutDialog({ sections, state, mustShow, onConfirm, onClose }: {
   });
 
   return (
-    <Dialog open onClose={onClose} headerText="Adapt layout" resizable className="confire-flush"
+    <Dialog open onClose={onClose} headerText={i18n.getText("UI_ADAPT_LAYOUT")} resizable className="confire-flush"
       style={{ width: "min(56rem, 95vw)", height: "min(40rem, 85vh)" }}
       footer={
         <Bar design="Footer" endContent={
           <>
-            <Button design="Emphasized" onClick={() => onConfirm(draft)}>OK</Button>
-            <Button design="Transparent" onClick={onClose}>Cancel</Button>
+            <Button design="Emphasized" onClick={() => onConfirm(draft)}>{i18n.getText("UI_OK")}</Button>
+            <Button design="Transparent" onClick={onClose}>{i18n.getText("UI_CANCEL")}</Button>
           </>
         } />
       }>
       <TabContainer className="confire-flush" style={{ height: "100%" }}>
-        <Tab text="Sections" selected>
+        <Tab text={i18n.getText("UI_SECTIONS")} selected>
           <ColumnsTab items={sectionItems}
             onChange={(items) => setDraft((d) => ({
               sections: items.map((it) => ({ ...d.sections.find((x) => x.id === it.key)!, visible: it.visible })),

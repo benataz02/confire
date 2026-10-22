@@ -2,6 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Link, Option, Select } from "@ui5/webcomponents-react";
 import { orpc } from "../../orpc.ts";
+import { useI18n } from "../../i18n.ts";
 
 // A model names a tenant masterdata query and never holds the query itself, so every "which
 // query?" field in the builder is this same Select plus a way to go look at the thing it names.
@@ -17,6 +18,8 @@ export function MasterdataQuerySelect({ value, onChange, issue, required, access
   required?: boolean;
   accessibleName: string;
 }) {
+  const i18n = useI18n();
+  const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
   const navigate = useNavigate({ from: "/$slug" });
   const md = useQuery(orpc.masterdata.list.queryOptions());
   const queries = (md.data ?? []).filter((t) => t.kind === "query");
@@ -27,10 +30,9 @@ export function MasterdataQuerySelect({ value, onChange, issue, required, access
     <>
       <Select value={value ?? ""} accessibleName={accessibleName}
         valueState={issue ? "Negative" : empty ? "Information" : "None"}
-        valueStateMessage={<div>{issue
-          ?? (empty ? "No queries are defined yet — add one on the Masterdata page." : "Choose a query.")}</div>}
+        valueStateMessage={<div>{issue ?? (empty ? t("MODEL_NO_QUERIES") : t("MODEL_CHOOSE_QUERY"))}</div>}
         onChange={(e) => onChange(e.detail.selectedOption.value || undefined)}>
-        <Option value="">{empty ? "— none defined —" : required ? "— pick one —" : "— none —"}</Option>
+        <Option value="">{empty ? t("MODEL_NONE_DEFINED") : required ? t("MODEL_PICK_ONE") : t("MODEL_NONE")}</Option>
         {queries.map((q) => (
           <Option key={q.id} value={q.name} additionalText={q.query?.query.entitySet}>{q.name}</Option>
         ))}
@@ -38,11 +40,11 @@ export function MasterdataQuerySelect({ value, onChange, issue, required, access
       {picked ? (
         <Link icon="inspect" wrappingType="None"
           onClick={() => void navigate({ to: "/$slug/masterdata/$id", params: { id: picked.id } })}>
-          Open in Masterdata
+          {t("MODEL_OPEN_MD")}
         </Link>
       ) : (
         <Link icon="add" wrappingType="None" onClick={() => void navigate({ to: "/$slug/masterdata/new" })}>
-          Create a query
+          {t("MODEL_CREATE_QUERY")}
         </Link>
       )}
     </>

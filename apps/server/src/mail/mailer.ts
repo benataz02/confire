@@ -7,28 +7,30 @@ import { platformDomain } from "../tenant.ts";
 // configuration, not a dev/prod branch — the same as an unset GOOGLE_CLIENT_ID leaving its button dead.
 // Every caller fires and forgets: a mail is never on a request's critical path (spec §12), so a
 // slow Resend costs nothing, and a sign-in's timing never depends on whether a mail went out.
+// Every mail is a no-reply notification: no Reply-To, and mail.<domain> receives nothing — the
+// conversation is the project's timeline, not an inbox.
 
 export type Mail = {
   to: string;
   subject: string;
   /** One React Email template with its typed props (spec §17); rendered to HTML and text on send. */
   body: ReactElement;
-  /** The From display name — the address is always notify@<domain>. */
+  /** The From display name. */
   fromName: string;
-  /** The From address's domain: a tenant's verified sender (D29). Absent = mailDomain. */
-  fromDomain?: string;
-  replyTo?: string;
+  /** The From address's local part on mailDomain: a tenant's slug on its client mail. Absent = notify. */
+  sender?: string;
   /** `<event>/<id>` (Resend keeps it 24 h): a retried send is the original send, not a second mail. */
   idempotencyKey?: string;
 };
 
-export type SentMail = { to: string; subject: string; from: string; replyTo?: string; html: string; text: string };
-/** `status` is Resend's HTTP status on a refusal: a 403 from a tenant's domain is the D29 fallback. */
-export type SendResult = { error: string | null; status: number | null };
+export type SentMail = { to: string; subject: string; from: string; html: string; text: string };
+export type SendResult = { error: string | null };
 
 // A sending_access key: it can send and nothing else, so a leak cannot touch domains or keys.
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-/** Confire's own sending domain, `mail.<domain>`: account and internal mail, and every fallback. */
+/** The one sending domain, `mail.<domain>` (Resend, eu-west-1): Confire's mail as notify@, a
+ *  tenant's client mail as <slug>@. ponytail: one domain, so one reputation for every tenant; a
+ *  Resend domain per tenant (plan-capped, DNS per tenant) if a tenant's sending ever hurts the rest. */
 export const mailDomain = `mail.${platformDomain}`;
 
 /** RFC 5322 quoted display name: `"` and `\` escaped, so `Müller & Söhne, GmbH` stays one name and
@@ -40,9 +42,9 @@ export const formatFrom = (name: string, address: string) => `"${name.replace(/[
 export const devOutbox: SentMail[] = [];
 
 async function rendered(mail: Mail) {
-  const from = formatFrom(mail.fromName, `notify@${mail.fromDomain ?? mailDomain}`);
+  const from = formatFrom(mail.fromName, `${mail.sender ?? "notify"}@${mailDomain}`);
   const [html, text] = await Promise.all([render(mail.body), render(mail.body, { plainText: true })]);
-  return { from, to: mail.to, subject: mail.subject, html, text, ...(mail.replyTo ? { replyTo: mail.replyTo } : {}) };
+  return { from, to: mail.to, subject: mail.subject, html, text };
 }
 
 /**
@@ -54,7 +56,7 @@ async function rendered(mail: Mail) {
  * recorded). Chunk with a key per chunk if a company or a supplier's staff ever gets that big.
  */
 export async function sendMails(mails: Mail[], idempotencyKey?: string): Promise<SendResult> {
-  if (!mails.length) return { error: null, status: null };
+  if (!mails.length) return { error: null };
   try {
     const out = await Promise.all(mails.map(rendered));
     if (!resend) {
@@ -63,14 +65,14 @@ export async function sendMails(mails: Mail[], idempotencyKey?: string): Promise
         if (devOutbox.length > 50) devOutbox.shift();
         console.log(`[mail] ${m.from} -> ${m.to}: ${m.subject}\n${m.text}\n`);
       }
-      return { error: null, status: null };
+      return { error: null };
     }
     const options = idempotencyKey ? { idempotencyKey } : undefined;
     // The SDK returns { data, error } instead of throwing.
     const { error } = out.length === 1 ? await resend.emails.send(out[0]!, options) : await resend.batch.send(out, options);
-    return { error: error?.message ?? null, status: error?.statusCode ?? null };
+    return { error: error?.message ?? null };
   } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e), status: null };
+    return { error: e instanceof Error ? e.message : String(e) };
   }
 }
 

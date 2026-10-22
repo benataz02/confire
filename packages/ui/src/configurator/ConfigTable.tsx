@@ -10,7 +10,8 @@ import { Grid, type CellTemplate, type GridState } from "../list-report/Grid.tsx
 import type { ListColumn } from "../types.ts";
 import { displayValue, rowTable } from "./formHelpers.ts";
 import { addRow, pasteRows, removeRows, setCell, type Row } from "./configTableOps.ts";
-import { money as fmtMoney, qtyLabel, type ItemMoney } from "../money.ts";
+import { money as fmtMoney, type ItemMoney } from "../money.ts";
+import { useUiI18n } from "../i18n.ts";
 import { useUiSource } from "../source.tsx";
 
 /** The stored row's position, carried on the grid row: Grid hands back row objects (a cell, the
@@ -62,6 +63,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
 }) {
   // Off `me`, not off a prop: the currency is the tenant's, identical for every table on the page,
   // so threading it down from the model was carrying a constant through four components.
+  const i18n = useUiI18n();
   const currency = useUiSource().useCurrency();
   // Same function the server runs, so a computed cell cannot disagree with the quote.
   const evaluated = useMemo(
@@ -80,9 +82,9 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
   // take the focus out of whatever input the salesperson is typing in.
   const showMoney = def.role === "items" && money !== undefined;
   // The quantity the two figures were priced at — see qtyLabel.
-  const at = qtyLabel(money?.batchQty);
-  const costHeader = `Unit cost${at}`;
-  const priceHeader = `Unit price${at}`;
+  const at = money?.batchQty ? ` (${i18n.getText("UI_QUANTITY", String(money.batchQty))})` : "";
+  const costHeader = `${i18n.getText("UI_UNIT_COST")}${at}`;
+  const priceHeader = `${i18n.getText("UI_UNIT_PRICE")}${at}`;
   const moneyText = (n: number | undefined) => (n === undefined ? "—" : fmtMoney(n, currency));
 
   const priceCell = (ri: number) => {
@@ -97,7 +99,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
       <Input style={{ width: "100%" }} type="Number" accessibleName={priceHeader}
         value={value === undefined ? "" : show(value)}
         showClearIcon={overridden} valueState={overridden ? "Information" : "None"}
-        valueStateMessage={<div>Typed by hand. Clear the field to go back to the calculated price.</div>}
+        valueStateMessage={<div>{i18n.getText("UI_HAND_PRICE")}</div>}
         disabled={disabled}
         onInput={(e) => {
           const raw = e.target.value ?? "";
@@ -123,7 +125,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
     if (readOnly || (computed && given)) {
       if (computed) return <Text>{show(value ?? null)}</Text>;
       if (c.type === "boolean")
-        return <Text>{displayValue(stored, [{ value: true, label: "Yes" }, { value: false, label: "No" }])}</Text>;
+        return <Text>{displayValue(stored, [{ value: true, label: i18n.getText("UI_YES") }, { value: false, label: i18n.getText("UI_NO") }])}</Text>;
       if (c.cell.kind === "options") {
         // Items grid: the stored code is what rides to SAP; don't swap it for the lookup label.
         const opts = def.role === "items" ? [] : columnOptions(c, lookups);
@@ -161,7 +163,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
       const opts = columnOptions(c, lookups);
       return (
         <Select style={{ width: "100%" }} disabled={disabled} required={req}
-          valueState={blank ? "Negative" : "None"} valueStateMessage={<div>{`${header(c)} is required.`}</div>}
+          valueState={blank ? "Negative" : "None"} valueStateMessage={<div>{i18n.getText("UI_REQUIRED", header(c))}</div>}
           value={stored === undefined || stored === null ? "" : JSON.stringify(stored)}
           onChange={(e) => {
             const j = (e.detail.selectedOption as HTMLElement).dataset.j;
@@ -182,7 +184,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
         // The clear icon IS the revert, and the value state is how a hand-typed number is told
         // apart from a calculated one at a glance.
         showClearIcon={overridden} valueState={overridden ? "Information" : blank ? "Negative" : "None"}
-        valueStateMessage={<div>{overridden ? "Overridden by hand. Clear the field to go back to the formula." : `${header(c)} is required.`}</div>}
+        valueStateMessage={<div>{overridden ? i18n.getText("UI_HAND_FORMULA") : i18n.getText("UI_REQUIRED", header(c))}</div>}
         disabled={disabled}
         onInput={(e) => {
           const raw = e.target.value ?? "";
@@ -235,13 +237,13 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
       }}>
       <Grid title={def.title || def.key} columns={columns} state={state} rows={data} fill={false}
         cellTemplates={cellTemplates}
-        noDataText="No rows yet. Add one, or paste a block of cells straight from a spreadsheet."
+        noDataText={i18n.getText("UI_NO_ROWS")}
         // Delete works on the selection — the Grid idiom — so a read-only grid has none to make.
         selectionMode={editable ? "Multiple" : "None"}
         toolbarActions={readOnly ? undefined : (sel) => (
           <>
             <Button icon="add" design="Transparent" disabled={disabled || atMax}
-              onClick={() => onChange(addRow(rows))}>Add row</Button>
+              onClick={() => onChange(addRow(rows))}>{i18n.getText("UI_ADD_ROW")}</Button>
             {/* Copies land at the end, like a new row: positions above stay put, so the selection
                 still names the rows it did. Stored cells only — a formula cell nobody typed over
                 stays absent and the copy follows the formula too. */}
@@ -250,7 +252,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
               onClick={() => {
                 const picked = sel.rows.map((r) => r[IDX] as number).sort((a, b) => a - b);
                 onChange([...rows, ...picked.map((i) => ({ ...rows[i] }))]);
-              }}>Duplicate</Button>
+              }}>{i18n.getText("UI_DUPLICATE")}</Button>
             <Button icon="delete" design="Transparent"
               disabled={!editable || !sel.rows.length || rows.length - sel.rows.length < minRows}
               onClick={() => {
@@ -258,7 +260,7 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
                 // row ids are positions, so a kept selection would land on the rows that moved up
                 sel.clear();
                 onChange(removeRows(rows, gone));
-              }}>Delete</Button>
+              }}>{i18n.getText("UI_DELETE")}</Button>
           </>
         )} />
     </div>

@@ -56,10 +56,9 @@ services:
       # cookie on a name this stack does not own. Not `:?` — compose checks that for every service, so
       # it would refuse even the dev `up -d db`.
       DOMAIN: ${DOMAIN:-}
-      # Mail (apps/server/src/mail): sender notify@mail.<DOMAIN>. No key = the console mailer. The
-      # admin key is only for tenant sender domains (Settings → Portal); unset turns them off.
+      # Mail (apps/server/src/mail): from mail.<DOMAIN> — notify@ for Confire's own, <slug>@ for a
+      # tenant's client mail. No key = the console mailer.
       RESEND_API_KEY: ${RESEND_API_KEY:-}
-      RESEND_ADMIN_KEY: ${RESEND_ADMIN_KEY:-}
       # Errors and traces from both processes to Sentry (apps/server/src/instrument.ts). Unset = none sent.
       SENTRY_DSN: ${SENTRY_DSN:-}
       # Rows per Service Layer page (apps/server/src/lookups.ts); unset = 100.

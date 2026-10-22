@@ -10,7 +10,6 @@ import { sendMail, sendMails, type SendResult } from "./mail/mailer.ts";
 import {
   clientOnboardedMail, clientProjectMail, staffRequestMail, type ClientEventKind, type StaffEventKind,
 } from "./mail/portal-mail.tsx";
-import { sendClientMail } from "./portal/sender-domain.ts";
 import { tenantBrand } from "./portal/settings.ts";
 import { appTenantUrl, portalTenantUrl } from "./tenant.ts";
 
@@ -176,16 +175,14 @@ async function notifyEvent(tenantId: string, eventId: string, revisedId: string 
         value: `${q.value.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${currency ? ` ${currency}` : ""}`,
       } : null,
       url: portalTenantUrl(slug, `/projects/${e.projectId}`),
-      // The tenant's sales address, else the staff member who acted.
-      replyTo: settings.replyTo || e.actorEmail || undefined,
     };
-    r = await sendClientMail(settings, tenantId, to.map((x) => clientProjectMail({ ...common, to: x.email })), key);
+    r = await sendMails(to.map((x) => clientProjectMail({ ...common, to: x.email })), key);
   } else {
-    // Internal mail is Confire's, from mail.<domain> (D29), and replies to the client who acted.
+    // Internal mail is Confire's, from notify@mail.<domain>.
     const to = await staffRecipients(tenantId, p.assigneeId, p.cardCode, settings);
     const common = {
       brand: CONFIRE, kind: e.kind as StaffEventKind, companyName: p.cardName, projectName: p.name, actorName, note: e.note, fileName,
-      url: appTenantUrl(slug, `/configs/${e.projectId}`), replyTo: e.actorEmail ?? undefined,
+      url: appTenantUrl(slug, `/configs/${e.projectId}`),
     };
     r = await sendMails(to.map((x) => staffRequestMail({ ...common, to: x.email })), key);
   }
@@ -204,7 +201,7 @@ export function notifyOnboarded(o: {
     if (!inviter) return;
     const { slug } = await tenantBrand(o.tenantId);
     const r = await sendMail(clientOnboardedMail({
-      brand: CONFIRE, to: inviter.email, replyTo: o.client.email, invitationId: o.invitationId,
+      brand: CONFIRE, to: inviter.email, invitationId: o.invitationId,
       clientName: o.client.name, clientEmail: o.client.email, cardCode: o.cardCode, cardName: o.cardName,
       url: appTenantUrl(slug, `/b1/BusinessPartners/${encodeURIComponent(o.cardCode)}`),
     }));

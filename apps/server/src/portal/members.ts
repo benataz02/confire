@@ -4,9 +4,9 @@ import {
   db, EXTERNAL_ROLES, externalRole, invitation, member, organization, PORTAL_ROLES, portalCompany, portalCompanyDomain,
   portalRoleOf, user, type PortalRole,
 } from "@confire/db";
+import { sendMails } from "../mail/mailer.ts";
 import { invitationMail } from "../mail/portal-mail.tsx";
 import { portalTenantUrl } from "../tenant.ts";
-import { sendClientMail } from "./sender-domain.ts";
 import { tenantBrand } from "./settings.ts";
 
 // The customer portal's write rules (spec §4.2, §5.1): seats, registered domains and invitations.
@@ -190,7 +190,7 @@ export async function sendInvitation(i: {
   inviter: { id: string; name: string; email: string };
 }): Promise<{ id: string; expiresAt: Date }> {
   const email = i.email.trim().toLowerCase();
-  const { slug, brand, settings } = await tenantBrand(i.tenantId);
+  const { slug, brand } = await tenantBrand(i.tenantId);
   const [company] = i.cardCode === null ? [null] : await db.select({ cardName: portalCompany.cardName }).from(portalCompany)
     .where(and(eq(portalCompany.tenantId, i.tenantId), eq(portalCompany.cardCode, i.cardCode)));
   if (company === undefined) throw new ORPCError("NOT_FOUND", { message: "No such company on this portal" });
@@ -216,12 +216,12 @@ export async function sendInvitation(i: {
     return id;
   });
 
-  // Client-facing (D29): from the tenant's own domain when it has one; off the request path.
+  // Client-facing: from <slug>@mail.<domain>, off the request path.
   const mail = invitationMail({
-    id, to: email, replyTo: settings.replyTo || i.inviter.email, inviterName: i.inviter.name,
+    id, to: email, inviterName: i.inviter.name,
     companyName: company?.cardName ?? null, brand, url: portalTenantUrl(slug, `/accept/${id}`), expiresAt,
   });
-  void sendClientMail(settings, i.tenantId, [mail], `invite/${id}`).then((r) => {
+  void sendMails([mail], `invite/${id}`).then((r) => {
     if (r.error) console.error(`[mail] invitation ${id} -> ${email} failed: ${r.error}`);
   });
   return { id, expiresAt };
