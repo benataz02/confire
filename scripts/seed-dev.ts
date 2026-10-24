@@ -1,6 +1,6 @@
 /**
  * Bootstrap a dev tenant from an empty database: a user + the org whose slug IS the workspace's
- * path. Sign in at http://localhost:5173/login, land on http://localhost:5173/<slug>/.
+ * path. Sign in at http://localhost:5173/login, land on http://localhost:5173/<slug>/configs.
  *
  *   bun run seed:dev [slug] [email] [password]
  *

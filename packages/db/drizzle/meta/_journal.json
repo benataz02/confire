@@ -15,6 +15,34 @@
       "when": 1792612503367,
       "tag": "0001_portal_settings_drop_reply_to",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792684173653,
+      "tag": "0002_drop_dashboard_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792684595052,
+      "tag": "0003_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792759991660,
+      "tag": "0004_agent_pairing",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792773244967,
+      "tag": "0005_bp_language",
+      "breakpoints": true
     }
   ]
 }

@@ -12,9 +12,10 @@ import { LANGUAGES, useLanguage } from "@confire/ui/i18n.ts";
 import { useI18n } from "../i18n.ts";
 import { ROLE_KEY } from "../features/labels.ts";
 import { authClient } from "../auth-client.ts";
-import { lobbyQuery, meQuery, type Me } from "../orpc.ts";
+import { lobbyQuery, meQuery, notifications, type Me } from "../orpc.ts";
 import { authUrl, hardRedirect, tenantPath } from "@confire/ui/host.ts";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
+import { NotificationsPopover, useUnreadCount } from "@confire/ui/notifications/Notifications.tsx";
 import { DOC_PAGES } from "../features/documents.ts";
 
 // The supplier's portal chrome (spec §9): the same NavigationLayout + ShellBar + SideNavigation
@@ -71,6 +72,9 @@ export function PortalShell() {
     return () => { for (const k of Object.keys(vars)) root.removeProperty(k); };
   }, [me.tenant.accent]);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The bell (notifications spec §10): the count polls, the list loads while the popover is open.
+  const unread = useUnreadCount(notifications);
+  const [bellOpener, setBellOpener] = useState<HTMLElement | null>(null);
   const layout = useRef<NavigationLayoutDomRef>(null);
   const [navMode, setNavMode] = useState<NavigationLayoutPropTypes["mode"]>("Auto");
   const toggleNav = () => setNavMode(layout.current?.isSideCollapsed() ? "Expanded" : "Collapsed");
@@ -112,6 +116,16 @@ export function PortalShell() {
             }
             profile={<Avatar id="portal-user-menu" initials={initials(me.user.name)} />}
             onProfileClick={() => setMenuOpen((open) => !open)}
+            showNotifications
+            notificationsCount={unread ? String(unread) : undefined}
+            onNotificationsClick={(e) => {
+              const target = e.detail.targetRef;
+              setBellOpener((cur) => (cur ? null : target));
+            }}
+            accessibilityAttributes={{
+              notifications: { expanded: bellOpener !== null, hasPopup: "dialog" },
+              profile: { expanded: menuOpen, hasPopup: "menu" },
+            }}
           />
           <UserMenu
             open={menuOpen}
@@ -141,10 +155,15 @@ export function PortalShell() {
                 <UserMenuItem key={l.id} text={l.label} icon={language === l.id ? "sys-enter" : ""} onClick={() => setLanguage(l.id)} />
               ))}
             </UserMenuItem>
+            <UserMenuItem text={i18n.getText("NOTIF_MENU")} icon="bell"
+              onClick={() => { setMenuOpen(false); go("/notifications"); }} />
             {(lobby.data?.length ?? 0) > 1 ? (
               <UserMenuItem text={i18n.getText("USER_MENU_SWITCH_SUPPLIER")} icon="switch-views" onClick={() => void hardRedirect(authUrl("/login?choose=1"))} />
             ) : null}
           </UserMenu>
+          <NotificationsPopover api={notifications} opener={bellOpener} open={bellOpener !== null}
+            onClose={() => setBellOpener(null)} getText={i18n.getText.bind(i18n)}
+            onNavigate={go} onSettings={() => go("/notifications")} />
         </>
       }
       sideContent={

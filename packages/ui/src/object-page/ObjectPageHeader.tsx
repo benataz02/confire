@@ -7,6 +7,7 @@ import { formatValue } from "../format.ts";
 import { useUiI18n } from "../i18n.ts";
 import { documentStatusText } from "../documentStatus.ts";
 import { isIntegerType, type FieldConstraint } from "../metadata.ts";
+import { PageBreadcrumbs, type Crumb } from "../PageBreadcrumbs.tsx";
 import type { Facet, HeaderActionContext, HeaderConfig, Row } from "../types.ts";
 
 // app-object-page-header (LIST-REPORT-OBJECT-PAGE.md §4.3), from the declared header config and
@@ -31,6 +32,8 @@ export function objectPageTitle(o: {
   onEdit?: () => void;
   editDisabled?: boolean;
   navigation?: RecordNavigation;
+  /** the trail above the title */
+  breadcrumbs?: Crumb[];
   /** the layout view selector + Adapt layout */
   layout?: ReactNode;
   t: (key: string, ...params: Array<string | number>) => string;
@@ -45,9 +48,19 @@ export function objectPageTitle(o: {
     .filter(Boolean)
     .join(" · ");
   const actions = header.actions?.(ctx);
+  // The trail names the record by what users quote: a document's DocNum (its key, DocEntry, is
+  // internal), else the key itself (CardCode, ItemCode). A new record by the create title.
+  const code = ctx.isNew ? null : formData.DocNum ?? formData[ctx.constraints?.keys[0] ?? ""];
+  const crumb = code == null || code === "" ? title || o.label : String(code);
   return (
     <ObjectPageTitle
-      breadcrumbs={o.layout}
+      // One slot for both: the layout selector has always sat above the title, the trail goes first.
+      breadcrumbs={o.breadcrumbs || o.layout ? (
+        <FlexBox alignItems="Center" wrap="Wrap" style={{ columnGap: "1rem" }}>
+          {o.breadcrumbs ? <PageBreadcrumbs items={o.breadcrumbs} current={crumb} /> : null}
+          {o.layout}
+        </FlexBox>
+      ) : undefined}
       header={<Title>{title || o.label}</Title>}
       subHeader={subtitle ? <Text>{subtitle}</Text> : undefined}
       navigationBar={o.navigation && !ctx.isNew ? (

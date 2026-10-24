@@ -9,7 +9,7 @@ import { fileRoutes } from "../files.ts";
 export default serve({
   auth,
   router: portalRouter,
-  files: fileRoutes("external"),
+  routes: fileRoutes("external"),
   spaDist: "../portal/dist",
   port: 3001,
 });

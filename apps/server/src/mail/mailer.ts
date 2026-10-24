@@ -30,8 +30,10 @@ export type SendResult = { error: string | null };
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 /** The one sending domain, `mail.<domain>` (Resend, eu-west-1): Confire's mail as notify@, a
  *  tenant's client mail as <slug>@. ponytail: one domain, so one reputation for every tenant; a
- *  Resend domain per tenant (plan-capped, DNS per tenant) if a tenant's sending ever hurts the rest. */
-export const mailDomain = `mail.${platformDomain}`;
+ *  Resend domain per tenant (plan-capped, DNS per tenant) if a tenant's sending ever hurts the rest.
+ *  `MAIL_DOMAIN` is dev's only: `mail.localhost` can never be verified (Resend answers 403), so a dev
+ *  with a key sends from production's verified domain instead. A deployment never sets it. */
+export const mailDomain = process.env.MAIL_DOMAIN || `mail.${platformDomain}`;
 
 /** RFC 5322 quoted display name: `"` and `\` escaped, so `Müller & Söhne, GmbH` stays one name and
  *  cannot inject a second address. */

@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
  *  decides what a path's first segment means. */
 const RESERVED = new Set([
   "login", "signup", "forgot-password", "reset-password", "onboarding",
-  "api", "rpc", "files", "assets",
+  "api", "rpc", "files", "assets", "download",
   "app", "portal", "www", "auth", "admin", "static",
   "notify", "noreply", "no-reply", "postmaster", "abuse", "hostmaster", "webmaster", "security", "mailer-daemon",
 ]);
@@ -71,6 +71,7 @@ if (import.meta.main) {
   assert.equal(tenantSlug("ACME"), null); // the client sends what the URL holds, lowercased by the slug rule
   assert.equal(tenantSlug("login"), null); // reserved: a staff SPA page
   assert.equal(tenantSlug("files"), null); // reserved: a server route
+  assert.equal(tenantSlug("download"), null); // reserved: the agent's download
   assert.equal(tenantSlug("notify"), null); // reserved: Confire's own sender
   assert.equal(tenantSlug("postmaster"), null); // reserved: a role address
   assert.equal(tenantSlug("a.b"), null);

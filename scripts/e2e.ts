@@ -10,9 +10,8 @@
  */
 import { db, pool, organization, sapConnection } from "@confire/db";
 import { eq } from "drizzle-orm";
-import { countOf, nextLinkOf, rowsOf } from "@confire/b1";
-import { runnerFor, tenantConnector } from "../apps/server/src/b1.ts";
-import { snapshotQueries } from "../apps/server/src/dashboard-snapshot.ts";
+import { agentPost, countOf, nextLinkOf, rowsOf } from "@confire/b1";
+import { agentTarget, runnerFor, tenantConnector } from "../apps/server/src/b1.ts";
 
 const slug = process.argv[2] ?? process.env.SLUG ?? "alumigraf";
 let failures = 0;
@@ -29,18 +28,17 @@ async function step(name: string, fn: () => Promise<string>) {
 }
 
 const [org] = await db.select({ id: organization.id }).from(organization).where(eq(organization.slug, slug)).limit(1);
-if (!org) throw new Error(`no organization '${slug}' — run seed:dev, then seed:agent`);
+if (!org) throw new Error(`no organization '${slug}' — run seed:dev, then pair an agent`);
 
 const [conn] = await db.select().from(sapConnection).where(eq(sapConnection.tenantId, org.id)).limit(1);
-if (!conn) throw new Error(`no sap_connection for '${slug}' — run seed:agent`);
+if (!conn) throw new Error(`no sap_connection for '${slug}' — pair an agent (or seed:agent)`);
 const { b1 } = await tenantConnector(org.id);
 console.log(`e2e against ${slug} via ${conn.agentUrl}\n`);
 
 await step("agent /health", async () => {
-  // The one unauthenticated route; proves the process is up before blaming the Service Layer.
-  const res = await fetch(new URL("/health", conn.agentUrl));
-  if (!res.ok) throw new Error(`status ${res.status}`);
-  return JSON.stringify(await res.json());
+  // Proves the process is up before blaming the Service Layer. Through agentPost, because in
+  // production Cloudflare Access refuses anything without the service token.
+  return JSON.stringify(await agentPost(await agentTarget(org.id), "/health"));
 });
 
 await step("read a page of Items", async () => {
@@ -73,7 +71,7 @@ await step("nextLink follows within the Service Layer", async () => {
   return `${rowsOf((await b1.readNext(next)).data).length} rows on page 2`;
 });
 
-await step("/next refuses a foreign origin", async () => {
+await step("the agent refuses a foreign nextLink", async () => {
   await b1.readNext("https://evil.example/steal").then(
     () => { throw new Error("the agent accepted a foreign nextLink"); },
     () => {},
@@ -96,12 +94,6 @@ await step("paged read advances and terminates", async () => {
     skip = r.nextSkip;
   }
   return `${rows} item rows over ${skip === undefined ? "all" : "3"} pages`;
-});
-
-await step("dashboard snapshot streams", async () => {
-  const q = snapshotQueries(new Date());
-  const orders = rowsOf((await b1.readEntitySet("Orders", { ...q.orders, top: 5 })).data);
-  return `${orders.length} orders in the 13-month window`;
 });
 
 await step("scoped $metadata for Orders", async () => {

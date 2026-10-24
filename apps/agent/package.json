@@ -1,16 +1,8 @@
 {
   "name": "@confire/agent",
-  "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run --hot src/index.ts",
-    "start": "bun run src/index.ts",
-    "build": "bun build --compile --outfile confire-agent.exe src/index.ts"
-  },
-  "dependencies": {
-    "@confire/b1": "workspace:*"
-  },
-  "devDependencies": {
-    "@types/bun": "^1.4.0"
+    "dev": "go run . run --config agent.json",
+    "test": "go test ./..."
   }
 }

@@ -103,8 +103,9 @@ export const configProject = pgTable(
     // portal read and write is fenced on it together with tenantId — a company is (tenant, CardCode) —
     // and an internal read never sees one in `draft`.
     portalCardCode: text("portal_card_code"),
-    // Set by accept; the client sees the name. ponytail: no reassignment — add a "Reassign" action
-    // when a sales team asks for one.
+    // Set by accept when nobody holds it yet, and by staff's Reassign (project-lifecycle.ts `assign`);
+    // the client sees the name. No foreign key and nothing clears it: someone who has left the
+    // workspace counts as no assignee when a notification is routed.
     assigneeId: text("assignee_id"),
     quoteResponse: text("quote_response").$type<QuoteResponse>(),
     quoteRespondedAt: timestamp("quote_responded_at", { withTimezone: true }),
@@ -123,12 +124,13 @@ export const configProject = pgTable(
     // The CURRENT quotation: a re-quote modifies it, or replaces it when B1 has it closed (§7.3).
     // Each `quoted` event keeps its own docEntry, so an earlier quotation stays findable.
     b1DocEntry: integer("b1_doc_entry"),
+    // The company b1DocEntry lives in (sap_connection.companyDb when it was posted). A DocEntry means
+    // nothing in another company: there a re-quote creates instead of patching, and no link shows.
+    b1Company: text("b1_company"),
     quotedAt: timestamp("quoted_at", { withTimezone: true }),
-    // Engineered value/cost of the selected candidates, captured once when the quotation is
-    // confirmed. Stored rather than recomputed: recomputing resolves the model's live lookups,
-    // which means one SAP round trip per row for a 12-month dashboard window.
-    // ponytail: no backfill — configurations quoted before this shipped stay null and are excluded
-    //           from the margin roll-up rather than counted as zero margin.
+    // Engineered value/cost of the selected candidates, captured when the quotation is confirmed
+    // so the posted document's DocTotal can be checked against a frozen figure. Recomputing would
+    // resolve the model's live lookups and could disagree with what was posted.
     quotedValue: numeric("quoted_value", { precision: 18, scale: 4 }),
     quotedCost: numeric("quoted_cost", { precision: 18, scale: 4 }),
     createdBy: text("created_by").notNull(),
@@ -145,7 +147,7 @@ export type ConfigProject = typeof configProject.$inferSelect;
 
 export const PROJECT_EVENT_KINDS = [
   "created", "submitted", "resubmitted", "withdrawn", "accepted", "returned", "declined", "revised",
-  "quoted", "quote_accepted", "quote_declined", "comment", "file",
+  "quoted", "quote_accepted", "quote_declined", "comment", "file", "assigned",
 ] as const;
 export type ProjectEventKind = (typeof PROJECT_EVENT_KINDS)[number];
 export type ProjectInputs = { entries: Entries; batches: number[]; tables: TableRows };
@@ -162,8 +164,11 @@ export type RevisionDiff = {
 export type ProjectEventPayload =
   | { inputs: ProjectInputs; prices?: PortalPrice[] }
   | RevisionDiff
-  | { docEntry: number; docNum: number | null; value: number; mode: "created" | "updated"; inputs: ProjectInputs }
-  | { fileId: string; name: string; size: number };
+  // `company`: where docEntry lives (absent on events older than company switches = the project's b1Company)
+  | { docEntry: number; docNum: number | null; value: number; mode: "created" | "updated"; inputs: ProjectInputs; company?: string | null }
+  | { fileId: string; name: string; size: number }
+  /** `assigned`: the name is snapshotted, so the timeline needs no join */
+  | { assigneeId: string; assigneeName: string };
 
 // The project's timeline (spec §6, §8), append-only. project-lifecycle.ts writes every status
 // event in the same transaction as the guarded status UPDATE; comments are written beside it.

@@ -4,6 +4,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db, configModel, configProject, portalCompany, user } from "@confire/db";
 import { EntriesZ, syncTables, TableRowsZ, type Entries, type Val } from "@confire/config-engine";
 import { userProcedure } from "../base.ts";
+import { tenantCompany } from "../../b1.ts";
 import { queryRowOf } from "../../lookups.ts";
 import { ensureFresh, rowCache, syncNow } from "../../masterdata-sync.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
@@ -69,14 +70,15 @@ const SelectionZ = z.object({
  *  the page held every row. */
 const CUSTOMER_NAME = sql<string>`${configProject.customer}->>'cardName'`;
 
-/** Filterable/sortable columns of the configurations list. */
-const CONFIG_FIELDS: SqlFields = {
+/** Filterable/sortable columns of the configurations list. `mine` is per caller, so the fields are too. */
+const configFields = (userId: string): SqlFields => ({
   name: { col: configProject.name, kind: "string" },
   modelName: { col: configModel.name, kind: "string" },
   customerName: { col: CUSTOMER_NAME, kind: "string" },
   status: { col: configProject.status, kind: "enum" },
+  mine: { col: sql<string>`case when ${configProject.createdBy} = ${userId} then 'yes' else 'no' end`, kind: "enum" },
   updatedAt: { col: configProject.updatedAt, kind: "date" },
-};
+});
 
 /** The project row and the two facts about its last calculation — what a mutation returns, so the
  *  client patches its query cache from the response instead of refetching. Deliberately no model:
@@ -96,6 +98,9 @@ async function projectState(
   if (!project) throw new ORPCError("NOT_FOUND");
   return {
     project,
+    // The SAP company the agent serves now: the page links the quotation only when it is the
+    // project's b1Company (a DocEntry means nothing in another company).
+    sapCompany: await tenantCompany(tenantId),
     capped: calc?.capped ?? project.candidates.length >= 200,
     // ponytail: `widest` is a run-time hint only — a plain get (page reload) has no run to report,
     // same as calculateProject's reuse path. Store it on the row if the hint has to survive one.
@@ -150,7 +155,7 @@ export const configsRouter = {
    *  flattened out of the `customer` jsonb here rather than in the browser: it has to be sortable
    *  and filterable server-side now that the page only ever holds one page. */
   rows: userProcedure.input(ListPageZ).handler(async ({ input, context }) => {
-    const { where, orderBy } = compileQuery(CONFIG_FIELDS, input.query);
+    const { where, orderBy } = compileQuery(configFields(context.userId), input.query);
     const raw = await db
       .select({
         id: configProject.id, name: configProject.name, status: configProject.status,

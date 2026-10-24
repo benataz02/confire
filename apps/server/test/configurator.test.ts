@@ -363,7 +363,7 @@ describe("config tables (integration)", () => {
     expect(lines.map((l) => l.Quantity)).toEqual([3, 3]);
     expect(new Set(lines.map((l) => l.ItemCode))).toEqual(new Set(["SHEET-CFG"]));
 
-    // The invariant: what SAP will total has to equal what the dashboard stores. Work in cents —
+    // The invariant: what SAP will total has to equal the stored quoted value. Work in cents —
     // that is the unit the split reconciles in, and the unit B1 rounds each line to.
     const cents = (l: Record<string, unknown>) => Math.round(Number(l.Quantity) * Number(l.UnitPrice) * 100);
     const total = Math.round(out.unitPrice * 3 * 100);

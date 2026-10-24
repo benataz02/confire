@@ -3,9 +3,9 @@
 # Repo settings: secrets DEPLOY_SSH_KEY (the private half of the key the server's authorized_keys forces
 # to update.sh) and DEPLOY_KNOWN_HOSTS (the server's host key line); variable DEPLOY_HOST.
 name: deploy
+# Push-to-deploy is off while main is work in progress: deploy by hand from the Actions tab
+# (Run workflow). Restore `push: { branches: [main] }` to turn it back on.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 # One deploy at a time, in push order.
 concurrency: deploy
@@ -22,6 +22,7 @@ jobs:
       - run: >
           docker build -f apps/server/Dockerfile
           --build-arg SENTRY_RELEASE=$GITHUB_SHA
+          --build-arg AGENT_VERSION=$(date -u +%Y.%m.%d).$GITHUB_RUN_NUMBER
           --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
       # A schema change without its migration would start new code on the old schema. generate needs no

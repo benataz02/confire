@@ -15,6 +15,7 @@ import { orpc } from "../../orpc.ts";
 import { colMinWidth } from "../configurator/tableWidths.ts";
 import { confirm } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
+import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
 
 // One editor for both kinds. The kind is picked once, on create: a saved row keeps it, because
 // switching would throw away either the maintained rows or the query behind it.
@@ -220,12 +221,14 @@ export function MasterdataEditor({ id }: { id?: string }) {
   const setCell = (ri: number, ci: number, v: Cell) =>
     edit((x) => ({ ...x, rows: x.rows.map((y, j) => (j === ri ? y.map((cell, cj) => (cj === ci ? v : cell)) : y)) }));
 
+  const title = d.name || (id ? i18n.getText("ADMIN_UNTITLED") : i18n.getText("ADMIN_NEW_TABLE"));
   return (
     <ObjectPage
       titleArea={
         <ObjectPageTitle
+          breadcrumbs={<PageBreadcrumbs items={[{ text: i18n.getText("NAV_MASTERDATA"), to: "/masterdata" }]} current={title} />}
           header={
-              <Title level="H4">{i18n.getText("ADMIN_MD_HEADING", i18n.getText("NAV_MASTERDATA"), d.name || (id ? i18n.getText("ADMIN_UNTITLED") : i18n.getText("ADMIN_NEW_TABLE")))}</Title>
+              <Title level="H4">{title}</Title>
           }
           snappedContent={errorStrip}
           expandedContent={errorStrip}

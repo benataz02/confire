@@ -225,6 +225,19 @@ describe("onboarding.invitation / accept", () => {
     expect(await seatRole(t.company, invitee.userId)).toBe("buyer");
   });
 
+  test("invitee, signed out: the address and whether it has an account; null for another supplier's or a closed one", async () => {
+    const t = await invitingTenant();
+    const fresh = `n${uid()}@test.local`;
+    const { id } = await t.invite(fresh.toUpperCase());
+    expect(await call(portalRouter.onboarding.invitee, { id }, ctx(t.slug))).toEqual({ email: fresh, hasAccount: false });
+    const known = await makePortalUser();
+    const { id: knownId } = await t.invite(known.email);
+    expect(await call(portalRouter.onboarding.invitee, { id: knownId }, ctx(t.slug))).toEqual({ email: known.email, hasAccount: true });
+    expect(await call(portalRouter.onboarding.invitee, { id }, ctx((await makeTenant()).slug))).toBeNull();
+    await db.update(invitation).set({ status: "canceled" }).where(eq(invitation.id, id));
+    expect(await call(portalRouter.onboarding.invitee, { id }, ctx(t.slug))).toBeNull();
+  });
+
   test("expired, cancelled or already accepted is CONFLICT; an unverified account is FORBIDDEN", async () => {
     const t = await invitingTenant();
     const a = await makePortalUser();

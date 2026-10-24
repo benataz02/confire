@@ -25,6 +25,7 @@ export default defineConfig({
       "/rpc": "http://localhost:3000",
       "/api": "http://localhost:3000",
       "/files": "http://localhost:3000",
+      "/download": "http://localhost:3000",
     },
   },
 });

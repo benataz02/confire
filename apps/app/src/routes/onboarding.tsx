@@ -1,21 +1,13 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Input, Button, MessageStrip, CheckBox } from "@ui5/webcomponents-react";
+import { Input, Button, MessageStrip, BusyIndicator } from "@ui5/webcomponents-react";
 import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
+import { PairingCode } from "../components/PairingCode.tsx";
 import { lobbyQuery, orpc } from "../orpc.ts";
 import { authUrl, currentSlug, hardRedirect, isReserved, tenantUrl } from "@confire/ui/host.ts";
-import { copyInput, generateAgentSecret } from "../lib/agent-secret.ts";
 import { useI18n } from "../i18n.ts";
-
-/** Wrap the JSON key `secret` so the hint stays one sentence in either language. */
-function withCode(text: string): ReactNode {
-  const word = "secret";
-  const at = text.indexOf(word);
-  if (at < 0) return text;
-  return <>{text.slice(0, at)}<code>{word}</code>{text.slice(at + word.length)}</>;
-}
 
 export const Route = createFileRoute("/onboarding")({
   // Outside any workspace. A user with a company and an agent row belongs *in* the tenant;
@@ -32,7 +24,6 @@ export const Route = createFileRoute("/onboarding")({
   component: Onboarding,
 });
 
-const DEFAULT_AGENT_URL = "http://localhost:4000";
 const sanitizeSlug = (v: string) => v.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 31);
 /** Clean a company name into a slug candidate (no random suffix — it's the permanent URL). */
 const toSlug = (name: string) =>
@@ -48,12 +39,6 @@ function Onboarding() {
   const [company, setCompany] = useState("");
   const [slug, setSlug] = useState(agentSetupSlug ?? "");
   const [slugEdited, setSlugEdited] = useState(false);
-  const [agentUrl, setAgentUrl] = useState(DEFAULT_AGENT_URL);
-  const [secret, setSecret] = useState(generateAgentSecret);
-  const [accessId, setAccessId] = useState("");
-  const [accessSecret, setAccessSecret] = useState("");
-  const [beas, setBeas] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const onCompany = (v: string) => {
     setCompany(v);
@@ -83,10 +68,6 @@ function Onboarding() {
     onSuccess: () => setStep("agent"),
   });
 
-  const connect = useMutation(orpc.sap.connect.mutationOptions({
-    onSuccess: () => hardRedirect(tenantUrl(slug)),
-  }));
-
   // The only way off this page without an org: browser-back just re-runs the dispatcher (/login),
   // which sends a user with no place straight back here.
   const signOut = async () => {
@@ -95,96 +76,12 @@ function Onboarding() {
     navigate({ to: "/login" });
   };
 
-  const busy = create.isPending || connect.isPending;
-  const error = create.error ?? connect.error;
+  const busy = create.isPending;
+  const error = create.error;
   const canCreate = company.trim().length > 0 && available && !busy;
-  const canConnect = agentUrl.trim().length > 0 && secret.trim().length > 0 && !busy;
   const errMsg = error instanceof Error ? error.message : error ? String(error) : null;
 
-  if (step === "agent") {
-    return (
-      <AuthLayout>
-        <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_CONNECT_TITLE")}</h2>
-        <p className="auth-sub">{i18n.getText("SHELL_AUTH_CONNECT_SUB")}</p>
-        {errMsg ? <MessageStrip design="Negative" hideCloseButton>{errMsg}</MessageStrip> : null}
-
-        <label className="auth-field">
-          <span>{i18n.getText("SHELL_AUTH_AGENT_URL")}</span>
-          <Input
-            value={agentUrl}
-            placeholder={DEFAULT_AGENT_URL}
-            onInput={(e) => setAgentUrl(e.target.value)}
-          />
-        </label>
-
-        <label className="auth-field">
-          <span>{i18n.getText("SHELL_AUTH_SHARED_SECRET")}</span>
-          <input
-            className="auth-secret"
-            value={secret}
-            spellCheck={false}
-            onFocus={(e) => e.target.select()}
-            onChange={(e) => setSecret(e.target.value)}
-          />
-          <div className="auth-inline">
-            <button type="button" className="auth-textbtn" onClick={() => { if (copyInput(document.querySelector<HTMLInputElement>(".auth-secret"))) setCopied(true); }}>
-              {i18n.getText("SHELL_AUTH_COPY")}
-            </button>
-            <button type="button" className="auth-textbtn" onClick={() => { setSecret(generateAgentSecret()); setCopied(false); }}>
-              {i18n.getText("SHELL_AUTH_REGENERATE")}
-            </button>
-          </div>
-          <small className="auth-sub">
-            {copied ? `${i18n.getText("SHELL_AUTH_COPIED")} ` : ""}
-            {withCode(i18n.getText("SHELL_AUTH_SECRET_HINT"))}
-          </small>
-        </label>
-
-        <label className="auth-field">
-          <span>{i18n.getText("SHELL_AUTH_CF_ID")}</span>
-          <Input
-            value={accessId}
-            placeholder={i18n.getText("SHELL_AUTH_CF_ID_PLACEHOLDER")}
-            onInput={(e) => setAccessId(e.target.value)}
-          />
-        </label>
-
-        <label className="auth-field">
-          <span>{i18n.getText("SHELL_AUTH_CF_SECRET")}</span>
-          <Input
-            type="Password"
-            value={accessSecret}
-            onInput={(e) => setAccessSecret(e.target.value)}
-          />
-        </label>
-
-        <CheckBox
-          className="auth-check"
-          text={i18n.getText("SHELL_AUTH_BEAS")}
-          checked={beas}
-          onChange={(e) => setBeas(e.target.checked)}
-        />
-
-        <Button
-          design="Emphasized"
-          disabled={!canConnect}
-          onClick={() => connect.mutate({
-            agentUrl: agentUrl.trim(),
-            secret: secret.trim(),
-            accessClientId: accessId.trim() || null,
-            accessClientSecret: accessSecret.trim() || null,
-            beasEnabled: beas,
-          })}
-        >
-          {connect.isPending ? i18n.getText("SHELL_AUTH_CONNECTING") : i18n.getText("SHELL_AUTH_CONNECT")}
-        </Button>
-
-        <p className="auth-alt">
-          {i18n.getText("SHELL_AUTH_NOT_NOW")} <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("SHELL_AUTH_SIGN_OUT")}</a>
-        </p>
-      </AuthLayout>
-    );
-  }
+  if (step === "agent") return <AgentStep slug={slug} signOut={signOut} />;
 
   return (
     <AuthLayout>
@@ -226,6 +123,35 @@ function Onboarding() {
         {create.isPending ? i18n.getText("SHELL_AUTH_SETTING_UP") : i18n.getText("SHELL_AUTH_CREATE_COMPANY")}
       </Button>
 
+      <p className="auth-alt">
+        {i18n.getText("SHELL_AUTH_NOT_NOW")} <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("SHELL_AUTH_SIGN_OUT")}</a>
+      </p>
+    </AuthLayout>
+  );
+}
+
+/** Pair the SAP server (spec 2026-10-21 §3): a code on arrival, then wait. The row existing proves
+ *  nothing — the page moves on only once SAP answers through the agent. */
+function AgentStep({ slug, signOut }: { slug: string; signOut: () => Promise<void> }) {
+  const i18n = useI18n();
+  const code = useMutation(orpc.sap.onboardingPairingCode.mutationOptions());
+  const issue = code.mutate;
+  useEffect(() => issue(undefined), [issue]);
+  const status = useQuery({ ...orpc.sap.onboardingAgentStatus.queryOptions(), refetchInterval: 3000 });
+  const connected = status.data?.connected === true;
+  useEffect(() => { if (connected) hardRedirect(tenantUrl(slug)); }, [connected, slug]);
+
+  return (
+    <AuthLayout>
+      <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_CONNECT_TITLE")}</h2>
+      <p className="auth-sub">{i18n.getText("SHELL_AUTH_CONNECT_SUB")}</p>
+      {code.error ? <MessageStrip design="Negative" hideCloseButton>{code.error.message}</MessageStrip> : null}
+      <PairingCode code={code.data ?? null} busy={code.isPending} onNewCode={() => code.mutate(undefined)} />
+      <p className="auth-sub" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        {connected ? i18n.getText("SHELL_AUTH_AGENT_CONNECTED") : <><BusyIndicator active size="S" />{i18n.getText("SHELL_AUTH_AGENT_WAITING")}</>}
+      </p>
+      {/* A paired agent whose SAP refuses it: say why rather than wait forever. */}
+      {status.data?.paired && status.data.error ? <MessageStrip design="Critical" hideCloseButton>{status.data.error}</MessageStrip> : null}
       <p className="auth-alt">
         {i18n.getText("SHELL_AUTH_NOT_NOW")} <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("SHELL_AUTH_SIGN_OUT")}</a>
       </p>

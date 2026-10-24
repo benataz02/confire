@@ -6,7 +6,7 @@ import { ROLE_HELP_KEY, ROLE_KEY } from "../../features/labels.ts";
 import { useI18n } from "../../i18n.ts";
 import { meQuery, orpc } from "../../orpc.ts";
 import { PortalAuthLayout } from "../../components/AuthChrome.tsx";
-import { hardRedirect, loginUrl } from "@confire/ui/host.ts";
+import { hardRedirect } from "@confire/ui/host.ts";
 import { invitationGuard } from "../../lib/invitation.ts";
 
 // The invitation link (spec §5.2): `portal.<domain>/<slug>/accept/<id>`. The server checks everything
@@ -38,7 +38,7 @@ function Accept() {
   const switchAccount = async () => {
     await authClient.signOut();
     qc.clear();
-    void hardRedirect(loginUrl());
+    void hardRedirect(window.location.href);
   };
   const signedInAs = (
     <p className="auth-alt">

@@ -1,12 +1,13 @@
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import {
-  db, configProject, configProjectEvent, projectFile,
+  db, configProject, configProjectEvent, member, projectFile,
   type ConfigProject, type ProjectEventKind, type ProjectEventPayload, type ProjectInputs, type ProjectStatus,
   type RevisionDiff,
 } from "@confire/db";
 import type { Val } from "@confire/config-engine";
 import { sameJson } from "./canon.ts";
+import { staffOf } from "./notifications.ts";
 import { notifyInBackground } from "./notify.ts";
 
 // A project's lifecycle (spec §7): the ONLY writer of config_project.status and of
@@ -15,8 +16,8 @@ import { notifyInBackground } from "./notify.ts";
 //
 // Every transition locks the row, checks where it stands, and writes the new status and its
 // events in one transaction. The side that loses a race reads the status the winner left and gets
-// a message naming it, instead of a lost write. Once a write commits, notify.ts tells whoever §12
-// says, off the request path.
+// a message naming it, instead of a lost write. Once a write commits, notify.ts tells whoever is
+// eligible (notifications spec §4), off the request path.
 
 export type Side = "internal" | "external";
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -163,6 +164,34 @@ export async function projectFileFor(tenantId: string, fileId: string, actor: Ac
   return f;
 }
 
+/** Hand a client's request to a colleague (spec 2026-10-22-notifications-design.md §6). `assigned` is
+ *  an event like the rest, so this module stays its only writer: the row locked, the assignee and an
+ *  internal `assigned` event in one transaction, the new assignee told after commit. Any status the
+ *  actor may see — a draft is not one. Assigning the current assignee writes nothing. */
+export async function assign(tenantId: string, projectId: string, actor: Actor, assigneeId: string) {
+  if (actor.side !== "internal") throw new ORPCError("FORBIDDEN");
+  const r = await db.transaction(async (tx) => {
+    const [locked] = await tx.select({
+      portalCardCode: configProject.portalCardCode, status: configProject.status, assigneeId: configProject.assigneeId,
+    }).from(configProject)
+      .where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId)))
+      .for("update");
+    const row = fenced(locked, actor);
+    if (row.portalCardCode === null) throw new ORPCError("BAD_REQUEST", { message: "Only a client's request has an assignee" });
+    const [target] = await staffOf(tenantId, eq(member.userId, assigneeId));
+    if (!target) throw new ORPCError("BAD_REQUEST", { message: "Only someone in this workspace can be assigned" });
+    if (row.assigneeId === assigneeId) return { eventId: null, name: target.name };
+    await tx.update(configProject).set({ assigneeId, updatedAt: new Date() }).where(eq(configProject.id, projectId));
+    const eventId = await append(tx, {
+      tenantId, projectId, kind: "assigned", actor, visibility: "internal",
+      payload: { assigneeId, assigneeName: target.name },
+    });
+    return { eventId, name: target.name };
+  });
+  if (r.eventId) notifyInBackground(tenantId, r.eventId);
+  return { assigneeId, assigneeName: r.name };
+}
+
 /**
  * One writer per status (spec §7's side table). Every handler that writes a project's inputs goes
  * through this first — configs.update/calculate/select/remove and their portal counterparts.
@@ -251,7 +280,8 @@ async function step(tx: Tx, o: Parameters<typeof transition>[0]) {
   await tx.update(configProject)
     .set({
       status: t.to, updatedAt: now,
-      ...(o.action === "accept" ? { assigneeId: o.actor.userId } : {}),
+      // Accept takes the request only when nobody holds it: one reassigned before anyone accepted stays put.
+      ...(o.action === "accept" ? { assigneeId: row.assigneeId ?? o.actor.userId } : {}),
       ...(o.action === "quoteAccept" ? { quoteResponse: "accepted" as const, quoteRespondedAt: now } : {}),
       ...(o.action === "quoteDecline" ? { quoteResponse: "declined" as const, quoteRespondedAt: now } : {}),
       ...(o.action === "quote" ? { quoteResponse: null, quoteRespondedAt: null } : {}),

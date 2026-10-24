@@ -6,6 +6,7 @@ import { companyRouter } from "./company.ts";
 import { modelsRouter, projectsRouter } from "./projects.ts";
 import { timelineRouter, viewsRouter } from "./timeline.ts";
 import { docsRouter } from "./docs.ts";
+import { notificationsRouter } from "./notifications.ts";
 import { tenantCurrency } from "../../b1.ts";
 import { rememberActiveOrganization } from "../../auth.ts";
 import { appTenantUrl, TENANT_HEADER } from "../../tenant.ts";
@@ -47,6 +48,7 @@ export const portalRouter = {
   views: viewsRouter,
   docs: docsRouter,
   home: homeRouter,
+  notifications: notificationsRouter,
 };
 
 export type PortalRouter = typeof portalRouter;

@@ -16,7 +16,7 @@ async function projectFor(tenantId: string, projectId: string, actor: Actor) {
   if (actor.side === "external" && !actor.cardCode) throw new ORPCError("NOT_FOUND");
   const [p] = await db
     .select({
-      modelId: configProject.modelId, b1DocEntry: configProject.b1DocEntry,
+      modelId: configProject.modelId, b1DocEntry: configProject.b1DocEntry, b1Company: configProject.b1Company,
       portalCardCode: configProject.portalCardCode, customer: configProject.customer,
     })
     .from(configProject)
@@ -75,19 +75,23 @@ export type ProjectDocuments = {
 };
 
 /** Every quotation in the project's `quoted` events, and what SAP made of each (§8). Live. A client
- *  sees a document only when its CardCode is the company's. */
+ *  sees a document only when its CardCode is the company's; nobody sees one posted in another SAP
+ *  company than the agent serves now — its DocEntry would name a stranger's document here. */
 export async function projectDocuments(tenantId: string, projectId: string, actor: Actor): Promise<ProjectDocuments> {
   const p = await projectFor(tenantId, projectId, actor);
   const quoted = await db.select({ payload: configProjectEvent.payload }).from(configProjectEvent)
     .where(and(eq(configProjectEvent.projectId, projectId), eq(configProjectEvent.kind, "quoted")))
     .orderBy(asc(configProjectEvent.at));
-  const entries = [...new Set(quoted.map((q) => (q.payload as { docEntry?: number } | null)?.docEntry)
+  const { b1, companyDb } = await tenantConnector(tenantId);
+  const entries = [...new Set(quoted
+    .map((q) => q.payload as { docEntry?: number; company?: string | null } | null)
+    .filter((q) => (q?.company ?? p.b1Company) === companyDb)
+    .map((q) => q?.docEntry)
     .filter((d): d is number => typeof d === "number"))].reverse();
   if (!entries.length) return { quotations: [] };
 
   const cardCode = p.customer?.cardCode;
   const mine = (d: ChainDoc) => actor.side === "internal" || d.cardCode === cardCode;
-  const { b1 } = await tenantConnector(tenantId);
   return viaB1(async () => {
     const quotations: ProjectDocuments["quotations"] = [];
     for (const docEntry of entries) {
@@ -102,7 +106,7 @@ export async function projectDocuments(tenantId: string, projectId: string, acto
       };
       if (!mine(quotation)) continue;
       quotations.push({
-        quotation, chain: (await documentChain(b1, docEntry)).filter(mine), current: docEntry === p.b1DocEntry,
+        quotation, chain: (await documentChain(b1, docEntry)).filter(mine), current: docEntry === p.b1DocEntry && p.b1Company === companyDb,
       });
     }
     return { quotations };

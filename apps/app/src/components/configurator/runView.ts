@@ -113,6 +113,11 @@ export function chartRows(candidates: PricedCandidate[], selection: Sel[]): numb
 export const margin = (unitPrice: number, unitCost: number): number | null =>
   unitPrice === 0 ? null : (unitPrice - unitCost) / unitPrice;
 
+/** One decimal. An em dash where there is no share to show. */
+export function percent(value: number | null): string {
+  return value === null ? "—" : `${(value * 100).toFixed(1)}%`;
+}
+
 /** BOM items the engine costed at 0 because the price list had no line for them, each once. Read
  *  off the stored candidates, so the warning is exactly as current as the prices it is about. */
 export const unpricedItems = (candidates: Candidate[]): string[] => [

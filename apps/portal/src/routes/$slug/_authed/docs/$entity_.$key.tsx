@@ -7,7 +7,7 @@ import { useDetailView } from "@confire/ui/useDetailView.ts";
 import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import type { HeaderConfig } from "@confire/ui/types.ts";
 import { orpc } from "../../../../orpc.ts";
-import { docFeature, isDocEntity, type DocEntity } from "../../../../features/documents.ts";
+import { DOC_PAGES, docFeature, isDocEntity, type DocEntity } from "../../../../features/documents.ts";
 import { useI18n } from "../../../../i18n.ts";
 
 // One of the company's SAP documents (spec §9, §13.1): read-only, Preview of its print layout, and a
@@ -44,7 +44,7 @@ function DocRecord() {
   if (d.error || !d.row || !feature || !header) return <PageError error={d.error ?? new Error(i18n.getText("PORTAL_NOT_FOUND"))} />;
   // `writable: false` from the server: no Edit, so onSave is never reached.
   return <ObjectPage entity={entity} constraints={d.constraints!} data={d.row} sections={feature.detail.sections} header={header}
-    onSave={d.save} />;
+    onSave={d.save} breadcrumbs={[{ text: i18n.getText(DOC_PAGES[entity].labelKey), to: `/docs/${entity}` }]} />;
 }
 
 /** The project this document came from (docs.project walks back to the quotation). A separate read:

@@ -3,8 +3,8 @@ import { z } from "zod";
 import { and, eq, gt } from "drizzle-orm";
 import { db, invitation, portalCompany, portalCompanyDomain, portalRoleOf, user, type PortalCardType } from "@confire/db";
 import { B1Error, readPages, rowsOf, type B1Transport } from "@confire/b1";
-import { portalSessionProcedure } from "./base.ts";
-import { addPortalMember, claimDomain, emailDomain, isFreeMail, portalInvitationOf, seatOf } from "../members.ts";
+import { portalBase, portalSessionProcedure, tenantOf } from "./base.ts";
+import { addPortalMember, claimDomain, emailDomain, isFreeMail, openInvitation, portalInvitationOf, seatOf } from "../members.ts";
 import { COUNTRY_FIELDS, formProblems, leadKey, leadPayload, onboardingSchema, onboardingSeed } from "../onboarding-form.ts";
 import { loadPortalSettings, tenantBrand } from "../settings.ts";
 import { notifyOnboarded } from "../../notify.ts";
@@ -12,6 +12,7 @@ import { tenantConnector, viaB1 } from "../../b1.ts";
 import { entitySchema, toConstraints } from "../../entity-meta.ts";
 import { bad } from "../../entity-read.ts";
 import { DEDUP_UDF } from "../../config-quote.ts";
+import { TENANT_HEADER } from "../../tenant.ts";
 
 // The two ways into a company (spec §4.4, §5.2): an invitation, accepted on its link, and auto-join
 // by a registered email domain. Both run on the supplier's portal page — sign-in lives on the sign-in
@@ -29,7 +30,7 @@ async function openInvitationFor(tenantId: string, u: { email: string; emailVeri
     .select({
       id: invitation.id, cardCode: invitation.cardCode, email: invitation.email,
       role: portalRoleOf(invitation.role), status: invitation.status, expiresAt: invitation.expiresAt,
-      registerDomain: invitation.registerDomain, inviterId: invitation.inviterId,
+      registerDomain: invitation.registerDomain, inviterId: invitation.inviterId, languageCode: invitation.languageCode,
       companyName: portalCompany.cardName, inviterName: user.name,
     })
     .from(invitation)
@@ -86,6 +87,21 @@ export async function brandOf(tenantId: string) {
 }
 
 export const onboardingRouter = {
+  /** Signed out on an invitation link: sign-up when the invited address has no account yet, else
+   *  sign-in, either with the address filled in. No session on purpose — the link (a random UUID,
+   *  mailed to that address) is the credential, and this says no more than the mail it came in.
+   *  null = no open invitation here; the page falls back to plain sign-in. */
+  invitee: portalBase.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
+    const tenant = await tenantOf(context.headers.get(TENANT_HEADER));
+    // sendInvitation lowercases the address and Better Auth stores user emails lowercased.
+    const [row] = await db.select({ email: invitation.email, userId: user.id })
+      .from(invitation)
+      .leftJoin(user, eq(user.email, invitation.email))
+      .where(and(eq(invitation.id, input.id), portalInvitationOf(tenant.id), openInvitation()))
+      .limit(1);
+    return row ? { email: row.email, hasAccount: row.userId !== null } : null;
+  }),
+
   /** The accept page: what joining means — whose portal, which company, which role, from whom. */
   invitation: portalSessionProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
     const inv = await openInvitationFor(context.tenantId, context.user, input.id);
@@ -156,7 +172,7 @@ export const onboardingRouter = {
       const lead = await viaB1(async () => {
         // ponytail: unverified (spec §16) — that U_CF_Key on OCRD filters as it does on OQUT.
         const existing = await b1.readEntitySet("BusinessPartners", {
-          filter: `${DEDUP_UDF} eq '${key}'`, select: ["CardCode", "CardName", "CardType"], top: 1,
+          filter: `${DEDUP_UDF} eq '${key}'`, select: ["CardCode", "CardName", "CardType", "LanguageCode"], top: 1,
         }).catch((e) => {
           // Only a 400 means "no such property": an unreachable agent keeps its own status.
           if (e instanceof B1Error && e.status === 400)
@@ -169,7 +185,12 @@ export const onboardingRouter = {
         if (prior) return prior;
         // ponytail: unverified (spec §16) — that a POST with Series and no CardCode numbers the lead
         // and answers with the generated CardCode, BPAddresses and ContactEmployees inline.
-        const body = { ...leadPayload(form, values, { email: context.user.email, series: settings.leadSeries }), [DEDUP_UDF]: key };
+        // The lead speaks the language its invitation went out in (the inviter's), unless the form
+        // itself asks for one — an admin may offer LanguageCode as an extra field.
+        const body = {
+          ...(inv.languageCode === null ? {} : { LanguageCode: inv.languageCode }),
+          ...leadPayload(form, values, { email: context.user.email, series: settings.leadSeries }), [DEDUP_UDF]: key,
+        };
         return (await b1.createEntity("BusinessPartners", body, { prefer: "representation" })).data as Record<string, unknown>;
       });
       const cardCode = typeof lead.CardCode === "string" ? lead.CardCode : "";
@@ -180,6 +201,7 @@ export const onboardingRouter = {
         cardName: String(lead.CardName ?? values.CardName),
         // A lead converted in B1 before the retry keeps its CardCode (§5.5); say what it is now.
         cardType: (lead.CardType === "cCustomer" ? "cCustomer" : "cLid") as PortalCardType,
+        languageCode: typeof lead.LanguageCode === "number" ? lead.LanguageCode : inv.languageCode,
       };
       await db.transaction(async (tx) => {
         await tx.insert(portalCompany)

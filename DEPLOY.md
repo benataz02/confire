@@ -18,7 +18,7 @@ Cloudflare for DNS, tunnels and backups, Resend for mail, GitHub Actions for bui
 
  git push main ─▶ GitHub Actions: build image ─▶ ghcr.io/benataz02/confire ─▶ ssh: deploy/update.sh
 
- server ─HTTPS─▶ acme-agent.confire.ai ─▶ Cloudflare Access ─▶ Tunnel ─▶ confire-agent (customer's Windows box) ─▶ SAP B1
+ server ─HTTPS─▶ <label>.confire.app ─▶ Cloudflare Access ─▶ Tunnel ─▶ confire-agent (customer's Windows box) ─▶ SAP B1
 ```
 
 Everything on the VPS is `docker-compose.yml` with `COMPOSE_PROFILES=full`. The whole deployment is
@@ -39,8 +39,9 @@ does it (`apps/server/src/tenant.ts`).
 # Part 1: First deploy
 
 **You will collect these secrets.** Keep each in your password manager as you go: `BETTER_AUTH_SECRET`,
-`POSTGRES_PASSWORD`, the two Resend keys, the R2 keys, the OAuth client secrets, the Cloudflare Access
-service token, and each customer's agent secret.
+`POSTGRES_PASSWORD`, the two Resend keys, the R2 keys, the OAuth client secrets, and the Cloudflare
+Access service token and API token ([§8](#8-connecting-a-customers-sap-agent)). Agent secrets are
+generated at pairing and never shown to anyone.
 
 Rebuilding a lost server is the same path: §1, the same `.env` from your password manager, §6–§7, then
 restore the latest dump ([§13](#13-restore)). Update the DNS records if the IP changed.
@@ -119,8 +120,9 @@ Cloudflare adds its own certificate authorities to the CAA set. That does no har
 `letsencrypt.org` stays in it.
 
 **No wildcard record (`*`), ever.** Every `*.confire.ai` host receives the session cookie. The only
-other names under `confire.ai` are the mail records ([§3](#3-mail-resend)) and the customer agent
-hostnames, which sit behind Cloudflare Access ([§8](#8-connecting-a-customers-sap-agent)).
+other names under `confire.ai` are the mail records ([§3](#3-mail-resend)). Customer agents live on
+the separate domain `confire.app` ([§8](#8-connecting-a-customers-sap-agent)), and Confire writes their
+DNS records there itself.
 
 ## 3. Mail (Resend)
 
@@ -179,6 +181,14 @@ GOOGLE_CLIENT_SECRET=...
 MICROSOFT_CLIENT_ID=...
 MICROSOFT_CLIENT_SECRET=...
 
+# §8: SAP agents. Unset CF_API_TOKEN refuses every pairing (DOMAIN is set)
+AGENT_DOMAIN=confire.app
+CF_API_TOKEN=...
+CF_ACCOUNT_ID=...
+CF_ZONE_ID=...
+CF_ACCESS_CLIENT_ID=....access
+CF_ACCESS_CLIENT_SECRET=...
+
 # §4; until these are set the backup container restart-loops
 R2_ENDPOINT=https://<account-id>.eu.r2.cloudflarestorage.com
 R2_BUCKET=confire-backups
@@ -204,8 +214,7 @@ For dev, add `http://localhost:5173/api/auth/callback/…` to the same clients.
 **Two secrets can never change:**
 
 - `BETTER_AUTH_SECRET` signs every session and also **encrypts each tenant's SAP agent secret in the
-  database** (`apps/server/src/crypto.ts`). If you lose it, every agent connection must be set up
-  again.
+  database** (`apps/server/src/crypto.ts`). If you lose it, every SAP agent must be paired again.
 - `POSTGRES_PASSWORD` is read once, when the database volume is first created. Changing it later goes
   through [§14](#14-access-and-housekeeping).
 
@@ -253,87 +262,104 @@ Then:
 3. Sign up at `https://app.confire.ai/signup`. The verification mail arrives (check spam on the first
    try) and signs you in.
 4. Workspace setup asks for a company name and a URL slug, which becomes `app.confire.ai/<slug>/`.
-   Then it asks for the SAP agent ([§8](#8-connecting-a-customers-sap-agent)); you can finish that step
-   later in *Settings*.
+   Then it shows the SAP agent's download link and a pairing code ([§8](#8-connecting-a-customers-sap-agent));
+   *Not now — Sign out* leaves that for later.
 5. Once R2 is set up, run one backup by hand and check that it appears in the bucket:
    `docker compose run --rm backup now`.
 
 ## 8. Connecting a customer's SAP agent
 
 Each workspace reaches its customer's SAP B1 through `confire-agent`, a Windows service on the
-customer's network. The cloud calls it at `https://<slug>-agent.confire.ai`, a Cloudflare Tunnel
-hostname. The tunnel dials out from the customer's side, so their firewall needs no inbound rule.
+customer's SAP server (`apps/agent`, Go; design in `docs/superpowers/specs/2026-10-21-agent-autosetup-design.md`).
+The cloud calls it at `https://<label>.confire.app`, a Cloudflare Tunnel hostname: the tunnel dials out
+from the customer's side, so their firewall needs no inbound rule. Confire creates the tunnel, its
+route and its DNS name itself, when the agent pairs. Nobody opens the Cloudflare dashboard per customer,
+and nobody copies a secret.
 
-**Cloudflare Access in front of every agent hostname is mandatory.** These hostnames are under
-`confire.ai`, so a browser sends them the session cookie. Access stops every request at Cloudflare's
-edge unless it carries Confire's service token. A browser, and its cookie, therefore never reaches a
-machine the customer controls. Never publish an agent hostname without it.
+**Agent hostnames live on `confire.app`, a separate registrable domain**, so the `confire.ai` session
+cookie can never reach a customer machine, whatever happens to Access. Never point a `confire.ai`
+name at a customer, and never serve anything that sets a cookie under `confire.app`. In front of every
+`confire.app` name sits one wildcard Access application, which admits Confire's service token and
+nothing else. Labels are random (`k3x9q2m7ab.confire.app`), so DNS does not list the customers.
 
-### One-time: the Access guard
+### One-time: Cloudflare
 
-Cloudflare dashboard → **Zero Trust** (free plan; pick any team name):
+1. **Zero Trust** (free plan; pick any team name). Then *Access → Service credentials → Service
+   Tokens → Create*: name `confire-cloud`. Copy the **Client ID** and **Client Secret** into `.env` as
+   `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`. The secret is shown only once. If you give the
+   token an expiry, put its renewal in your calendar: once it expires, every agent call fails.
+2. *Access → Applications → Add → Self-hosted*: name `Confire agents`, public hostname
+   **`*.confire.app`** (subdomain `*`, domain `confire.app`). Add one policy, action **Service Auth**,
+   including **Service Token = `confire-cloud`**, and nothing else. This is the guard. It exists before
+   any agent hostname does, so there is no per-customer step to get wrong.
+3. *My Profile → API Tokens → Create Token → Custom*:
+   - Account › **Cloudflare Tunnel** › Edit
+   - Zone `confire.app` › **DNS** › Edit
 
-1. *Access → Service credentials → Service Tokens → Create*: name `confire-cloud`. Copy the **Client
-   ID** and **Client Secret**; the secret is shown only once. If you give it an expiry, put a renewal
-   date in your calendar.
-2. *Access → Applications → Add → Self-hosted*: name `Confire agents`. Add a policy with action
-   **Service Auth** that includes **Service Token = `confire-cloud`**. Add no other policy. You add
-   hostnames to it per customer, below.
+   Nothing else. In particular **no Access permission**: the server cannot weaken the guard, so a
+   compromised server cannot open customer machines to the world. Put it in `.env` as `CF_API_TOKEN`.
+4. Add to `.env`: `AGENT_DOMAIN=confire.app`, `CF_ACCOUNT_ID` (any zone's overview page, right
+   column), and `CF_ZONE_ID` (the `confire.app` zone's overview). Then `docker compose up -d` so the
+   server reads them. Check: a pairing code typed into an agent pairs, rather than failing with
+   "cannot pair agents yet".
 
-### Per customer (here: slug `acme`)
+ponytail: 1,000 tunnels per Cloudflare account. Past that: *Tunnels for Platforms*, or a second account.
 
-1. **Guard first:** add the public hostname `acme-agent.confire.ai` to the `Confire agents`
-   application. Use the flat `<slug>-agent` form: a deeper name like `acme.agent.confire.ai` falls
-   outside Cloudflare's free certificate.
-2. **Tunnel:** *Zero Trust → Networks → Tunnels → Create → Cloudflared*, name `acme`. Copy the
-   **token** from the install command. Add a published route: hostname `acme-agent.confire.ai`,
-   service **HTTP** `localhost:4000`.
-3. **In Confire** (workspace setup, or *Settings* → agent): enter the agent URL
-   `https://acme-agent.confire.ai` and the `confire-cloud` Client ID and Secret. Copy the **agent
-   secret** the page generates.
-4. **Build the agent**, on any machine with Bun, from the repo:
+### Per customer
 
-   ```bash
-   cd apps/agent && bun build --compile --target=bun-windows-x64 --outfile confire-agent.exe src/index.ts
-   ```
+**In Confire:** workspace setup's last step, or *Settings → SAP agent → New pairing code*, shows the
+download link `https://app.confire.ai/download/confire-agent.exe` and a code such as `K7QM-2XPA`. The
+code is valid for 60 minutes and works once; *New code* replaces it.
 
-5. **On the customer's Windows server**, the one that reaches the Service Layer: install `cloudflared`
-   (`winget install --id Cloudflare.cloudflared`), then lay out:
+**On the customer's Windows server**, the one that reaches the Service Layer (Windows Server 2012 R2
+or later; on 2012 R2 the Universal C Runtime, KB2999226, which cloudflared needs):
 
-   ```
-   C:\Confire\confire-agent.exe
-   C:\Confire\agent.json
-   C:\Confire\deploy\install-service.ps1      (from apps/agent/deploy/)
-   ```
+1. Download the agent (the link above, typed in a browser there) and double-click it. It asks for
+   administrator rights. It is unsigned, so Windows SmartScreen warns on first run: *More info → Run
+   anyway*.
+2. Answer its questions. Each section is tested with a real login before it is kept:
+   - **SAP B1 Service Layer**: URL (`https://localhost:50000`), company database, user, password.
+   - **Beas**: optional. Its URL including its path, session or basic sign-in, user, password.
+   - **Printing** (SAP API Gateway): optional. URL (`https://<SL host>:60020`), user, password, and the
+     Crystal layout code per document type. A blank layout means that type is not printable.
+   - **The pairing code**, last, so a long SAP section cannot use up its hour.
+3. It installs itself: `C:\Program Files\Confire\Agent\` (with `cloudflared` embedded), the service
+   `ConfireAgent` (automatic start, restarts on failure), and `C:\ProgramData\Confire\agent.json`
+   (Administrators and SYSTEM only). Logs go to `C:\ProgramData\Confire\logs\`. When it prints
+   *Tunnel… ✓ connected*, Confire's page turns green by itself.
 
-   ```json
-   {
-     "port": 4000,
-     "secret": "<agent secret from step 3>",
-     "b1": {
-       "url": "https://<sap-host>:50000",
-       "companyDb": "<SBO company database>",
-       "user": "<B1 user>",
-       "pass": "<B1 password>",
-       "allowSelfSigned": true
-     }
-   }
-   ```
+The SAP credentials stay in `agent.json` and never reach the cloud; pairing sends the company's name
+and nothing else. The agent listens on `127.0.0.1` only. Port 4000, or a free port if 4000 is taken.
 
-   In an elevated PowerShell in `C:\Confire`: `.\deploy\install-service.ps1 -TunnelToken <token>`.
-   The SAP credentials stay in this file and never reach the cloud.
-6. **Check:**
-   - On the box, `curl http://localhost:4000/health` returns `{"ok":true,...}`.
-   - The tunnel shows *Healthy* in Zero Trust.
-   - From anywhere, `curl -i https://acme-agent.confire.ai/health` is **refused by Access**. That
-     proves the guard works.
-   - With the token headers, it answers:
+**Check** (the first time, and whenever something looks off):
 
-     ```bash
-     curl -H "CF-Access-Client-Id: <id>" -H "CF-Access-Client-Secret: <secret>" https://acme-agent.confire.ai/health
-     ```
+- Confire: *Settings → SAP agent* says *Connected*, with the agent version, Beas and printing as
+  configured. A B1 list (e.g. Business Partners) loads.
+- From anywhere, `curl -i https://<label>.confire.app/health` is **refused by Access**. That proves the
+  guard works. The label is the agent URL in the server log, or `select agent_url from sap_connection`.
+- With the token headers, it answers:
 
-   - In Confire, a B1 list (e.g. Business Partners) loads.
+  ```bash
+  curl -H "CF-Access-Client-Id: <id>" -H "CF-Access-Client-Secret: <secret>" https://<label>.confire.app/health
+  ```
+
+### Later, on the SAP server
+
+Run the exe again (double-click, or `confire-agent setup` in an elevated prompt). It offers:
+
+- **Change company**: re-tests SAP B1, Beas and printing against the new company, asking for
+  credentials only where the old ones fail, then restarts the service. Confire follows by itself: its
+  next call learns the new company, drops the old company's cached data and refills. Hand-editing
+  `companyDb` in `agent.json` and restarting the `ConfireAgent` service does the same. **Portal clients
+  then see the documents of their CardCode in the new company.** Between copies of one company (test ↔
+  production) that is the same partner; in an unrelated company it may be someone else.
+- **Change SAP B1 / Beas / printing**: credentials, URLs, layouts. No new code needed.
+- **Pair again**: needs a new code. Use it to move a workspace to another server: pairing the new one
+  retires the old tunnel and replaces the agent secret, so a forgotten old server stops serving.
+- **Update**: offered when the exe you run is newer than the installed one. It keeps its settings.
+  *Settings → SAP agent* says when an update is available. Updates are never pushed: that would let
+  Confire put code onto customers' SAP servers.
+- **Uninstall** (also `confire-agent uninstall`): the service, its files and its settings.
 
 One SAP-side precondition: the `U_CF_Key` user-defined field must exist in the customer's company
 database, or quote write-back refuses to run. That is by design: the field is what stops a quotation

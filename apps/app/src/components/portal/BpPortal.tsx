@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BusyIndicator, Button, FlexBox, Input, Label, MessageStrip, Option, Select, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow,
+  BusyIndicator, Button, FlexBox, Input, Label, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow,
   TableRowAction, Text,
 } from "@ui5/webcomponents-react";
+import { useLanguage } from "@confire/ui/i18n.ts";
 import { useI18n } from "../../i18n.ts";
 import { orpc } from "../../orpc.ts";
-import { notifyEventLabel, notifyModeLabel, } from "../settings/PortalMail.tsx";
 import { CompanyPeople } from "@confire/ui/portal/CompanyPeople.tsx";
 import { InviteDialog } from "@confire/ui/portal/InviteDialog.tsx";
 import { confirm } from "@confire/ui/confirm.ts";
@@ -69,6 +69,8 @@ export function InviteToPortal({ cardCode, cardName }: { cardCode: string; cardN
  *  invitee fills the onboarding form, whose submit creates the lead in SAP; they are its owner. */
 export function InviteNewClientDialog({ onClose }: { onClose: () => void }) {
   const i18n = useI18n();
+  // No BP yet, so no SAP language: the mail (and later the lead) takes the sender's.
+  const { language } = useLanguage();
   const qc = useQueryClient();
   const invite = useMutation(orpc.portalInvitations.inviteNew.mutationOptions({
     onSuccess: (_r, v) => {
@@ -84,7 +86,7 @@ export function InviteNewClientDialog({ onClose }: { onClose: () => void }) {
       registerDomainFor={i18n.getText("ADMIN_THEIR_COMPANY")}
       busy={invite.isPending}
       error={invite.error?.message}
-      onSubmit={({ email, registerDomain }) => invite.mutate({ email, registerDomain })}
+      onSubmit={({ email, registerDomain }) => invite.mutate({ email, registerDomain, language })}
       onClose={onClose} />
   );
 }
@@ -105,8 +107,7 @@ export function BpPortalSection({ cardCode, cardName }: { cardCode: string; card
   const [domain, setDomain] = useState("");
   const addDomain = useMutation(orpc.portalCompanies.addDomain.mutationOptions({ ...opts, onSuccess: () => setDomain("") }));
   const removeDomain = useMutation(orpc.portalCompanies.removeDomain.mutationOptions(opts));
-  const setNotify = useMutation(orpc.portalCompanies.setNotify.mutationOptions(opts));
-  const busy = [setRole, removeMember, cancel, addDomain, removeDomain, setNotify].some((m) => m.isPending);
+  const busy = [setRole, removeMember, cancel, addDomain, removeDomain].some((m) => m.isPending);
   const error = q.error ?? failed;
 
   if (q.isPending) return <BusyIndicator active delay={0} />;
@@ -154,34 +155,6 @@ export function BpPortalSection({ cardCode, cardName }: { cardCode: string; card
                 </TableRow>
               ))}
             </Table>
-            {d.notify ? (
-              <FlexBox direction="Column" style={{ gap: "0.5rem" }}>
-                <Label showColon>{i18n.getText("ADMIN_EMAIL_NOTIFICATIONS")}</Label>
-                <Text>{i18n.getText("ADMIN_NOTIFY_COMPANY", cardName)}</Text>
-                <Table accessibleName={i18n.getText("ADMIN_EMAIL_NOTIFICATIONS")} overflowMode="Popin"
-                  headerRow={<TableHeaderRow><TableHeaderCell minWidth="12rem">{i18n.getText("ADMIN_WHEN_TEAM")}</TableHeaderCell><TableHeaderCell minWidth="14rem">{i18n.getText("ADMIN_MAIL_GOES_TO")}</TableHeaderCell></TableHeaderRow>}>
-                  {d.notify.events.map((e) => {
-                    const event = notifyEventLabel((k) => i18n.getText(k), e.key, e.label);
-                    return (
-                    <TableRow key={e.key} rowKey={e.key}>
-                      <TableCell><Text>{event}</Text></TableCell>
-                      <TableCell>
-                        <Select accessibleName={i18n.getText("ADMIN_NOTIFY_WHO", event)} disabled={busy} style={{ width: "19rem" }} value={d.notify!.company[e.key] ?? ""}
-                          onChange={(ev) => {
-                            const v = ev.detail.selectedOption.value ?? "";
-                            const { [e.key]: _old, ...rest } = d.notify!.company;
-                            setNotify.mutate({ cardCode, notify: v ? { ...rest, [e.key]: v as "off" } : rest });
-                          }}>
-                          <Option value="">{i18n.getText("ADMIN_TENANT_DEFAULT", notifyModeLabel((k) => i18n.getText(k), d.notify!.tenant[e.key] ?? "buyers"))}</Option>
-                          {(["buyers", "creator", "off"] as const).map((v) => <Option key={v} value={v}>{notifyModeLabel((k) => i18n.getText(k), v)}</Option>)}
-                        </Select>
-                      </TableCell>
-                    </TableRow>
-                    );
-                  })}
-                </Table>
-              </FlexBox>
-            ) : null}
             <FlexBox style={{ gap: "0.5rem" }}>
               <Input value={domain} placeholder="kunde.de" accessibleName={i18n.getText("ADMIN_DOMAIN_INPUT")} style={{ width: "16rem" }}
                 onInput={(e) => setDomain(e.target.value)}

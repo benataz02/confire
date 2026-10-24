@@ -33,8 +33,9 @@ const ROLE_KEY: Record<string, string> = {
 // "Where to?" — which `?choose` asks for outright ("Switch supplier"). No place at all is workspace
 // setup. ?error=<code> (social sign-in, a dead verification link) reads through authErrorMessage.
 export const Route = createFileRoute("/login")({
-  validateSearch: (s: Record<string, unknown>): { redirect?: string; error?: string; choose?: boolean } => ({
+  validateSearch: (s: Record<string, unknown>): { redirect?: string; error?: string; choose?: boolean; email?: string } => ({
     redirect: typeof s.redirect === "string" ? s.redirect : undefined,
+    email: typeof s.email === "string" ? s.email : undefined,
     error: typeof s.error === "string" ? s.error : undefined,
     choose: s.choose !== undefined ? true : undefined,
   }),
@@ -71,8 +72,8 @@ function Login() {
 function SignIn() {
   const i18n = useI18n();
   const router = useRouter();
-  const { redirect: redirectTo, error: oauthError } = Route.useSearch();
-  const [email, setEmail] = useState("");
+  const { redirect: redirectTo, error: oauthError, email: invited } = Route.useSearch();
+  const [email, setEmail] = useState(invited ?? "");
   const [password, setPassword] = useState("");
 
   const queryClient = useQueryClient();
@@ -124,7 +125,7 @@ function SignIn() {
       <div className="auth-or">{i18n.getText("SHELL_AUTH_OR")}</div>
       <SocialButtons redirect={redirectTo} />
       <p className="auth-alt">
-        {i18n.getText("SHELL_AUTH_NEW")} <Link to="/signup" search={{ redirect: redirectTo }}>{i18n.getText("SHELL_AUTH_CREATE_ACCOUNT_LINK")}</Link>
+        {i18n.getText("SHELL_AUTH_NEW")} <Link to="/signup" search={{ redirect: redirectTo, email: invited }}>{i18n.getText("SHELL_AUTH_CREATE_ACCOUNT_LINK")}</Link>
       </p>
     </AuthLayout>
   );

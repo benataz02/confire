@@ -4,6 +4,7 @@ import {
   db, EXTERNAL_ROLES, externalRole, invitation, member, organization, PORTAL_ROLES, portalCompany, portalCompanyDomain,
   portalRoleOf, user, type PortalRole,
 } from "@confire/db";
+import { mailLang } from "../mail/layout.tsx";
 import { sendMails } from "../mail/mailer.ts";
 import { invitationMail } from "../mail/portal-mail.tsx";
 import { portalTenantUrl } from "../tenant.ts";
@@ -175,7 +176,7 @@ export const portalInvitationOf = (tenantId: string) =>
 
 /** Pending and not expired: an expired invitation keeps `pending` (Better Auth's own rule), so only
  *  this pair means "open". */
-const open = () => and(eq(invitation.status, "pending"), gt(invitation.expiresAt, new Date()));
+export const openInvitation = () => and(eq(invitation.status, "pending"), gt(invitation.expiresAt, new Date()));
 
 /**
  * An invitation (spec §5.1): guard → lock the organization → refuse a second open invitation for the
@@ -183,17 +184,22 @@ const open = () => and(eq(invitation.status, "pending"), gt(invitation.expiresAt
  * invitation. The organization row lock is the "one open invitation per address" rule: the generated
  * Better Auth schema cannot carry the partial unique index, so two concurrent sends run one after the
  * other and the second sees the first. `cardCode` null is a new-client invitation (D25): its invitee
- * fills the onboarding form, and its submit sets the company.
+ * fills the onboarding form, and its submit sets the company. The mail is in the company's SAP
+ * language; a new client has none yet, so it is `languageCode`, the inviter's (and its lead's, later).
  */
 export async function sendInvitation(i: {
   tenantId: string; cardCode: string | null; email: string; role: PortalRole; registerDomain: boolean;
   inviter: { id: string; name: string; email: string };
+  /** a new client's SAP language (UserLanguages.Code); an existing company's own is read here */
+  languageCode?: number;
 }): Promise<{ id: string; expiresAt: Date }> {
   const email = i.email.trim().toLowerCase();
   const { slug, brand } = await tenantBrand(i.tenantId);
-  const [company] = i.cardCode === null ? [null] : await db.select({ cardName: portalCompany.cardName }).from(portalCompany)
+  const [company] = i.cardCode === null ? [null] : await db
+    .select({ cardName: portalCompany.cardName, languageCode: portalCompany.languageCode }).from(portalCompany)
     .where(and(eq(portalCompany.tenantId, i.tenantId), eq(portalCompany.cardCode, i.cardCode)));
   if (company === undefined) throw new ORPCError("NOT_FOUND", { message: "No such company on this portal" });
+  const languageCode = company ? company.languageCode : (i.languageCode ?? null);
   await inviteGuard(i.tenantId, i.cardCode, email);
 
   const expiresAt = new Date(Date.now() + INVITATION_DAYS * 86_400_000);
@@ -202,7 +208,7 @@ export async function sendInvitation(i: {
     const [taken] = await tx.select({ cardCode: invitation.cardCode, cardName: portalCompany.cardName })
       .from(invitation)
       .leftJoin(portalCompany, and(eq(portalCompany.tenantId, invitation.organizationId), eq(portalCompany.cardCode, invitation.cardCode)))
-      .where(and(portalInvitationOf(i.tenantId), eq(invitation.email, email), open()))
+      .where(and(portalInvitationOf(i.tenantId), eq(invitation.email, email), openInvitation()))
       .limit(1);
     if (taken) {
       const to = taken.cardCode ? ` to ${taken.cardName} (${taken.cardCode})` : " as a new client";
@@ -211,7 +217,7 @@ export async function sendInvitation(i: {
     const id = crypto.randomUUID();
     await tx.insert(invitation).values({
       id, organizationId: i.tenantId, email, role: externalRole(i.role), status: "pending", expiresAt,
-      inviterId: i.inviter.id, cardCode: i.cardCode, registerDomain: i.registerDomain,
+      inviterId: i.inviter.id, cardCode: i.cardCode, registerDomain: i.registerDomain, languageCode,
     });
     return id;
   });
@@ -220,6 +226,7 @@ export async function sendInvitation(i: {
   const mail = invitationMail({
     id, to: email, inviterName: i.inviter.name,
     companyName: company?.cardName ?? null, brand, url: portalTenantUrl(slug, `/accept/${id}`), expiresAt,
+    lang: mailLang(languageCode),
   });
   void sendMails([mail], `invite/${id}`).then((r) => {
     if (r.error) console.error(`[mail] invitation ${id} -> ${email} failed: ${r.error}`);

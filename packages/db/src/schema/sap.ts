@@ -1,19 +1,20 @@
-import { boolean, jsonb, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import { jsonb, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
 import type { B1EntitySchema } from "@confire/b1";
 
-// One row per tenant: where that tenant's on-prem agent is and how to authenticate to it.
-// No company column — the agent owns its company DB, so a tenant points at one agent URL.
-// agentUrl is http://localhost:4000 in dev and the Cloudflare Tunnel hostname in production;
-// that difference is this row, not a branch in the code.
+// One row per tenant: where that tenant's on-prem agent is and how to authenticate to it, written by
+// pairing (apps/server/src/agent-pairing.ts). agentUrl is http://localhost:<port> in dev and
+// https://<label>.<AGENT_DOMAIN> in production; that difference is this row, not a branch in the code.
+// The Cloudflare Access service token is one for every tenant, so it is server env, not a column.
 export const sapConnection = pgTable("sap_connection", {
   tenantId: text("tenant_id").primaryKey(),
   agentUrl: text("agent_url").notNull(),
   /** Bearer secret the agent checks. Encrypted at rest (see apps/server/src/crypto.ts). */
   secret: text("secret").notNull(),
-  /** Cloudflare Access service token — null in dev, where there is no edge in front of the agent. */
-  accessClientId: text("access_client_id"),
-  accessClientSecret: text("access_client_secret"),
-  beasEnabled: boolean("beas_enabled").notNull().default(false),
+  /** The Cloudflare tunnel pairing created; null in dev. A re-pair retires it (cloudflare.ts). */
+  tunnelId: text("tunnel_id"),
+  /** The company the agent last said it serves. The agent owns it (agent.json `companyDb`): Confire
+   *  sends it on every call and adopts the agent's answer when they differ (b1.ts `adoptCompany`). */
+  companyDb: text("company_db"),
   /** B1's local currency (OADM.MainCurncy), read once from CompanyService_GetAdminInfo. A company's
    *  local currency is fixed when its database is created, so — like entity_meta below — there is
    *  no TTL; null only means "not read yet". */

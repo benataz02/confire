@@ -171,6 +171,11 @@ describe("onboarding.submit", () => {
     const told = devOutbox.filter((m) => m.to === admin.email && m.subject.includes("joined your customer portal"));
     expect(told).toHaveLength(1);
     expect(told[0]).toMatchObject({ subject: `Neu GmbH joined your customer portal (${res.cardCode})` });
+    // …and on their bell, linking to the new business partner.
+    expect(await call(router.notifications.list, undefined, as)).toMatchObject([{
+      type: "client.onboarded", path: `/b1/BusinessPartners/${encodeURIComponent(res.cardCode)}`,
+      params: { companyName: "Neu GmbH", cardCode: res.cardCode },
+    }]);
   });
 
   test("no series set: B1's default lead series; the seed ships to the bill-to address", async () => {

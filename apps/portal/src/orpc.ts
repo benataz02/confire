@@ -3,6 +3,7 @@ import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import type { PortalRouter } from "@confire/server/portal-router";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { notificationsApi } from "@confire/ui/notifications/api.ts";
 import { currentSlug, hardRedirect, loginUrl, TENANT_HEADER } from "@confire/ui/host.ts";
 
 // Same-origin (dev proxy / prod static) → the session cookie rides along. The supplier is the page's
@@ -22,6 +23,8 @@ const link = new RPCLink({
 });
 export const client: RouterClient<PortalRouter> = createORPCClient(link);
 export const orpc = createTanstackQueryUtils(client);
+/** The bell's and the Notifications page's data source (@confire/ui/notifications). */
+export const notifications = notificationsApi(client.notifications);
 
 /** Who am I on this supplier's portal — primed by `_authed`'s beforeLoad, cached for the page
  *  session like the internal app's `me`. The server re-checks on every procedure regardless. */

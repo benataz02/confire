@@ -9,11 +9,12 @@ import * as Sentry from "@sentry/bun";
  * else. The internal server (index.ts) and the customer portal (portal/index.ts) are the same shape
  * over their own auth instance, router and SPA — one function, so the body cap cannot drift apart.
  */
-export function serve({ auth, router, files, spaDist, port }: {
+export function serve({ auth, router, routes, spaDist, port }: {
   auth: { handler: (request: Request) => Promise<Response> };
   router: Router<any, { headers: Headers }>;
-  /** /files/* (files.ts): uploads past the RPC body cap, downloads as attachments */
-  files: Hono;
+  /** plain routes: /files/* (files.ts) — uploads past the RPC body cap, downloads as attachments —
+   *  and on the staff process the agent's /api/agent/pair and /download (agent-pairing.ts) */
+  routes: Hono;
   /** the built SPA. In dev the SPA runs on Vite and proxies /rpc + /api here instead. */
   spaDist: string;
   port: number;
@@ -44,7 +45,7 @@ export function serve({ auth, router, files, spaDist, port }: {
     await next();
   });
 
-  app.route("/", files);
+  app.route("/", routes);
 
   app.use("/*", serveStatic({ root: spaDist }));
   app.get("/*", serveStatic({ path: `${spaDist}/index.html` }));

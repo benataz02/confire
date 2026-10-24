@@ -1,28 +1,24 @@
 import { describe, expect, test } from "bun:test";
-import { DirectTransport, nextLinkOf } from "../src/index.ts";
-import type { ServiceLayer } from "../src/service-layer.ts";
+import { DirectTransport, nextLinkOf, type B1Request } from "../src/index.ts";
 
 // The Service Layer pages server-side at 20 rows unless asked otherwise, and that default is
 // invisible: you get 20 rows and an @odata.nextLink, which looks exactly like a short last page to
 // anyone inferring "there is more" from the row count. These lock in both halves of the fix.
 
 const spy = () => {
-  const calls: { url: string; headers?: Record<string, string> }[] = [];
-  const sl = {
-    base: "https://sap.example:50000/b1s/v2/",
-    request: async (o: { url: string; headers?: Record<string, string> }) => {
-      calls.push(o);
-      return { status: 200, data: { value: [] } };
-    },
-  } as unknown as ServiceLayer;
-  return { calls, t: new DirectTransport(sl) };
+  const calls: B1Request[] = [];
+  const t = new DirectTransport(async (r) => {
+    calls.push(r);
+    return { status: 200, data: { value: [] } };
+  });
+  return { calls, t };
 };
 
 describe("Prefer: odata.maxpagesize", () => {
   test("asking for $top implies asking for a page that big — otherwise B1 answers with 20", async () => {
     const { calls, t } = spy();
     await t.readEntitySet("Items", { top: 100 });
-    expect(calls[0]!.url).toContain("$top=100");
+    expect(calls[0]!.path).toContain("$top=100");
     expect(calls[0]!.headers).toEqual({ Prefer: "odata.maxpagesize=100" });
   });
 
@@ -50,10 +46,7 @@ describe("Prefer: odata.maxpagesize", () => {
     expect(calls[0]!.headers).toEqual({ Prefer: "odata.maxpagesize=100" });
   });
 
-  test("readNext still refuses a link outside the Service Layer", async () => {
-    const { t } = spy();
-    await expect(t.readNext("https://evil.example/steal", 100)).rejects.toThrow("outside the Service Layer");
-  });
+  // A link outside the Service Layer is the agent's to refuse: apps/agent/allow_test.go.
 });
 
 describe("nextLinkOf is the 'there is more' signal", () => {

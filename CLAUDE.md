@@ -15,6 +15,13 @@ bun install
 bun run dev                             # sign in at http://localhost:5173/login; staff app
                                         # localhost:5173/<slug>/ (server :3000), portal
                                         # localhost:5180/<slug>/ (server :3001), agent :4000
+                                        # (Go: `go run . run` in apps/agent — Go must be installed)
+bun run dev:pair                        # pair a real SAP server's agent with dev: a public quick
+                                        # tunnel to :3000; on that server run `confire-agent.exe
+                                        # setup --server https://<printed>.trycloudflare.com`, then
+                                        # stop it. Pairing is the only call the agent makes to us:
+                                        # after it, dev reaches the agent on its <label>.confire.app
+                                        # (CF_* in .env), so later dev runs need no tunnel
 bun run db:push                         # drizzle-kit push: dev's schema sync, never production's
 bun run db:generate                     # a schema change's migration SQL — commit it with the change
 bun run auth:generate                   # regenerate schema/auth.ts after a Better Auth config change
@@ -28,13 +35,14 @@ tsconfig that covers everything, so a change can typecheck in one package and br
 
 ```bash
 bunx tsc -p apps/server/tsconfig.json --noEmit
-# projects: packages/{b1,config-engine,db,ui}, apps/{agent,server,app,portal}
+# projects: packages/{b1,config-engine,db,ui}, apps/{server,app,portal}
 bun --cwd apps/app build                # also regenerates routeTree.gen.ts (gitignored)
 bun --cwd apps/portal build             # same, for the portal's route tree
 ```
 
 Note `apps/server/tsconfig.json` also includes `../../scripts`, so the seed/migration/e2e scripts
-are checked there rather than in a project of their own.
+are checked there rather than in a project of their own. The agent is Go: in `apps/agent`,
+`go test ./...` and `GOOS=windows go vet ./...` (the Windows half only compiles there).
 
 ## The processes
 
@@ -44,9 +52,9 @@ Browser: apps/app (staff)               Browser: apps/portal (the manufacturer's
    ▼                                        ▼
 Confire server (apps/server/src/index.ts)   Portal server (apps/server/src/portal/index.ts)
    │                        └── Postgres ──┘
-   │ HTTPS to the tenant's agentUrl, one named operation per endpoint
+   │ HTTPS to the tenant's agentUrl (prod: <label>.confire.app, Cloudflare Access + Tunnel)
    ▼
-confire-agent (Bun, on the customer's network) ── SAP B1 Service Layer /b1s/v2
+confire-agent (Go, a Windows service on the customer's SAP server) ── SAP B1 Service Layer /b1s/v2
 ```
 
 The customer portal is a second process from the same image (compose service `portal`, CMD
@@ -54,11 +62,29 @@ The customer portal is a second process from the same image (compose service `po
 Better Auth on `/api/auth`, oRPC on `/rpc` with the 2 MB body cap, the SPA on the rest. The design
 record is `docs/superpowers/specs/2026-10-07-portal-redesign.md`; P0–P6 are built (see its §15).
 
-The agent is a Windows service the customer installs. SAP credentials live in its `agent.json`
-and never reach the cloud. `sapConnection.agentUrl` is `http://localhost:4000` in dev and a
-Cloudflare Tunnel hostname in production — **that difference is a database row, not a branch in
-the code**, which is why nothing here is conditional on "dev vs prod". The deployment itself is one
-setting, `DOMAIN` (below); the root `.env` needs only `DATABASE_URL` and `BETTER_AUTH_SECRET` in dev.
+The agent (`apps/agent`, Go; `docs/superpowers/specs/2026-10-21-agent-autosetup-design.md`) is one
+self-installing Windows exe: a wizard asks the SAP questions on the box (each tested with a real
+login) and a one-time **pairing code** last; it then runs as a Windows service with `cloudflared` as
+its child. SAP credentials live in its `agent.json` and never reach the cloud. It is **thin**: it holds
+the SAP sessions and forwards an **allowlist** (`allow.go`, the security boundary, tested) of
+`{ method, path }` requests on `/{b1|beas}/request`, plus `/print` and `/health`; every path is still
+built by `packages/b1/src/query.ts`, now on the cloud side, so most changes ship with Confire and need
+no agent update. **Pairing** (`agent-pairing.ts`): `sap.pairingCode` stores a code in Better Auth's
+`verification` table; the agent redeems it on the plain route `POST /api/agent/pair` for its secret and
+tunnel token, and `cloudflare.ts` creates the tunnel, its route and the DNS name — with `CF_API_TOKEN`
+unset (dev) the answer is `http://localhost:<port>` instead. The Access service token is one for all
+tenants, so it is server env. `sapConnection.agentUrl` is that localhost URL in dev and a tunnel
+hostname in production — **that difference is a database row, not a branch in the code**, which is why
+nothing here is conditional on "dev vs prod". The deployment itself is one setting, `DOMAIN` (below);
+the root `.env` needs only `DATABASE_URL` and `BETTER_AUTH_SECRET` in dev.
+
+**One SAP company at a time, switched on the SAP server only** (wizard or `agent.json`). Every call
+carries `X-Confire-Company` (`agentPost`); an agent on another company answers 409 `COMPANY_CHANGED`
+before it touches SAP, and `adoptCompany` (`b1.ts`) takes the agent's company once and clears the old
+one's caches (local currency, `entity_meta`, masterdata rows). A posted quotation remembers its company
+(`config_project.b1_company`): only there is it patched, linked or shown on the timeline. Decide a
+company-bound step off `Connector.companyDb` — the company the call itself carries — never a second
+read. Portal clients are deliberately not fenced by company (spec §6.2).
 
 ## Tenancy is the path
 
@@ -69,7 +95,8 @@ origin is `routes/index.tsx`, the dispatcher's). A link never names or changes i
 `useNavigate({ from: "/$slug" })` + `to: "/$slug/…"`, which carries the param over, and the shells'
 declared routes (`/b1/Items`) go through `useEntityNav` (`@confire/ui/EntityLink.tsx`), which puts them
 under `/$slug`. Moving to another tenant is always a full page load — the query cache never holds two.
-The staff app's admin-only pages (Settings, `/b1/*`) sit under the pathless `_admin` layout.
+The staff app's admin-only pages (`/b1/*`) sit under the pathless `_admin` layout; Settings does not — its
+Notifications tab is every member's (`?tab=notifications`), the other tabs are admin-only in the page.
 The oRPC link sends the slug as **`x-tenant`** on every call; the plain file routes carry it in their
 path (`/files/<slug>/…`), because a download is a link. `tenant.ts` is the only place a slug is read
 off a request (`tenantSlug`, with the reserved names: the staff SPA's top-level pages and the server's
@@ -134,6 +161,9 @@ submit end in `addPortalMember` instead, with the organization and the company b
 
 Ways in are an invitation (`/<slug>/accept/<id>`, existing-BP from the BP Object Page's *Invite to portal*)
 or auto-join (`onboarding.join`, a verified address on a domain registered to a company).
+Signed out, an invitation link goes to sign-up when the invited address has no account yet, else
+sign-in, the address filled in (`invitationGuard`): it asks `onboarding.invitee`, the portal's one
+procedure without a session — the link's random id is the credential.
 `bun run seed:portal` gives a dev tenant a company and an owner login.
 
 **New-client onboarding** (spec §5.3–5.4): *Invite new client* on the BP List Report sends an invitation
@@ -185,9 +215,9 @@ on `https://app.confire.ai`, the portal on `https://portal.confire.ai`, the cook
 Confire's mail on `mail.confire.ai`; the apex only redirects to sign-in. Unset is dev: `localhost:5173`
 and `localhost:5180`. **Every `*.confire.ai` host receives the session cookie: never point a name
 under it at a service this stack does not control** (a subdomain takeover would collect sessions).
-The one exception is a customer's agent tunnel (`<slug>-agent.<DOMAIN>`), and only behind a Cloudflare
-Access *Service Auth* policy: a browser stops at Cloudflare's edge, so the cookie never reaches the
-customer's machine. The production runbook (first deploy, shipping a change, migrations, backup and restore, agents) is `DEPLOY.md`;
+There is no exception: customer agents live on a separate registrable domain (`AGENT_DOMAIN`,
+`confire.app`) behind one wildcard Access *Service Auth* application, so the cookie can never reach a
+customer's machine — and nothing that sets a cookie is ever served under `confire.app`. The production runbook (first deploy, shipping a change, migrations, backup and restore, agents) is `DEPLOY.md`;
 `deploy/update.sh` ships a version and the compose `backup` service dumps Postgres to R2 nightly.
 Caddy has two fixed sites plus the apex redirect, certificates from Let's Encrypt over the HTTP
 challenge (Caddy's automatic HTTPS) — no wildcard, no DNS API. There is no local full stack: dev is
@@ -200,19 +230,36 @@ deployment serves).
 console (the server log prints each mail, links included; tests read `devOutbox`). One sending
 domain, `mail.<DOMAIN>` (`mailDomain`, Resend eu-west-1): Confire's mail from `notify@`, a tenant's
 client mail from `<slug>@` (`Brand.sender`, set by `tenantBrand` — which is why `tenant.ts` reserves
-the mail names as slugs), the display name quoted by `formatFrom`. Templates are React Email
+the mail names as slugs), the display name quoted by `formatFrom`. Dev with a key also sets
+`MAIL_DOMAIN=mail.confire.ai`: `mail.localhost` is unverifiable, so Resend refuses every send with a
+403 the UI never shows. **Client mail is in its company's SAP language** (`mailLang`, `layout.tsx`):
+`portal_company.languageCode` copies `BusinessPartners.LanguageCode` (→ `UserLanguages.Code`; 23/25
+Spanish, anything else English) on an invite, an onboarding submit and a BP edit in Confire. A
+new-client invitation has no BP yet, so it carries the sender's app language (`invitation.languageCode`),
+which its lead gets in SAP. Staff and account mail stay English. Templates are React Email
 components (`react-email`, pinned: 6.11.3 requires a `@react-email/render` that was never
 published), one typed props object each, drawn in `layout.tsx`'s frame with a `Brand`. Sends are
 fire-and-forget and never throw — a mail is never on a request's critical path.
 
-**Who hears of what is `notify.ts`** (spec §12), fired after commit by `project-lifecycle.ts` (a
-transition, comment or file) and onboarding submit. Client mail (D27: `off`/`creator`/`buyers`, the
-company's `portal_company.notify` over the tenant's `portal_settings.notify`) wears the tenant's
-branding and its slug as the sender. Staff mail (D22: assignee, else the BP's sales employee in B1,
-else `notifyFallback`, else admins and owners) is Confire's, from `notify@`. Recipients are read at
-send time; a failure lands on the event's `mailError`. **Tests never send:** `bunfig.toml` preloads
-`scripts/test-preload.ts`, which drops `RESEND_API_KEY`; tests read `devOutbox` and await
-`notificationsSettled()`.
+**Notifications are a bell and a mail, each switched per event by every user**
+(`docs/superpowers/specs/2026-10-22-notifications-design.md`; no admin decides for anyone).
+`notifications.ts` holds the catalog (`NOTIFICATION_TYPES`: id, audience `staff`/`client`, group) and
+is the only writer of `notification` (bell rows carrying their own `params` and tenant-relative
+`path`, never a key to the event) and `notification_optout` (everything is on: a row is one
+switch-off, so a new type needs no backfill). `deliver()` drops each person's switched-off channels,
+then inserts the bell rows and sends the mails, each independent of the other. **Who is eligible is
+`notify.ts`**, the project-event producer, fired after commit by `project-lifecycle.ts` (a
+transition, comment, file, or `assign` — staff's Reassign) and by onboarding submit: the client side
+is the project's creator while still seated at its company; the staff side is the assignee while
+still on staff, else every staff member (each kept or not by their own switch), so a request is never
+silent; never the actor; an internal event tells nobody, `assigned` aside. Client mail wears the
+tenant's branding and its slug as the sender; staff mail is Confire's, from `notify@`. Recipients are
+read at send time; a mail failure lands on the event's `mailError`. Both routers carry the same six
+`notifications.*` procedures over (the path's tenant, the session's user), and each SPA polls
+`unreadCount` every 30 s for its ShellBar bell (`@confire/ui/notifications`). **Tests never send:**
+`bunfig.toml` preloads `scripts/test-preload.ts`, which drops `RESEND_API_KEY` (and `CF_API_TOKEN`, or
+the pairing tests create real tunnels); tests read
+`devOutbox` and await `notificationsSettled()`.
 
 Email + password sign-in requires a verified address (`requireEmailVerification`): sign-up returns
 no session, and an unverified sign-in is refused with `EMAIL_NOT_VERIFIED` after mailing a fresh
@@ -253,7 +300,7 @@ selecting, so the read asks for whole rows and the cache stores them raw.
 lookups are resolved on every read (`liveEngine` in `config-project.ts` — the engine's server half,
 out of the router so the portal process can import it without the internal auth), so a quoted
 configuration is re-priced against what the cache says now rather than what it said then —
-`quotedValue`/`quotedCost` are the only frozen numbers, captured for the dashboard. (A portal
+`quotedValue`/`quotedCost` are the only frozen numbers, captured when the quotation is posted. (A portal
 submit freezes the client's inputs and indicative prices — on its append-only event row, not the
 project.)
 
@@ -277,11 +324,14 @@ not in the data path — its write layer is elicitation-gated, has no ETag handl
 never parses `NavigationProperty`. The *services underneath* it are what got ported.
 
 - `query.ts` is the **only** module that builds a Service Layer URL. Everything else passes data.
-- `B1Transport` is the seam: `DirectTransport` (agent → Service Layer) and `RemoteTransport`
-  (cloud → agent) implement the same named methods. **Cloud call sites never see a URL.**
+- `B1Transport` is the seam: `DirectTransport` is its one implementation, named methods over a
+  `B1Requester` — in production the tenant's agent (`remote.ts` `agentRequester`, one `agentPost`
+  per call, which adds the bearer, the Access headers, the company and the timeout). **Call sites
+  never see a URL.**
 - There is deliberately **no `readAll`**. `readPages(t, set, q, { maxPages })` takes a *required*
   cap so an unbounded fetch can never hide behind an innocent-looking line.
-- `readNext` is the one method taking a B1-supplied URL; the agent origin-checks it.
+- `readNext` is the one method passing a B1-supplied link on; the agent resolves every path under
+  the service's base and refuses one outside it.
 - `action(set, key, name)` is a bound document action (`Quotations(5)/Close`); the agent allowlists
   the names again on its side. `updateEntity(…, { replaceCollections })` sends
   `B1S-ReplaceCollectionsOnPatch` so a PATCHed `DocumentLines` replaces the stored lines.
@@ -289,15 +339,16 @@ never parses `NavigationProperty`. The *services underneath* it are what got por
   which neither cache in jsonb nor cross the wire) and adds `ReferentialConstraint` parsing —
   that is what yields `CardCode → BusinessPartners` and makes the entity UI possible.
 
-Deliberate fixes on port, all load-bearing: `getSetCookie()` (splitting on `,` shreds
-`Expires=Wed, 09 Jun …` and loses `ROUTEID`, which a load-balanced Service Layer requires); one
-in-flight login promise (N cold requests otherwise burn N B1 licence slots); `buildKeyValue`
-(escapes quotes, handles composite keys); `B1Error{status, code}` instead of `Error(string)`;
-Bun's `tls: { rejectUnauthorized: false }` — **Bun's `fetch` ignores undici's `dispatcher`**, so
-the sample's self-signed handling is a silent no-op here.
+Deliberate fixes on port, all load-bearing: `buildKeyValue` (escapes quotes, handles composite
+keys); `B1Error{status, code}` instead of `Error(string)`. The session's own fixes moved into the Go
+agent's `session.go` with it: every `Set-Cookie` kept whole by a cookie jar (splitting on `,` shreds
+`Expires=Wed, 09 Jun …` and loses `ROUTEID`, which a load-balanced Service Layer requires), one
+in-flight login (N cold requests otherwise burn N B1 licence slots, tested), a re-login once on 401,
+and self-signed certificates accepted on all three SAP services.
 
-Beas is not a second package: it is the same `ServiceLayer` with a different `basePath`/`auth`
-and a different agent route prefix.
+Beas is not a second package: it is the same session on the agent with a different `basePath`/`auth`
+and the route `/beas/request`. Confire always builds its transport; an agent without Beas answers
+503, as `/print` does without printing.
 
 ## Live queries are data, not paths
 
@@ -308,7 +359,8 @@ express nothing but paging.
 
 `apps/server/src/b1.ts` is where a tenant becomes transports: `tenantConnector` → `runnerFor`
 (the `QueryRunner` seam, which only the **sync** and the editor's live preview still hold) and
-`toOrpcError` (B1 status/code → `ORPCError`, a lookup rather than a regex over a message).
+`toOrpcError` (B1 status/code → `ORPCError`, a lookup rather than a regex over a message;
+`COMPANY_CHANGED` and the agent's `AGENT_REFUSED` have cases of their own).
 `runnerFor` returns one page per call and nothing else — the sync walks a table by following
 `nextSkip`, so no multi-page branch can hide an unbounded read.
 
@@ -419,7 +471,7 @@ a missing field is an error (dropping it would show *more* rows than asked for),
 ## Conventions
 
 - **`// ponytail:` comments mark deliberate simplifications** and name the ceiling plus the upgrade
-  path (`// ponytail: jsonb blob; real tables only if the dashboard needs drill-down`). Respect
+  path (`// ponytail: jsonb blob; real tables only if a reader has to filter inside it`). Respect
   them — they are decisions, not oversights. Add one when you take a shortcut with a known limit.
 - Comments explain *why*, especially when the obvious approach was tried and failed. Several
   carry verified error strings from a live B1 — do not "clean those up".

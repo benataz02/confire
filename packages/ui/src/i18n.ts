@@ -1,4 +1,5 @@
 import { registerI18nLoader } from "@ui5/webcomponents-base/dist/asset-registries/i18n.js";
+import I18nBundle, { getI18nBundle } from "@ui5/webcomponents-base/dist/i18nBundle.js";
 import { getLanguage, setFetchDefaultLanguage, setLanguage as applyLanguage } from "@ui5/webcomponents-base/dist/config/Language.js";
 import getLocale from "@ui5/webcomponents-base/dist/locale/getLocale.js";
 import parse from "@ui5/webcomponents-base/dist/PropertiesFileFormat.js";
@@ -41,6 +42,23 @@ export function messageLoaders(files: Files) {
   return loaders;
 }
 
+const loading: Promise<unknown>[] = [];
+
+/** Every registered bundle's texts are in. Each app's i18n.ts awaits it, so nothing renders before. */
+export const textsLoaded = () => Promise.all(loading);
+
+// UI5's useI18nBundle returns an empty bundle (getText gives back the key) until its own effect has
+// fetched the texts, after the first paint: every load flashed its keys. The texts are in before the
+// first render (textsLoaded) and getText reads them when called, so hand out the real bundle at once;
+// UI5's hook stays for its subscription, which re-renders on a language change.
+const hookFor = (name: string) => {
+  const bundle = new I18nBundle(name);
+  return () => {
+    useI18nBundle(name);
+    return bundle;
+  };
+};
+
 /** Registers an app's bundle and returns its hook. `files` is the app's own
  *  `import.meta.glob("./i18n/messagebundle_*.properties", { query: "?raw", import: "default" })`:
  *  the glob has to sit in the app, and each file becomes a lazy chunk fetched only for its language. */
@@ -50,14 +68,13 @@ export function messageBundle(name: string, files: Files) {
   // where a switch once the page has rendered re-fetches every bundle and redraws.
   const chosen = localStorage.getItem("language");
   if (chosen && !getLanguage()) void applyLanguage(chosen);
-  return () => useI18nBundle(name);
+  loading.push(getI18nBundle(name)); // after the language: it fetches the current one
+  return hookFor(name);
 }
 
 /** Shared shells (List Report, Object Page, value help). Each app registers `@confire/ui`
  *  from packages/ui/src/i18n in its own i18n.ts — the glob has to sit in the app. */
-export function useUiI18n() {
-  return useI18nBundle("@confire/ui");
-}
+export const useUiI18n = hookFor("@confire/ui");
 
 // Each language in its own name, so a user finds theirs whatever the page is showing.
 export const LANGUAGES = [

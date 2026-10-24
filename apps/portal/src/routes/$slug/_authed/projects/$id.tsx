@@ -12,6 +12,7 @@ import { ProjectTimeline } from "@confire/ui/timeline/ProjectTimeline.tsx";
 import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
+import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
 import { money } from "@confire/ui/money.ts";
 import { uploadFile } from "@confire/ui/files.ts";
 import { client, meQuery, orpc, type Me } from "../../../../orpc.ts";
@@ -204,6 +205,7 @@ function ProjectPage({ id }: { id: string }) {
     <ObjectPage mode="IconTabBar" hidePinButton
       titleArea={
         <ObjectPageTitle header={<Title>{p.project.name}</Title>} subHeader={<Text>{p.model.name}</Text>}
+          breadcrumbs={<PageBreadcrumbs items={[{ text: i18n.getText("PORTAL_PROJECTS"), to: "/projects" }]} current={p.project.name} />}
           actionsBar={buyer && status === "draft" ? (
             <Toolbar design="Transparent">
               <ToolbarButton icon="delete" design="Transparent" text={i18n.getText("PORTAL_DELETE")} disabled={acting}

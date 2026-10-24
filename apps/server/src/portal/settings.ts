@@ -23,7 +23,7 @@ export async function savePortalSettings(tenantId: string, settings: PortalSetti
  *  and its slug as the sender of its client mail (`<slug>@mail.<domain>`). The logo URL is absolute
  *  — a mail has no origin to resolve against — and is the one file the portal process serves
  *  without a session. */
-export async function tenantBrand(tenantId: string): Promise<{ slug: string; brand: Brand; settings: PortalSettings }> {
+export async function tenantBrand(tenantId: string): Promise<{ slug: string; brand: Brand }> {
   const [[org], settings] = await Promise.all([
     db.select({ slug: organization.slug, name: organization.name, logo: organization.logo })
       .from(organization).where(eq(organization.id, tenantId)).limit(1),
@@ -33,7 +33,6 @@ export async function tenantBrand(tenantId: string): Promise<{ slug: string; bra
   const b = settings.branding ?? {};
   return {
     slug: org.slug,
-    settings,
     brand: {
       name: b.displayName || org.name,
       // The one file route without a tenant in its path: mail links to it, signed out (files.ts).
@@ -53,9 +52,3 @@ export function contrastOnWhite(hex: string): number {
   };
   return 1.05 / (0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5) + 0.05);
 }
-
-/** The D27 events as Settings and the BP page list them. */
-export const NOTIFY_LABELS = {
-  accepted: "Request accepted (in review)", returned: "Changes requested", declined: "Request declined",
-  quoted: "Quotation sent", comment: "Comment or file from your team",
-} as const;

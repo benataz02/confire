@@ -2,22 +2,15 @@ import { eq } from "drizzle-orm";
 import { db, sapConnection } from "@confire/db";
 import { encryptSecret } from "./crypto.ts";
 
-export type AgentSeed = {
-  agentUrl: string;
-  secret: string;
-  accessClientId?: string | null;
-  accessClientSecret?: string | null;
-  beasEnabled?: boolean;
-};
+/** A row by hand — what pairing writes, for scripts/seed-agent.ts and the tests. */
+export type AgentSeed = { agentUrl: string; secret: string; companyDb?: string | null };
 
 export async function upsertSapConnection(tenantId: string, seed: AgentSeed): Promise<void> {
   const row = {
     tenantId,
     agentUrl: seed.agentUrl,
     secret: encryptSecret(seed.secret),
-    accessClientId: seed.accessClientId ?? null,
-    accessClientSecret: seed.accessClientSecret ?? null,
-    beasEnabled: seed.beasEnabled ?? false,
+    companyDb: seed.companyDb ?? null,
     status: "ok" as const,
   };
   await db.insert(sapConnection).values(row).onConflictDoUpdate({ target: sapConnection.tenantId, set: row });

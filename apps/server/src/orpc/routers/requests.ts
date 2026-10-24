@@ -3,7 +3,8 @@ import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db, configModel, configProject, portalCompany, user } from "@confire/db";
 import { userProcedure } from "../base.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
-import { addComment, transition, type Action } from "../../project-lifecycle.ts";
+import { staffOf } from "../../notifications.ts";
+import { addComment, assign, transition, type Action } from "../../project-lifecycle.ts";
 import { projectDocuments, timelineEvents } from "../../project-timeline.ts";
 
 // Portal → Requests (spec §10, §11): the clients' projects from their first submit on, and the
@@ -63,6 +64,15 @@ export const requestsRouter = {
   accept: decide("accept"),
   sendBack: decide("sendBack"),
   decline: decide("decline"),
+
+  /** Reassign (notifications spec §6): any staff member may hand a request to any other. */
+  assign: userProcedure
+    .input(z.object({ projectId: z.uuid(), userId: z.string().min(1) }))
+    .handler(({ input, context }) =>
+      assign(context.tenantId, input.projectId, { userId: context.userId, side: "internal" }, input.userId)),
+
+  /** Who a request can be assigned to: the workspace's staff, for the Reassign picker. */
+  assignable: userProcedure.handler(({ context }) => staffOf(context.tenantId)),
 };
 
 /** The project timeline, staff side (spec §8): every event, internal notes included. */

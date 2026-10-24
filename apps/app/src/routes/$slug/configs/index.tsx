@@ -83,6 +83,9 @@ function Configs() {
   const colCustomer = t("CONFIG_COL_CUSTOMER");
   const colStatus = t("CONFIG_COL_STATUS");
   const colUpdated = t("CONFIG_COL_UPDATED");
+  const colMine = t("CONFIG_COL_MINE");
+  const yes = t("ADMIN_YES");
+  const no = t("ADMIN_NO");
   const draftText = statuses.draft.text;
   const quotedText = statuses.quoted.text;
   const feature = useMemo<ListFeature>(() => ({
@@ -102,9 +105,11 @@ function Configs() {
         ],
       },
       { key: "updatedAt", label: colUpdated, type: "date" },
+      // The server computes it per caller: the home page's "My drafts" links here with ?mine=yes.
+      { key: "mine", label: colMine, type: "enum", options: [{ value: "yes", label: yes }, { value: "no", label: no }], hidden: true },
     ],
     filterFields: [{ key: "name" }, { key: "customerName" }, { key: "status" }],
-  }), [title, colName, colModel, colCustomer, colStatus, colUpdated, draftText, quotedText]);
+  }), [title, colName, colModel, colCustomer, colStatus, colUpdated, colMine, yes, no, draftText, quotedText]);
   const cells = useMemo(() => ({
     status: (row: Row) => {
       const known = statusUi(t)[row.status as "draft" | "quoted"];

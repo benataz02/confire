@@ -38,7 +38,7 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
   const qc = useQueryClient();
   const navigate = useNavigate({ from: "/$slug" });
   // The B1 pages are admin/owner only — _admin bounces everyone else off /b1 — so a plain member
-  // stays here and reads the confirmation rather than being thrown back to the dashboard.
+  // stays here and reads the confirmation rather than being sent to the configurations list.
   const canOpenInB1 = useIsAdmin();
   const meta = useFieldConstraints("Quotations");
   const draft = useQuery({ ...orpc.configs.quoteDraft.queryOptions({ input: { projectId } }), retry: false });
@@ -101,6 +101,11 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
       ) : undefined}
       tableActions={tableActions}
       onCancelCreate={backToConfig}
+      // A client's request is reached from Requests, a configuration from Configurations.
+      breadcrumbs={[
+        d.portal ? { text: t("NAV_REQUESTS"), to: "/requests" } : { text: t("NAV_CONFIGS"), to: "/configs" },
+        { text: d.name.trim() || t("CONFIG_NEW"), to: `/configs/${projectId}` },
+      ]}
       // The draft carries the commandId it was built from, so the server refuses to post a
       // selection that moved between preview and Create rather than quoting something else.
       onSave={async (header) => {

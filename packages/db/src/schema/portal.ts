@@ -1,4 +1,4 @@
-import { foreignKey, index, jsonb, pgTable, primaryKey, text, timestamp, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { foreignKey, index, integer, jsonb, pgTable, primaryKey, text, timestamp, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 
@@ -23,29 +23,17 @@ export const portalRoleOf = (role: AnyPgColumn) => sql<PortalRole>`replace(${rol
 export type PortalDocFields = { header: string[]; lines: string[] };
 /** A BusinessPartners field an admin adds to the new-client onboarding form (§5.3), in form order. */
 export type PortalExtraField = { key: string; required: boolean };
-/** The client-facing project events a tenant decides about (D27, §12). `comment` covers staff files
- *  with external visibility too; `revised` never mails on its own (its transition's mail lists it). */
-export const NOTIFY_EVENTS = ["accepted", "returned", "declined", "quoted", "comment"] as const;
-export type NotifyEvent = (typeof NOTIFY_EVENTS)[number];
-/** `creator`: the project creator; `buyers`: the creator plus every buyer and owner of the company. */
-export const NOTIFY_MODES = ["off", "creator", "buyers"] as const;
-export type NotifyMode = (typeof NOTIFY_MODES)[number];
-export type PortalNotify = Partial<Record<NotifyEvent, NotifyMode>>;
 /** The supplier's look on its portal and in its client mail (D20). Absent keys fall back to the
  *  organization's name and logo, and Horizon's own colours. */
 export type PortalBranding = { displayName?: string; accent?: string; logoFileId?: string };
 /** `portal_settings.settings` (spec §6): one document, loaded and saved whole. P5 writes `docFields`,
  *  P6 `onboarding` and `leadSeries` (a B1 BP numbering series; absent = B1's default for leads), P7
- *  the branding and mail keys. */
+ *  the branding. Who hears of what is each user's own setting (notification_optout), not this. */
 export type PortalSettings = {
   docFields?: Partial<Record<string, PortalDocFields>>;
   onboarding?: { extraFields: PortalExtraField[] };
   leadSeries?: number;
   branding?: PortalBranding;
-  notify?: PortalNotify;
-  /** internal members (user ids) who get a request's mail when neither its assignee nor the BP's
-   *  sales employee resolves (D22); empty = the tenant's admins and owners */
-  notifyFallback?: string[];
 };
 
 /** A customer company: one per tenant × CardCode, the register of which CardCodes are on the portal
@@ -59,9 +47,11 @@ export const portalCompany = pgTable(
     cardCode: text("card_code").notNull(),
     cardName: text("card_name").notNull(),
     cardType: text("card_type").$type<PortalCardType>().notNull(),
-    // The D27 override, edited by internal admins on the BP Object Page: a missing key (or null) is
-    // the tenant's setting.
-    notify: jsonb("notify").$type<PortalNotify>(),
+    /** The BP's SAP language, `BusinessPartners.LanguageCode` → `UserLanguages.Code`: what its mail is
+     *  written in (mail/layout.tsx `mailLang`). Copied whenever Confire reads or writes the BP — an
+     *  invitation, an onboarding submit, an edit on the Object Page. ponytail: a change made in SAP
+     *  itself lands at the next of those; re-read it at send time if that lag ever matters. */
+    languageCode: integer("language_code"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.cardCode] })],

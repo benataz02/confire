@@ -184,6 +184,36 @@ describe("sendInvitation", () => {
     expect(mail.text).toContain("Müller & Söhne GmbH");
   });
 
+  test("mails in the company's SAP language, a new client in the sender's", async () => {
+    const { tenantId } = await makeTenant();
+    const inviter = await inviterOf();
+    const send = async (cardCode: string | null, languageCode?: number) => {
+      const email = `l${uid()}@kunde.es`;
+      const { id } = await sendInvitation({ tenantId, cardCode, email, role: "owner", registerDomain: false, inviter, languageCode });
+      const [row] = await db.select({ languageCode: invitation.languageCode }).from(invitation).where(eq(invitation.id, id));
+      return { mail: await mailTo(email), stored: row!.languageCode };
+    };
+    const withLanguage = async (languageCode: number) => (await db.insert(portalCompany)
+      .values({ tenantId, cardCode: `C${uid()}`, cardName: "Hera SL", cardType: "cCustomer", languageCode }).returning())[0]!.cardCode;
+
+    // 23 = Spanish in UserLanguages: the subject, the body and the frame all switch.
+    const es = await send(await withLanguage(23));
+    expect(es.mail.subject).toContain("Ines Inviter le ha invitado al portal de clientes de");
+    expect(es.mail.html).toContain('lang="es"');
+    expect(es.mail.text).toContain("Aceptar la invitación");
+    expect(es.mail.text).toContain("enviado con Confire");
+    expect(es.stored).toBe(23);
+    // A language with no translation (9 = German) reads English; a passed language is ignored for an
+    // existing company, whose own wins.
+    const de = await send(await withLanguage(9), 23);
+    expect(de.mail.subject).toContain("invited you to");
+    expect(de.stored).toBe(9);
+    // A new client has no BP yet: the sender's language, kept for its lead.
+    const fresh = await send(null, 23);
+    expect(fresh.mail.text).toContain("Facilite los datos de su empresa");
+    expect(fresh.stored).toBe(23);
+  });
+
   test("one open invitation per address, whatever its case", async () => {
     const { tenantId } = await makeTenant();
     const c = await company(tenantId);

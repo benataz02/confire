@@ -1,24 +1,22 @@
 /**
- * Point a tenant at an on-prem agent. This row IS the difference between dev and production:
- * `agentUrl` is http://localhost:4000 on a dev box and the Cloudflare Tunnel hostname in a
- * customer install, and the Access service token is null in the first case.
+ * Point a tenant at an agent by hand, skipping pairing — for a dev agent whose agent.json you wrote
+ * yourself. Pairing (`go run ./apps/agent setup --server http://localhost:3000 …`) writes the same
+ * row and is the normal way, in dev too.
  *
- *   bun --env-file=.env scripts/seed-agent.ts <slug> [agentUrl] [secret]
- *   bun --env-file=.env scripts/seed-agent.ts alumigraf https://agent-acme.example S3CRET \
- *       --access-id=<id> --access-secret=<secret> --beas
+ *   bun --env-file=.env scripts/seed-agent.ts <slug> [agentUrl] [secret] [--company=SBODEMOUS]
  *
- * The secret must match `secret` in the agent's agent.json (and agent.example.json in
- * local dev). It is stored encrypted.
+ * The secret must match `secret` in the agent's agent.json; it is stored encrypted. The company may
+ * be left out: the agent answers the first call with its own and Confire adopts it.
  */
 import { eq } from "drizzle-orm";
 import { db, pool, organization } from "@confire/db";
 import { upsertSapConnection } from "../apps/server/src/seed-agent.ts";
 
 const [slug, agentUrl = "http://localhost:4000", secret = "dev-secret-change-me-min-32-chars-long"] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-const flag = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split("=").slice(1).join("=") ?? null;
+const companyDb = process.argv.find((a) => a.startsWith("--company="))?.slice("--company=".length) ?? null;
 
 if (!slug) {
-  console.error("usage: bun scripts/seed-agent.ts <slug> [agentUrl] [secret] [--access-id=] [--access-secret=] [--beas]");
+  console.error("usage: bun scripts/seed-agent.ts <slug> [agentUrl] [secret] [--company=]");
   process.exit(1);
 }
 
@@ -28,15 +26,6 @@ if (!org) {
   process.exit(1);
 }
 
-const accessClientId = flag("access-id");
-const beasEnabled = process.argv.includes("--beas");
-await upsertSapConnection(org.id, {
-  agentUrl,
-  secret,
-  accessClientId,
-  accessClientSecret: flag("access-secret"),
-  beasEnabled,
-});
-
-console.log(`${slug} -> ${agentUrl}${accessClientId ? " (behind Cloudflare Access)" : ""}${beasEnabled ? " + beas" : ""}`);
+await upsertSapConnection(org.id, { agentUrl, secret, companyDb });
+console.log(`${slug} -> ${agentUrl}${companyDb ? ` (${companyDb})` : ""}`);
 await pool.end();

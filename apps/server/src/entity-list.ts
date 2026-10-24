@@ -20,13 +20,12 @@ const literal = (f: B1Field, value: string | number | boolean): string => {
       return String(Number(value));
     case "boolean": {
       const on = value === true || value === "true" || value === "tYES";
-      // A BoYesNoEnum column rejects `eq true` — it wants the quoted member, as dashboard-snapshot.ts
-      // already does with `Cancelled eq 'tNO'`.
+      // A BoYesNoEnum column rejects `eq true` — it wants the quoted member (`Cancelled eq 'tNO'`).
       return isYesNo(f) ? `'${encodeBool(f, on)}'` : String(on);
     }
-    // OData v4 date/time literals are unquoted. (dashboard-snapshot.ts quotes its DocDate
-    // literals — that form is what was verified against the live b1s/v2 there, so it stays;
-    // ponytail: if one of the two 400s in the field, make both match whichever wins.)
+    // OData v4 date/time literals are unquoted. A quoted DocDate (`DocDate ge '2026-01-01'`)
+    // is the form verified against live b1s/v2; this compiler leaves them bare.
+    // ponytail: if one of the two 400s in the field, make both match whichever wins.
     case "date":
     case "time":
       return String(value);

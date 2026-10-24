@@ -23,3 +23,14 @@ test("part files for one language merge, and that language still lays over Engli
   expect(await loaders.en!()).toEqual({ NAV_HOME: "Home", NAV_SETTINGS: "Settings" });
   expect(await loaders.es!()).toEqual({ NAV_HOME: "Home", NAV_SETTINGS: "Configuración" });
 });
+
+test("the first render shows the texts, never their keys", async () => {
+  (globalThis as { localStorage?: unknown }).localStorage ??= { getItem: () => null };
+  const { messageBundle, textsLoaded } = await import("./i18n.ts");
+  const { createElement } = await import("react");
+  const { renderToString } = await import("react-dom/server");
+  const useTexts = messageBundle("@confire/test", { "./i18n/messagebundle_en.properties": async () => "HELLO=Hello" });
+  await textsLoaded();
+  // renderToString runs no effects: what it returns is the first paint.
+  expect(renderToString(createElement(() => useTexts().getText("HELLO")))).toBe("Hello");
+});

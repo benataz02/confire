@@ -20,7 +20,7 @@ import {
 import { B1Error, rowsOf, type B1Transport } from "@confire/b1";
 import { ENTITY_PROFILES } from "./entity-profiles.ts";
 import { canonicalJson } from "./canon.ts";
-import { tenantConnector, tenantCurrency, viaB1 } from "./b1.ts";
+import { quotationIn, tenantCompany, tenantConnector, tenantCurrency, viaB1 } from "./b1.ts";
 import { liveEngine } from "./config-project.ts";
 import { assertWritable, inputsOf, internalVisible, transition } from "./project-lifecycle.ts";
 
@@ -255,23 +255,27 @@ async function loadQuotable(tenantId: string, projectId: string) {
   return project;
 }
 
-const commandIdOf = (tenantId: string, p: ConfigProjectRow) => configDocumentCommandId({
+/** `here`: the project's quotation is in the company this quote goes to (quotationIn). Only then is
+ *  there a quotation to modify or replace; in another company the quote is a first one. */
+const commandIdOf = (tenantId: string, p: ConfigProjectRow, here: boolean) => configDocumentCommandId({
   tenantId, projectId: p.id, candidates: p.candidates, selection: p.selection ?? [], tables: p.tables,
-  replaces: p.b1DocEntry ?? undefined,
+  replaces: here ? p.b1DocEntry! : undefined,
 });
 
 export async function quoteDraft(tenantId: string, projectId: string) {
   const project = await loadQuotable(tenantId, projectId);
   const { model, lookups } = await liveEngine(tenantId, project);
-  const done = project.status === "quoted" && project.b1DocEntry !== null;
+  const here = quotationIn(project, await tenantCompany(tenantId));
+  const done = project.status === "quoted" && here;
   return {
-    commandId: commandIdOf(tenantId, project),
+    commandId: commandIdOf(tenantId, project, here),
     data: buildQuoteSeed(project, model.definition, lookups, await tenantCurrency(tenantId)),
     totals: quotedTotals(project, model.definition, lookups),
     quoted: done ? { docEntry: project.b1DocEntry!, quotedAt: project.quotedAt } : null,
     // A reopened project re-quotes its quotation (§7.3): the page says so before the user posts.
-    replaces: !done && project.b1DocEntry !== null ? { docEntry: project.b1DocEntry } : null,
+    replaces: !done && here ? { docEntry: project.b1DocEntry! } : null,
     portal: project.portalCardCode !== null,
+    name: project.name, // the page's breadcrumb back to the configuration
   };
 }
 
@@ -306,26 +310,30 @@ export async function createQuote(
     throw new ORPCError("BAD_REQUEST", { message: `Not settable on a quotation: ${rejected.join(", ")}` });
 
   const project = await loadQuotable(tenantId, input.projectId);
+  // One connector for the whole write: `here` is decided against the company its calls carry, so a
+  // switch landing mid-way turns into the agent's 409, never a PATCH of another company's DocEntry.
+  const conn = await tenantConnector(tenantId);
+  const here = quotationIn(project, conn.companyDb);
   // Already posted: the row IS the idempotency record for a retry that got its response.
-  if (project.status === "quoted" && project.b1DocEntry !== null)
-    return { docEntry: project.b1DocEntry, docNum: null, reused: true, row: null, etag: null, mode: "created" as const };
+  if (project.status === "quoted" && here)
+    return { docEntry: project.b1DocEntry!, docNum: null, reused: true, row: null, etag: null, mode: "created" as const };
   const actor = { userId, side: "internal" as const };
   await assertWritable(tenantId, project.id, actor);
   // The customer of a portal project is the company (spec §10) — the page cannot quote someone else.
   if (project.portalCardCode !== null && input.header?.CardCode !== undefined && input.header.CardCode !== project.customer?.cardCode)
     throw new ORPCError("BAD_REQUEST", { message: "A request is quoted to the client's own business partner" });
 
-  const commandId = commandIdOf(tenantId, project);
+  const commandId = commandIdOf(tenantId, project, here);
   if (commandId !== input.commandId)
     throw new ORPCError("CONFLICT", { message: "STATE_CHANGED" });
 
   const { model, lookups } = await liveEngine(tenantId, project);
   const seed = buildQuoteSeed(project, model.definition, lookups, await tenantCurrency(tenantId));
   const totals = quotedTotals(project, model.definition, lookups);
-  const { b1 } = await tenantConnector(tenantId);
+  const { b1 } = conn;
 
   const posted = await viaB1(async () => {
-    const current = project.b1DocEntry === null ? null : await readQuotation(b1, project.b1DocEntry);
+    const current = here ? await readQuotation(b1, project.b1DocEntry!) : null;
 
     if (current?.open) {
       // Re-quote an open quotation in place. The same check-then-create, applied to an update: a
@@ -353,7 +361,7 @@ export async function createQuote(
     // against the dedup UDF covers the window the DB cannot: we POSTed, B1 created the quotation,
     // and our response never arrived. The closed predecessor is excluded by DocEntry as well as by
     // the key (`replaces` is in it): a modify may have written this very key onto it.
-    const filter = `${DEDUP_UDF} eq '${commandId}'${project.b1DocEntry === null ? "" : ` and DocEntry ne ${project.b1DocEntry}`}`;
+    const filter = `${DEDUP_UDF} eq '${commandId}'${here ? ` and DocEntry ne ${project.b1DocEntry}` : ""}`;
     const existing = await b1.readEntitySet("Quotations", { filter, select: ["DocEntry", "DocNum"], top: 1 }).catch((e) => {
       // Only a 400 means "no such property"; an unreachable agent or a rejected session is a
       // different problem and must keep its own status rather than becoming setup advice.
@@ -396,9 +404,12 @@ export async function createQuote(
   const now = new Date();
   await transition({
     tenantId, projectId: project.id, action: "quote", actor,
-    payload: (row) => ({ docEntry: posted.docEntry, docNum: posted.docNum, value: totals.value, mode: posted.mode, inputs: inputsOf(row) }),
+    payload: (row) => ({
+      docEntry: posted.docEntry, docNum: posted.docNum, value: totals.value, mode: posted.mode, inputs: inputsOf(row),
+      company: conn.companyDb,
+    }),
     set: {
-      b1DocEntry: posted.docEntry, quotedAt: now,
+      b1DocEntry: posted.docEntry, b1Company: conn.companyDb, quotedAt: now,
       quotedValue: totals.value.toFixed(4), quotedCost: totals.cost.toFixed(4),
     },
   });

@@ -43,8 +43,20 @@ export type B1MetadataParams = {
   dependency?: boolean;
 };
 
-/** The seam. `DirectTransport` (agent) talks to the Service Layer; `RemoteTransport` (cloud)
- *  talks to the agent. Cloud call sites are written against this and never see a URL. */
+/** One Service Layer call as the agent's `/{b1|beas}/request` takes it. `path` is relative to the
+ *  service's base and comes from query.ts (or is a B1 nextLink); the agent allowlists method, path
+ *  and headers, and answers a SAP failure as a B1Error rather than a status. */
+export type B1Request = {
+  method: "GET" | "POST" | "PATCH" | "DELETE";
+  path: string;
+  headers?: Record<string, string>;
+  body?: unknown;
+};
+export type B1Requester = (r: B1Request) => Promise<{ status: number; data: unknown }>;
+
+/** The seam. `DirectTransport` is the one implementation: named methods over a B1Requester, which in
+ *  production is the tenant's agent (remote.ts). Call sites are written against this and never see a
+ *  URL. */
 export interface B1Transport {
   readEntitySet(entitySet: string, q?: QueryOptions): Promise<B1Response>;
   readEntity(entitySet: string, key: Key, q?: QueryOptions): Promise<B1Response>;
@@ -99,5 +111,12 @@ export const countOf = (data: unknown): number | undefined => {
   return typeof n === "number" && Number.isFinite(n) ? n : undefined;
 };
 
-/** Both live targets a model can name. `beas` is null unless the tenant enabled it. */
-export type Connector = { b1: B1Transport; beas: B1Transport | null };
+/** Both live targets a model can name. Beas always has a transport: an agent without Beas answers
+ *  503 "not configured", the same way it answers a print it has no layout for. */
+export type Connector = {
+  b1: B1Transport;
+  beas: B1Transport;
+  /** The company these transports' calls are built against: decide anything company-bound (which
+   *  DocEntry to patch) off this, never off a second read — a call on another company answers 409. */
+  companyDb: string | null;
+};

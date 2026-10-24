@@ -32,7 +32,7 @@ export const ENTITY_PROFILES: Record<string, EntityProfile> = {
     editableCollections: ["DocumentLines"],
   },
   BusinessPartners: {
-    editable: ["CardName", "Phone1", "Cellular", "EmailAddress", "Notes", "FreeText", "SalesPersonCode", "Currency"],
+    editable: ["CardName", "Phone1", "Cellular", "EmailAddress", "Notes", "FreeText", "SalesPersonCode", "Currency", "LanguageCode"],
     requiredOnCreate: ["CardCode", "CardName", "CardType"],
     editableCollections: [],
   },

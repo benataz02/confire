@@ -4,6 +4,7 @@ import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import type { AppRouter } from "@confire/server/router";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { notificationsApi } from "@confire/ui/notifications/api.ts";
 import { currentSlug, hardRedirect, loginUrl, TENANT_HEADER } from "@confire/ui/host.ts";
 
 // Same-origin (dev proxy / prod static) → cookies ride along automatically. The workspace is the
@@ -24,6 +25,8 @@ const link = new RPCLink({
 });
 export const client: RouterClient<AppRouter> = createORPCClient(link);
 export const orpc = createTanstackQueryUtils(client);
+/** The bell's and the Notifications page's data source (@confire/ui/notifications). */
+export const notifications = notificationsApi(client.notifications);
 
 /**
  * Identity in the workspace in the path: session + membership + role in one call.
@@ -58,7 +61,3 @@ export function useIsAdmin(): boolean {
   const role = useQuery(meQuery).data?.role;
   return role === "admin" || role === "owner";
 }
-
-export type RouterOutputs = {
-  dashboard: { overview: Awaited<ReturnType<typeof client.dashboard.overview>> };
-};

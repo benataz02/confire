@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db, configMasterdata, configMasterdataRow } from "@confire/db";
 import { runnerFor, tenantConnector } from "./b1.ts";
 import {
-  bumpMasterdata, DEFAULT_PAGE,
+  bumpMasterdata, DEFAULT_PAGE, masterdataVersion,
   type MasterdataQueryRow, type MasterdataRow, type QueryRunner, type RowCache, type RowQuery,
 } from "./lookups.ts";
 
@@ -15,7 +15,8 @@ import {
 /** Rows held in memory while a sync walks. One page — the insert happens per page, so a table
  *  with no ceiling still costs O(page) memory. */
 const CACHE_TTL_MS = 5 * 60_000;
-const allRows = new Map<string, { at: number; rows: Record<string, unknown>[] }>();
+// Keyed with the masterdata version too, so a bump (an edit, a sync, a company switch) drops it.
+const allRows = new Map<string, { at: number; version: number; rows: Record<string, unknown>[] }>();
 
 /** Pull every page of a query masterdata into config_masterdata_row, wholesale.
  *
@@ -123,9 +124,10 @@ export function rowCache(tenantId: string): RowCache {
     if (!q || (q.top === undefined && q.col === undefined && !q.search)) {
       const key = `${tenantId}:${masterdataId}`;
       const hit = allRows.get(key);
-      if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.rows;
+      const version = masterdataVersion(tenantId);
+      if (hit && hit.version === version && Date.now() - hit.at < CACHE_TTL_MS) return hit.rows;
       const rows = await selectRows(tenantId, masterdataId, {});
-      allRows.set(key, { at: Date.now(), rows });
+      allRows.set(key, { at: Date.now(), version, rows });
       return rows;
     }
     return selectRows(tenantId, masterdataId, q);

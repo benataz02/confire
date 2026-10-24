@@ -3,6 +3,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useI18n } from "../../../../i18n.ts";
 import { b1Feature } from "../../../../features/b1/index.ts";
 import { localizedB1Feature } from "../../../../features/b1/localize.ts";
+import { b1Label } from "../../../../components/AppShell.tsx";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
 import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import { useDetailView } from "@confire/ui/useDetailView.ts";
@@ -34,6 +35,7 @@ function EntityRecord() {
       sections={feature.detail.sections} header={feature.detail.header}
       // No ETag means B1 gave us nothing to guard the write with; refuse rather than send a blind PATCH.
       editDisabled={!d.etag}
-      onSave={d.save} navigation={d.navigation} />
+      onSave={d.save} navigation={d.navigation}
+      breadcrumbs={[{ text: b1Label(entity, (k) => i18n.getText(k)), to: `/b1/${entity}` }]} />
   );
 }

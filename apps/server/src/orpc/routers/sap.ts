@@ -1,10 +1,9 @@
 import { ORPCError } from "@orpc/server";
-import { z } from "zod";
 import { and, eq, notInArray } from "drizzle-orm";
-import { db, EXTERNAL_ROLES, member, organization, sapConnection } from "@confire/db";
+import { db, EXTERNAL_ROLES, member, organization } from "@confire/db";
 import { adminProcedure, sessionProcedure } from "../base.ts";
-import { sapConnectionExists, upsertSapConnection } from "../../seed-agent.ts";
-import { encryptSecret } from "../../crypto.ts";
+import { sapConnectionExists } from "../../seed-agent.ts";
+import { agentStatus, issuePairingCode } from "../../agent-pairing.ts";
 import { portalSeats } from "../../portal/members.ts";
 import { appTenantUrl, portalTenantUrl } from "../../tenant.ts";
 
@@ -32,7 +31,7 @@ export const sapRouter = {
   // The sign-in dispatcher's one call (/login, signed in): every place this user can go — their
   // workspace (null = no company yet; does it still need an agent?) and every supplier portal they
   // have a seat at, the one the session last worked in marked `active`. Only an owner/admin can
-  // connect an agent, so a member goes straight to the workspace whether or not the row exists. The
+  // pair an agent, so a member goes straight to the workspace whether or not the row exists. The
   // URLs are built here so the browser never guesses the other app's origin.
   lobby: sessionProcedure.handler(async ({ context }) => {
     const [row, seats] = await Promise.all([oneMembership(context.user.id), portalSeats(context.user.id)]);
@@ -47,66 +46,12 @@ export const sapRouter = {
       portals: seats.map(({ tenantId, ...s }) => ({ ...s, url: portalTenantUrl(s.slug), active: tenantId === active })),
     };
   }),
-  connect: sessionProcedure
-    .input(z.object({
-      agentUrl: z.url(),
-      secret: z.string().min(1),
-      accessClientId: z.string().nullable().optional(),
-      accessClientSecret: z.string().nullable().optional(),
-      beasEnabled: z.boolean().optional(),
-    }))
-    .handler(async ({ input, context }) => {
-      const tenantId = await ownedTenant(context.user.id);
-      await upsertSapConnection(tenantId, {
-        agentUrl: input.agentUrl,
-        secret: input.secret,
-        accessClientId: input.accessClientId || null,
-        accessClientSecret: input.accessClientSecret || null,
-        beasEnabled: input.beasEnabled ?? false,
-      });
-    }),
 
-  // Settings: the same row, edited after onboarding from inside the workspace — so path-scoped
-  // (adminProcedure) rather than ownedTenant's "first org" lookup. Secrets never come back out:
-  // the Access secret is shown once by Cloudflare and the agent secret lives in agent.json, so
-  // a blank field means "keep", and changing only the URL never forces either to be re-entered.
-  // ponytail: assumes the same company DB behind the new URL — localCurrency, entity_meta and the
-  // masterdata cache are not reset. Clear them here if repointing at another company becomes real.
-  agent: adminProcedure.handler(async ({ context }) => {
-    const [row] = await db
-      .select({
-        agentUrl: sapConnection.agentUrl,
-        accessClientId: sapConnection.accessClientId,
-        beasEnabled: sapConnection.beasEnabled,
-      })
-      .from(sapConnection)
-      .where(eq(sapConnection.tenantId, context.tenantId))
-      .limit(1);
-    if (!row) throw new ORPCError("NOT_FOUND", { message: "No agent is connected yet — finish onboarding first." });
-    return row;
-  }),
-  reconfigure: adminProcedure
-    .input(z.object({
-      agentUrl: z.url(),
-      secret: z.string().optional(),
-      accessClientId: z.string().nullable(),
-      accessClientSecret: z.string().optional(),
-      beasEnabled: z.boolean(),
-    }))
-    .handler(async ({ input, context }) => {
-      const [row] = await db
-        .update(sapConnection)
-        .set({
-          agentUrl: input.agentUrl,
-          beasEnabled: input.beasEnabled,
-          accessClientId: input.accessClientId || null,
-          ...(input.secret ? { secret: encryptSecret(input.secret) } : {}),
-          // No client ID turns Access off, so its secret goes with it; otherwise blank keeps it.
-          ...(!input.accessClientId ? { accessClientSecret: null }
-            : input.accessClientSecret ? { accessClientSecret: input.accessClientSecret } : {}),
-        })
-        .where(eq(sapConnection.tenantId, context.tenantId))
-        .returning({ tenantId: sapConnection.tenantId });
-      if (!row) throw new ORPCError("NOT_FOUND", { message: "No agent is connected yet — finish onboarding first." });
-    }),
+  // Pairing (spec 2026-10-21 §4): a one-time code the agent redeems on the SAP server, and the status
+  // that turns green once SAP answers through it. Settings reaches them through the path's tenant;
+  // onboarding has no workspace in its path yet, so it resolves the user's one staff workspace.
+  pairingCode: adminProcedure.handler(({ context }) => issuePairingCode(context.tenantId)),
+  agentStatus: adminProcedure.handler(({ context }) => agentStatus(context.tenantId)),
+  onboardingPairingCode: sessionProcedure.handler(async ({ context }) => issuePairingCode(await ownedTenant(context.user.id))),
+  onboardingAgentStatus: sessionProcedure.handler(async ({ context }) => agentStatus(await ownedTenant(context.user.id))),
 };

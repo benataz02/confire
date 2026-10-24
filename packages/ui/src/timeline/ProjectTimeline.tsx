@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import {
-  Button, CheckBox, FileUploader, IllustratedMessage, Link, MessageStrip, ObjectStatus, Tag, Text, TextArea, Timeline,
+  Button, CheckBox, FileUploader, IllustratedMessage, Link, MessageStrip, ObjectStatus, Text, TextArea, Timeline,
   TimelineItem,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoActivities.js";
+import { addCustomCSS } from "@ui5/webcomponents-base/dist/Theming.js";
 import { useUiI18n } from "../i18n.ts";
 import { money } from "../money.ts";
 import { documentStatusText } from "../documentStatus.ts";
@@ -54,6 +55,8 @@ const KIND: Record<string, { title: (side: "internal" | "external") => string; i
   quote_declined: { title: (s) => (s === "external" ? "UI_EVT_DECLINED_YOU" : "UI_EVT_DECLINED_QUOTE"), icon: "cancel", state: "Critical" },
   comment: { title: () => "UI_EVT_COMMENT", icon: "comment" },
   file: { title: () => "UI_EVT_FILE", icon: "attachment" },
+  // Staff only: the event is internal, so the portal is never sent it.
+  assigned: { title: () => "UI_EVT_ASSIGNED", icon: "employee" },
 };
 
 const show = (v: unknown, yes: string, no: string): string =>
@@ -63,6 +66,41 @@ const show = (v: unknown, yes: string, no: string): string =>
   : String(v);
 
 const when = (d: Date) => d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+// The reader's own items (`data-mine`) read like a chat's: text on the right and the bubble's point
+// with it, the icons staying down one line. TimelineItem has no side and no ::part, so this goes into
+// its shadow — the arrow rule is the item's own `:dir(rtl)` one. Every bubble keeps the point's room
+// free on the right (the timeline scrolls, so an overhang would be clipped), so both sides are one width.
+// The header is strings only, so the internal tag (`--cf-internal`) is drawn in it in the Tag's own
+// theme colours, before the sender's name. The icon's tooltip (`--cf-tip`) is CSS too: iconTooltip is
+// the browser's native one, whose delay nobody sets. Both are CSS strings (tipVars); unset, nothing draws.
+// ponytail: UI5's private class and variable names, for every ui5-timeline-item (this is the apps' only
+// Timeline); re-check on a UI5 upgrade, drop if it ships a side.
+addCustomCSS("ui5-timeline-item", `
+  :host .ui5-tli-bubble { margin-inline-end: var(--_ui5_TimelineItem_arrow_size); }
+  :host([data-mine]) .ui5-tli-bubble { text-align: end; }
+  :host([data-mine]) .ui5-tli-bubble-arrow--left { left: auto; right: calc(-1 * var(--_ui5_TimelineItem_arrow_size)); transform: scaleX(-1); }
+  .ui5-tli-title::before {
+    content: var(--cf-internal); display: inline-block; margin-inline-end: .375rem;
+    font-size: var(--sapFontSmallSize); font-family: var(--sapFontBoldFamily); line-height: var(--_ui5-tag-height);
+    padding: var(--_ui5-tag-text-padding); border: .0625rem solid var(--ui5-tag-set2-color-scheme-8-border);
+    border-radius: var(--sapButton_BorderCornerRadius); background: var(--ui5-tag-set2-color-scheme-8-background);
+    color: var(--ui5-tag-set2-color-scheme-8-color);
+  }
+  .ui5-tli-icon-outer::after {
+    content: var(--cf-tip); position: absolute; top: 0; inset-inline-start: 100%; z-index: 1; white-space: nowrap;
+    padding: .25rem .5rem; font-family: var(--sapFontFamily); font-size: var(--sapFontSmallSize); color: var(--sapTextColor);
+    background: var(--sapGroup_ContentBackground); border: .0625rem solid var(--sapGroup_ContentBorderColor);
+    border-radius: var(--sapElement_BorderCornerRadius); box-shadow: var(--sapContent_Shadow1);
+    pointer-events: none; visibility: hidden; opacity: 0; transition: opacity .1s, visibility .1s;
+  }
+  .ui5-tli-icon-outer:hover::after { visibility: visible; opacity: 1; transition-delay: .25s; }
+`);
+
+/** The custom properties above: CSS strings, so a quote in a label cannot end one early. */
+const tipVars = (tip: string, internal?: string) => ({
+  "--cf-tip": JSON.stringify(tip), ...(internal ? { "--cf-internal": JSON.stringify(internal) } : {}),
+}) as CSSProperties;
 
 /** A revision as readable lines: the model's labels, old → new. */
 function Revision({ payload, labels }: { payload: unknown; labels: Record<string, string> }) {
@@ -124,14 +162,14 @@ export function ProjectTimeline({
   const [posting, setPosting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
 
-  // Newest first: the feed reads from what just happened, the comment box sits on top of it.
+  // Oldest first, like a chat: the newest sits right above the comment box.
   const entries = useMemo<Entry[]>(() => [
     ...(events ?? []).map((e) => ({ at: new Date(e.at).getTime(), kind: "event" as const, e })),
     ...(documents?.quotations ?? []).flatMap((q) => [q.quotation, ...q.chain].map((d) => ({
       // A document has a posting date, not a time: it sorts at the start of its day.
       at: new Date(d.docDate).getTime() || 0, kind: "doc" as const, d, superseded: !q.current && d.entity === "Quotations",
     }))),
-  ].sort((a, b) => b.at - a.at), [events, documents]);
+  ].sort((a, b) => a.at - b.at), [events, documents]);
 
   // Remounts the uploader after each pick, so choosing the same file again still fires a change.
   const [picks, setPicks] = useState(0);
@@ -160,7 +198,66 @@ export function ProjectTimeline({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", maxWidth: "60rem" }}>
+    // Centered in the section: a reading column, not a strip down the left of a wide page.
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", width: "100%", maxWidth: "60rem", marginInline: "auto" }}>
+      {error ? <MessageStrip design="Negative" hideCloseButton>{error.message}</MessageStrip> : null}
+      {documentsError ? (
+        <MessageStrip design="Critical" hideCloseButton>
+          {i18n.getText("UI_SAP_UNAVAILABLE", documentsError.message)}
+        </MessageStrip>
+      ) : null}
+      {!loading && !entries.length ? (
+        <IllustratedMessage name="NoActivities" design="Small" titleText={i18n.getText("UI_TIMELINE_EMPTY_TITLE")}
+          subtitleText={i18n.getText("UI_TIMELINE_EMPTY_SUB")} />
+      ) : (
+        <Timeline loading={loading} accessibleName={i18n.getText("UI_TIMELINE")}>
+          {entries.map((x) => {
+            if (x.kind === "doc") {
+              const meta = ENTITY[x.d.entity];
+              const docName = meta ? i18n.getText(meta.key) : x.d.entity;
+              return (
+                <TimelineItem key={`${x.d.entity}:${x.d.docEntry}`} icon={meta?.icon ?? "document"} style={tipVars(docName)}
+                  titleText={i18n.getText(x.superseded ? "UI_DOC_TITLE_SUPERSEDED" : "UI_DOC_TITLE", docName, String(x.d.docNum))}
+                  subtitleText={x.d.docDate ? new Date(x.d.docDate).toLocaleDateString() : undefined}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+                    <Text>{money(x.d.docTotal, currency)}</Text>
+                    <ObjectStatus state={x.d.docStatus === "bost_Open" ? "Information" : "None"}>
+                      {documentStatusText(x.d.docStatus, x.d.docStatus, i18n.getText.bind(i18n))}
+                    </ObjectStatus>
+                    {onOpenDocument ? (
+                      <Link onClick={() => onOpenDocument(x.d.entity, x.d.docEntry)}>{i18n.getText("UI_OPEN")}</Link>
+                    ) : null}
+                    {canPreview ? <PrintActions entity={x.d.entity} docEntry={x.d.docEntry} /> : null}
+                  </div>
+                </TimelineItem>
+              );
+            }
+            const e = x.e;
+            const known = KIND[e.kind];
+            const k = known ?? { title: () => e.kind, icon: "history" };
+            const q = e.payload as { docNum?: number | null; mode?: string; value?: number } | null;
+            const f = e.kind === "file" ? e.payload as { fileId: string; name: string; size: number } | null : null;
+            const title = e.kind === "quoted" && q
+              ? i18n.getText(q.mode === "updated" ? "UI_QUOTE_UPDATED" : "UI_QUOTE_SENT", q.docNum == null ? "" : String(q.docNum)).replace(/\s+/g, " ")
+              : e.kind === "assigned" ? i18n.getText("UI_EVT_ASSIGNED", (e.payload as { assigneeName?: string } | null)?.assigneeName ?? "")
+              : known ? i18n.getText(k.title(side)) : k.title(side);
+            const mine = e.actorSide === side;
+            return (
+              <TimelineItem key={e.id} icon={k.icon} state={k.state ?? "None"} titleText={title}
+                name={e.actorName ?? undefined} subtitleText={when(new Date(e.at))} data-mine={mine || undefined}
+                style={tipVars(title, e.visibility === "internal" ? i18n.getText("UI_INTERNAL_TAG") : undefined)}>
+                {/* The body sits on its side as a block; a note's lines still read from the left. */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", textAlign: "start", alignItems: mine ? "flex-end" : "flex-start" }}>
+                  {e.kind === "revised" ? <Revision payload={e.payload} labels={labels} /> : null}
+                  {e.kind === "quoted" && q?.value !== undefined ? <Text>{money(q.value, currency)}</Text> : null}
+                  {f ? <Link href={fileUrl(f.fileId)} icon="download">{`${f.name} (${fileSize(f.size)})`}</Link> : null}
+                  {e.note ? <Text style={{ whiteSpace: "pre-wrap" }}>{e.note}</Text> : null}
+                </div>
+              </TimelineItem>
+            );
+          })}
+        </Timeline>
+      )}
       {canComment || onUpload ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           <TextArea value={note} rows={2} growing growingMaxRows={8} maxlength={4000} disabled={posting}
@@ -186,61 +283,6 @@ export function ProjectTimeline({
           {postError ? <MessageStrip design="Negative" hideCloseButton>{postError}</MessageStrip> : null}
         </div>
       ) : null}
-      {error ? <MessageStrip design="Negative" hideCloseButton>{error.message}</MessageStrip> : null}
-      {documentsError ? (
-        <MessageStrip design="Critical" hideCloseButton>
-          {i18n.getText("UI_SAP_UNAVAILABLE", documentsError.message)}
-        </MessageStrip>
-      ) : null}
-      {!loading && !entries.length ? (
-        <IllustratedMessage name="NoActivities" design="Small" titleText={i18n.getText("UI_TIMELINE_EMPTY_TITLE")}
-          subtitleText={i18n.getText("UI_TIMELINE_EMPTY_SUB")} />
-      ) : (
-        <Timeline loading={loading} accessibleName={i18n.getText("UI_TIMELINE")}>
-          {entries.map((x) => {
-            if (x.kind === "doc") {
-              const meta = ENTITY[x.d.entity];
-              const docName = meta ? i18n.getText(meta.key) : x.d.entity;
-              return (
-                <TimelineItem key={`${x.d.entity}:${x.d.docEntry}`} icon={meta?.icon ?? "document"}
-                  titleText={i18n.getText(x.superseded ? "UI_DOC_TITLE_SUPERSEDED" : "UI_DOC_TITLE", docName, String(x.d.docNum))}
-                  subtitleText={x.d.docDate ? new Date(x.d.docDate).toLocaleDateString() : undefined}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-                    <Text>{money(x.d.docTotal, currency)}</Text>
-                    <ObjectStatus state={x.d.docStatus === "bost_Open" ? "Information" : "None"}>
-                      {documentStatusText(x.d.docStatus, x.d.docStatus, i18n.getText.bind(i18n))}
-                    </ObjectStatus>
-                    {onOpenDocument ? (
-                      <Link onClick={() => onOpenDocument(x.d.entity, x.d.docEntry)}>{i18n.getText("UI_OPEN")}</Link>
-                    ) : null}
-                    {canPreview ? <PrintActions entity={x.d.entity} docEntry={x.d.docEntry} /> : null}
-                  </div>
-                </TimelineItem>
-              );
-            }
-            const e = x.e;
-            const known = KIND[e.kind];
-            const k = known ?? { title: () => e.kind, icon: "history" };
-            const q = e.payload as { docNum?: number | null; mode?: string; value?: number } | null;
-            const f = e.kind === "file" ? e.payload as { fileId: string; name: string; size: number } | null : null;
-            const title = e.kind === "quoted" && q
-              ? i18n.getText(q.mode === "updated" ? "UI_QUOTE_UPDATED" : "UI_QUOTE_SENT", q.docNum == null ? "" : String(q.docNum)).replace(/\s+/g, " ")
-              : known ? i18n.getText(k.title(side)) : k.title(side);
-            return (
-              <TimelineItem key={e.id} icon={k.icon} state={k.state ?? "None"} titleText={title}
-                name={e.actorName ?? undefined} subtitleText={when(new Date(e.at))}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-                  {e.visibility === "internal" ? <Tag design="Set2" colorScheme="8" style={{ alignSelf: "flex-start" }}>{i18n.getText("UI_INTERNAL_TAG")}</Tag> : null}
-                  {e.kind === "revised" ? <Revision payload={e.payload} labels={labels} /> : null}
-                  {e.kind === "quoted" && q?.value !== undefined ? <Text>{money(q.value, currency)}</Text> : null}
-                  {f ? <Link href={fileUrl(f.fileId)} icon="download">{`${f.name} (${fileSize(f.size)})`}</Link> : null}
-                  {e.note ? <Text style={{ whiteSpace: "pre-wrap" }}>{e.note}</Text> : null}
-                </div>
-              </TimelineItem>
-            );
-          })}
-        </Timeline>
-      )}
     </div>
   );
 }

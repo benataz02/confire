@@ -61,6 +61,15 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       # Errors and traces from both processes to Sentry (apps/server/src/instrument.ts). Unset = none sent.
       SENTRY_DSN: ${SENTRY_DSN:-}
+      # SAP agents (DEPLOY.md §8): pairing creates each tenant's tunnel and its name under AGENT_DOMAIN
+      # through the Cloudflare API; every call to an agent carries the one Access service token.
+      # CF_API_TOKEN unset with DOMAIN set refuses to pair, so production never stores a localhost URL.
+      AGENT_DOMAIN: ${AGENT_DOMAIN:-}
+      CF_API_TOKEN: ${CF_API_TOKEN:-}
+      CF_ACCOUNT_ID: ${CF_ACCOUNT_ID:-}
+      CF_ZONE_ID: ${CF_ZONE_ID:-}
+      CF_ACCESS_CLIENT_ID: ${CF_ACCESS_CLIENT_ID:-}
+      CF_ACCESS_CLIENT_SECRET: ${CF_ACCESS_CLIENT_SECRET:-}
       # Rows per Service Layer page (apps/server/src/lookups.ts); unset = 100.
       B1_PAGE_SIZE: ${B1_PAGE_SIZE:-}
       # Unset leaves that sign-in button dead: Better Auth only logs a warning at boot.

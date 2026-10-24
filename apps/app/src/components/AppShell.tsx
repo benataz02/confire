@@ -1,4 +1,4 @@
-import { useRouter, useRouterState, Outlet } from "@tanstack/react-router";
+import { useNavigate, useRouter, useRouterState, Outlet } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Avatar, Button,
@@ -10,9 +10,10 @@ import {
 } from "@ui5/webcomponents-react";
 import type { SideNavigationPropTypes, NavigationLayoutDomRef, NavigationLayoutPropTypes } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
-import { meQuery, useIsAdmin } from "../orpc.ts";
+import { meQuery, notifications, useIsAdmin } from "../orpc.ts";
 import { authUrl, hardRedirect, tenantPath } from "@confire/ui/host.ts";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
+import { NotificationsPopover, useUnreadCount } from "@confire/ui/notifications/Notifications.tsx";
 import { B1_FEATURES } from "../features/b1/index.ts";
 import { GlobalSearch, type SearchEntry } from "./GlobalSearch.tsx";
 import { useRef, useState, useMemo } from "react";
@@ -21,12 +22,17 @@ import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 import { LANGUAGES, useLanguage } from "@confire/ui/i18n.ts";
 import { useI18n } from "../i18n.ts";
 
-const B1_NAV_KEY: Record<string, string> = {
+export const B1_NAV_KEY: Record<string, string> = {
   Quotations: "NAV_QUOTATIONS",
   Orders: "NAV_ORDERS",
   DeliveryNotes: "NAV_DELIVERIES",
   BusinessPartners: "NAV_BP",
   Items: "NAV_ITEMS",
+};
+/** A declared B1 entity's list, as the side nav names it. */
+export const b1Label = (entity: string, t: (key: string) => string) => {
+  const key = B1_NAV_KEY[entity];
+  return key ? t(key) : entity;
 };
 
 const THEME_KEY: Record<string, string> = {
@@ -48,6 +54,8 @@ const THEME_KEY: Record<string, string> = {
 export function AppShell() {
   const go = useEntityNav();
   const router = useRouter();
+  const navigate = useNavigate({ from: "/$slug" });
+  const openNotificationSettings = () => void navigate({ to: "/$slug/settings", search: { tab: "notifications" } });
   const pathname = useRouterState({ select: (s) => tenantPath(s.location.pathname) });
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const navLayoutRef = useRef<NavigationLayoutDomRef>(null);
@@ -73,6 +81,9 @@ export function AppShell() {
   const user = me.data?.user;
   const isAdmin = useIsAdmin();
   const queryClient = useQueryClient();
+  // The bell (notifications spec §10): the count polls, the list loads while the popover is open.
+  const unread = useUnreadCount(notifications);
+  const [bellOpener, setBellOpener] = useState<HTMLElement | null>(null);
 
   const onSelect: SideNavigationPropTypes["onSelectionChange"] = (e) => {
     const to = (e.detail.item as HTMLElement).dataset.to;
@@ -87,7 +98,6 @@ export function AppShell() {
     const page = (text: string, to: string, icon: string) => ({ group: "Menus", text, icon, run: () => go(to) });
     const label = (key: string) => i18n.getText(key);
     return [
-      page(label("NAV_HOME"), "/", "home"),
       page(label("NAV_CONFIGS"), "/configs", "sales-quote"),
       page(label("SHELL_SEARCH_PORTAL_REQUESTS"), "/requests", "inbox"),
       ...(isAdmin
@@ -105,9 +115,9 @@ export function AppShell() {
             page(label("NAV_MODELS"), "/models", "tree"),
             page(label("SHELL_SEARCH_MASTERDATA"), "/masterdata", "table-view"),
             page(label("SHELL_SEARCH_PORTAL_INVITATIONS"), "/portal/invitations", "paper-plane"),
-            page(label("NAV_SETTINGS"), "/settings", "action-settings"),
           ]
         : []),
+      page(label("NAV_SETTINGS"), "/settings", "action-settings"),
       ...THEMES.map((item) => {
         const themeKey = THEME_KEY[item.id];
         return {
@@ -166,7 +176,16 @@ export function AppShell() {
             profile={<Avatar id="user-menu-opener" initials='BA' />}
             onProfileClick={() => setUserMenuOpen((open) => !open)}
             showNotifications
+            notificationsCount={unread ? String(unread) : undefined}
+            onNotificationsClick={(e) => {
+              const target = e.detail.targetRef;
+              setBellOpener((cur) => (cur ? null : target));
+            }}
             assistant={<ToggleButton icon="da" tooltip="Joule" />}
+            accessibilityAttributes={{
+              notifications: { expanded: bellOpener !== null, hasPopup: "dialog" },
+              profile: { expanded: userMenuOpen, hasPopup: "menu" },
+            }}
           >
           </ShellBar>
           <UserMenu
@@ -222,19 +241,23 @@ export function AppShell() {
                   onClick={() => setLanguage(l.id)} />
               ))}
             </UserMenuItem>
+            <UserMenuItem text={i18n.getText("NOTIF_MENU")} icon="bell"
+              onClick={() => { setUserMenuOpen(false); openNotificationSettings(); }} />
           </UserMenu>
+          <NotificationsPopover api={notifications} opener={bellOpener} open={bellOpener !== null}
+            onClose={() => setBellOpener(null)} getText={i18n.getText.bind(i18n)}
+            onNavigate={go} onSettings={openNotificationSettings} />
         </>
       }
       sideContent={
         <SideNavigation
           onSelectionChange={onSelect}
-          fixedItems={isAdmin ? (
+          fixedItems={
             <SideNavigationItem text={i18n.getText("NAV_SETTINGS")} icon="action-settings" data-to="/settings"
               selected={pathname === "/settings"} />
-          ) : undefined}
+          }
         >
-          <SideNavigationItem text={i18n.getText("NAV_HOME")} icon="home" data-to="/" selected={pathname === "/"} />
-              {isAdmin ? (
+          {isAdmin ? (
                 <SideNavigationGroup text={i18n.getText("NAV_SAP")} expanded>
                   {Object.values(B1_FEATURES).map((f) => {
                     const navKey = B1_NAV_KEY[f.entity];

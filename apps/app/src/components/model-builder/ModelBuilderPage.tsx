@@ -15,6 +15,7 @@ import { PageMessages } from "../PageMessages.tsx";
 import { builderMessages, sectionTitle, type Translate } from "./builderMessages.ts";
 import { confirm } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
+import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
 import { SettingsTab } from "./SettingsTab.tsx";
 import { ParamsTab, type PreviewAt } from "./ParamsTab.tsx";
 import { RulesTab } from "./RulesTab.tsx";
@@ -115,6 +116,7 @@ export function ModelBuilderPage({ id }: { id?: string }) {
         {...sectionParam.props}
         titleArea={
           <ObjectPageTitle
+            breadcrumbs={<PageBreadcrumbs items={[{ text: t("NAV_MODELS"), to: "/models" }]} current={draft.name.trim() || t("MODEL_NEW")} />}
             header={
               // Trailing * is the unsaved-changes mark; the native tooltip is what says so, since
               // ObjectPageTitle has no draft-indicator slot of its own.

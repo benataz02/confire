@@ -7,9 +7,11 @@ dist/
 .DS_Store
 apps/app/src/routeTree.gen.ts
 apps/app/tsconfig.tsbuildinfo
-apps/agent/agent.json
+apps/agent/agent.json*
 apps/agent/confire-agent.exe
 apps/agent/hera-agent.exe
 apps/portal/src/routeTree.gen.ts
 apps/portal/tsconfig.tsbuildinfo
 .tanstack/
+# CI drops the pinned cloudflared here before building the agent (apps/server/Dockerfile).
+apps/agent/bin/cloudflared.exe

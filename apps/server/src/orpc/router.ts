@@ -2,11 +2,12 @@ import { viewsRouter } from "./routers/views.ts";
 import { modelsRouter } from "./routers/models.ts";
 import { masterdataRouter } from "./routers/masterdata.ts";
 import { configsRouter } from "./routers/configs.ts";
-import { dashboardRouter } from "./routers/dashboard.ts";
 import { entitiesRouter } from "./routers/entities.ts";
 import { sapRouter } from "./routers/sap.ts";
 import { portalCompaniesRouter, portalInvitationsRouter, portalSettingsRouter } from "./routers/portal.ts";
 import { requestsRouter, timelineRouter } from "./routers/requests.ts";
+import { notificationsRouter } from "./routers/notifications.ts";
+import { homeRouter } from "./routers/home.ts";
 import { sessionProcedure, membershipOf } from "./base.ts";
 import { tenantCurrency } from "../b1.ts";
 import { rememberActiveOrganization } from "../auth.ts";
@@ -31,7 +32,6 @@ export const router = {
   models: modelsRouter,
   masterdata: masterdataRouter,
   configs: configsRouter,
-  dashboard: dashboardRouter,
   entities: entitiesRouter,
   sap: sapRouter,
   portalInvitations: portalInvitationsRouter,
@@ -39,6 +39,8 @@ export const router = {
   portalSettings: portalSettingsRouter,
   requests: requestsRouter,
   timeline: timelineRouter,
+  notifications: notificationsRouter,
+  home: homeRouter,
 };
 
 export type AppRouter = typeof router;

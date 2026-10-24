@@ -68,6 +68,9 @@ const orgPlugin = organization({
       additionalFields: {
         cardCode: { type: "string", required: false, input: false },
         registerDomain: { type: "boolean", required: false, defaultValue: false, input: false },
+        // The SAP language (UserLanguages.Code) its mail went out in: the company's, or for a new
+        // client the inviter's app language — which onboarding submit also gives the new lead.
+        languageCode: { type: "number", required: false, input: false },
       },
     },
   },

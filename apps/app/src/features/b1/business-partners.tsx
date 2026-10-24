@@ -46,7 +46,15 @@ export const businessPartners: EntityFeature = {
         label: "General",
         groups: [
           { id: "identity", label: "Business partner", fields: [{ key: "CardCode" }, { key: "CardName" }, { key: "CardType" }] },
-          { id: "contact", label: "Contact", fields: [{ key: "Phone1" }, { key: "Cellular" }, { key: "EmailAddress" }] },
+          {
+            id: "contact",
+            label: "Contact",
+            fields: [
+              { key: "Phone1" }, { key: "Cellular" }, { key: "EmailAddress" },
+              // The language its portal mail is written in (portal_company.languageCode).
+              { key: "LanguageCode", cfl: { dialogConfig: cfl.userLanguages() } },
+            ],
+          },
           {
             id: "sales",
             label: "Sales",

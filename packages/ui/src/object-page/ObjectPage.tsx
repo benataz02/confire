@@ -16,6 +16,7 @@ import { evalDyn, getFieldValidationError, isEmptyValue, matchErrorFields, valid
 import { sameState, useViews } from "../views.ts";
 import { applyObjectView, resolveObjectState } from "./objectView.ts";
 import { objectPageHeaderArea, objectPageTitle, type RecordNavigation } from "./ObjectPageHeader.tsx";
+import type { Crumb } from "../PageBreadcrumbs.tsx";
 import { objectPageSection, type SectionContext, type Templates } from "./ObjectPageSection.tsx";
 import type { FormField, HeaderConfig, ObjectViewState, Row, Section } from "../types.ts";
 
@@ -52,6 +53,8 @@ export function ObjectPage(p: Templates & {
   onSave: (diff: Row, opts: { createAction: CreateAction }) => Promise<void>;
   onCancelCreate?: () => void;
   navigation?: RecordNavigation;
+  /** the parent pages, above the title */
+  breadcrumbs?: Crumb[];
   /** an informational strip above the first section */
   notice?: ReactNode;
 }) {
@@ -361,6 +364,7 @@ export function ObjectPage(p: Templates & {
           t,
           editDisabled: p.editDisabled,
           navigation: p.navigation,
+          breadcrumbs: p.breadcrumbs,
           layout: layoutControl,
         })}
         headerArea={objectPageHeaderArea(p.header.facets, formData, fields)}

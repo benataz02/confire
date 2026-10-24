@@ -1,51 +1,53 @@
 import { B1Error } from "./errors.ts";
-import type {
-  B1MetadataParams, B1Response, B1Transport, CrossJoinSpec, Key, Prefer, QueryOptions,
-} from "./types.ts";
+import type { B1Requester } from "./types.ts";
 
-/** Everything needed to reach one tenant's agent. Shared by RemoteTransport and the non-transport
- *  routes (print), so the bearer/CF-Access/timeout handling exists exactly once. */
+/** Everything needed to reach one tenant's agent. Shared by the transports and the non-transport
+ *  routes (print, health), so the bearer/CF-Access/company/timeout handling exists exactly once. */
 export type AgentTarget = {
-  /** http://localhost:4000 in dev, the tunnel hostname in production. A row in sapConnection —
-   *  which is the whole reason the tunnel is deployment config and not a code dependency. */
+  /** http://localhost:<port> in dev, https://<label>.<AGENT_DOMAIN> in production. A row in
+   *  sap_connection — which is the whole reason the tunnel is deployment config and not code. */
   agentUrl: string;
   /** Bearer secret the agent checks on every request. */
   secret: string;
   /** Cloudflare Access service token — absent in dev, present in production. */
   accessClientId?: string | null;
   accessClientSecret?: string | null;
+  /** The company this call is built against, sent as X-Confire-Company: an agent serving another one
+   *  answers 409 COMPANY_CHANGED before it touches SAP. */
+  companyDb?: string | null;
+  /** Told the agent's company when it answered COMPANY_CHANGED, before the call fails. */
+  onCompanyChanged?: (companyDb: string) => Promise<void>;
   /** Bound on the cloud -> agent hop, independent of the agent -> SL bound. */
   timeoutMs?: number;
 };
 
-export type RemoteOptions = AgentTarget & {
-  /** Which service the agent should route to. */
-  target?: "b1" | "beas";
-};
+export const COMPANY_CHANGED = "COMPANY_CHANGED";
 
 /** Wire shape of the agent's reply. */
-type Wire = { error: { status: number; code: string | number | null; message: string } } | Record<string, unknown>;
+type WireError = { status: number; code: string | number | null; message: string; companyDb?: string };
+type Wire = { error: WireError } | Record<string, unknown>;
 
 /**
- * One POST to the agent. `route` is the FULL agent path — `/b1/entity-set`, `/print` — because
- * not every agent route sits under a transport target.
+ * One call to the agent: a POST with `body`, a GET without (`/health`). `route` is the full agent
+ * path — `/b1/request`, `/print`.
  *
  * Never throws a bare Error: an unreachable agent is a 503 B1Error so toOrpcError can tell it
  * apart from a SAP rejection.
  */
-export async function agentPost(o: AgentTarget, route: string, body: unknown): Promise<unknown> {
+export async function agentPost(o: AgentTarget, route: string, body?: unknown): Promise<unknown> {
   let res: Response;
   try {
     res = await fetch(`${o.agentUrl.replace(/\/+$/, "")}${route}`, {
-      method: "POST",
+      method: body === undefined ? "GET" : "POST",
       headers: {
-        "Content-Type": "application/json",
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         Authorization: `Bearer ${o.secret}`,
+        ...(o.companyDb ? { "X-Confire-Company": o.companyDb } : {}),
         ...(o.accessClientId && o.accessClientSecret
           ? { "CF-Access-Client-Id": o.accessClientId, "CF-Access-Client-Secret": o.accessClientSecret }
           : {}),
       },
-      body: JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(o.timeoutMs ?? 70_000),
     });
   } catch (e) {
@@ -57,51 +59,17 @@ export async function agentPost(o: AgentTarget, route: string, body: unknown): P
   let wire: Wire | null = null;
   try { wire = text ? (JSON.parse(text) as Wire) : null; } catch { /* fall through */ }
   if (wire && "error" in wire) {
-    const err = wire.error as { status: number; code: string | number | null; message: string };
+    const err = wire.error as WireError;
+    if (err.code === COMPANY_CHANGED && err.companyDb) {
+      await o.onCompanyChanged?.(err.companyDb);
+      throw new B1Error(409, COMPANY_CHANGED, `SAP company changed to ${err.companyDb} — try again.`);
+    }
     throw new B1Error(err.status, err.code, err.message);
   }
   if (!res.ok || !wire) throw new B1Error(res.status, null, `Agent error ${res.status}: ${text.slice(0, 500)}`);
   return wire;
 }
 
-/** Cloud side of the seam: the same B1Transport methods, one HTTP call each to an
- *  operation-shaped agent endpoint. No route takes a URL except /next, which the agent
- *  origin-checks. */
-export class RemoteTransport implements B1Transport {
-  private readonly prefix: string;
-  constructor(private readonly o: RemoteOptions) {
-    this.prefix = `/${o.target ?? "b1"}`;
-  }
-
-  private async call(route: string, body: unknown): Promise<B1Response> {
-    return (await agentPost(this.o, `${this.prefix}${route}`, body)) as B1Response;
-  }
-
-  readEntitySet(entitySet: string, query?: QueryOptions) {
-    return this.call("/entity-set", { entitySet, query });
-  }
-  readEntity(entitySet: string, key: Key, query?: QueryOptions) {
-    return this.call("/entity", { entitySet, key, query });
-  }
-  readNext(nextLink: string, maxPageSize?: number) {
-    return this.call("/next", { nextLink, maxPageSize });
-  }
-  crossJoin(spec: CrossJoinSpec) {
-    return this.call("/cross-join", spec);
-  }
-  createEntity(entitySet: string, data: unknown, o?: { prefer?: Prefer }) {
-    return this.call("/create", { entitySet, data, prefer: o?.prefer });
-  }
-  updateEntity(entitySet: string, key: Key, data: unknown, o?: { etag?: string; replaceCollections?: boolean }) {
-    return this.call("/update", { entitySet, key, data, etag: o?.etag, replaceCollections: o?.replaceCollections });
-  }
-  action(entitySet: string, key: Key, name: string) {
-    return this.call("/action", { entitySet, key, name });
-  }
-  deleteEntity(entitySet: string, key: Key, o?: { etag?: string }) {
-    return this.call("/delete", { entitySet, key, etag: o?.etag });
-  }
-  async metadata(p?: B1MetadataParams) {
-    return String((await this.call("/metadata", p ?? {})).data ?? "");
-  }
-}
+/** The cloud's half of a Service Layer call: DirectTransport builds the path, the agent sends it. */
+export const agentRequester = (o: AgentTarget, service: "b1" | "beas"): B1Requester =>
+  async (r) => (await agentPost(o, `/${service}/request`, r)) as { status: number; data: unknown };

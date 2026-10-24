@@ -26,6 +26,9 @@ const PARSER_EPOCH = Math.min(Date.parse("2026-08-28T07:55:00Z"), Date.now());
  *  of them and they outlive a deploy. */
 const listCache = new Map<string, { at: number; list: Promise<B1EntityRef[]> }>();
 
+/** A company switch (b1.ts adoptCompany): the list belongs to the old company. */
+export const forgetEntityList = (tenantId: string) => { listCache.delete(tenantId); };
+
 export function entityList(tenantId: string, b1: B1Transport, refresh = false): Promise<B1EntityRef[]> {
   const hit = listCache.get(tenantId);
   if (!refresh && hit && Date.now() - hit.at < LIST_TTL_MS) return hit.list;

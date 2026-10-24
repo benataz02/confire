@@ -1,7 +1,6 @@
 export * from "./types.ts";
 export * from "./errors.ts";
 export * from "./query.ts";
-export * from "./service-layer.ts";
 export * from "./client.ts";
 export * from "./remote.ts";
 export * from "./paging.ts";

@@ -107,6 +107,21 @@ export const cfl = {
     ...o,
   }),
 
+  /** SAP's languages (OLNG): `BusinessPartners.LanguageCode` points at `Code`. */
+  userLanguages: (o: Overrides = {}): CflDialogConfig => ({
+    title: "Language",
+    source: { kind: "entity", entitySet: "UserLanguages" },
+    keyField: "Code",
+    displayColumns: ["LanguageFullName"],
+    columns: [
+      { key: "Code", label: "No.", width: 90 },
+      { key: "LanguageShortName", label: "Code", width: 90 },
+      { key: "LanguageFullName", label: "Name" },
+    ],
+    searchFields: ["LanguageFullName"],
+    ...o,
+  }),
+
   salesPersons: (o: Overrides = {}): CflDialogConfig => ({
     title: "Sales employee",
     source: { kind: "entity", entitySet: "SalesPersons" },

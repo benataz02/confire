@@ -9,7 +9,7 @@ import {
   DslError, EntriesZ, missingInputs, propagate, referencedTables, TableRowsZ,
 } from "@confire/config-engine";
 import { portalBuyerProcedure, portalMemberProcedure } from "./base.ts";
-import { tenantConnector, viaB1 } from "../../b1.ts";
+import { quotationIn, tenantConnector, viaB1 } from "../../b1.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { cachedLookups, calculateProject, loadModel, QueryPageZ, queryTablePage } from "../../config-project.ts";
 import { assertWritable, inputsOf, recordCreated, transition, writableBy, type Action, type Actor } from "../../project-lifecycle.ts";
@@ -254,7 +254,8 @@ export const projectsRouter = {
   quotation: portalMemberProcedure.input(IdZ).handler(async ({ input, context }) => {
     const p = await ownProject(context, input.id);
     if (p.b1DocEntry === null) return null;
-    const { b1 } = await tenantConnector(context.tenantId);
+    const { b1, companyDb } = await tenantConnector(context.tenantId);
+    if (!quotationIn(p, companyDb)) return null;
     const doc = (await viaB1(() => b1.readEntity("Quotations", p.b1DocEntry!))).data as Record<string, unknown>;
     if (doc.CardCode !== context.cardCode) throw new ORPCError("NOT_FOUND");
     const lines = (doc.DocumentLines as Record<string, unknown>[] | undefined) ?? [];

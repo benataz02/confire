@@ -15,8 +15,11 @@ function emph(template: string, value: string): ReactNode {
 }
 
 export const Route = createFileRoute("/signup")({
-  validateSearch: (s: Record<string, unknown>): { redirect?: string } => ({
+  // `email`: an invitation's address (the portal's invitationGuard) — fixed, since only that address
+  // can accept it.
+  validateSearch: (s: Record<string, unknown>): { redirect?: string; email?: string } => ({
     redirect: typeof s.redirect === "string" ? s.redirect : undefined,
+    email: typeof s.email === "string" ? s.email : undefined,
   }),
   // Already signed in: the dispatcher (/login) takes it from here.
   beforeLoad: async ({ context, search, location }) => {
@@ -29,10 +32,11 @@ export const Route = createFileRoute("/signup")({
 
 function Signup() {
   const i18n = useI18n();
-  const { redirect: redirectTo } = Route.useSearch();
+  const { redirect: redirectTo, email: invited } = Route.useSearch();
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(invited ?? "");
   const [password, setPassword] = useState("");
+  const [repeat, setRepeat] = useState("");
 
   const signUp = useMutation({
     // Unconditional for the same reason as login: a session belonging to someone else must
@@ -48,7 +52,8 @@ function Signup() {
     },
   });
 
-  const submit = () => name && email && password && signUp.mutate({ name, email, password });
+  const mismatch = repeat.length > 0 && repeat !== password;
+  const submit = () => name && email && password && repeat && !mismatch && signUp.mutate({ name, email, password });
 
   if (signUp.isSuccess) {
     return (
@@ -58,7 +63,7 @@ function Signup() {
           {emph(i18n.getText("SHELL_AUTH_VERIFY_SENT", "\u0000"), email)}
         </p>
         <p className="auth-alt">
-          {i18n.getText("SHELL_AUTH_VERIFY_RETRY")} <Link to="/login" search={{ redirect: redirectTo }}>{i18n.getText("SHELL_AUTH_SIGN_IN")}</Link>
+          {i18n.getText("SHELL_AUTH_VERIFY_RETRY")} <Link to="/login" search={{ redirect: redirectTo, email }}>{i18n.getText("SHELL_AUTH_SIGN_IN")}</Link>
         </p>
       </AuthLayout>
     );
@@ -75,24 +80,30 @@ function Signup() {
       </label>
       <label className="auth-field">
         <span>{i18n.getText("SHELL_AUTH_WORK_EMAIL")}</span>
-        <Input type="Email" value={email} onInput={(e) => setEmail(e.target.value)} />
+        <Input type="Email" value={email} readonly={invited !== undefined} onInput={(e) => setEmail(e.target.value)} />
       </label>
       <label className="auth-field">
         <span>{i18n.getText("SHELL_AUTH_PASSWORD")}</span>
+        <Input type="Password" value={password} onInput={(e) => setPassword(e.target.value)} />
+      </label>
+      <label className="auth-field">
+        <span>{i18n.getText("SHELL_AUTH_REPEAT_PASSWORD")}</span>
         <Input
           type="Password"
-          value={password}
-          onInput={(e) => setPassword(e.target.value)}
+          value={repeat}
+          valueState={mismatch ? "Negative" : "None"}
+          valueStateMessage={<span>{i18n.getText("SHELL_AUTH_PASSWORD_MISMATCH")}</span>}
+          onInput={(e) => setRepeat(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
         />
       </label>
-      <Button design="Emphasized" disabled={signUp.isPending} onClick={submit}>
+      <Button design="Emphasized" disabled={signUp.isPending || mismatch} onClick={submit}>
         {signUp.isPending ? i18n.getText("SHELL_AUTH_CREATING") : i18n.getText("SHELL_AUTH_CREATE_ACCOUNT")}
       </Button>
       <div className="auth-or">{i18n.getText("SHELL_AUTH_OR")}</div>
       <SocialButtons redirect={redirectTo} />
       <p className="auth-alt">
-        {i18n.getText("SHELL_AUTH_HAVE_ACCOUNT")} <Link to="/login" search={{ redirect: redirectTo }}>{i18n.getText("SHELL_AUTH_SIGN_IN")}</Link>
+        {i18n.getText("SHELL_AUTH_HAVE_ACCOUNT")} <Link to="/login" search={{ redirect: redirectTo, email: invited }}>{i18n.getText("SHELL_AUTH_SIGN_IN")}</Link>
       </p>
     </AuthLayout>
   );

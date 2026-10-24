@@ -5,10 +5,9 @@ import {
 import { LineChart } from "@ui5/webcomponents-react-charts";
 import type { Entries, ModelDef } from "@confire/config-engine";
 import {
-  bestByBatch, candidateLabel, chartRows, fmt, lineKey, margin, mergeSelection, openKeys, sortRows,
+  bestByBatch, candidateLabel, chartRows, fmt, lineKey, margin, mergeSelection, openKeys, percent, sortRows,
   type PricedCandidate, type Sel,
 } from "./runView.ts";
-import { percent } from "../dashboard/dashboardView.ts";
 import { money } from "@confire/ui/money.ts";
 import { useCurrency } from "../../orpc.ts";
 import { useI18n } from "../../i18n.ts";

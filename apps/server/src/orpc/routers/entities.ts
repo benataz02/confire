@@ -1,6 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { ListQueryZ } from "@confire/db";
+import { and, eq } from "drizzle-orm";
+import { db, ListQueryZ, portalCompany } from "@confire/db";
 import { coerceKey, rowsOf, type Key } from "@confire/b1";
 import { adminProcedure, userProcedure } from "../base.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
@@ -142,7 +143,15 @@ export const entitiesRouter = {
       await viaB1(() => b1.updateEntity(input.entity, key, payload, { etag: input.etag }));
       // B1's PATCH answers 204; re-read so the caller gets the new ETag rather than a stale one.
       const fresh = await viaB1(() => b1.readEntity(input.entity, key));
-      return { row: fresh.data as Record<string, unknown>, etag: fresh.etag ?? null };
+      const row = fresh.data as Record<string, unknown>;
+      // A portal company keeps its BP's language for its mail: an edit here is one of the reads that
+      // keep the copy current. No row = the BP is not on the portal, and nothing changes.
+      if (input.entity === "BusinessPartners" && typeof row.CardCode === "string") {
+        await db.update(portalCompany)
+          .set({ languageCode: typeof row.LanguageCode === "number" ? row.LanguageCode : null })
+          .where(and(eq(portalCompany.tenantId, context.tenantId), eq(portalCompany.cardCode, row.CardCode)));
+      }
+      return { row, etag: fresh.etag ?? null };
     }),
 
   /** Curated create. `prefer: representation` means the created document comes back in one call. */

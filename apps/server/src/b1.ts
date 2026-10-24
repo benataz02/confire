@@ -1,40 +1,92 @@
 import { ORPCError } from "@orpc/server";
-import { eq } from "drizzle-orm";
-import { db, sapConnection } from "@confire/db";
-import { B1Error, RemoteTransport, nextLinkOf, rowsOrThrow, type AgentTarget, type B1Transport, type Connector } from "@confire/b1";
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { db, configMasterdata, configMasterdataRow, configProject, entityMeta, sapConnection } from "@confire/db";
+import {
+  agentRequester, B1Error, COMPANY_CHANGED, DirectTransport, nextLinkOf, rowsOrThrow,
+  type AgentTarget, type B1Transport, type Connector,
+} from "@confire/b1";
 import { decryptSecret } from "./crypto.ts";
-import { DEFAULT_PAGE, type QueryRunner } from "./lookups.ts";
+import { forgetEntityList } from "./entity-meta.ts";
+import { bumpMasterdata, DEFAULT_PAGE, type QueryRunner } from "./lookups.ts";
 
 export const SAP_UNAVAILABLE =
-  "No on-prem agent is configured for this workspace. Run seed:agent with the secret from agent.json.";
+  "No SAP agent is paired with this workspace yet. An admin pairs one in Settings → SAP agent.";
 
 export type { Connector };
 
-export type TenantAgent = AgentTarget & { beasEnabled: boolean };
-
 /** The tenant's agent, as plain config. One PK select — nothing here is worth caching. Printing
- *  needs this without a transport, so the row->config mapping lives here rather than inline. */
-export async function agentTarget(tenantId: string): Promise<TenantAgent> {
+ *  needs this without a transport, so the row->config mapping lives here rather than inline.
+ *
+ *  The Access service token is one for every tenant (DEPLOY.md §8): the `*.<AGENT_DOMAIN>` Access
+ *  application lets it through and nothing else. Unset in dev, where nothing stands in front. */
+export async function agentTarget(tenantId: string): Promise<AgentTarget> {
   const [row] = await db.select().from(sapConnection).where(eq(sapConnection.tenantId, tenantId)).limit(1);
   if (!row) throw new ORPCError("SERVICE_UNAVAILABLE", { message: SAP_UNAVAILABLE });
   return {
     agentUrl: row.agentUrl,
     secret: decryptSecret(row.secret),
-    accessClientId: row.accessClientId,
-    accessClientSecret: row.accessClientSecret,
-    beasEnabled: row.beasEnabled,
+    accessClientId: process.env.CF_ACCESS_CLIENT_ID || null,
+    accessClientSecret: process.env.CF_ACCESS_CLIENT_SECRET || null,
+    companyDb: row.companyDb,
+    onCompanyChanged: async (companyDb) => { await adoptCompany(tenantId, companyDb); },
   };
 }
 
-/** The tenant's on-prem agent, as a pair of transports. The transports hold nothing but config,
- *  so there is nothing worth caching. */
+/**
+ * Follow a company switch made on the SAP server (spec 2026-10-21 §6.2): the agent is the authority
+ * on which company it serves, and Confire adopts its answer — from a 409 COMPANY_CHANGED, a health
+ * check or a pairing. Once, however many calls hit the 409 together: the `is distinct from` update
+ * is what only one of them wins. The winner clears every cache of the old company's data, each of
+ * which refills on its own: the local currency on the next `me`, entity schemas on the next read,
+ * masterdata rows through their TTL (synced_at null = stale).
+ *
+ * Quotations posted before companies were recorded (dev only — spec A15) get the first company
+ * adopted. `portal_settings.leadSeries` is a setting, not a cache: it names a series of the old
+ * company and is left for an admin to re-pick.
+ */
+export async function adoptCompany(tenantId: string, companyDb: string): Promise<boolean> {
+  const adopted = await db.transaction(async (tx) => {
+    const [row] = await tx.update(sapConnection).set({ companyDb, localCurrency: null })
+      .where(and(eq(sapConnection.tenantId, tenantId), sql`${sapConnection.companyDb} is distinct from ${companyDb}`))
+      .returning({ tenantId: sapConnection.tenantId });
+    if (!row) return false;
+    await tx.update(configProject).set({ b1Company: companyDb })
+      .where(and(eq(configProject.tenantId, tenantId), isNotNull(configProject.b1DocEntry), isNull(configProject.b1Company)));
+    await tx.delete(entityMeta).where(eq(entityMeta.tenantId, tenantId));
+    await tx.delete(configMasterdataRow).where(eq(configMasterdataRow.tenantId, tenantId));
+    await tx.update(configMasterdata).set({ syncedAt: null, rowCount: 0 })
+      .where(and(eq(configMasterdata.tenantId, tenantId), eq(configMasterdata.kind, "query")));
+    return true;
+  });
+  if (adopted) {
+    // The in-process halves: the entity list, and (through the version) the lookup and row caches.
+    forgetEntityList(tenantId);
+    bumpMasterdata(tenantId);
+  }
+  return adopted;
+}
+
+/** The tenant's on-prem agent, as a pair of transports. They hold nothing but config, so there is
+ *  nothing worth caching. Beas is always built: an agent without it answers 503. */
 export async function tenantConnector(tenantId: string): Promise<Connector> {
   const a = await agentTarget(tenantId);
   return {
-    b1: new RemoteTransport({ ...a, target: "b1" }),
-    beas: a.beasEnabled ? new RemoteTransport({ ...a, target: "beas" }) : null,
+    b1: new DirectTransport(agentRequester(a, "b1")), beas: new DirectTransport(agentRequester(a, "beas")),
+    companyDb: a.companyDb ?? null,
   };
 }
+
+/** The company the tenant's SAP reads are in now — for what a page shows. A decision that leads to a
+ *  SAP call takes `Connector.companyDb` instead. */
+export async function tenantCompany(tenantId: string): Promise<string | null> {
+  const [row] = await db.select({ companyDb: sapConnection.companyDb }).from(sapConnection)
+    .where(eq(sapConnection.tenantId, tenantId)).limit(1);
+  return row?.companyDb ?? null;
+}
+
+/** The project's quotation is in this company: a DocEntry means nothing in another one. */
+export const quotationIn = (p: { b1DocEntry: number | null; b1Company: string | null }, companyDb: string | null) =>
+  p.b1DocEntry !== null && p.b1Company === companyDb;
 
 /** The tenant's B1 local currency — what every money figure in the app is denominated in.
  *
@@ -68,11 +120,8 @@ export async function tenantCurrency(tenantId: string): Promise<string | null> {
   }
 }
 
-export function transportFor(c: Connector, target: "b1" | "beas"): B1Transport {
-  const t = target === "beas" ? c.beas : c.b1;
-  if (!t) throw new ORPCError("SERVICE_UNAVAILABLE", { message: "Beas is not enabled for this workspace." });
-  return t;
-}
+export const transportFor = (c: Connector, target: "b1" | "beas"): B1Transport =>
+  target === "beas" ? c.beas : c.b1;
 
 /** Map a B1Error to the closest ORPCError. Status + code come off the wire intact, so this is a
  *  lookup rather than a regex over a message. Agent-auth 401 is the exception: it never reached
@@ -86,8 +135,12 @@ export function toOrpcError(e: unknown): unknown {
       return new ORPCError("SERVICE_UNAVAILABLE", { message });
     case e.status === 401 && message === "Bad agent secret":
       return new ORPCError("BAD_GATEWAY", {
-        message: "The on-prem agent rejected the shared secret. Re-run seed:agent with the secret from agent.json.",
+        message: "The SAP agent rejected Confire's secret: another workspace or server paired since. Pair it again in Settings → SAP agent.",
       });
+    case e.code === COMPANY_CHANGED:
+      return new ORPCError("CONFLICT", { message });
+    case e.code === "AGENT_REFUSED": // the agent's allowlist (apps/agent/allow.go), not SAP
+      return new ORPCError("FORBIDDEN", { message });
     case e.status === 401 || e.status === 403:
       return new ORPCError("BAD_GATEWAY", { message: `SAP rejected the request: ${message}` });
     case e.status === 404:

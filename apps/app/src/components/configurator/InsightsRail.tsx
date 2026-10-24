@@ -4,8 +4,7 @@ import type { CostElement } from "@confire/config-engine";
 import { money } from "@confire/ui/money.ts";
 import type { CostLine, ItemMoney } from "@confire/ui/money.ts";
 import { useI18n } from "../../i18n.ts";
-import { margin } from "./runView.ts";
-import { percent } from "../dashboard/dashboardView.ts";
+import { margin, percent } from "./runView.ts";
 
 // The insights rail's cost blocks. The rail itself is ConfigProcessPage's DynamicSideContent side
 // content; these are what its "Cost elements" panel draws.

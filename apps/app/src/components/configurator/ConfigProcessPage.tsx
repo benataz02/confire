@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar, Button, BusyIndicator, DynamicSideContent, Form, FormGroup, FormItem, IllustratedMessage,
-  Input, Label, MessageStrip, MultiInput, ObjectPage, ObjectPageSection, ObjectPageTitle,
-  Option, Panel, Select, Tag, Text, Title, ToggleButton, Token, Toolbar, ToolbarButton, ToolbarItem,
+  Input, Label, ListItemStandard, MessageStrip, MultiInput, ObjectPage, ObjectPageSection, ObjectPageTitle,
+  Option, Panel, Select, SelectDialog, Tag, Text, Title, ToggleButton, Token, Toolbar, ToolbarButton, ToolbarItem,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import {
@@ -17,7 +17,7 @@ import { money as formatMoney } from "@confire/ui/money.ts";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
 import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import { ProjectTimeline } from "@confire/ui/timeline/ProjectTimeline.tsx";
-import { uploadFile } from "@confire/ui/files.ts";
+import { FILE_MAX_MB, uploadFile } from "@confire/ui/files.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { useI18n } from "../../i18n.ts";
 import { projectStatusText, toPriced, unpricedItems, type Sel } from "./runView.ts";
@@ -30,6 +30,7 @@ import { SimilarConfigs } from "./SimilarConfigs.tsx";
 import { itemMoney, moneyTotals } from "./itemMoney.ts";
 import { configMessages } from "./configMessages.ts";
 import { PageMessages } from "../PageMessages.tsx";
+import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
 import { useSectionParam } from "../../lib/sectionParam.ts";
 
 /** The calculation's inputs, edited as one unit — see `draft` below. */
@@ -161,9 +162,40 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const sendBack = useMutation(orpc.requests.sendBack.mutationOptions({ onSuccess: decided(t("CONFIG_TOAST_SENT_BACK")) }));
   const decline = useMutation(orpc.requests.decline.mutationOptions({ onSuccess: decided(t("CONFIG_TOAST_DECLINED")) }));
   const deciding = accept.isPending || sendBack.isPending || decline.isPending;
+  // Reassign (notifications spec §6): any colleague, from a picker of the workspace's staff. The answer
+  // names the new assignee, so the header is patched rather than refetched.
+  const [reassigning, setReassigning] = useState(false);
+  const [staffSearch, setStaffSearch] = useState("");
+  const assignable = useQuery({ ...orpc.requests.assignable.queryOptions(), enabled: reassigning });
+  const reassign = useMutation(orpc.requests.assign.mutationOptions({
+    onSuccess: (r) => {
+      const cur = qc.getQueryData(getKey);
+      if (cur?.request) setProject({ project: { ...cur.project, assigneeId: r.assigneeId }, request: { ...cur.request, assigneeName: r.assigneeName } });
+      void qc.invalidateQueries({ queryKey: orpc.requests.rows.key() });
+      void qc.invalidateQueries({ queryKey: orpc.timeline.list.queryKey({ input: { projectId: id } }) });
+      toast(t("CONFIG_TOAST_REASSIGNED", r.assigneeName));
+    },
+  }));
+  const closeReassign = () => { setReassigning(false); setStaffSearch(""); };
+  // The header's Attach: the timeline's upload, for the client to see — the internal-only toggle
+  // stays on the timeline's own composer. The size check is here because the server's refusal of an
+  // oversized body may reach the browser as a reset connection rather than its message.
+  const fileInput = useRef<HTMLInputElement>(null);
+  const attach = useMutation({
+    mutationFn: (file: File) => file.size > FILE_MAX_MB * 1024 * 1024
+      ? Promise.reject(new Error(t("CONFIG_FILE_MAX", String(FILE_MAX_MB))))
+      : uploadFile(id, file),
+    onSuccess: (_, file) => {
+      void qc.invalidateQueries({ queryKey: orpc.timeline.list.queryKey({ input: { projectId: id } }) });
+      toast(t("CONFIG_TOAST_ATTACHED", file.name));
+    },
+  });
 
   const project = q.data?.project;
   const model = q.data?.model;
+  // A DocEntry means something only in the SAP company it was posted in: elsewhere there is no
+  // quotation to open, and quoting creates one (the server decides the same way).
+  const quotationHere = !!project && project.b1DocEntry !== null && project.b1Company === q.data?.sapCompany;
   // What the General form shows and writes. A new configuration holds its fields here until name
   // and model are both set (create needs both, and the form below only means something against a
   // model); that creates it, and it opens at its own URL.
@@ -370,7 +402,10 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
 
   if (isNew) {
     return (
-      <ObjectPage hidePinButton titleArea={<ObjectPageTitle header={<Title>{t("CONFIG_NEW")}</Title>} />}>
+      <ObjectPage hidePinButton titleArea={
+        <ObjectPageTitle header={<Title>{t("CONFIG_NEW")}</Title>}
+          breadcrumbs={<PageBreadcrumbs items={[{ text: t("NAV_CONFIGS"), to: "/configs" }]} current={t("CONFIG_NEW")} />} />
+      }>
         <ObjectPageSection id="configure" titleText={t("CONFIG_SECTION_CONFIGURE")}>
           {create.error ? <MessageStrip design="Negative" hideCloseButton>{create.error.message}</MessageStrip> : null}
           {general}
@@ -455,7 +490,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
               tooltip={conflicted || calc.isError || select.isError ? t("CONFIG_RESOLVE_FIRST")
                 : busy ? t("CONFIG_CALCULATING") : undefined}
               onClick={finalize}>
-              {mustPick ? t("CONFIG_SELECT_CANDIDATE") : project.b1DocEntry !== null ? t("CONFIG_UPDATE_QUOTE") : t("CONFIG_CREATE_QUOTE")}
+              {mustPick ? t("CONFIG_SELECT_CANDIDATE") : quotationHere ? t("CONFIG_UPDATE_QUOTE") : t("CONFIG_CREATE_QUOTE")}
             </Button>
           ) : null}
           {canDecide && project.status === "submitted" ? (
@@ -488,18 +523,22 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
     lookupsError: lookups.error as Error | null,
     sync: lookups.data?.sync,
     syncError: sync.error as Error | null,
-    configErrors: [update.error, calc.error, duplicate.error, remove.error, accept.error, sendBack.error, decline.error] as (Error | null)[],
+    configErrors: [update.error, calc.error, duplicate.error, remove.error, accept.error, sendBack.error, decline.error, reassign.error, attach.error] as (Error | null)[],
     selectError: select.error as Error | null,
     locked: locked && { request: !!request, status: project.status, quoteResponse: project.quoteResponse },
   });
 
   return (
+    <>
     <ObjectPage
       mode="IconTabBar"
       hidePinButton
       {...sectionParam.props}
       titleArea={
         <ObjectPageTitle
+          breadcrumbs={<PageBreadcrumbs items={[request
+            ? { text: t("NAV_REQUESTS"), to: "/requests" }
+            : { text: t("NAV_CONFIGS"), to: "/configs" }]} current={project.name.trim() || t("CONFIG_NEW")} />}
           header={<Title>{project.name.trim() || t("CONFIG_NEW")}</Title>}
           subHeader={request ? (
             <Text>{t("CONFIG_REQUEST_SUB", request.cardName, request.assigneeName ? t("CONFIG_ASSIGNED", request.assigneeName) : t("CONFIG_NOT_ACCEPTED"))}</Text>
@@ -523,7 +562,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
               <ToolbarButton icon="synchronize" design="Transparent" disabled={sync.isPending}
                 tooltip={t("CONFIG_REFRESH_SAP")}
                 onClick={() => sync.mutate({ id })} />
-              {project.b1DocEntry !== null && isAdmin ? (
+              {quotationHere && isAdmin ? (
                 <ToolbarButton icon="document-text" design="Transparent" text={t("CONFIG_OPEN_QUOTE")}
                   onClick={() => navigate({
                     to: "/$slug/b1/$entity/$key",
@@ -534,6 +573,15 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
           }
           actionsBar={
             <Toolbar design="Transparent">
+              {request ? (
+                <ToolbarButton icon="employee" design="Transparent" disabled={reassign.isPending}
+                  text={t("CONFIG_REASSIGN")} accessibilityAttributes={{ hasPopup: "dialog" }}
+                  onClick={() => setReassigning(true)} />
+              ) : null}
+              {request ? (
+                <ToolbarButton icon="attachment" design="Transparent" disabled={attach.isPending}
+                  text={t("CONFIG_ATTACH")} onClick={() => fileInput.current?.click()} />
+              ) : null}
               <ToolbarButton icon="copy" design="Transparent" disabled={draft !== null || duplicate.isPending}
                 tooltip={draft !== null ? t("CONFIG_CALC_FIRST") : t("CONFIG_DUPLICATE_TIP")}
                 text={duplicate.isPending ? t("CONFIG_DUPLICATING") : t("CONFIG_DUPLICATE")}
@@ -643,6 +691,30 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
         </ObjectPageSection>
       )}
     </ObjectPage>
+    {request ? (
+      <SelectDialog open={reassigning} headerText={t("CONFIG_REASSIGN_TITLE")} searchPlaceholder={t("CONFIG_REASSIGN_SEARCH")}
+        onSearchInput={(e) => setStaffSearch(e.detail.value)} onSearchReset={() => setStaffSearch("")}
+        onCancel={closeReassign} onClose={closeReassign}
+        onConfirm={(e) => {
+          const userId = (e.detail.selectedItems[0] as HTMLElement | undefined)?.dataset.id;
+          closeReassign();
+          if (userId && userId !== project.assigneeId) reassign.mutate({ projectId: id, userId });
+        }}>
+        {(assignable.data ?? [])
+          .filter((m) => `${m.name} ${m.email}`.toLowerCase().includes(staffSearch.trim().toLowerCase()))
+          .map((m) => (
+            <ListItemStandard key={m.userId} data-id={m.userId} text={m.name} description={m.email}
+              selected={m.userId === project.assigneeId} />
+          ))}
+      </SelectDialog>
+    ) : null}
+    {/* The Attach button's picker. Cleared after each pick, so the same file again still fires. */}
+    <input ref={fileInput} type="file" hidden onChange={(e) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (file) attach.mutate(file);
+    }} />
+    </>
   );
 }
 

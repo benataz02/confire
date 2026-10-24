@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { ORPCError } from "@orpc/server";
-import { agentTarget } from "../src/b1.ts";
+import { agentTarget, SAP_UNAVAILABLE } from "../src/b1.ts";
 
-// A missing sap_connection row is a seed gap, not a SAP outage. The old "SAP is not connected"
-// copy hid `bun run seed:agent <slug>` behind a message that also covers a down Service Layer.
+// A missing sap_connection row means nobody paired an agent yet, not a SAP outage — the message says
+// where to pair one rather than a "SAP is not connected" that also covers a down Service Layer.
 
 test("a tenant with no sap_connection is told the agent is not configured", async () => {
   const err = await agentTarget(crypto.randomUUID()).then(
@@ -13,7 +13,5 @@ test("a tenant with no sap_connection is told the agent is not configured", asyn
   expect(err).toBeInstanceOf(ORPCError);
   const o = err as ORPCError;
   expect(o.code).toBe("SERVICE_UNAVAILABLE");
-  expect(o.message).toBe(
-    "No on-prem agent is configured for this workspace. Run seed:agent with the secret from agent.json.",
-  );
+  expect(o.message).toBe(SAP_UNAVAILABLE);
 });

@@ -20,13 +20,31 @@ export type Brand = {
 // The staff app serves apps/app/public, so the logo URL is its own.
 export const CONFIRE: Brand = { name: "Confire", logoUrl: `${authUrl}/confire-logo.png` };
 
+/** A client mail's language: its company's SAP language, `BusinessPartners.LanguageCode` →
+ *  `UserLanguages.Code`, whose codes are SAP's built-in languages (3 English, 23 Spanish, 25 Spanish
+ *  (LA), …). Only English and Spanish are written; any other language reads English, as in the SPAs.
+ *  ponytail: built-in codes only — a user-defined UserLanguages row (its own Code, pointing at 23
+ *  through RelatedSystemLanguage) reads English; resolve it through UserLanguages if one shows up. */
+export type MailLang = "en" | "es";
+export const mailLang = (languageCode: number | null | undefined): MailLang =>
+  languageCode === 23 || languageCode === 25 ? "es" : "en";
+/** The other way, for a new client: the inviter's app language (`LANGUAGES` ids) as an SAP language. */
+export const sapLanguage = (appLanguage: string): number => (appLanguage === "es" ? 23 : 3);
+/** Dates and amounts in the mail's language. */
+export const MAIL_LOCALE: Record<MailLang, string> = { en: "en-GB", es: "es-ES" };
+
+const FOOTER: Record<MailLang, { sentWith: string; noReply: string }> = {
+  en: { sentWith: "sent with Confire", noReply: "This is an automated message. Replies to this address are not received." },
+  es: { sentWith: "enviado con Confire", noReply: "Este es un mensaje automático. No se reciben respuestas en esta dirección." },
+};
+
 // SAP Horizon blue, the auth pages' link colour: 4.9:1 against white.
 const DEFAULT_ACCENT = "#0a6ed1";
 const font = '-apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 
-export function Layout({ brand, preview, children }: { brand: Brand; preview: string; children: ReactNode }) {
+export function Layout({ brand, preview, lang = "en", children }: { brand: Brand; preview: string; lang?: MailLang; children: ReactNode }) {
   return (
-    <Html lang="en">
+    <Html lang={lang}>
       <Head />
       <Body style={{ backgroundColor: "#f5f7fb", fontFamily: font, margin: 0, padding: "24px 0" }}>
         <Preview>{preview}</Preview>
@@ -47,9 +65,9 @@ export function Layout({ brand, preview, children }: { brand: Brand; preview: st
         </Container>
         {/* Every mail is a no-reply notification: mail.<domain> receives nothing (mailer.ts). */}
         <Text style={{ color: "#8a97b8", fontSize: 12, lineHeight: "18px", textAlign: "center", margin: "16px 0 0" }}>
-          {brand.name === CONFIRE.name ? "Confire" : `${brand.name} · sent with Confire`}
+          {brand.name === CONFIRE.name ? "Confire" : `${brand.name} · ${FOOTER[lang].sentWith}`}
           <br />
-          This is an automated message. Replies to this address are not received.
+          {FOOTER[lang].noReply}
         </Text>
       </Body>
     </Html>

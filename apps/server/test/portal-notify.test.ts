@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { asc, eq } from "drizzle-orm";
-import { db, configModel, configProjectEvent, type PortalRole } from "@confire/db";
+import { and, eq } from "drizzle-orm";
+import { db, configModel, configProjectEvent, member, portalCompany, type PortalRole } from "@confire/db";
 import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
 import { devOutbox, mailDomain } from "../src/mail/mailer.ts";
 import { notificationsSettled } from "../src/notify.ts";
+import { NOTIFICATION_TYPES } from "../src/notifications.ts";
 import { fileRoutes, imageType, cleanName } from "../src/files.ts";
 import { contrastOnWhite } from "../src/portal/settings.ts";
 import {
@@ -12,14 +13,15 @@ import {
 } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
-// P7: who hears about a project event (spec §12, D22, D27), files on the timeline (D14), branding
-// (D20) and the portal home. Every hop goes through the real routers and file routes.
+// Who hears about a project event and how (notifications spec 2026-10-22 §4, §12: bell and mail, each
+// user's own switches), reassigning a request (§6), files on the timeline (D14), branding (D20) and
+// the portal home. Every hop goes through the real routers and file routes.
 
 const codeOf = (p: Promise<unknown>) => p.then(() => "OK", (e: { code?: string }) => e.code);
 const messageOf = (p: Promise<unknown>) => p.then(() => "", (e: Error) => e.message);
 
 let agent: MockAgent;
-beforeAll(() => { agent = startMockAgent({ BusinessPartners: [], SalesPersons: [] }); });
+beforeAll(() => { agent = startMockAgent({}); });
 afterAll(() => agent.stop());
 
 /** The mail each address got since `mark`, once every notification in flight has gone out. By
@@ -63,104 +65,240 @@ async function setup() {
     await call(portalRouter.projects.calculate, { id, entries: { material: "steel" } }, on(buyer.cookie));
     return id;
   };
-  return { ...t, owner, admin, rep, buyer, colleague, viewer, company, as, on, draft };
+  /** A user's bell at this tenant, newest first, through their own app's router, once every
+   *  notification in flight has landed. */
+  const bell = async (u: { userId: string; cookie: string }) => {
+    await notificationsSettled();
+    return [owner, admin, rep].some((x) => x.userId === u.userId)
+      ? call(router.notifications.list, undefined, as(u.cookie))
+      : call(portalRouter.notifications.list, undefined, on(u.cookie));
+  };
+  return { ...t, owner, admin, rep, buyer, colleague, viewer, company, as, on, draft, bell };
 }
 
 describe("notifications", () => {
-  test("staff: the assignee, else the BP's sales employee, else the fallback list, else admins and owners", async () => {
+  test("staff: a first submit reaches every staff member by their own switches; once assigned, the assignee only", async () => {
     const s = await setup();
     const id = await s.draft();
+    // rep keeps mail only; admin switches both channels off.
+    for (const [u, channel] of [[s.rep, "bell"], [s.admin, "bell"], [s.admin, "mail"]] as const) {
+      await call(router.notifications.setPreference, { type: "request.submitted", channel, enabled: false }, s.as(u.cookie));
+    }
 
     // A client's draft is private: a comment on it reaches nobody at the supplier.
     let m = await mark();
     await call(portalRouter.timeline.comment, { projectId: id, note: "Hm" }, s.on(s.buyer.cookie));
     let to = await mailSince(m);
     expect([s.owner, s.admin, s.rep].flatMap((u) => to(u.email))).toHaveLength(0);
+    expect(await s.bell(s.owner)).toHaveLength(0);
 
-    // No assignee, the BP has no sales employee in SAP, no fallback: the admins and owners.
+    // No assignee yet: every staff member, minus each one's own switch-offs.
     m = await mark();
     await call(portalRouter.projects.submit, { id }, s.on(s.buyer.cookie));
     to = await mailSince(m);
     expect(to(s.owner.email).map((x) => x.subject)).toEqual([`New request from Kunde GmbH: Kabel 1`]);
-    expect(to(s.admin.email)).toHaveLength(1);
-    expect(to(s.rep.email)).toHaveLength(0);
-    // Internal mail is Confire's own, and replies to the client who acted.
+    // Internal mail is Confire's own, from notify@.
     expect(to(s.owner.email)[0]).toMatchObject({ from: `"Confire" <notify@${mailDomain}>` });
     expect(to(s.owner.email)[0]!.text).toContain(`/configs/${id}`);
+    expect(to(s.rep.email)).toHaveLength(1);
+    expect(to(s.admin.email)).toHaveLength(0);
+    expect(await s.bell(s.owner)).toMatchObject([{
+      type: "request.submitted", path: `/configs/${id}`, read: false,
+      params: { projectName: "Kabel 1", companyName: "Kunde GmbH", actorName: s.buyer.email },
+    }]);
+    expect(await s.bell(s.rep)).toHaveLength(0);
+    expect(await s.bell(s.admin)).toHaveLength(0);
+    expect(await call(router.notifications.unreadCount, undefined, s.as(s.owner.cookie))).toEqual({ count: 1 });
 
-    // The fallback list picks who instead.
-    await call(router.portalSettings.save, { notifyFallback: [s.admin.userId] }, s.as(s.owner.cookie));
+    // Accepted: the acceptor holds it, and hears the client's activity alone.
+    await call(router.requests.accept, { id }, s.as(s.rep.cookie));
     m = await mark();
     await call(portalRouter.timeline.comment, { projectId: id, note: "Any news?" }, s.on(s.buyer.cookie));
     to = await mailSince(m);
-    expect(to(s.admin.email).map((x) => x.subject)).toEqual([`${s.buyer.email} (Kunde GmbH) commented on Kabel 1`]);
-    expect(to(s.admin.email)[0]!.text).toContain("Any news?");
-    expect(to(s.owner.email)).toHaveLength(0);
+    expect(to(s.rep.email).map((x) => x.subject)).toEqual([`${s.buyer.email} (Kunde GmbH) commented on Kabel 1`]);
+    expect(to(s.rep.email)[0]!.text).toContain("Any news?");
+    expect([s.owner, s.admin].flatMap((u) => to(u.email))).toHaveLength(0);
+    expect(await s.bell(s.rep)).toMatchObject([{ type: "request.comment", params: { note: "Any news?" } }]);
+    expect(await s.bell(s.owner)).toHaveLength(1);
+    const events = await db.select().from(configProjectEvent).where(eq(configProjectEvent.projectId, id));
+    expect(events.every((e) => e.mailError === null)).toBe(true);
 
-    // The BP's sales employee in SAP, matched to a member by email, comes before the list.
-    agent.store.BusinessPartners!.push({ CardCode: s.company.cardCode, SalesPersonCode: 7 });
-    agent.store.SalesPersons!.push({ SalesEmployeeCode: 7, Email: s.rep.email.toUpperCase() });
+    // An assignee who has left counts as none: the request falls back to everyone, never silent.
+    await db.delete(member).where(and(eq(member.organizationId, s.tenantId), eq(member.userId, s.rep.userId)));
     m = await mark();
     await call(portalRouter.timeline.comment, { projectId: id, note: "Hello?" }, s.on(s.buyer.cookie));
     to = await mailSince(m);
-    expect(to(s.rep.email)).toHaveLength(1);
-    expect(to(s.admin.email)).toHaveLength(0);
-
-    // Once accepted, the assignee.
-    await call(router.requests.accept, { id }, s.as(s.owner.cookie));
-    m = await mark();
-    await call(portalRouter.timeline.comment, { projectId: id, note: "Thanks" }, s.on(s.buyer.cookie));
-    to = await mailSince(m);
     expect(to(s.owner.email)).toHaveLength(1);
+    expect(to(s.admin.email)).toHaveLength(1);
     expect(to(s.rep.email)).toHaveLength(0);
-    const [ev] = await db.select().from(configProjectEvent).where(eq(configProjectEvent.projectId, id))
-      .orderBy(asc(configProjectEvent.at));
-    expect(ev!.mailError).toBeNull();
   });
 
-  test("client: buyers by default, the creator or nobody by setting, the company's override first; revisions folded in", async () => {
+  test("client mail is in the company's SAP language; staff mail stays English", async () => {
+    const s = await setup();
+    await db.update(portalCompany).set({ languageCode: 23 })
+      .where(and(eq(portalCompany.tenantId, s.tenantId), eq(portalCompany.cardCode, s.company.cardCode)));
+    const id = await s.draft();
+    let m = await mark();
+    await call(portalRouter.projects.submit, { id }, s.on(s.buyer.cookie));
+    let to = await mailSince(m);
+    expect(to(s.owner.email)[0]!.subject).toContain("New request from");
+
+    m = await mark();
+    await call(router.requests.accept, { id, note: "On it" }, s.as(s.admin.cookie));
+    to = await mailSince(m);
+    expect(to(s.buyer.email).map((x) => x.subject)).toEqual([`${s.slug} está revisando Kabel 1`]);
+    expect(to(s.buyer.email)[0]!.text).toContain("Abrir el proyecto");
+  });
+
+  test("client: the creator only, while still at the company; internal notes never; revisions folded in", async () => {
     const s = await setup();
     const id = await s.draft();
     await call(portalRouter.projects.submit, { id }, s.on(s.buyer.cookie));
 
-    // Default `buyers`: the creator and every buyer and owner, never a viewer who didn't create it.
     let m = await mark();
     await call(router.requests.accept, { id, note: "On it" }, s.as(s.admin.cookie));
     let to = await mailSince(m);
     expect(to(s.buyer.email).map((x) => x.subject)).toEqual([`${s.slug} is reviewing Kabel 1`]);
-    expect(to(s.colleague.email)).toHaveLength(1);
-    expect(to(s.viewer.email)).toHaveLength(0);
-    // Client mail: the supplier's name, Confire's domain (no sender domain), replies to whoever acted.
+    expect([s.colleague, s.viewer].flatMap((u) => to(u.email))).toHaveLength(0);
+    // Client mail: the supplier's name, Confire's domain, the project's portal page.
     expect(to(s.buyer.email)[0]).toMatchObject({ from: `"${s.slug}" <${s.slug}@${mailDomain}>` });
     expect(to(s.buyer.email)[0]!.text).toContain(`/projects/${id}`);
+    expect(await s.bell(s.buyer)).toMatchObject([{ type: "project.accepted", path: `/projects/${id}`, params: { note: "On it" } }]);
+    expect(await s.bell(s.colleague)).toHaveLength(0);
 
-    // An internal note mails nobody; a comment for the client does.
+    // An internal note tells nobody; a comment for the client tells its creator.
     m = await mark();
     await call(router.timeline.comment, { projectId: id, note: "Check the margin", internalOnly: true }, s.as(s.admin.cookie));
     await call(router.timeline.comment, { projectId: id, note: "Steel is late this month" }, s.as(s.admin.cookie));
     to = await mailSince(m);
-    expect(to(s.buyer.email).map((x) => x.text).join()).not.toContain("margin");
     expect(to(s.buyer.email)).toHaveLength(1);
     expect(to(s.buyer.email)[0]!.text).toContain("Steel is late this month");
+    expect(JSON.stringify(await s.bell(s.buyer))).not.toContain("margin");
 
-    // Tenant setting `creator`; the company override `off` wins over the tenant.
-    await call(router.portalSettings.save, { notify: { returned: "creator", comment: "buyers" } }, s.as(s.owner.cookie));
-    await call(router.portalCompanies.setNotify, { cardCode: s.company.cardCode, notify: { comment: "off" } }, s.as(s.owner.cookie));
+    // `revised` sends nothing of its own: the send-back lists the change.
     m = await mark();
-    await call(router.timeline.comment, { projectId: id, note: "Silent" }, s.as(s.admin.cookie));
-    // `revised` sends no mail of its own: the send-back's lists the change.
     await call(router.configs.calculate, { id, entries: { material: "alu" } }, s.as(s.admin.cookie));
     await call(router.requests.sendBack, { id, note: "Aluminium is what we can do" }, s.as(s.admin.cookie));
     to = await mailSince(m);
-    expect(to(s.colleague.email)).toHaveLength(0);
     expect(to(s.buyer.email).map((x) => x.subject)).toEqual(["Changes requested on Kabel 1"]);
     const sent = to(s.buyer.email)[0]!;
     expect(sent).not.toHaveProperty("replyTo"); // no-reply notification mail
     expect(sent.text).toContain("Material: steel → alu");
     expect(sent.text).toContain("Aluminium is what we can do");
+    expect((await s.bell(s.buyer)).map((n) => n.type)).toEqual(["project.returned", "project.comment", "project.accepted"]);
+  });
 
-    const company = await call(router.portalCompanies.get, { cardCode: s.company.cardCode }, s.as(s.owner.cookie));
-    expect(company.notify).toMatchObject({ company: { comment: "off" }, tenant: { returned: "creator", comment: "buyers" } });
+  test("client: a staff quote tells the creator; once they have left the company, nobody", async () => {
+    const s = await setup();
+    const id = await s.draft();
+    await call(portalRouter.projects.submit, { id }, s.on(s.buyer.cookie));
+    await call(router.requests.accept, { id }, s.as(s.admin.cookie));
+    const { project } = await call(router.configs.calculate, { id }, s.as(s.admin.cookie));
+    await call(router.configs.select, {
+      projectId: id, selection: project.candidates[0]!.perBatch.map((b) => ({ candidateIdx: 0, batchQty: b.batchQty })),
+    }, s.as(s.admin.cookie));
+    const d = await call(router.configs.quoteDraft, { projectId: id }, s.as(s.admin.cookie));
+    let m = await mark();
+    const posted = await call(router.configs.createQuote, { projectId: id, commandId: d.commandId }, s.as(s.admin.cookie));
+    let to = await mailSince(m);
+    expect(to(s.buyer.email).map((x) => x.subject)).toEqual([`Quotation ${posted.docNum} for Kabel 1`]);
+    expect([s.colleague, s.viewer].flatMap((u) => to(u.email))).toHaveLength(0);
+    expect((await s.bell(s.buyer))[0]).toMatchObject({ type: "project.quoted", params: { docNum: posted.docNum } });
+
+    await db.delete(member).where(and(eq(member.organizationId, s.tenantId), eq(member.userId, s.buyer.userId)));
+    m = await mark();
+    await call(router.timeline.comment, { projectId: id, note: "Any questions?" }, s.as(s.admin.cookie));
+    to = await mailSince(m);
+    expect([s.buyer, s.colleague, s.viewer].flatMap((u) => to(u.email))).toHaveLength(0);
+  });
+
+  test("reassign: staff only, never a draft, never told to the actor; accept keeps it", async () => {
+    const s = await setup();
+    const id = await s.draft();
+    const assign = (userId: string, as = s.admin) => call(router.requests.assign, { projectId: id, userId }, s.as(as.cookie));
+    // A draft is not the supplier's to see, let alone assign.
+    expect(await codeOf(assign(s.rep.userId))).toBe("NOT_FOUND");
+    await call(portalRouter.projects.submit, { id }, s.on(s.buyer.cookie));
+    // Only the workspace's staff: not its client, not someone else's staff.
+    const stranger = await makeUser("owner", (await makeTenant()).tenantId);
+    expect(await codeOf(assign(s.buyer.userId))).toBe("BAD_REQUEST");
+    expect(await codeOf(assign(stranger.userId))).toBe("BAD_REQUEST");
+    // A client cannot reach the staff router at all.
+    expect(await codeOf(call(router.requests.assign, { projectId: id, userId: s.buyer.userId }, s.as(s.buyer.cookie)))).toBe("FORBIDDEN");
+
+    // Reassigned before anyone accepted: the new assignee hears, the actor does not.
+    let m = await mark();
+    expect(await assign(s.rep.userId)).toEqual({ assigneeId: s.rep.userId, assigneeName: s.rep.email });
+    let to = await mailSince(m);
+    expect(to(s.rep.email).map((x) => x.subject)).toEqual([`${s.admin.email} assigned Kabel 1 (Kunde GmbH) to you`]);
+    expect([s.owner, s.admin].flatMap((u) => to(u.email))).toHaveLength(0);
+    expect((await s.bell(s.rep))[0]).toMatchObject({ type: "request.assigned", path: `/configs/${id}`, params: { actorName: s.admin.email } });
+    // An internal event: the staff timeline has it, the client's doesn't.
+    const staffTl = await call(router.timeline.list, { projectId: id }, s.as(s.owner.cookie));
+    expect(staffTl.events.find((e) => e.kind === "assigned")).toMatchObject({
+      visibility: "internal", payload: { assigneeId: s.rep.userId, assigneeName: s.rep.email },
+    });
+    const clientTl = await call(portalRouter.timeline.list, { projectId: id }, s.on(s.buyer.cookie));
+    expect(clientTl.events.some((e) => e.kind === "assigned")).toBe(false);
+
+    // Accept keeps an existing assignee: the request stays rep's, and accept tells no one it was assigned.
+    m = await mark();
+    await call(router.requests.accept, { id }, s.as(s.admin.cookie));
+    expect((await call(router.configs.get, { id }, s.as(s.admin.cookie))).request?.assigneeName).toBe(s.rep.email);
+    to = await mailSince(m);
+    expect([s.owner, s.admin, s.rep].flatMap((u) => to(u.email))).toHaveLength(0);
+
+    // Self-reassign: nobody is told; the current assignee again: nothing is written.
+    m = await mark();
+    await assign(s.admin.userId);
+    to = await mailSince(m);
+    expect([s.owner, s.admin, s.rep].flatMap((u) => to(u.email))).toHaveLength(0);
+    expect((await s.bell(s.admin)).some((n) => n.type === "request.assigned")).toBe(false);
+    const count = async () => (await db.select().from(configProjectEvent).where(eq(configProjectEvent.projectId, id))).length;
+    const before = await count();
+    await assign(s.admin.userId);
+    expect(await count()).toBe(before);
+  });
+
+  test("the fence: own rows, the path's tenant, the caller's side of the catalog", async () => {
+    const s = await setup();
+    const id = await s.draft();
+    await call(portalRouter.projects.submit, { id }, s.on(s.buyer.cookie));
+    await notificationsSettled();
+    const [row] = await s.bell(s.owner);
+
+    // Another user's id is a silent no-op, both ways.
+    await call(router.notifications.markRead, { ids: [row!.id] }, s.as(s.admin.cookie));
+    await call(router.notifications.dismiss, { id: row!.id }, s.as(s.admin.cookie));
+    expect(await s.bell(s.owner)).toMatchObject([{ id: row!.id, read: false }]);
+    // A client is refused the staff router outright (the membership join), whatever x-tenant says.
+    expect(await codeOf(call(router.notifications.list, undefined, s.as(s.buyer.cookie)))).toBe("FORBIDDEN");
+
+    // The same person at another workspace sees that workspace's rows only.
+    const other = await makeTenant();
+    await db.insert(member).values({ id: crypto.randomUUID(), organizationId: other.tenantId, userId: s.owner.userId, role: "member", createdAt: new Date() });
+    const there = { context: { headers: tenantHeaders(other.slug, s.owner.cookie) } };
+    expect(await call(router.notifications.list, undefined, there)).toHaveLength(0);
+    expect(await call(router.notifications.unreadCount, undefined, there)).toEqual({ count: 0 });
+
+    // Read, then gone.
+    await call(router.notifications.markRead, {}, s.as(s.owner.cookie));
+    expect(await s.bell(s.owner)).toMatchObject([{ id: row!.id, read: true }]);
+    await call(router.notifications.dismiss, { id: row!.id }, s.as(s.owner.cookie));
+    expect(await s.bell(s.owner)).toHaveLength(0);
+
+    // Each side lists its own types, all on by default, and refuses the other side's.
+    const staffSettings = await call(router.notifications.settings, undefined, s.as(s.rep.cookie));
+    expect(staffSettings.map((t) => t.id)).toEqual(NOTIFICATION_TYPES.filter((t) => t.audience === "staff").map((t) => t.id));
+    expect(staffSettings.every((t) => t.bell && t.mail && t.group === "portal")).toBe(true);
+    expect(await codeOf(call(router.notifications.setPreference, { type: "project.quoted", channel: "mail", enabled: false }, s.as(s.rep.cookie)))).toBe("BAD_REQUEST");
+    expect(await codeOf(call(portalRouter.notifications.setPreference, { type: "request.submitted", channel: "mail", enabled: false }, s.on(s.buyer.cookie)))).toBe("BAD_REQUEST");
+    await call(portalRouter.notifications.setPreference, { type: "project.quoted", channel: "mail", enabled: false }, s.on(s.buyer.cookie));
+    await call(portalRouter.notifications.setPreference, { type: "project.quoted", channel: "mail", enabled: false }, s.on(s.buyer.cookie));
+    const quoted = () => call(portalRouter.notifications.settings, undefined, s.on(s.buyer.cookie)).then((r) => r.find((t) => t.id === "project.quoted"));
+    expect(await quoted()).toEqual({ id: "project.quoted", group: "portal", bell: true, mail: false });
+    await call(portalRouter.notifications.setPreference, { type: "project.quoted", channel: "mail", enabled: true }, s.on(s.buyer.cookie));
+    expect(await quoted()).toMatchObject({ bell: true, mail: true });
   });
 });
 
@@ -185,6 +323,7 @@ describe("files", () => {
     const { id: fileId } = (await res.json()) as { id: string };
     const to = await mailSince(m);
     expect(to(s.admin.email).map((x) => x.subject)).toEqual([`${s.buyer.email} (Kunde GmbH) added a file to Kabel 1`]);
+    expect((await s.bell(s.admin))[0]).toMatchObject({ type: "request.file", params: { fileName: "Zeichnung ü.pdf" } });
 
     const tl = await call(portalRouter.timeline.list, { projectId: id }, s.on(s.buyer.cookie));
     expect(tl.events.find((e) => e.kind === "file")!.payload).toEqual({ fileId, name: "Zeichnung ü.pdf", size: 16 });
@@ -263,14 +402,6 @@ describe("files", () => {
 });
 
 describe("settings and home", () => {
-  test("general lists staff for the fallback; the fallback refuses outsiders", async () => {
-    const s = await setup();
-    const g = await call(router.portalSettings.general, undefined, s.as(s.admin.cookie));
-    expect(g.staff.map((x) => x.userId).sort()).toEqual([s.owner.userId, s.admin.userId, s.rep.userId].sort());
-    expect(await codeOf(call(router.portalSettings.save, { notifyFallback: [s.buyer.userId] }, s.as(s.admin.cookie)))).toBe("BAD_REQUEST");
-    expect(await codeOf(call(router.portalSettings.general, undefined, s.as(s.rep.cookie)))).toBe("FORBIDDEN");
-  });
-
   test("home.overview: the company's projects by status and the quotes awaiting an answer", async () => {
     const s = await setup();
     const a = await s.draft();

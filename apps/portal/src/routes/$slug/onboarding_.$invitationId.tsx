@@ -6,7 +6,7 @@ import { ObjectPageSkeleton } from "@confire/ui/object-page/ObjectPageSkeleton.t
 import { authClient } from "../../auth-client.ts";
 import { client, meQuery, orpc } from "../../orpc.ts";
 import { PortalAuthLayout } from "../../components/AuthChrome.tsx";
-import { authUrl, hardRedirect, loginUrl } from "@confire/ui/host.ts";
+import { authUrl, hardRedirect } from "@confire/ui/host.ts";
 import { invitationGuard } from "../../lib/invitation.ts";
 import { useI18n } from "../../i18n.ts";
 import { ONBOARDING_HEADER, ONBOARDING_LOCKED, onboardingSections } from "../../features/onboarding.ts";
@@ -43,7 +43,8 @@ function OnboardingForm() {
   const switchAccount = async () => {
     await authClient.signOut();
     qc.clear();
-    void hardRedirect(loginUrl());
+    // This link again, signed out: the guard sends it to sign-up or sign-in for the invited address.
+    void hardRedirect(window.location.href);
   };
 
   if (inv.data?.type === "existing") return <Navigate from="/$slug" to="/$slug/accept/$invitationId" params={{ invitationId }} replace />;

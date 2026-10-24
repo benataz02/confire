@@ -16,6 +16,7 @@ import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import { CloseQuotations } from "../../../../features/b1/documents.tsx";
 import { InviteNewClientDialog } from "../../../../components/portal/BpPortal.tsx";
+import { b1Label } from "../../../../components/AppShell.tsx";
 import type { EntityFeature, ListQuery, Row } from "@confire/ui/types.ts";
 
 // One declared B1 entity's list — or, with the `#create` fragment, its object page in create mode
@@ -120,6 +121,7 @@ function EntityCreate({ feature }: { feature: EntityFeature }) {
   return (
     <ObjectPage key={d.createEpoch} isNew entity={feature.entity} constraints={d.constraints} data={seed}
       sections={feature.detail.sections} header={feature.detail.header}
-      onSave={d.save} onCancelCreate={() => open(route)} />
+      onSave={d.save} onCancelCreate={() => open(route)}
+      breadcrumbs={[{ text: b1Label(feature.entity, (k) => i18n.getText(k)), to: route }]} />
   );
 }

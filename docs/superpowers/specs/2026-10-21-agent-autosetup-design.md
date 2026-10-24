@@ -1,7 +1,7 @@
 # Agent auto-setup: one download, one code, the SAP password
 
 **Date:** 2026-10-21
-**Status:** Decided through Q&A; not built.
+**Status:** Built 2026-10-23 (§14). The §10 by-hand walk-through on a Windows B1 box is still to do.
 **Replaces:** DEPLOY.md §8's per-customer runbook, the agent step of `routes/onboarding.tsx`, the
 Settings → SAP agent form, and the Bun agent in `apps/agent/src`.
 
@@ -19,9 +19,11 @@ own. Nobody opens the Cloudflare dashboard per customer, and nobody sees or copi
 
 **Anti-goals** — this fails even if it works when:
 - SAP credentials reach the cloud (they stay on the box, as today);
-- an agent hostname can go live without the Access guard in front of it (DEPLOY.md §8: hostnames under
-  `<DOMAIN>` receive the session cookie);
-- a forgotten old server keeps serving part of a tenant's traffic after a move.
+- an agent hostname can go live without the Access guard in front of it, or a `confire.ai` session
+  cookie can ever reach a customer machine (A11);
+- a forgotten old server keeps serving part of a tenant's traffic after a move;
+- after a company switch, a write lands in the wrong company: a quotation patched or a document printed
+  from another company (§6.2). (Portal reads are an accepted risk, §6.2.)
 
 ## 2. Decisions
 
@@ -31,7 +33,7 @@ Q&A and open to correction.
 | # | Topic | Decision |
 |---|---|---|
 | A1 | Transport | Cloudflare Tunnel from the customer's SAP server, as today. **(user)** |
-| A2 | Cloudflare work | Confire's server creates the tunnel, its route, the Access guard and the DNS record through the Cloudflare API, at pairing time. Guard first, DNS last. **(user)** |
+| A2 | Cloudflare work | Confire's server creates the tunnel, its route and the DNS record through the Cloudflare API, at pairing time, behind an Access guard that already covers every agent hostname (A11). **(user)** |
 | A3 | Secrets onto the box | A one-time **pairing code** shown in Confire, typed into the agent. The agent redeems it for its agent secret and tunnel token. **(user)** |
 | A4 | SAP settings | Asked by a wizard in the agent, on the box, each tested with a real login before it is saved. Credentials are never sent to Confire. **(user)** The company database *name* is (A16). |
 | A5 | Beas, printing | Configured in the same wizard the same way (URL, credentials…), each **skippable**. SAP B1 is not skippable. **(user)** |
@@ -40,12 +42,13 @@ Q&A and open to correction.
 | A8 | Linux | Not now. A planned next step (B1 on HANA runs on SUSE): OS-specific code stays behind `_windows.go` files so Linux is an addition, not a restructure. **(user)** |
 | A9 | Dev | The agent runs in the foreground on the dev machine against a test B1, started by `bun run dev`, and pairing works locally without Cloudflare. **(user: "a dev server for the agent")**; the shape below is **(call)** |
 | A10 | Thin agent | The agent holds the SAP sessions and forwards an **allowlist** of requests; Service Layer URLs are still built only by `packages/b1/src/query.ts`, now on the cloud side. Most future changes ship with Confire and need no agent update. **(call)** |
-| A11 | Agent hostname | Stays `<slug>-agent.<DOMAIN>`, guarded by **one Access application per tenant** using one reusable Service Auth policy. **(call)** — see §11 for the separate-domain alternative. |
+| A11 | Agent hostname | **A separate registrable domain, `confire.app`** (user-bought, zone active), so the `confire.ai` session cookie can never reach a customer machine whatever happens to Access. **One wildcard Access application** (`*.confire.app`, Service Auth only), made once by hand. Hostnames are **opaque** (`<random>.confire.app`), so DNS does not list the customers. **(user: confire.app)** Nothing that sets a cookie is ever served under `confire.app`. |
 | A12 | Access service token | One for all tenants, so it moves from `sap_connection` to server env. The two Access fields leave every form. **(call)** |
 | A13 | Updates | Manual in v1: running a newer exe replaces the installed one and keeps its config. Settings shows "update available". No auto-update (it would let Confire push code onto customers' SAP servers; that needs code signing and a trust story first). **(call)** |
 | A14 | Distribution | The exe is built by CI into the app image and served by Confire at `/download/confire-agent.exe`. The bundled build *is* "latest". **(call)** |
-| A15 | Existing connections | None in production. No compatibility with the Bun agent's wire protocol; a dev tenant re-pairs. **(call — confirm)** |
-| A16 | Company identity | A workspace is bound to **one** B1 company, set by its first pairing (`sap_connection.company_db`). Confire assumes it never changes (`b1DocEntry` re-quotes PATCH in place, `portal_company` is keyed by CardCode, `localCurrency`/`entity_meta`/the masterdata cache are never reset), so a switch is **refused**, never silently followed. Supporting a deliberate switch (cache reset, portal review) is later work. **(call)** |
+| A15 | Existing connections | None in production. No compatibility with the Bun agent's wire protocol; a dev tenant re-pairs. **(user: confirmed)** |
+| A16 | Company switch | One company at a time, **switched on the SAP server only**: in the wizard, or by editing `companyDb` in `agent.json` and restarting the service. Credentials change the same way. Confire has no switch of its own and follows by itself (§6.2). **(user)** How it follows safely is **(call)**. Not multi-company: no list of companies, no switcher in the shell (user: dropped). |
+| A17 | Deployments | `confire.ai` is the only deployment that hands out the agent. The exe pairs with `https://app.confire.ai`; `--server` exists for dev only. **(user)** |
 
 ## 3. Install day
 
@@ -72,7 +75,7 @@ Beas — configure? [y/N]: y
   Testing… ✓
 
 Printing (SAP API Gateway) — configure? [y/N]: y
-  URL [https://<SL host>:60020]:   Company database [ALUMIGRAF]:   User [manager]:   Password [same as SAP B1]:
+  URL [https://<SL host>:60020]:   User [manager]:   Password [same as SAP B1]:
   Layout for Quotations (blank = not printable): QUT20009
   Layout for Orders: RDR20011   Layout for DeliveryNotes: …   Layout for Invoices: …
   Testing… ✓
@@ -86,12 +89,16 @@ Done. Confire now shows this server as connected. You can close this window.
 
 - A failed test re-asks that section; the wizard never saves an untested service. The code is asked
   **last** so a long SAP section cannot eat its validity, and a mistyped code costs only the code.
-- Defaults pre-fill from earlier answers (Beas/print reuse B1's company DB, user, and "same as SAP B1"
-  password). Self-signed certificates are accepted on all three services (stock installs ship them);
-  the wizard does not ask.
-- **Running it again** (double-click, or `confire-agent setup`) on an installed box offers: change SAP B1 /
-  Beas / printing, re-pair, uninstall — and, when the running exe is newer than the installed one,
-  update. Changing a service needs no new code; re-pair does.
+- The company database is asked **once**, in the SAP B1 section, and Beas and printing use the same
+  one (§6 config) — print can never render a document of another company than B1 reads. Defaults
+  pre-fill from earlier answers (Beas/print reuse B1's user and a "same as SAP B1" password).
+  Self-signed certificates are accepted on all three services (stock installs ship them); the wizard
+  does not ask.
+- **Running it again** (double-click, or `confire-agent setup`) on an installed box offers: change
+  company, change SAP B1 / Beas / printing credentials, re-pair, uninstall — and, when the running exe is
+  newer than the installed one, update. *Change company* re-tests every configured service against the
+  new company (asking for credentials only where the old ones fail) and restarts the service. None of
+  these needs a new code; re-pair does.
 
 ## 4. Pairing (server)
 
@@ -108,8 +115,8 @@ average; add a per-IP limit if codes ever live longer or get shorter.
 caller is the Go agent, not a browser, and the code is its only credential). Body
 `{ code, port, version, companyDb }`. In order:
 
-1. Look up the hashed code; refuse if missing or expired. Refuse if the tenant already has a
-   `company_db` and this one differs (A16) — the message names both, and the code stays valid.
+1. Look up the hashed code; refuse if missing or expired. A `companyDb` other than the stored one is
+   a company switch and is adopted as in §6.2.
 2. **Provision** (§5) — or, when Cloudflare is not configured, skip it: `agentUrl = http://localhost:<port>`, no token.
 3. Generate the agent secret server-side (32 random bytes), upsert `sap_connection`
    (`agentUrl`, `secret` encrypted by `crypto.ts`, `tunnelId`, `companyDb`, `status: ok`).
@@ -131,29 +138,28 @@ pairing is refused, so production can never store a localhost `agentUrl`.
 
 | Env | What |
 |---|---|
-| `CF_API_TOKEN` | Account: *Cloudflare Tunnel Edit*, *Access: Apps and Policies Edit*; Zone (`<DOMAIN>`): *DNS Edit* |
-| `CF_ACCOUNT_ID`, `CF_ZONE_ID` | ids, so nothing is looked up per pairing |
-| `CF_ACCESS_POLICY_ID` | the reusable Service Auth policy that includes the `confire-cloud` service token |
-| `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | that service token; `agentPost` sends them on every agent call (were per-tenant columns) |
+| `AGENT_DOMAIN` | `confire.app` — where agent hostnames live |
+| `CF_API_TOKEN` | Account: *Cloudflare Tunnel Edit*; Zone `confire.app`: *DNS Edit*. **No Access permission**: the server cannot weaken the guard, so a compromised server cannot open customer machines to the world |
+| `CF_ACCOUNT_ID`, `CF_ZONE_ID` | ids (`confire.app` is zone `e56029ad…`), so nothing is looked up per pairing |
+| `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | the `confire-cloud` service token; `agentPost` sends them on every agent call (were per-tenant columns) |
 
-`provisionAgent(slug, port, oldTunnelId)` → `{ agentUrl, tunnelId, token }`, host = `<slug>-agent.<DOMAIN>`:
+`provisionAgent(host, port, oldTunnelId)` → `{ agentUrl, tunnelId, token }`. `host` is
+`<label>.confire.app`, the label 10 random lowercase letters and digits, chosen at a tenant's first
+pairing and kept across re-pairs (it is the `agentUrl`).
 
-1. **Guard:** ensure a self-hosted Access application for the host exists (name `Confire agent <slug>`,
-   policy `CF_ACCESS_POLICY_ID`). Created once per tenant and kept across re-pairs.
-2. **Tunnel:** `POST /accounts/{id}/cfd_tunnel` `{ name: "confire-<slug>-<n>", config_src: "cloudflare" }`;
+1. **Tunnel:** `POST /accounts/{id}/cfd_tunnel` `{ name: "confire-<slug>-<n>", config_src: "cloudflare" }`;
    `PUT …/configurations` with ingress `host → http://localhost:<port>`, then the catch-all `http_status:404`.
-3. **DNS:** upsert the proxied CNAME `host → <tunnelId>.cfargotunnel.com` (update the record if it exists).
-4. **Retire** `oldTunnelId` if any: clean up its connections, delete it. The old box's `cloudflared`
+2. **DNS:** upsert the proxied CNAME `host → <tunnelId>.cfargotunnel.com` (update the record if it exists).
+3. **Retire** `oldTunnelId` if any: clean up its connections, delete it. The old box's `cloudflared`
    stops authenticating, and its agent secret was already replaced — the "forgotten old server" anti-goal.
-5. Token: from the create response, or `GET …/cfd_tunnel/{id}/token`.
+4. Token: from the create response, or `GET …/cfd_tunnel/{id}/token`.
 
-Guard before DNS is the order of this function, not a runbook step. Retrying after a partial failure
-must not leave orphan tunnels piling up (e.g. reuse a tunnel created by a failed attempt) — builder's
-choice how.
+The guard is the wildcard Access app, which exists before any hostname does; there is no per-tenant
+guard step to get wrong. Retrying after a partial failure must not leave orphan tunnels piling up (e.g.
+reuse a tunnel created by a failed attempt) — builder's choice how.
 
-ponytail: one Access app per tenant; Cloudflare's default limits are 500 Access applications and 1,000
-tunnels per account. Past that: multi-domain apps (50 hostnames each), or §11's separate domain with one
-wildcard app.
+ponytail: 1,000 tunnels per account (Cloudflare's default). Past that: *Tunnels for Platforms*, or a
+second account.
 
 ## 6. The agent (Go, `apps/agent`)
 
@@ -184,14 +190,17 @@ likely why today's `install-service.ps1` has never worked as a service.
   "port": 4000,
   "secret": "<from pairing>",
   "tunnelToken": "<from pairing, absent in dev>",
-  "b1":   { "url": "https://localhost:50000", "companyDb": "ALUMIGRAF", "user": "manager", "pass": "…" },
-  "beas": { "url": "…", "auth": "session", "companyDb": "…", "user": "…", "pass": "…" },
-  "print": { "url": "https://sap:60020", "companyDb": "…", "user": "…", "pass": "…",
+  "companyDb": "ALUMIGRAF",
+  "b1":   { "url": "https://localhost:50000", "user": "manager", "pass": "…" },
+  "beas": { "url": "…", "auth": "session", "user": "…", "pass": "…" },
+  "print": { "url": "https://sap:60020", "user": "…", "pass": "…",
              "layouts": { "Quotations": "QUT20009", "Orders": "RDR20011" } }
 }
 ```
 
-`beas` and `print` are absent when skipped. `basePath` (B1 `/b1s/v2/`; Beas its own) and `auth`
+`companyDb` is one top-level field for all three services, so a hand edit cannot leave B1 on one
+company and printing on another. Edited by hand, it takes effect on the next service restart; the agent
+logs a failed login at start and `/health` reports it. `beas` and `print` are absent when skipped. `basePath` (B1 `/b1s/v2/`; Beas its own) and `auth`
 (session login or basic) carry over from today's `ServiceConfig`; how the wizard asks for Beas's is the
 builder's choice.
 
@@ -224,11 +233,11 @@ Replaces the operation endpoints (`/b1/entity-set`, `/b1/create`, …).
 Errors keep today's envelope `{ error: { status, code, message } }`; Beas or print not configured →
 503. The bearer check stays a constant-time compare of hashes.
 
-**Company check (A16).** `agentPost` sends the workspace's `company_db` as `X-Confire-Company` on every
-Bearer call; an agent whose B1 company differs answers **409** naming both, before touching SAP. So a
-company changed in the wizard after pairing stops every call with a clear message rather than quoting
-into the wrong company. The wizard warns when the company of a paired box is changed. One header, no
-extra round trip.
+**Company check.** `agentPost` sends the workspace's `company_db` as `X-Confire-Company` on every
+Bearer call; an agent on another company answers **409** `{ code: "COMPANY_CHANGED", companyDb }`
+**before touching SAP**. A call built against the old company therefore cannot land in the new one —
+not even one already in flight when the switch happened. One header, no extra round trip. §6.2 says
+what Confire does with the 409.
 
 **The allowlist** (`/request`), equal to what today's agent permits — a leaked agent secret still
 cannot issue arbitrary Service Layer calls:
@@ -250,11 +259,36 @@ agent-backed `request()` in place of `ServiceLayer`, so `RemoteTransport`'s eigh
 `agentPost` stays the one place that adds the bearer, the Access headers and the timeout. The TS
 `ServiceLayer` then serves no runtime path — delete it unless a script still needs it.
 
+### 6.2 Following a company switch (Confire)
+
+Confire learns of a switch from the agent's 409 (or from a pairing that reports another company) and
+**adopts it by itself** — no admin step, as the user asked:
+
+1. `sap_connection.company_db` becomes the new company — once, however many calls hit the 409 together
+   (`update … where company_db is distinct from <new>`).
+2. Every cache of the old company's data is cleared and refills on its own: at least `localCurrency`,
+   `entity_meta` and `config_masterdata_row` (the masterdata TTL refills it); the builder lists any other.
+3. The call that hit the 409 fails with "SAP company changed to X — try again"; the next one goes through.
+
+A posted quotation remembers its company, so a switch can never make it point at a stranger's
+document, and switching back restores it: `config_project.b1_company` beside `b1DocEntry`, written
+when a quotation is posted. A re-quote PATCHes the stored document only in that company; in any other
+it creates a new quotation (the `U_CF_Key` pre-check still prevents a duplicate). The process page's
+link and the timeline's SAP chain show only in that company. Existing rows (dev only, A15) get the
+first company a pairing reports.
+
+**Accepted risk (user): portal clients are not fenced by company.** `portal_company` stays keyed by
+(tenant, CardCode), so after a switch a portal client sees the documents of its CardCode *in the new
+company*. Between copies of one company (test ↔ production) that is the same partner; in an unrelated
+company it may be another partner's. The wizard's *Change company* step says so in one line
+("Portal clients will see the documents of their CardCode in the new company."), and DEPLOY.md §8
+repeats it. The fence (`portal_company.company_db` matched in the seat join) was weighed and dropped.
+
 ## 7. Confire changes
 
-**Schema** (`sap_connection`, a migration): drop `access_client_id`, `access_client_secret`,
-`beas_enabled`; add `tunnel_id text` (null in dev) and `company_db text` (A16). Pairing codes need no
-table (§4).
+**Schema** (one migration): `sap_connection` drops `access_client_id`, `access_client_secret`,
+`beas_enabled` and adds `tunnel_id text` (null in dev) and `company_db text`; `config_project` adds
+`b1_company text` (§6.2). Pairing codes need no table (§4).
 
 **Server.**
 - `sap.connect`, `sap.reconfigure`, `sap.agent` go; `sap.pairingCode` (§4) and `sap.agentStatus` come.
@@ -263,6 +297,9 @@ table (§4).
   answered (and fills `localCurrency`). Returns `{ connected, version, latestVersion, services, lastOkAt, error }`.
 - `b1.ts`: `tenantConnector` always builds the Beas transport; `transportFor`'s "Beas is not enabled"
   becomes the agent's 503. `TenantAgent` loses `beasEnabled`; `agentTarget` reads the Access pair from env.
+- §6.2: the adoption (one function beside `agentTarget`, called from `agentPost`'s 409 and from
+  pairing); `config-quote.ts` writes `b1_company` and PATCHes only within it; `project-timeline.ts` and
+  the process page show the SAP link only within it.
 - `seed-agent.ts`/`upsertSapConnection` and `scripts/seed-dev.ts` follow the new columns.
 - Reserve the new top-level path names (`download`; check `api`) in `tenant.ts`.
 
@@ -301,27 +338,100 @@ the current one.
 - Go: one test for the allowlist (methods × paths × headers, the outside-base and `Login` refusals) —
   it is the security boundary. One for the session's single in-flight login.
 - Server: pairing redeem in dev mode (code → row → code gone; expired and reused codes refused);
-  `cloudflare.ts` against a stubbed `fetch` asserting call order (Access before DNS, old tunnel retired
-  last); the existing B1/print tests green over the rewritten mock agent; `sap-connect.test.ts` rewritten
-  for the new procedures.
+  `cloudflare.ts` against a stubbed `fetch` asserting call order (tunnel configured before DNS, old tunnel
+  retired last); the existing B1/print tests green over the rewritten mock agent; `sap-connect.test.ts`
+  rewritten for the new procedures.
+- Company switch, over the mock agent: a 409 adopts the new company once and clears the caches; a
+  re-quote after a switch creates instead of patching, and patches again after switching back. The mock
+  agent answers 409 when its company differs from the
+  header.
 - By hand once, on a real Windows SQL Server B1 box with Cloudflare configured: the §3 walk-through,
-  then `curl https://<slug>-agent.<DOMAIN>/health` refused by Access, a B1 list loading in Confire, a
+  then `curl https://<label>.confire.app/health` refused by Access, a B1 list loading in Confire, a
   re-pair from a second machine retiring the first.
 
 ## 11. Out of scope, and what was weighed
 
 - **Linux / B1 on HANA** — A8.
-- **Several company databases on one agent** — one agent, one company, as today.
+- **Multi-company workspaces** (several companies at once, a company list from the SLD, a switcher in
+  the shell) — weighed and dropped by the user; one company at a time, switched on the box (A16).
 - **Auto-update, code signing, DPAPI-encrypted config, reading print layouts from B1** — later.
-- **Separate agent domain** (e.g. `confire-agents.net`, one wildcard Access app made once): removes
-  the cookie exposure by construction and the per-tenant Access app. Not taken: a new domain to own,
-  and A11 already makes the guard a step the code cannot skip.
+- **Agent hostnames under `confire.ai`** with one Access app per tenant (the first draft of A11):
+  secure only while every app stays configured, a cookie leak the moment one is not, and a 500-app
+  ceiling. Replaced by `confire.app`.
 - **Agent dials Confire over a WebSocket** (no Cloudflare at all): rejected by A1.
 
 ## 12. Docs to update
 
-- **DEPLOY.md §8:** becomes the one-time Cloudflare setup (service token, reusable Service Auth policy,
-  the API token and the env of §5) and the customer's steps of §3. The per-customer dashboard steps go.
+- **DEPLOY.md §8:** becomes the one-time Cloudflare setup (Zero Trust, the service token, the
+  `*.confire.app` Access app, the API token and the env of §5) and the customer's steps of §3, including
+  how to switch company (wizard, or `agent.json` + restart). The per-customer dashboard steps go.
 - **CLAUDE.md:** the agent paragraph (Go, thin, allowlist, pairing), `b1.ts` (no `beasEnabled`), the
-  `packages/b1` notes that describe `DirectTransport` running on the agent.
+  `packages/b1` notes that describe `DirectTransport` running on the agent, and the `DOMAIN` paragraph:
+  the `<slug>-agent.<DOMAIN>` exception is gone — *no* name under `confire.ai` points at a customer.
 - `apps/agent/deploy/install-service.ps1` is deleted.
+
+## 13. First rollout: the ALUMIGRAF server
+
+The user's live SAP server (company `ALUMIGRAF`) is the first real install **(user)**. What the
+Cloudflare account held on 2026-10-23 (read through the API):
+
+- one remotely-managed tunnel, `ALUMIGRAF` (`85de295c-…`, created 2026-10-19), **healthy with 4
+  connections**: a hand-installed `cloudflared` service is running on that box;
+- the tunnel has **no published routes** and the `confire.ai` zone has **no `*-agent` record**, so nothing
+  reaches the agent through it yet;
+- **Cloudflare Access (Zero Trust) is not enabled** on the account — the API answers
+  `access.api.error.not_enabled`.
+
+So, in order:
+
+1. **One-time, in the dashboard** (the Cloudflare API connection here cannot mint API tokens or enable
+   Zero Trust): enable Zero Trust (free plan, pick a team name); create the service token `confire-cloud`;
+   create the self-hosted Access application `*.confire.app` with one policy, action *Service Auth*,
+   including that token, and nothing else; create the API token of §5. Put the §5 env into the
+   server's `.env`.
+2. Ship the build. Create (or pick) the workspace on `app.confire.ai`.
+3. On the ALUMIGRAF box, run the exe and pair. If a test company exists, pairing it first is the safer
+   start; switching to `ALUMIGRAF` later is *Change company* in the wizard (§6.2).
+4. Verify as §10: `/health` through the hostname is refused without the service token and answers with
+   it; a B1 list loads; print works. **This is the productive company**: check reads and print first,
+   and run a quote write-back only once `U_CF_Key` exists and the user agrees to a test document.
+5. Retire the hand-made setup: `cloudflared service uninstall` on the box, then delete the `ALUMIGRAF`
+   tunnel. Its traffic is nil (no routes), so order is not critical; do it after step 4 so a failed
+   install leaves the box as it was.
+
+## 14. As built (2026-10-23)
+
+Where the build decided what the spec left open, or deviated from it:
+
+- **Procedures.** Settings uses `sap.pairingCode` / `sap.agentStatus` (`adminProcedure`, the path's
+  tenant); onboarding, which has no workspace in its path, uses `sap.onboardingPairingCode` /
+  `sap.onboardingAgentStatus` (`ownedTenant`). One handler each, in `agent-pairing.ts`.
+  `agentStatus` also returns `pairingPending` (an unredeemed code exists), which is how Settings
+  knows its code was used.
+- **Concurrent redeems:** the code is claimed by `DELETE … RETURNING` and re-inserted if anything after
+  it fails.
+- **Hostname label:** before a tenant's first stored `agentUrl`, the label is an HMAC of the tenant id
+  under `BETTER_AUTH_SECRET`, so a first pairing that failed half-way retries under the same name.
+- **Orphans:** a tenant's tunnels are named `confire-<label>-<slug>-<n>` and listed by the
+  `confire-<label>-` prefix. A never-run one (`inactive`) that is not the current box's is reused; every
+  other one is retired. **Retiring** rotates the tunnel's secret first, then drops its connections, then
+  deletes it, because Cloudflare refuses to delete a connected tunnel and a running cloudflared
+  reconnects within seconds.
+- **Elevation** is requested at run time (`ShellExecute` *runas*) instead of in a manifest, so the build
+  needs no resource compiler, and `run`/`version` never prompt.
+- **Wire details:** `/health` also reports `tunnel` (cloudflared's `/ready`, polled by the agent) and
+  `error` (a failed B1 login at start); the wizard's *Tunnel… ✓ connected* waits on it. The agent's own
+  refusals carry the code `AGENT_REFUSED` and surface as `FORBIDDEN`, never as "SAP rejected". A missing
+  `X-Confire-Company` header counts as another company.
+- **Company on events:** each `quoted` event carries `company` too, so the timeline lists only the
+  quotations of the company served now (older events fall back to the project's `b1_company`).
+- **Beas in the wizard:** one URL including its path, then session or basic sign-in.
+- **Caches cleared on a switch:** `localCurrency`, `entity_meta` and the in-process entity list,
+  `config_masterdata_row` (with `synced_at` reset so the TTL refills it), and the in-process lookup/row
+  caches through the masterdata version. `portal_settings.leadSeries` names a series of the old
+  company and is left for an admin to re-pick.
+- **Verified here:** the Go allowlist and single-login tests, the server tests (pairing in dev mode,
+  `cloudflare.ts` call order against a stubbed API, the company switch over the mock agent), and a dev
+  run: the wizard against a fake Service Layer, paired with the running server, then cloud → agent →
+  SAP reads, paging, `$metadata`, the allowlist's refusals and a company switch. The Docker build ran
+  as its commands (pinned cloudflared digest, vet, test, Windows build with the embed), not as an image.
