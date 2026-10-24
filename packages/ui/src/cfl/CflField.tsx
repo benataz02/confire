@@ -1,11 +1,11 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Button, MultiInput, SuggestionItemCustom, Text, Token, type MultiInputDomRef,
+  MultiInput, SuggestionItemCustom, Text, Token, type MultiInputDomRef,
 } from "@ui5/webcomponents-react";
 import { useUiI18n } from "../i18n.ts";
 import { useUiSource } from "../source.tsx";
-import { EntityLink, useCanOpen, useEntityNav } from "../EntityLink.tsx";
+import { EntityLink, useCanOpen } from "../EntityLink.tsx";
 import { formatValue } from "../format.ts";
 import { showLink } from "../navigation.ts";
 import { fetchPage, sourceKey } from "./cfl-provider.ts";
@@ -65,7 +65,6 @@ export function CflField({
   const qc = useQueryClient();
   const { client } = useUiSource();
   const canOpen = useCanOpen();
-  const go = useEntityNav();
   const inputRef = useRef<MultiInputDomRef>(null);
 
   const [typed, setTyped] = useState<string | null>(null);
@@ -239,10 +238,6 @@ export function CflField({
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", width: "100%" }}>
-      {target ? (
-        <Button icon="navigation-right-arrow" design="Transparent" tooltip={i18n.getText("UI_OPEN")} accessibleName={i18n.getText("UI_OPEN")}
-          onClick={() => (target.action ? target.action(value, formData ?? {}) : target.route && go(target.route, target.target))} />
-      ) : null}
       <MultiInput
         ref={inputRef}
         style={{ flex: 1, minWidth: 0, width: "100%" }}

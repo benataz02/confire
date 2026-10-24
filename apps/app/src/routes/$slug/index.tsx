@@ -1,8 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Button, FlexBox, HeroBanner, Icon, Title } from "@ui5/webcomponents-react";
-import { useLanguage } from "@confire/ui/i18n.ts";
 import { meQuery, orpc, useCurrency, useIsAdmin } from "../../orpc.ts";
+import { formatLocale } from "@confire/ui/format.ts";
 import { useI18n } from "../../i18n.ts";
 import { B1_FEATURES } from "../../features/b1/index.ts";
 import { B1_NAV_KEY } from "../../components/AppShell.tsx";
@@ -51,7 +51,6 @@ const flag = (n: number | undefined, state: "Critical" | "Negative") => (n ? sta
 function Home() {
   const i18n = useI18n();
   const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
-  const { language } = useLanguage();
   const navigate = useNavigate({ from: "/$slug" });
   const isAdmin = useIsAdmin();
   const currency = useCurrency();
@@ -61,7 +60,7 @@ function Home() {
   const firstName = (me?.user?.name || me?.user?.email || "").split(/[ @]/)[0]!;
   const hour = new Date().getHours();
   const greeting = t(hour < 12 ? "HOME_GREETING_MORNING" : hour < 18 ? "HOME_GREETING_AFTERNOON" : "HOME_GREETING_EVENING", firstName);
-  const compact = new Intl.NumberFormat(language, { notation: "compact", maximumFractionDigits: 1 });
+  const compact = new Intl.NumberFormat(formatLocale(), { notation: "compact", maximumFractionDigits: 1 });
 
   const groups: { title: string; tiles: TileProps[] }[] = [
     {
@@ -95,7 +94,7 @@ function Home() {
   return (
     <FlexBox direction="Column" style={{ gap: "2rem", padding: "1rem 2rem 2rem" }}>
       <HeroBanner
-        overlineText={new Date().toLocaleDateString(language, { weekday: "long", day: "numeric", month: "long" })}
+        overlineText={new Date().toLocaleDateString(formatLocale(), { weekday: "long", day: "numeric", month: "long" })}
         headerText={greeting}
         actions={
           <Button icon="add" onClick={() => void navigate({ to: "/$slug/configs/new" })}>{t("CONFIG_NEW")}</Button>

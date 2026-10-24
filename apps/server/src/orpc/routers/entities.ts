@@ -8,7 +8,7 @@ import { tenantConnector, viaB1 } from "../../b1.ts";
 import { assertEntity, entitySchema, toConstraints } from "../../entity-meta.ts";
 import { compileList } from "../../entity-list.ts";
 import { missingRequired, pickEditable, profileOf, PRINTABLE } from "../../entity-profiles.ts";
-import { buildCopy, COPY_SELECT, findFlow, flowsFrom } from "../../doc-copy.ts";
+import { buildCopy, COPY_SELECT, CopyHeaderZ, draftConstraints, findFlow, flowsFrom } from "../../doc-copy.ts";
 import { printDocument } from "../../print.ts";
 import { bad, readOne, readRows } from "../../entity-read.ts";
 import { DEFAULT_PAGE } from "../../lookups.ts";
@@ -34,6 +34,24 @@ const curated = (entity: string) => {
   if (!p) throw new ORPCError("FORBIDDEN", { message: `${entity} is read-only in Confire` });
   return p;
 };
+
+const CopyZ = z.object({
+  sourceEntity: EntityZ,
+  targetEntity: EntityZ,
+  // ponytail: one read per source through the agent; 50 caps the burst, batch if lists merge more.
+  docEntries: z.array(z.number().int()).min(1).max(50),
+});
+
+/** A copy's flow and its source documents, read from B1 — for the draft and for the post alike. */
+async function copySources(tenantId: string, input: z.infer<typeof CopyZ>) {
+  const flow = findFlow(input.sourceEntity, input.targetEntity);
+  if (!flow)
+    throw new ORPCError("BAD_REQUEST", { message: `No document flow from ${input.sourceEntity} to ${input.targetEntity}` });
+  const b1 = await b1Of(tenantId);
+  const read = await Promise.all([...new Set(input.docEntries)].map((n) =>
+    viaB1(() => b1.readEntity(flow.source, n, { select: COPY_SELECT }))));
+  return { flow, b1, sources: read.map((r) => r.data as Record<string, unknown>) };
+}
 
 export const entitiesRouter = {
   /** One entity's field constraints (Beas' /api/metadata/{Entity}), the write rule folded in as
@@ -172,27 +190,40 @@ export const entitiesRouter = {
       return { row: res.data as Record<string, unknown>, etag: res.etag ?? null };
     }),
 
+  /** The copy's draft page: the target document `copy` would post, unposted, and the form it is
+   *  drawn with — the target's fields, editable only where `copy` takes a change (CopyHeaderZ, a
+   *  line's quantity). DeliveryNotes and Invoices stay read-only targets: this is their only form. */
+  copyDraft: adminProcedure
+    .input(CopyZ)
+    .handler(async ({ input, context }) => {
+      const { flow, b1, sources } = await copySources(context.tenantId, input);
+      const schema = await viaB1(() => entitySchema(context.tenantId, b1, flow.target)).catch(bad);
+      let draft;
+      try {
+        draft = buildCopy(flow, sources);
+      } catch (e) {
+        return bad(e);
+      }
+      return {
+        draft,
+        constraints: { ...draftConstraints(toConstraints(schema, undefined)), printable: false, flows: [] as { target: string; label: string }[] },
+      };
+    }),
+
   /** Order -> Delivery -> Invoice and friends. The target lines carry BaseType/BaseEntry/BaseLine,
-   *  which is what makes B1 close the source lines instead of creating an unlinked document. */
+   *  which is what makes B1 close the source lines instead of creating an unlinked document.
+   *  Several sources of one business partner merge into one target. The draft page's changes ride
+   *  along: the header allowlist, and `lines` — the kept lines with their quantities. */
   copy: adminProcedure
-    .input(z.object({
-      sourceEntity: EntityZ,
-      targetEntity: EntityZ,
-      docEntry: z.number().int(),
-      /** source line indexes; omitted copies every line */
-      lines: z.array(z.number().int().min(0)).optional(),
-      comments: z.string().max(2000).optional(),
+    .input(CopyZ.extend({
+      header: CopyHeaderZ.optional(),
+      lines: z.array(z.object({ baseEntry: z.number().int(), baseLine: z.number().int(), quantity: z.number().positive() })).min(1).optional(),
     }))
     .handler(async ({ input, context }) => {
-      const flow = findFlow(input.sourceEntity, input.targetEntity);
-      if (!flow)
-        throw new ORPCError("BAD_REQUEST", { message: `No document flow from ${input.sourceEntity} to ${input.targetEntity}` });
-
-      const b1 = await b1Of(context.tenantId);
-      const source = await viaB1(() => b1.readEntity(flow.source, input.docEntry, { select: COPY_SELECT }));
+      const { flow, b1, sources } = await copySources(context.tenantId, input);
       let payload;
       try {
-        payload = buildCopy(flow, source.data as Record<string, unknown>, { lines: input.lines, comments: input.comments });
+        payload = buildCopy(flow, sources, { header: input.header, lines: input.lines });
       } catch (e) {
         return bad(e);
       }

@@ -1,6 +1,7 @@
 import type { Entries } from "@confire/config-engine";
 import type { GridState } from "@confire/ui/list-report/Grid.tsx";
 import type { Row } from "@confire/ui/types.ts";
+import { formatLocale } from "@confire/ui/format.ts";
 
 // What the process page does with the view beyond drawing it: formatting, and the sort, filter and
 // grouping the user drives. Every figure and flag here is the server's (config-view.ts).
@@ -8,7 +9,7 @@ export type Sel = { candidateIdx: number; batchQty: number };
 /** A candidate row as the view carries it: the open parameters' values, and per batch quantity. */
 type ChartCandidate = { perBatch: { unitPrice: number; lowest: boolean }[] };
 
-export const fmt = (n: number): string => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+export const fmt = (n: number): string => n.toLocaleString(formatLocale(), { maximumFractionDigits: 2 });
 
 /** `(key, ...params)` — the caller's `i18n.getText`, so this stays pure and testable. */
 export type TextFn = (key: string, ...params: string[]) => string;

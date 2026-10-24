@@ -15,6 +15,7 @@ import { orpc } from "../../orpc.ts";
 import { colMinWidth } from "../configurator/tableWidths.ts";
 import { confirm } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
+import { formatLocale } from "@confire/ui/format.ts";
 import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
 
 // One editor for both kinds. The kind is picked once, on create: a saved row keeps it, because
@@ -459,7 +460,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
             </FormGroup>
             <FormGroup headerText={i18n.getText("ADMIN_CACHE")}>
               <FormItem labelContent={<Label>{i18n.getText("ADMIN_LAST_SYNCED")}</Label>}>
-                <Text>{row?.syncedAt ? new Date(row.syncedAt).toLocaleString() : id ? i18n.getText("ADMIN_NEVER") : "—"}</Text>
+                <Text>{row?.syncedAt ? new Date(row.syncedAt).toLocaleString(formatLocale()) : id ? i18n.getText("ADMIN_NEVER") : "—"}</Text>
               </FormItem>
               <FormItem labelContent={<Label>{i18n.getText("ADMIN_CACHED_ROWS")}</Label>}>
                 <Text>{id ? rowsText(row?.rowCount ?? 0) : "—"}</Text>

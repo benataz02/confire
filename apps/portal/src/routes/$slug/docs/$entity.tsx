@@ -56,10 +56,12 @@ function DocList({ entity }: { entity: DocEntity }) {
       onQuery={setQuery}
       keyOf={(r) => String(r.DocEntry ?? "")}
       readOnly
-      // Unmounts with the selection, which closes any open preview — PrintActions releases its blob URL.
-      toolbarActions={({ rows }) => (rows.length === 1
-        ? <PrintActions entity={entity} docEntry={Number((rows[0] as Row).DocEntry)} />
-        : null)}
+      // Keyed by the selected document: a new selection remounts it, which closes any open preview —
+      // PrintActions releases its blob URL. No single row selected is NaN, which draws it disabled.
+      toolbarActions={({ rows }) => {
+        const docEntry = rows.length === 1 ? Number((rows[0] as Row).DocEntry) : NaN;
+        return <PrintActions key={docEntry} entity={entity} docEntry={docEntry} />;
+      }}
     />
   );
 }

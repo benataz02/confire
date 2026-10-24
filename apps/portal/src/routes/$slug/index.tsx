@@ -7,6 +7,7 @@ import "@ui5/webcomponents-fiori/dist/illustrations/NoEntries.js";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import { money } from "@confire/ui/money.ts";
+import { formatLocale } from "@confire/ui/format.ts";
 import { meQuery, orpc } from "../../orpc.ts";
 import { DOC_PAGES } from "../../features/documents.ts";
 import { PROJECT_STATUS_KEY } from "../../features/labels.ts";
@@ -17,7 +18,7 @@ export const Route = createFileRoute("/$slug/")({
 });
 
 const GRID = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(20rem, 1fr))", gap: "1rem", alignItems: "start" } as const;
-const date = (d: string | Date | null) => (d ? new Date(d).toLocaleDateString() : "");
+const date = (d: string | Date | null) => (d ? new Date(d).toLocaleDateString(formatLocale()) : "");
 
 /** The overview (spec §9): requests by status and quotes awaiting an answer from Postgres, recent
  *  documents and open invoices live from SAP — two calls, so a down agent costs two cards. */

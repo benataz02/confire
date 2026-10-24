@@ -1,3 +1,5 @@
+import { formatLocale } from "./format.ts";
+
 // One money formatter for the whole app. There used to be two with the same name and different
 // output — one locale-default with 2 decimals, one hardcoded en-GB with 0 — so the same figure
 // read differently depending on which page you were on.
@@ -16,7 +18,7 @@
 export function money(n: number, currency?: string): string {
   const digits = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
   try {
-    return new Intl.NumberFormat(undefined, currency ? { style: "currency", currency, ...digits } : digits).format(n);
+    return new Intl.NumberFormat(formatLocale(), currency ? { style: "currency", currency, ...digits } : digits).format(n);
   } catch {
     // The code is whatever B1 has in OADM, not something this app validated. Intl throws on
     // anything that is not a well-formed ISO 4217 code — never let that take the page down.

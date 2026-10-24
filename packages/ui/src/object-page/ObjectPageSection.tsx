@@ -100,7 +100,7 @@ export function objectPageSection(s: Section, ctx: SectionContext): ReactElement
         {ctx.errors[key] ? <Label style={{ color: "var(--sapNegativeTextColor)" }}>{ctx.errors[key]}</Label> : null}
         {/* a Form of its own for the card padding a field section gets from formOf */}
         <GridForm name={s.label}>
-          <EditGrid title={s.label} columns={s.table.columns} rows={rows} readOnly={!editable} errors={ctx.cellErrors[key]}
+          <EditGrid title={s.label} columns={s.table.columns} rows={rows} readOnly={!editable} fixedRows={s.table.fixedRows} errors={ctx.cellErrors[key]}
             toolbarActions={ctx.templates.tableActions?.[s.id]}
             onChange={(next) => ctx.updateField(key, next)} />
         </GridForm>

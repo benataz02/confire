@@ -1,5 +1,7 @@
+import { useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button, MessageStrip } from "@ui5/webcomponents-react";
+import { Button, Menu, MenuItem, MessageStrip, type ButtonDomRef } from "@ui5/webcomponents-react";
 import { useI18n } from "../../i18n.ts";
 import { orpc } from "../../orpc.ts";
 import { toast } from "@confire/ui/toast.ts";
@@ -7,7 +9,6 @@ import { confirm } from "@confire/ui/confirm.ts";
 import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import { DOCUMENT_STATUS } from "@confire/ui/documentStatus.ts";
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
-import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { toIsoDay } from "@confire/ui/format.ts";
 import type { EntityFeature, HeaderActionContext, Row } from "@confire/ui/types.ts";
 
@@ -55,30 +56,54 @@ export function CloseQuotations({ rows, disabled, onClosed }: { rows: Row[]; dis
   );
 }
 
-const CREATED: Record<string, string> = {
-  Orders: "ADMIN_CREATED_ORDER",
-  DeliveryNotes: "ADMIN_CREATED_DELIVERY",
-  Invoices: "ADMIN_CREATED_INVOICE",
-};
-const FLOW_KEY: Record<string, string> = {
-  "Sales Quotation to Sales Order": "ADMIN_FLOW_QUOTE_TO_ORDER",
-  "Sales Order to Delivery": "ADMIN_FLOW_ORDER_TO_DELIVERY",
-  "Sales Order to Invoice": "ADMIN_FLOW_ORDER_TO_INVOICE",
-  "Delivery to A/R Invoice": "ADMIN_FLOW_DELIVERY_TO_INVOICE",
+const TARGET: Record<string, string> = {
+  Orders: "ADMIN_TARGET_ORDER",
+  DeliveryNotes: "ADMIN_TARGET_DELIVERY",
+  Invoices: "ADMIN_TARGET_INVOICE",
 };
 
-/** Print, and the copy flows out of this document (Quotation -> Order -> Delivery -> Invoice). */
-function DocumentActions({ entity, ctx }: { entity: string; ctx: HeaderActionContext }) {
+/** Copy to: one button, the flows out of `entity` (Quotation -> Order -> Delivery -> Invoice) in its
+ *  menu. Every row is a source — the Object Page's one record, or a List Report's selection, merged
+ *  into one target, which B1 takes only from one business partner (the server checks again). It
+ *  posts nothing: it opens the target's draft (`#copy` on the target's route), and Save there does. */
+export function CopyTo({ entity, flows, rows, disabled }: {
+  entity: string; flows: { target: string; label: string }[]; rows: Row[]; disabled?: boolean;
+}) {
   const i18n = useI18n();
-  const go = useEntityNav();
-  const copy = useMutation(orpc.entities.copy.mutationOptions({
-    onSuccess: (r) => {
-      const key = CREATED[r.entity];
-      const num = String(r.docNum ?? r.docEntry);
-      toast(key ? i18n.getText(key, num) : `${r.entity} ${num} created`);
-      go(`/b1/${r.entity}`, r.docEntry);
-    },
-  }));
+  const navigate = useNavigate({ from: "/$slug" });
+  const opener = useRef<ButtonDomRef>(null);
+  const [open, setOpen] = useState(false);
+  if (!flows.length) return null;
+  const partners = new Set(rows.map((r) => r.CardCode)).size;
+  return (
+    <>
+      <Button ref={opener} icon="copy" endIcon="slim-arrow-down" design="Transparent"
+        disabled={disabled || partners !== 1}
+        tooltip={partners > 1 ? i18n.getText("ADMIN_COPY_ONE_PARTNER") : undefined}
+        accessibilityAttributes={{ hasPopup: "menu", expanded: open }}
+        onClick={() => setOpen(true)}>
+        {i18n.getText("ADMIN_COPY_TO")}
+      </Button>
+      {open ? (
+        <Menu open opener={opener.current} onClose={() => setOpen(false)}
+          onItemClick={(e) => void navigate({
+            to: "/$slug/b1/$entity",
+            params: { entity: (e.detail.item as HTMLElement).dataset.target! },
+            // The route keeps its search free-form (a list's filters live there), hence the cast.
+            search: { from: entity, docs: rows.map((r) => r.DocEntry).join(",") } as never,
+            hash: "copy",
+          })}>
+          {flows.map((f) => (
+            <MenuItem key={f.target} data-target={f.target} text={TARGET[f.target] ? i18n.getText(TARGET[f.target]!) : f.label} />
+          ))}
+        </Menu>
+      ) : null}
+    </>
+  );
+}
+
+/** Print, Copy to and (quotations) Close on the Object Page. */
+function DocumentActions({ entity, ctx, hasPage }: { entity: string; ctx: HeaderActionContext; hasPage: (entity: string) => boolean }) {
   if (ctx.isNew) return null;
   const docEntry = Number(ctx.formData.DocEntry);
   return (
@@ -86,17 +111,8 @@ function DocumentActions({ entity, ctx }: { entity: string; ctx: HeaderActionCon
       {ctx.constraints?.printable ? (
         <PrintActions entity={entity} docEntry={docEntry} disabled={ctx.isEditMode} />
       ) : null}
-      {(ctx.constraints?.flows ?? []).map((f) => {
-        const flow = FLOW_KEY[f.label];
-        return (
-          <Button key={f.target} icon="copy" design="Transparent" disabled={copy.isPending || ctx.isEditMode}
-            onClick={() => copy.mutate({ sourceEntity: entity, targetEntity: f.target, docEntry })}>
-            {flow ? i18n.getText(flow) : f.label}
-          </Button>
-        );
-      })}
+      <CopyTo entity={entity} flows={(ctx.constraints?.flows ?? []).filter((f) => hasPage(f.target))} rows={[ctx.formData]} disabled={ctx.isEditMode} />
       {entity === "Quotations" ? <CloseQuotations rows={[ctx.formData]} disabled={ctx.isEditMode} /> : null}
-      {copy.error ? <MessageStrip design="Negative" hideCloseButton>{copy.error.message}</MessageStrip> : null}
     </>
   );
 }
@@ -116,6 +132,8 @@ export function documentFeature(entity: string, o: {
   /** singular, lower case: "New <one>" */
   one: string;
   icon: string;
+  /** whether an entity has a page here: Copy to offers only those targets, its draft being one */
+  hasPage: (entity: string) => boolean;
 }): EntityFeature {
   return {
     entity,
@@ -156,7 +174,7 @@ export function documentFeature(entity: string, o: {
           { field: "DocumentStatus", type: "status", statusMapping: DOCUMENT_STATUS },
           { field: "DocTotal", type: "numeric", unitField: "DocCurrency" },
         ],
-        actions: (ctx) => <DocumentActions entity={entity} ctx={ctx} />,
+        actions: (ctx) => <DocumentActions entity={entity} ctx={ctx} hasPage={o.hasPage} />,
       },
       sections: [
         {

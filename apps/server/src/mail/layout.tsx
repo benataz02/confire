@@ -22,7 +22,8 @@ export const CONFIRE: Brand = { name: "Confire", logoUrl: `${authUrl}/confire-lo
 
 /** A client mail's language: its company's SAP language, `BusinessPartners.LanguageCode` →
  *  `UserLanguages.Code`, whose codes are SAP's built-in languages (3 English, 23 Spanish, 25 Spanish
- *  (LA), …). Only English and Spanish are written; any other language reads English, as in the SPAs.
+ *  (LA), …). Only English and Spanish are written; any other language reads English. The SPAs
+ *  also offer Basque, which has no built-in SAP code, so a Basque UI still sends this mail in English.
  *  ponytail: built-in codes only — a user-defined UserLanguages row (its own Code, pointing at 23
  *  through RelatedSystemLanguage) reads English; resolve it through UserLanguages if one shows up. */
 export type MailLang = "en" | "es";

@@ -29,7 +29,9 @@ export function PrintActions({ entity, docEntry, disabled }: { entity: string; d
   // A blob URL is a document-lifetime allocation; release it when the dialog closes or we unmount.
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url); }, [preview]);
 
-  if (!PRINTABLE_ENTITIES.has(entity) || !Number.isFinite(docEntry)) return null;
+  if (!PRINTABLE_ENTITIES.has(entity)) return null;
+  // No document (a list with no single row selected) still draws the button, disabled.
+  const none = !Number.isFinite(docEntry);
 
   const open = async () => {
     const res = await print.mutateAsync({ entity, docEntry });
@@ -42,7 +44,7 @@ export function PrintActions({ entity, docEntry, disabled }: { entity: string; d
 
   return (
     <>
-      <Button icon="pdf-attachment" design="Transparent" disabled={disabled || print.isPending} onClick={() => void open()}>
+      <Button icon="pdf-attachment" design="Transparent" disabled={disabled || none || print.isPending} onClick={() => void open()}>
         {i18n.getText("UI_PREVIEW")}
       </Button>
       {print.error ? <MessageStrip design="Negative" hideCloseButton>{print.error.message}</MessageStrip> : null}

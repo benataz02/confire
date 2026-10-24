@@ -1,5 +1,9 @@
+import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { RouterClient } from "@orpc/server";
+import { getI18nBundleData } from "@ui5/webcomponents-base/dist/asset-registries/i18n.js";
+import getLocale from "@ui5/webcomponents-base/dist/locale/getLocale.js";
+import { useI18nBundle } from "@ui5/webcomponents-react-base/hooks";
 import type { AppRouter } from "@confire/server/router";
 import { useUiSource } from "./source.tsx";
 import type { FilterField, FormField, ListColumn, Section } from "./types.ts";
@@ -13,15 +17,40 @@ export type EntityConstraints = Awaited<ReturnType<RouterClient<AppRouter>["enti
 export type FieldConstraint = EntityConstraints["fields"][string];
 export type Constraints = Record<string, FieldConstraint>;
 
+/**
+ * Labels in the reader's language. A field's label is the catalog's (`SAP_FIELD_<Name>`, parts/sap.*),
+ * else SAP's (a field neither names shows its property name); an enum option's is `SAP_ENUM_<member>`, else the server's.
+ * The catalog wins over SAP because SAP's labels are in the *agent's* SAP user's language, one for
+ * every reader — and a Service Layer before 10.0 FP2608 sends none at all (packages/b1 metadata.ts).
+ */
+export function localizeConstraints(c: EntityConstraints, text: (key: string) => string | undefined): EntityConstraints {
+  const fields = (fs: Constraints): Constraints => Object.fromEntries(Object.entries(fs).map(([name, f]) => [name, {
+    ...f,
+    Label: text(`SAP_FIELD_${name}`) ?? f.Label,
+    ...(f.Options ? { Options: f.Options.map((o) => ({ ...o, label: text(`SAP_ENUM_${o.value}`) ?? o.label })) } : {}),
+    ...(f.Fields ? { Fields: fields(f.Fields) } : {}),
+  }]));
+  return { ...c, fields: fields(c.fields) };
+}
+
 /** One entity's constraints. A day in the browser cache costs nothing: the server reads them from
  *  entity_meta in Postgres and only re-reads $metadata on an explicit refresh. */
 export function useFieldConstraints(entity: string | undefined) {
   const { orpc } = useUiSource();
+  // UI5's hook, not useUiI18n: i18n.ts drags in a .properties parser that needs `window` on import.
+  useI18nBundle("@confire/ui"); // re-renders on a language switch, which re-keys `select`
+  const language = getLocale().getLanguage();
+  // The bundle's data, not getText: getText warns on every miss, and most fields have no catalog entry.
+  const select = useCallback((c: EntityConstraints) => {
+    const texts = getI18nBundleData("@confire/ui");
+    return localizeConstraints(c, (key) => texts?.[key]);
+  }, [language]);
   return useQuery({
     ...orpc.entities.metadata.queryOptions({ input: { entity: entity ?? "" } }),
     enabled: !!entity,
     retry: false,
     staleTime: 24 * 60 * 60_000,
+    select,
   });
 }
 

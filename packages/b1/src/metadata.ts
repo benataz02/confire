@@ -119,8 +119,11 @@ function parseEnums(schema: Node): EnumMap {
   for (const e of many(schema.EnumType)) {
     const name = attr(e, "Name");
     if (!name) continue;
+    // A Service Layer before 10.0 FP2608 ignores `annotation=` (and `scope=`, answering the whole
+    // unannotated EDMX), so no member carries a ValidValue: its own Value stands in. Nothing reads
+    // `value` past here — the wire sends the member name (entity-meta.ts constraintOf).
     out[name] = many(e.Member)
-      .map((m) => ({ value: annotation(m, "SAPB1.ValidValue") ?? "", label: attr(m, "Name") ?? "" }))
+      .map((m) => ({ value: annotation(m, "SAPB1.ValidValue") ?? attr(m, "Value") ?? "", label: attr(m, "Name") ?? "" }))
       .filter((o) => o.value && o.label);
   }
   return out;

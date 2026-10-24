@@ -63,12 +63,14 @@ const ownKeys = (e: KeyboardEvent) => e.stopPropagation();
 /** The array position each grid row carries, so a cell and the selection name the line they mean. */
 const IDX = "#i";
 
-export function EditGrid({ title, columns, rows, onChange, readOnly, errors, toolbarActions }: {
+export function EditGrid({ title, columns, rows, onChange, readOnly, fixedRows, errors, toolbarActions }: {
   title?: string;
   columns: ListColumn[];
   rows: Row[];
   onChange: (rows: Row[]) => void;
   readOnly?: boolean;
+  /** Delete but no Add line */
+  fixedRows?: boolean;
   errors?: Record<string, string>;
   /** the caller's buttons, ahead of Add/Delete */
   toolbarActions?: (selection: Selection) => ReactNode;
@@ -126,7 +128,9 @@ export function EditGrid({ title, columns, rows, onChange, readOnly, errors, too
           {toolbarActions?.(sel)}
           {readOnly ? null : (
             <>
-              <Button icon="add" design="Transparent" onClick={() => onChange([...rows, {}])}>{i18n.getText("UI_ADD_LINE")}</Button>
+              {fixedRows ? null : (
+                <Button icon="add" design="Transparent" onClick={() => onChange([...rows, {}])}>{i18n.getText("UI_ADD_LINE")}</Button>
+              )}
               <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
                 onClick={() => {
                   const gone = new Set(sel.rows.map((r) => r[IDX] as number));

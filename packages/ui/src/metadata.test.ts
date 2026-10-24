@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { formatValue } from "./format.ts";
-import { isFieldEditable, resolveColumns, resolveField, resolveSections, udfColumns, udfSection, type Constraints } from "./metadata.ts";
+import { isFieldEditable, localizeConstraints, resolveColumns, resolveField, resolveSections, udfColumns, udfSection, type Constraints } from "./metadata.ts";
 import type { FormField } from "./types.ts";
 
 const C: Constraints = {
@@ -81,4 +81,23 @@ test("UDFs not declared become hidden columns and the auto section", () => {
   expect(s?.label).toBe("User-defined fields");
   expect(s?.fields?.map((f) => [f.key, f.label])).toEqual([["U_Note", "Note"]]);
   expect(udfSection(C, ["U_Note", "U_Prio"])).toBeNull();
+});
+
+test("localizeConstraints: the catalog beats SAP's label, down into lines", () => {
+  const texts: Record<string, string> = { SAP_FIELD_DocTotal: "Importe", SAP_ENUM_bost_Open: "Abierto" };
+  const c = localizeConstraints({
+    name: "Quotations", label: "Quotations", keys: ["DocEntry"], writable: false, printable: true, flows: [],
+    fields: {
+      DocTotal: { Type: "number", EdmType: "Edm.Double", Label: "Total" },
+      U_Prio: { Type: "string", EdmType: "Edm.String", Label: "Priority", Udf: true },
+      DocDueDate: { Type: "date", EdmType: "Edm.DateTime" },
+      DocumentStatus: { Type: "enum", EdmType: "SAPB1.BoStatus", Options: [{ value: "bost_Open", label: "Open" }, { value: "bost_Close", label: "Close" }] },
+      DocumentLines: { Type: "collection", EdmType: "SAPB1.DocumentLine", Fields: { U_CF_Key: { Type: "string", EdmType: "Edm.String" } } },
+    },
+  }, (k) => texts[k]);
+  expect(c.fields.DocTotal?.Label).toBe("Importe");
+  expect(c.fields.U_Prio?.Label).toBe("Priority");
+  expect(c.fields.DocDueDate?.Label).toBeUndefined();
+  expect(c.fields.DocumentStatus?.Options).toEqual([{ value: "bost_Open", label: "Abierto" }, { value: "bost_Close", label: "Close" }]);
+  expect(c.fields.DocumentLines?.Fields?.U_CF_Key?.Label).toBeUndefined();
 });

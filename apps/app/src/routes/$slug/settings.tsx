@@ -6,6 +6,7 @@ import {
   Tab, TabContainer, Text,
 } from "@ui5/webcomponents-react";
 import { NotificationSettings } from "@confire/ui/notifications/Notifications.tsx";
+import { formatLocale } from "@confire/ui/format.ts";
 import { useI18n } from "../../i18n.ts";
 import { notifications, orpc, useIsAdmin } from "../../orpc.ts";
 import { PairingCode } from "../../components/PairingCode.tsx";
@@ -104,7 +105,7 @@ function AgentCard() {
                   <Text>{s.services?.print.length ? s.services.print.join(", ") : none}</Text>
                 </FormItem>
                 <FormItem labelContent={<Label>{i18n.getText("ADMIN_AGENT_LAST_OK")}</Label>}>
-                  <Text>{s.lastOkAt ? s.lastOkAt.toLocaleString() : none}</Text>
+                  <Text>{s.lastOkAt ? s.lastOkAt.toLocaleString(formatLocale()) : none}</Text>
                 </FormItem>
               </Form>
             </>

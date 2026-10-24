@@ -7,6 +7,7 @@ import "@ui5/webcomponents-fiori/dist/illustrations/NoActivities.js";
 import { addCustomCSS } from "@ui5/webcomponents-base/dist/Theming.js";
 import { useUiI18n } from "../i18n.ts";
 import { money } from "../money.ts";
+import { formatLocale } from "../format.ts";
 import { documentStatusText } from "../documentStatus.ts";
 import { PrintActions } from "../PrintActions.tsx";
 import { FILE_MAX_MB, fileSize, fileUrl } from "../files.ts";
@@ -65,7 +66,7 @@ const show = (v: unknown, yes: string, no: string): string =>
   : typeof v === "boolean" ? (v ? yes : no)
   : String(v);
 
-const when = (d: Date) => d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+const when = (d: Date) => d.toLocaleString(formatLocale(), { dateStyle: "medium", timeStyle: "short" });
 
 // The reader's own items (`data-mine`) read like a chat's: text on the right and the bubble's point
 // with it, the icons staying down one line. TimelineItem has no side and no ::part, so this goes into
@@ -218,7 +219,7 @@ export function ProjectTimeline({
               return (
                 <TimelineItem key={`${x.d.entity}:${x.d.docEntry}`} icon={meta?.icon ?? "document"} style={tipVars(docName)}
                   titleText={i18n.getText(x.superseded ? "UI_DOC_TITLE_SUPERSEDED" : "UI_DOC_TITLE", docName, String(x.d.docNum))}
-                  subtitleText={x.d.docDate ? new Date(x.d.docDate).toLocaleDateString() : undefined}>
+                  subtitleText={x.d.docDate ? new Date(x.d.docDate).toLocaleDateString(formatLocale()) : undefined}>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
                     <Text>{money(x.d.docTotal, currency)}</Text>
                     <ObjectStatus state={x.d.docStatus === "bost_Open" ? "Information" : "None"}>

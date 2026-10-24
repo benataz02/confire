@@ -3,7 +3,7 @@ import {
   Bar, BusyIndicator, Button, Label, MessageStrip, NotificationList, NotificationListItem, ResponsivePopover, Switch,
   Table, TableCell, TableGroupRow, TableHeaderCell, TableHeaderRow, TableRow, Text, Title,
 } from "@ui5/webcomponents-react";
-import getLocale from "@ui5/webcomponents-base/dist/locale/getLocale.js";
+import { formatLocale } from "../format.ts";
 import { useUiI18n } from "../i18n.ts";
 import { toast } from "../toast.ts";
 import type { NotificationItem, NotificationSetting, NotificationsApi, Preference } from "./api.ts";
@@ -43,7 +43,7 @@ const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
 /** "5 minutes ago", in the page's UI5 language. */
 function ago(d: Date): string {
   const s = (new Date(d).getTime() - Date.now()) / 1000;
-  const f = new Intl.RelativeTimeFormat(getLocale().getLanguage(), { numeric: "auto" });
+  const f = new Intl.RelativeTimeFormat(formatLocale(), { numeric: "auto" });
   const unit = UNITS.find(([, n]) => Math.abs(s) >= n);
   return unit ? f.format(Math.round(s / unit[1]), unit[0]) : f.format(0, "minute");
 }

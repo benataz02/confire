@@ -6,8 +6,12 @@ import {
 } from "@confire/b1";
 import type { EntityProfile } from "./entity-profiles.ts";
 
-// B1's $metadata, cached. The full EDMX is ~1.7 MB; both reads here use the scoped query the
-// Service Layer already supports, so a schema costs one entity's worth of XML, not the lot.
+// B1's $metadata, cached. The full EDMX is ~1.7 MB; both reads here use the scoped query, so a
+// schema costs one entity's worth of XML, not the lot — on 10.0 FP2608 and later. An older Service
+// Layer ignores every $metadata option and answers the whole unannotated document (verified
+// 2026-10-24): the parse still finds the entity, minus labels (the browser's catalog names fields).
+// ponytail: an old SL pays ~1.5 MB per entity's first read and per day's entity list; keep one
+// full document per tenant if that read shows up.
 
 const LIST_TTL_MS = 24 * 60 * 60_000;
 
@@ -19,7 +23,7 @@ const LIST_TTL_MS = 24 * 60 * 60_000;
  *  a boolean. */
 //  Must be a past timestamp: `Math.min` with process start so a future one can only ever be a
 //  no-op, never a re-read of $metadata on every single request.
-const PARSER_EPOCH = Math.min(Date.parse("2026-08-28T07:55:00Z"), Date.now());
+const PARSER_EPOCH = Math.min(Date.parse("2026-10-24T14:00:00Z"), Date.now());
 
 /** The entity list is small and shared by every browse page — a per-process cache is enough,
  *  and it self-heals on restart. The per-entity schemas go to Postgres because there are ~420

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, FlexBox, Link, Text } from "@ui5/webcomponents-react";
 import { authUrl } from "@confire/ui/host.ts";
+import { formatLocale } from "@confire/ui/format.ts";
 import { useI18n } from "../i18n.ts";
 
 // Install day in Confire (spec 2026-10-21 §3): the download — a plain link, short enough to type on
@@ -40,7 +41,7 @@ export function PairingCode({ code, onNewCode, busy }: {
       </FlexBox>
       {code ? (
         <Text>{expired ? i18n.getText("ADMIN_PAIR_EXPIRED")
-          : i18n.getText("ADMIN_PAIR_VALID", code.expiresAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}</Text>
+          : i18n.getText("ADMIN_PAIR_VALID", code.expiresAt.toLocaleTimeString(formatLocale(), { hour: "2-digit", minute: "2-digit" }))}</Text>
       ) : null}
     </FlexBox>
   );

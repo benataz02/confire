@@ -1,5 +1,17 @@
+import getLocale from "@ui5/webcomponents-base/dist/locale/getLocale.js";
 import { decodeBool } from "@confire/b1";
 import type { FieldType, Option } from "./types.ts";
+
+/** The locale every number and date is drawn in: the UI language — UI5's, so the user menu's choice
+ *  or `?sap-ui-language`, else the browser's — the same one UI5's own date pickers use. The browser's
+ *  region stays when its language agrees, so English on an en-GB browser still reads 24/10/2026.
+ *  Never the browser locale alone (`undefined`): that drew "1,234.50" beside Spanish texts and
+ *  ignored a language switch. Display only — B1 and the API always get ISO dates and plain numbers. */
+export function formatLocale(): string {
+  const ui = getLocale().toString();
+  const browser = typeof navigator === "undefined" ? undefined : navigator.languages?.[0] ?? navigator.language;
+  return browser && browser.split("-")[0] === ui.split("-")[0] ? browser : ui;
+}
 
 // Beas `Uc`, the column type table: how a value of each type reads in a cell, a facet, a display
 // field and the .xlsx export.
@@ -41,10 +53,10 @@ export function formatValue(v: unknown, type?: FieldType, options?: Option[], in
       return decodeBool(v) ? "✓" : "–";
     case "date": {
       const d = parseIsoDate(v);
-      return d ? d.toLocaleDateString() : String(v);
+      return d ? d.toLocaleDateString(formatLocale()) : String(v);
     }
     case "number":
-      return typeof v === "number" && !integer ? v.toLocaleString(undefined, { maximumFractionDigits: 6 }) : String(v);
+      return typeof v === "number" && !integer ? v.toLocaleString(formatLocale(), { maximumFractionDigits: 6 }) : String(v);
     default:
       return typeof v === "object" ? JSON.stringify(v) : String(v);
   }

@@ -11,6 +11,7 @@ import { ProjectTimeline } from "@confire/ui/timeline/ProjectTimeline.tsx";
 import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
+import { formatLocale } from "@confire/ui/format.ts";
 import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
 import { money } from "@confire/ui/money.ts";
 import { uploadFile } from "@confire/ui/files.ts";
@@ -289,7 +290,7 @@ function Prices({ prices, quotation, quotationError, quotationLoading, currency,
     if (quotationError) return <MessageStrip design="Critical" hideCloseButton>{i18n.getText("PORTAL_QUOTE_UNAVAILABLE", quotationError.message)}</MessageStrip>;
     if (!quotation) return null;
     const cur = quotation.currency || currency;
-    const when = new Date(quotation.docDate).toLocaleDateString();
+    const when = new Date(quotation.docDate).toLocaleDateString(formatLocale());
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", maxWidth: "60rem" }}>
         {prices.declined ? (
@@ -297,7 +298,7 @@ function Prices({ prices, quotation, quotationError, quotationLoading, currency,
         ) : null}
         <Text>
           {i18n.getText("PORTAL_QUOTE_OF", String(quotation.docNum), when)}
-          {quotation.validUntil ? i18n.getText("PORTAL_QUOTE_VALID", new Date(quotation.validUntil).toLocaleDateString()) : ""}
+          {quotation.validUntil ? i18n.getText("PORTAL_QUOTE_VALID", new Date(quotation.validUntil).toLocaleDateString(formatLocale())) : ""}
         </Text>
         <Table headerRow={
           <TableHeaderRow>
@@ -310,7 +311,7 @@ function Prices({ prices, quotation, quotationError, quotationLoading, currency,
           {quotation.lines.map((l, i) => (
             <TableRow key={i}>
               <TableCell><Text>{l.description}</Text></TableCell>
-              <TableCell horizontalAlign="End"><Text>{l.quantity.toLocaleString()}</Text></TableCell>
+              <TableCell horizontalAlign="End"><Text>{l.quantity.toLocaleString(formatLocale())}</Text></TableCell>
               <TableCell horizontalAlign="End"><Text>{money(l.unitPrice, cur)}</Text></TableCell>
               <TableCell horizontalAlign="End"><Text>{money(l.lineTotal, cur)}</Text></TableCell>
             </TableRow>
@@ -327,7 +328,7 @@ function Prices({ prices, quotation, quotationError, quotationLoading, currency,
   if (prices.kind === "request") return null;
   const label = prices.kind === "live"
     ? i18n.getText("PORTAL_PRICE_LIVE")
-    : i18n.getText("PORTAL_PRICE_FROZEN", new Date(prices.at).toLocaleDateString());
+    : i18n.getText("PORTAL_PRICE_FROZEN", new Date(prices.at).toLocaleDateString(formatLocale()));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", maxWidth: "40rem" }}>
       <MessageStrip design="Information" hideCloseButton>{label}</MessageStrip>
@@ -341,7 +342,7 @@ function Prices({ prices, quotation, quotationError, quotationLoading, currency,
         }>
           {prices.rows.map((r) => (
             <TableRow key={r.batchQty}>
-              <TableCell horizontalAlign="End"><Text>{r.batchQty.toLocaleString()}</Text></TableCell>
+              <TableCell horizontalAlign="End"><Text>{r.batchQty.toLocaleString(formatLocale())}</Text></TableCell>
               <TableCell horizontalAlign="End"><Text>{priced(money(r.unitPrice, currency), r.from)}</Text></TableCell>
               <TableCell horizontalAlign="End"><Text>{priced(money(r.total, currency), r.from)}</Text></TableCell>
             </TableRow>

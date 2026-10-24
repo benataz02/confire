@@ -77,9 +77,12 @@ export function messageBundle(name: string, files: Files) {
 export const useUiI18n = hookFor("@confire/ui");
 
 // Each language in its own name, so a user finds theirs whatever the page is showing.
+// `eu` is not one of UI5's shipped languages, so its own components and CLDR stay English.
+// These bundles still load: a locale falls back only when no loader is registered for it.
 export const LANGUAGES = [
   { id: "en", label: "English" },
   { id: "es", label: "Español" },
+  { id: "eu", label: "Euskara" },
 ] as const;
 
 /** The user menu's language, remembered per browser like theme and density (appearance.ts). */

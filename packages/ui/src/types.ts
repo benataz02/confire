@@ -165,7 +165,9 @@ export type Section = {
   fields?: FormField[];
   groups?: Group[];
   subsections?: Subsection[];
-  table?: { key: string; columns: ListColumn[] };
+  /** `fixedRows`: lines may be edited and deleted but not added (a copy's draft, whose every line
+   *  names the source line it copies) */
+  table?: { key: string; columns: ListColumn[]; fixedRows?: boolean };
 };
 
 export type Facet = {
