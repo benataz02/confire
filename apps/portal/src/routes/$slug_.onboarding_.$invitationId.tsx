@@ -3,23 +3,23 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar, Link, MessageStrip, ShellBar, ShellBarBranding } from "@ui5/webcomponents-react";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
 import { ObjectPageSkeleton } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
-import { authClient } from "../../auth-client.ts";
-import { client, meQuery, orpc } from "../../orpc.ts";
-import { PortalAuthLayout } from "../../components/AuthChrome.tsx";
+import { authClient } from "../auth-client.ts";
+import { client, meQuery, orpc } from "../orpc.ts";
+import { PortalAuthLayout } from "../components/AuthChrome.tsx";
 import { authUrl, hardRedirect } from "@confire/ui/host.ts";
-import { invitationGuard } from "../../lib/invitation.ts";
-import { useI18n } from "../../i18n.ts";
-import { ONBOARDING_HEADER, ONBOARDING_LOCKED, onboardingSections } from "../../features/onboarding.ts";
+import { invitationGuard } from "../lib/guards.ts";
+import { useI18n } from "../i18n.ts";
+import { ONBOARDING_HEADER, ONBOARDING_LOCKED, onboardingSections } from "../features/onboarding.ts";
 
 // The new-client form (spec §5.3): the BP-create ObjectPage, unchanged, over the section tree in
 // features/onboarding.ts and the constraints `onboarding.formSchema` builds for this invitation. Not
-// under `_authed` (no seat yet), so no side nav: the supplier's ShellBar and the form. Submit creates
+// nested under `$slug` (no seat yet), so no side nav: the supplier's ShellBar and the form. Submit creates
 // the lead in SAP and the seat; SAP's refusal comes back as the page's save error.
-export const Route = createFileRoute("/$slug/onboarding_/$invitationId")({
+export const Route = createFileRoute("/$slug_/onboarding_/$invitationId")({
   beforeLoad: async (ctx) => {
     const r = await invitationGuard(ctx);
     // Already in a company here: this form can only be refused, so home instead.
-    if (r && "me" in r && r.me.company) throw redirect({ to: "/$slug", params: ctx.params });
+    if (r.me.company) throw redirect({ to: "/$slug", params: ctx.params });
     return r;
   },
   component: OnboardingForm,
@@ -98,7 +98,7 @@ function OnboardingForm() {
             }
             onSave={async (diff) => {
               await client.onboarding.submit({ id: invitationId, form: diff });
-              // Reset, not invalidate: nothing observes `me` here, and _authed reads the cache.
+              // Reset, not invalidate: nothing observes `me` here, and $slug reads the cache.
               await qc.resetQueries({ queryKey: meQuery.queryKey });
               void navigate({ to: "/$slug" });
             }}

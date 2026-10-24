@@ -160,7 +160,7 @@ export function AppShell() {
                   onClick={() => router.history.back()}
                 />
                 <Button
-                  icon="menu"
+                  icon="menu2"
                   tooltip={i18n.getText("SHELL_MENU")}
                   onClick={toggleNav}
                 />

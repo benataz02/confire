@@ -8,6 +8,7 @@ import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
 import { useListView } from "@confire/ui/useListView.ts";
 import { confirm } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
+import { InviteNewClientDialog } from "../../../components/portal/BpPortal.tsx";
 import type { ListFeature, ListQuery, Row } from "@confire/ui/types.ts";
 
 type TextFn = (key: string, ...args: Array<string | number>) => string;
@@ -53,6 +54,7 @@ function Invitations() {
   const feature = useMemo(() => invitationsFeature(t), [i18n]);
   const qc = useQueryClient();
   const [query, setQuery] = useState<ListQuery | null>(null);
+  const [inviting, setInviting] = useState(false);
   const data = useListView(
     {
       ...orpc.portalInvitations.rows.infiniteOptions({
@@ -91,19 +93,28 @@ function Invitations() {
   }, [cancel, i18n]);
 
   return (
-    <ListReport
-      feature={feature}
-      data={data}
-      onQuery={setQuery}
-      keyOf={(r) => String(r.id)}
-      error={cancel.error}
-      toolbarActions={({ rows: sel, clear }) => (
-        <Button design="Transparent"
-          disabled={cancel.isPending || !sel.some((r) => r.state === "pending" || r.state === "expired")}
-          onClick={() => void cancelSelected(sel, clear)}>
-          {t("ADMIN_CANCEL_INVITE")}
-        </Button>
-      )}
-    />
+    <>
+      <ListReport
+        feature={feature}
+        data={data}
+        onQuery={setQuery}
+        keyOf={(r) => String(r.id)}
+        error={cancel.error}
+        toolbarActions={({ rows: sel, clear }) => (
+          <>
+            {/* A new client, no CardCode yet (spec §5.1); an existing BP is invited from its Object Page. */}
+            <Button design="Transparent" icon="paper-plane" onClick={() => setInviting(true)}>
+              {t("ADMIN_INVITE_NEW_CLIENT")}
+            </Button>
+            <Button design="Transparent"
+              disabled={cancel.isPending || !sel.some((r) => r.state === "pending" || r.state === "expired")}
+              onClick={() => void cancelSelected(sel, clear)}>
+              {t("ADMIN_CANCEL_INVITE")}
+            </Button>
+          </>
+        )}
+      />
+      {inviting ? <InviteNewClientDialog onClose={() => setInviting(false)} /> : null}
+    </>
   );
 }

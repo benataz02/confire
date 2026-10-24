@@ -1,4 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { ORPCError } from "@orpc/client";
 import { meQuery } from "../orpc.ts";
 import { authUrl, hardRedirect, isSlug, loginUrl } from "@confire/ui/host.ts";
 import { AppShell } from "../components/AppShell.tsx";
@@ -18,7 +19,7 @@ export const Route = createFileRoute("/$slug")({
     const me = await context.queryClient
       .ensureQueryData({ ...meQuery, retry: false })
       .catch((e: unknown) => {
-        const code = (e as { code?: string }).code;
+        const code = e instanceof ORPCError ? e.code : undefined;
         // Auth lives on the sign-in host. FORBIDDEN means this workspace isn't theirs (a customer
         // of it, say), so the dispatcher sends them to a place that is — it only ever picks a
         // workspace they are a member of, which is what keeps this from ping-ponging. Anything else

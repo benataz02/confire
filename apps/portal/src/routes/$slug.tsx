@@ -1,11 +1,16 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { authUrl, hardRedirect, isSlug } from "@confire/ui/host.ts";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { portalMe } from "../lib/guards.ts";
+import { PortalShell } from "../components/PortalShell.tsx";
 
-// One supplier's portal, `/<slug>/…`: every portal page is one supplier's. A link carries `slug` over
-// from the current params and never changes it: another supplier is always a hardRedirect.
+// One supplier's portal, `/<slug>/…`, and the shell for every page that needs a seat there. The pages
+// before a seat (an invitation, onboarding) are `$slug_.*`: same URLs, not nested, so neither this
+// guard nor the shell runs for them. A link carries `slug` over from the current params and never
+// changes it: another supplier is always a hardRedirect.
 export const Route = createFileRoute("/$slug")({
-  beforeLoad: ({ params }) => {
-    // A reserved name is never a supplier (and the oRPC link sends no x-tenant for one).
-    if (!isSlug(params.slug)) return hardRedirect(authUrl("/login"));
+  beforeLoad: async ({ context, params }) => {
+    const me = await portalMe(context.queryClient, params.slug);
+    // No seat here: auto-join, or the invite-only page.
+    if (!me.company) throw redirect({ to: "/$slug/onboarding", params });
   },
+  component: PortalShell,
 });

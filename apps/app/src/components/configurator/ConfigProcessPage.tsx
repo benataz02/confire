@@ -72,12 +72,14 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const modelId = q.data?.project.modelId;
   const lookupsKey = orpc.configs.lookups.queryKey({ input: { modelId: modelId! } });
   const lookups = useQuery({
-    ...orpc.configs.lookups.queryOptions({ input: { modelId: modelId!, entries: q.data?.project.entries ?? {} } }),
-    // Entries only enrich the first fetch (the stored values past the canonical page); in the key,
-    // every autosave would remount every control and retrigger UI5 onChange → another calculate.
-    // The id is in it: that enrichment is this configuration's, so another configuration of the
-    // same model must not be served it. Sync invalidates the model's prefix.
-    queryKey: [...lookupsKey, id],
+    ...orpc.configs.lookups.queryOptions({
+      input: { modelId: modelId!, entries: q.data?.project.entries ?? {} },
+      // Entries only enrich the first fetch (the stored values past the canonical page); in the key,
+      // every autosave would remount every control and retrigger UI5 onChange → another calculate.
+      // The id is in it: that enrichment is this configuration's, so another configuration of the
+      // same model must not be served it. Sync invalidates the model's prefix.
+      queryKey: [...lookupsKey, id],
+    }),
     enabled: !!modelId,
     staleTime: 5 * 60_000, // rows move only when a sync refills them; Sync data invalidates this
     retry: false, // a failure is a page message plus its own Retry button, not a spinner

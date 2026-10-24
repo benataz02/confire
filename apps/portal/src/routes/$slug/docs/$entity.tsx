@@ -7,14 +7,14 @@ import { useFieldConstraints } from "@confire/ui/metadata.ts";
 import { useListView } from "@confire/ui/useListView.ts";
 import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import type { ListQuery, Row } from "@confire/ui/types.ts";
-import { orpc } from "../../../../orpc.ts";
-import { docFeature, isDocEntity, type DocEntity } from "../../../../features/documents.ts";
-import { useI18n } from "../../../../i18n.ts";
+import { orpc } from "../../../orpc.ts";
+import { docFeature, isDocEntity, type DocEntity } from "../../../features/documents.ts";
+import { useI18n } from "../../../i18n.ts";
 
 // Documents ▸ <entity> (spec §9, §13.1): the company's own SAP documents, columns from the tenant's
 // field list. The server fences every page to the company; there is no customer column to filter.
 
-export const Route = createFileRoute("/$slug/_authed/docs/$entity")({
+export const Route = createFileRoute("/$slug/docs/$entity")({
   beforeLoad: ({ params }) => {
     if (!isDocEntity(params.entity)) throw redirect({ to: "/$slug", params });
   },

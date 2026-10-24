@@ -59,7 +59,13 @@ confire-agent (Go, a Windows service on the customer's SAP server) ── SAP B1
 
 The customer portal is a second process from the same image (compose service `portal`, CMD
 `start:portal`) so external traffic never shares an event loop with staff. Both are `serve.ts`:
-Better Auth on `/api/auth`, oRPC on `/rpc` with the 2 MB body cap, the SPA on the rest. The design
+Better Auth on `/api/auth`, oRPC on `/rpc` with the 2 MB body cap, the SPA on the rest. The same
+router is also plain HTTP under **`/api/openapi`** (`OpenAPIHandler`, router-derived paths:
+`configs.calculate` is `POST /api/openapi/configs/calculate`), with its spec at `/api/openapi/spec.json`
+and a Scalar page at `/api/openapi` — both for signed-in users only, auth unchanged (cookie +
+`x-tenant`); it is for people, not a public API (no keys). oRPC is **v2 beta, pinned exactly**
+(every `@orpc/*` on one `2.0.0-beta.N`, bumped together): v2 has no `ORPCError.status` (`errorStatus`
+in `serve.ts` maps a code), and pretrained oRPC knowledge is v1 — the `orpc*` skills carry v2. The design
 record is `docs/superpowers/specs/2026-10-07-portal-redesign.md`; P0–P6 are built (see its §15).
 
 The agent (`apps/agent`, Go; `docs/superpowers/specs/2026-10-21-agent-autosetup-design.md`) is one
@@ -90,7 +96,8 @@ read. Portal clients are deliberately not fenced by company (spec §6.2).
 
 Two fixed hosts, no tenant subdomains (`docs/superpowers/specs/2026-10-19-path-tenancy-design.md`): the
 staff app on `app.<DOMAIN>/<slug>/…`, the portal on `portal.<DOMAIN>/<slug>/…`. In each SPA the slug is
-the **`$slug` route param** (`routes/$slug.tsx`: the tenant's guard, and the staff app's shell; the bare
+the **`$slug` route param** (`routes/$slug.tsx`: the tenant's guard and the app's shell, in both SPAs — the portal's
+pages before a seat are `$slug_.*`, same URLs but not nested, guarded by `lib/guards.ts`; the bare
 origin is `routes/index.tsx`, the dispatcher's). A link never names or changes it: typed navigation is
 `useNavigate({ from: "/$slug" })` + `to: "/$slug/…"`, which carries the param over, and the shells'
 declared routes (`/b1/Items`) go through `useEntityNav` (`@confire/ui/EntityLink.tsx`), which puts them

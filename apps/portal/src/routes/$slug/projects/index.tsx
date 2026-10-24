@@ -6,14 +6,14 @@ import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
 import { useListView } from "@confire/ui/useListView.ts";
 import { PROJECT_STATUS, PROJECT_STATUS_OPTIONS } from "@confire/ui/timeline/projectStatus.ts";
 import type { ListFeature, ListQuery, Row } from "@confire/ui/types.ts";
-import { PROJECT_STATUS_KEY, type TextFn } from "../../../../features/labels.ts";
-import { useI18n } from "../../../../i18n.ts";
-import { meQuery, orpc } from "../../../../orpc.ts";
+import { PROJECT_STATUS_KEY, type TextFn } from "../../../features/labels.ts";
+import { useI18n } from "../../../i18n.ts";
+import { meQuery, orpc } from "../../../orpc.ts";
 
 // Projects (spec §9): the company's projects, one configuration each, with personal views on top of
 // the declared ones. Buyers and owners start new ones from the catalog.
 
-export const Route = createFileRoute("/$slug/_authed/projects/")({ component: Projects });
+export const Route = createFileRoute("/$slug/projects/")({ component: Projects });
 
 const projectsFeature = (t: TextFn): ListFeature => ({
   tableId: "portal:projects",

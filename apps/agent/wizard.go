@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -27,14 +28,27 @@ type wizard struct {
 	out    io.Writer
 	server string
 	path   string
+	tty    bool   // stdout is a console: the spinner draws
+	color  bool   // …that renders ANSI styles
+	spin   []rune // the spinner's frames
 }
 
 // printable is what Confire may print (entity-profiles.ts PRINTABLE), in the order asked.
 var printable = []string{"Quotations", "Orders", "DeliveryNotes", "Invoices"}
 
 func newWizard(path, server string) *wizard {
-	initConsole()
-	return &wizard{in: bufio.NewReader(os.Stdin), out: os.Stdout, server: server, path: path}
+	vt := initConsole()
+	tty := term.IsTerminal(int(os.Stdout.Fd()))
+	w := &wizard{
+		in: bufio.NewReader(os.Stdin), out: os.Stdout, server: server, path: path,
+		tty: tty, color: vt && tty && os.Getenv("NO_COLOR") == "", spin: []rune(`|/-\`),
+	}
+	// Braille spins smoother, but conhost's Consolas has no braille glyphs: only where fonts fall
+	// back (Windows Terminal, any Unix terminal).
+	if w.color && (runtime.GOOS != "windows" || os.Getenv("WT_SESSION") != "") {
+		w.spin = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+	}
+	return w
 }
 
 func setup(path, server string) error {
@@ -42,7 +56,7 @@ func setup(path, server string) error {
 		return err
 	}
 	w := newWizard(path, server)
-	fmt.Fprintf(w.out, "Confire agent setup (%s)\n\n", version)
+	fmt.Fprintf(w.out, "\n%s  %s %s\n\n", w.sgr("1;30;46", " CONFIRE "), w.bold("agent setup"), w.dim(version))
 	if cfg, err := loadConfig(path); err == nil && isInstalled(path) {
 		return w.modify(cfg)
 	}
@@ -68,7 +82,26 @@ func uninstallCommand(path string) error {
 
 // ---- Prompts -----------------------------------------------------------------------------------
 
+// sgr wraps s in an ANSI style, or leaves it plain: on a pipe, under NO_COLOR, or on a console
+// without VT processing.
+func (w *wizard) sgr(code, s string) string {
+	if !w.color || s == "" {
+		return s
+	}
+	return "\x1b[" + code + "m" + s + "\x1b[0m"
+}
+
+func (w *wizard) bold(s string) string    { return w.sgr("1", s) }
+func (w *wizard) dim(s string) string     { return w.sgr("2", s) }
+func (w *wizard) good(s string) string    { return w.sgr("1;32", "✓") + " " + s }
+func (w *wizard) bad(s string) string     { return w.sgr("1;31", "✗ "+s) }
+func (w *wizard) heading(s string) string { return w.sgr("1;36", "●") + " " + w.bold(s) }
+
+// line reads one answer, dropping first what was typed before the question was on screen: Enter
+// pressed while a slow SAP login was still testing stayed queued and answered the next questions
+// with their defaults — Beas and printing went by as "N" without being asked.
 func (w *wizard) line() string {
+	w.flush()
 	s, err := w.in.ReadString('\n')
 	if err != nil && s == "" {
 		fmt.Fprintln(os.Stderr, "\nSetup needs answers, and its input closed.")
@@ -77,9 +110,16 @@ func (w *wizard) line() string {
 	return strings.TrimRight(s, "\r\n")
 }
 
+// flush drops type-ahead on a console. Piped answers (tests, scripts) are left alone.
+func (w *wizard) flush() {
+	if flushConsoleInput() {
+		w.in.Discard(w.in.Buffered())
+	}
+}
+
 func (w *wizard) ask(label, def string) string {
 	if def != "" {
-		fmt.Fprintf(w.out, "  %s [%s]: ", label, def)
+		fmt.Fprintf(w.out, "  %s %s: ", label, w.dim("["+def+"]"))
 	} else {
 		fmt.Fprintf(w.out, "  %s: ", label)
 	}
@@ -113,7 +153,7 @@ func (w *wizard) yes(question string, def bool) bool {
 	if def {
 		hint = "Y/n"
 	}
-	fmt.Fprintf(w.out, "%s [%s]: ", question, hint)
+	fmt.Fprintf(w.out, "%s %s: ", w.bold(question), w.dim("["+hint+"]"))
 	switch strings.ToLower(strings.TrimSpace(w.line())) {
 	case "y", "yes", "s", "si", "sí":
 		return true
@@ -133,9 +173,10 @@ func (w *wizard) password(label, current, fallback string) string {
 	case fallback != "":
 		hint = " [same as SAP B1]"
 	}
-	fmt.Fprintf(w.out, "  %s%s: ", label, hint)
+	fmt.Fprintf(w.out, "  %s%s: ", label, w.dim(hint))
 	var v string
 	if fd := int(os.Stdin.Fd()); term.IsTerminal(fd) {
+		w.flush()
 		b, _ := term.ReadPassword(fd)
 		fmt.Fprintln(w.out)
 		v = string(b)
@@ -151,13 +192,39 @@ func (w *wizard) password(label, current, fallback string) string {
 	return fallback
 }
 
+// busy runs fn behind a spinner and its seconds, erased when fn returns. A SAP login or the
+// server's tunnel setup takes long enough that a still window reads as hung — and the Enter
+// pressed to wake it answered the next questions. Not on a pipe, where backspaces are just noise.
+func (w *wizard) busy(fn func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	if !w.tty {
+		return <-done
+	}
+	width := 0 // columns drawn: what a backspace counts, unlike bytes or escape codes
+	start := time.Now()
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for i := 0; ; i++ {
+		select {
+		case err := <-done:
+			fmt.Fprint(w.out, strings.Repeat("\b", width)+strings.Repeat(" ", width)+strings.Repeat("\b", width))
+			return err
+		case <-tick.C:
+			secs := fmt.Sprintf(" %ds", int(time.Since(start).Seconds()))
+			fmt.Fprint(w.out, strings.Repeat("\b", width)+w.sgr("36", string(w.spin[i%len(w.spin)]))+w.dim(secs))
+			width = 1 + len(secs)
+		}
+	}
+}
+
 func (w *wizard) test(ok string, fn func() error) bool {
-	fmt.Fprint(w.out, "  Testing… ")
-	if err := fn(); err != nil {
-		fmt.Fprintf(w.out, "✗ %v\n\n", err)
+	fmt.Fprint(w.out, w.dim("  Testing… "))
+	if err := w.busy(fn); err != nil {
+		fmt.Fprintf(w.out, "%s\n\n", w.bad(err.Error()))
 		return false
 	}
-	fmt.Fprintf(w.out, "✓ %s\n\n", ok)
+	fmt.Fprintf(w.out, "%s\n\n", w.good(ok))
 	return true
 }
 
@@ -205,7 +272,7 @@ func testPrint(cfg *Config) error {
 // b1 asks SAP B1's section until a login works. The company is asked here only on a first install:
 // afterwards it changes through Change company, which re-tests everything.
 func (w *wizard) b1(cfg *Config, askCompany bool) {
-	fmt.Fprintln(w.out, "SAP B1 Service Layer")
+	fmt.Fprintln(w.out, w.heading("SAP B1 Service Layer"))
 	next := *cfg
 	for {
 		next.B1.URL = w.must("URL", or(next.B1.URL, "https://localhost:50000"))
@@ -222,7 +289,7 @@ func (w *wizard) b1(cfg *Config, askCompany bool) {
 }
 
 func (w *wizard) beas(cfg *Config) *Service {
-	fmt.Fprintln(w.out, "Beas")
+	fmt.Fprintln(w.out, w.heading("Beas"))
 	next := *cfg
 	if next.Beas == nil {
 		next.Beas = &Service{Auth: "session"}
@@ -243,7 +310,7 @@ func (w *wizard) beas(cfg *Config) *Service {
 }
 
 func (w *wizard) print(cfg *Config) *Print {
-	fmt.Fprintln(w.out, "Printing (SAP API Gateway)")
+	fmt.Fprintln(w.out, w.heading("Printing (SAP API Gateway)"))
 	next := *cfg
 	p := &Print{Layouts: map[string]string{}}
 	if cfg.Print != nil {
@@ -315,18 +382,20 @@ func redeem(server, code string, cfg *Config) (*pairResult, error) {
 
 func (w *wizard) pair(cfg *Config) {
 	for {
-		fmt.Fprint(w.out, "Pairing code from Confire: ")
+		fmt.Fprintf(w.out, "%s: ", w.heading("Pairing code from Confire"))
 		code := strings.TrimSpace(w.line())
 		if code == "" {
 			continue
 		}
-		res, err := redeem(w.server, code, cfg)
+		fmt.Fprint(w.out, w.dim("  Pairing… "))
+		var res *pairResult
+		err := w.busy(func() (err error) { res, err = redeem(w.server, code, cfg); return })
 		if err != nil {
-			fmt.Fprintf(w.out, "  ✗ %v\n", err)
+			fmt.Fprintln(w.out, w.bad(err.Error()))
 			continue
 		}
 		cfg.Secret, cfg.TunnelToken = res.Secret, res.TunnelToken
-		fmt.Fprintf(w.out, "  ✓ paired with workspace %q\n\n", res.Slug)
+		fmt.Fprintf(w.out, "%s\n\n", w.good("paired with workspace "+w.bold(res.Slug)))
 		return
 	}
 }
@@ -342,11 +411,11 @@ func (w *wizard) finish(cfg *Config) error {
 		fmt.Fprintf(w.out, "Saved %s. Nothing to install on this system; start the agent with\n  go run . run --config %s\n", w.path, w.path)
 		return nil
 	}
-	fmt.Fprint(w.out, "Installing service… ")
-	if err := install(); err != nil {
+	fmt.Fprint(w.out, w.dim("Installing service… "))
+	if err := w.busy(install); err != nil {
 		return err
 	}
-	fmt.Fprint(w.out, "✓   ")
+	fmt.Fprint(w.out, w.sgr("1;32", "✓")+"   ")
 	w.waitConnected(cfg)
 	return nil
 }
@@ -360,37 +429,43 @@ func (w *wizard) apply(cfg *Config) error {
 		fmt.Fprintf(w.out, "Saved %s. Restart `run` to apply it.\n", w.path)
 		return nil
 	}
-	fmt.Fprint(w.out, "Restarting service… ")
-	if err := restart(); err != nil {
+	fmt.Fprint(w.out, w.dim("Restarting service… "))
+	if err := w.busy(restart); err != nil {
 		return err
 	}
-	fmt.Fprint(w.out, "✓   ")
+	fmt.Fprint(w.out, w.sgr("1;32", "✓")+"   ")
 	w.waitConnected(cfg)
 	return nil
 }
 
 // waitConnected watches the service's own /health until cloudflared reports the tunnel ready.
 func (w *wizard) waitConnected(cfg *Config) {
-	fmt.Fprint(w.out, "Tunnel… ")
-	for deadline := time.Now().Add(90 * time.Second); time.Now().Before(deadline); time.Sleep(time.Second) {
-		res, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/health", cfg.Port))
-		if err != nil {
-			continue
+	fmt.Fprint(w.out, w.dim("Tunnel… "))
+	err := w.busy(func() error {
+		for deadline := time.Now().Add(90 * time.Second); time.Now().Before(deadline); time.Sleep(time.Second) {
+			res, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/health", cfg.Port))
+			if err != nil {
+				continue
+			}
+			var h struct{ Tunnel *bool }
+			json.NewDecoder(res.Body).Decode(&h)
+			res.Body.Close()
+			if h.Tunnel != nil && *h.Tunnel {
+				return nil
+			}
 		}
-		var h struct{ Tunnel *bool }
-		json.NewDecoder(res.Body).Decode(&h)
-		res.Body.Close()
-		if h.Tunnel != nil && *h.Tunnel {
-			fmt.Fprintln(w.out, "✓ connected")
-			fmt.Fprintln(w.out, "Done. Confire now shows this server as connected. You can close this window.")
-			return
-		}
+		return errors.New("not connected")
+	})
+	if err != nil {
+		fmt.Fprintf(w.out, "%s The service keeps trying; its log is in %s\n", w.sgr("1;33", "! not connected yet."), logDir())
+		return
 	}
-	fmt.Fprintf(w.out, "✗ not connected yet. The service keeps trying; its log is in %s\n", logDir())
+	fmt.Fprintln(w.out, w.good("connected"))
+	fmt.Fprintf(w.out, "\n%s  Confire now shows this server as connected. You can close this window.\n", w.sgr("1;30;42", " DONE "))
 }
 
 func (w *wizard) modify(cfg *Config) error {
-	fmt.Fprintf(w.out, "This server is paired with Confire, company %s.\n\n", cfg.CompanyDb)
+	fmt.Fprintf(w.out, "This server is paired with Confire, company %s.\n\n", w.bold(cfg.CompanyDb))
 	type option struct {
 		label string
 		run   func() error
@@ -421,9 +496,9 @@ func (w *wizard) modify(cfg *Config) error {
 	}
 	opts = append(opts, option{"Uninstall", w.uninstall})
 	for i, o := range opts {
-		fmt.Fprintf(w.out, "  %d) %s\n", i+1, o.label)
+		fmt.Fprintf(w.out, "  %s %s\n", w.sgr("1;36", strconv.Itoa(i+1)+")"), o.label)
 	}
-	fmt.Fprintln(w.out, "  0) Exit")
+	fmt.Fprintln(w.out, w.dim("  0) Exit"))
 	for {
 		n, err := strconv.Atoi(w.ask("Choice", "0"))
 		if err == nil && n == 0 {
@@ -461,6 +536,6 @@ func (w *wizard) uninstall() error {
 	if err := uninstallAll(w.path); err != nil {
 		return err
 	}
-	fmt.Fprintln(w.out, "Removed. To connect SAP again, download the agent from Confire and pair it.")
+	fmt.Fprintln(w.out, w.good("Removed.")+" To connect SAP again, download the agent from Confire and pair it.")
 	return nil
 }

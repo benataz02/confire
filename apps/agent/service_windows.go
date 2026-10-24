@@ -75,10 +75,20 @@ func ensureAdmin() (bool, error) {
 	return true, nil
 }
 
-// initConsole switches the console to UTF-8, so ✓ and … do not print as mojibake.
-func initConsole() {
+// initConsole switches the console to UTF-8, so ✓ and … do not print as mojibake, and turns on
+// VT processing, which the wizard's colours need; false on a console without it (pre-Windows 10).
+func initConsole() bool {
 	windows.SetConsoleOutputCP(65001)
 	windows.SetConsoleCP(65001)
+	out := windows.Handle(os.Stdout.Fd())
+	var mode uint32
+	return windows.GetConsoleMode(out, &mode) == nil &&
+		windows.SetConsoleMode(out, mode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING) == nil
+}
+
+// flushConsoleInput drops keys queued on the console; false when stdin is not one (a pipe).
+func flushConsoleInput() bool {
+	return windows.FlushConsoleInputBuffer(windows.Handle(os.Stdin.Fd())) == nil
 }
 
 // pause keeps a double-clicked window open long enough to read.

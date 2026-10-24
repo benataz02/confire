@@ -9,12 +9,12 @@ import { CompanyPeople, type PortalMemberRow } from "@confire/ui/portal/CompanyP
 import { InviteDialog } from "@confire/ui/portal/InviteDialog.tsx";
 import { confirm } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
-import { meQuery, orpc, type Me } from "../../../orpc.ts";
-import { useI18n } from "../../../i18n.ts";
+import { meQuery, orpc, type Me } from "../../orpc.ts";
+import { useI18n } from "../../i18n.ts";
 
 // The company page (spec §9): the business partner as the supplier's SAP has it, the colleagues on
 // the portal, and the registered email domains. Owner only (the server gates every write too).
-export const Route = createFileRoute("/$slug/_authed/company")({
+export const Route = createFileRoute("/$slug/company")({
   beforeLoad: async ({ context, params }) => {
     const me = await context.queryClient.ensureQueryData(meQuery);
     if (me.company?.role !== "owner") throw redirect({ to: "/$slug", params });

@@ -6,13 +6,13 @@ import {
   Label, MessageStrip, Text, Title,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoEntries.js";
-import { useI18n } from "../../../../i18n.ts";
-import { meQuery, orpc } from "../../../../orpc.ts";
+import { useI18n } from "../../../i18n.ts";
+import { meQuery, orpc } from "../../../orpc.ts";
 
 // The catalog (spec §9, D21): every model the supplier published, as cards. Pick one, name the
 // project, and it opens as a draft. The model is fixed from here on; the customer is the company.
 
-export const Route = createFileRoute("/$slug/_authed/projects/new")({
+export const Route = createFileRoute("/$slug/projects/new")({
   beforeLoad: async ({ context, params }) => {
     const me = await context.queryClient.ensureQueryData(meQuery);
     if (me.company?.role === "viewer") throw redirect({ to: "/$slug/projects", params });

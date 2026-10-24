@@ -7,12 +7,12 @@ import "@ui5/webcomponents-fiori/dist/illustrations/NoEntries.js";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import { money } from "@confire/ui/money.ts";
-import { meQuery, orpc } from "../../../orpc.ts";
-import { DOC_PAGES } from "../../../features/documents.ts";
-import { PROJECT_STATUS_KEY } from "../../../features/labels.ts";
-import { useI18n } from "../../../i18n.ts";
+import { meQuery, orpc } from "../../orpc.ts";
+import { DOC_PAGES } from "../../features/documents.ts";
+import { PROJECT_STATUS_KEY } from "../../features/labels.ts";
+import { useI18n } from "../../i18n.ts";
 
-export const Route = createFileRoute("/$slug/_authed/")({
+export const Route = createFileRoute("/$slug/")({
   component: Home,
 });
 
@@ -24,7 +24,7 @@ const date = (d: string | Date | null) => (d ? new Date(d).toLocaleDateString() 
 function Home() {
   const i18n = useI18n();
   const navigate = useNavigate({ from: "/$slug" });
-  // Primed by _authed's beforeLoad, which only lets a user with a seat through.
+  // Primed by $slug's beforeLoad, which only lets a user with a seat through.
   const me = useQuery(meQuery).data!;
   const overview = useQuery(orpc.home.overview.queryOptions());
   const documents = useQuery({ ...orpc.home.documents.queryOptions(), retry: false });

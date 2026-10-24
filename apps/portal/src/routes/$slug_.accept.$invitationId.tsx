@@ -1,18 +1,18 @@
 import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, MessageStrip } from "@ui5/webcomponents-react";
-import { authClient } from "../../auth-client.ts";
-import { ROLE_HELP_KEY, ROLE_KEY } from "../../features/labels.ts";
-import { useI18n } from "../../i18n.ts";
-import { meQuery, orpc } from "../../orpc.ts";
-import { PortalAuthLayout } from "../../components/AuthChrome.tsx";
+import { authClient } from "../auth-client.ts";
+import { ROLE_HELP_KEY, ROLE_KEY } from "../features/labels.ts";
+import { useI18n } from "../i18n.ts";
+import { meQuery, orpc } from "../orpc.ts";
+import { PortalAuthLayout } from "../components/AuthChrome.tsx";
 import { hardRedirect } from "@confire/ui/host.ts";
-import { invitationGuard } from "../../lib/invitation.ts";
+import { invitationGuard } from "../lib/guards.ts";
 
 // The invitation link (spec §5.2): `portal.<domain>/<slug>/accept/<id>`. The server checks everything
 // again on accept; this page only says what joining means, or why it can't. A new-client invitation
 // goes on to its form (§5.3).
-export const Route = createFileRoute("/$slug/accept/$invitationId")({
+export const Route = createFileRoute("/$slug_/accept/$invitationId")({
   beforeLoad: invitationGuard,
   component: Accept,
 });
@@ -26,7 +26,7 @@ function Accept() {
   const accept = useMutation(orpc.onboarding.accept.mutationOptions({
     onSuccess: async () => {
       // Reset, not invalidate: nothing observes `me` here, so an invalidate refetches nothing and
-      // _authed would read the seat-less `me` still in the cache.
+      // $slug would read the seat-less `me` still in the cache.
       await qc.resetQueries({ queryKey: meQuery.queryKey });
       void navigate({ to: "/$slug" });
     },

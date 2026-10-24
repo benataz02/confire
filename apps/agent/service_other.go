@@ -19,7 +19,8 @@ func logDir() string            { return "." }
 func isWindowsService() bool          { return false }
 func runService()                     {}
 func ensureAdmin() (bool, error)      { return false, nil }
-func initConsole()                    {}
+func initConsole() bool               { return true }
+func flushConsoleInput() bool         { return false }
 func pause()                          {}
 func install() error                  { return nil }
 func restart() error                  { return nil }

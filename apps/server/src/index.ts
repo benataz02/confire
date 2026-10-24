@@ -8,6 +8,7 @@ import { agentRoutes } from "./agent-pairing.ts";
 export default serve({
   auth,
   router,
+  title: "Confire staff API",
   routes: fileRoutes("internal").route("/", agentRoutes()),
   spaDist: "../app/dist",
   port: 3000,

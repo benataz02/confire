@@ -11,8 +11,8 @@
     "@confire/config-engine": "workspace:*",
     "@confire/db": "workspace:*",
     "@confire/server": "workspace:*",
-    "@orpc/client": "^1.14.6",
-    "@orpc/server": "^1.14.6",
+    "@orpc/client": "2.0.0-beta.45",
+    "@orpc/server": "2.0.0-beta.45",
     "@types/bun": "^1.4.0",
     "drizzle-orm": "^0.45.2",
     "typescript": "^7.0.2"

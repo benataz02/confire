@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createORPCClient, onError } from "@orpc/client";
+import { createORPCClient, onError, ORPCError } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import type { AppRouter } from "@confire/server/router";
@@ -8,18 +8,19 @@ import { notificationsApi } from "@confire/ui/notifications/api.ts";
 import { currentSlug, hardRedirect, loginUrl, TENANT_HEADER } from "@confire/ui/host.ts";
 
 // Same-origin (dev proxy / prod static) → cookies ride along automatically. The workspace is the
-// page's path segment, sent as x-tenant on every call (none on the sign-in pages). Functions, so the
-// module never touches `window` at import time: the pure helpers that sit next to a hook (views.ts,
+// page's path segment, sent as x-tenant on every call (none on the sign-in pages). No `origin`: the
+// URL stays relative and fetch resolves it at call time, and `headers` is a function, so the module
+// never touches `window` at import time — the pure helpers that sit next to a hook (views.ts,
 // metadata.ts, the CFL modules) stay importable from `bun test`.
 const link = new RPCLink({
-  url: () => `${window.location.origin}/rpc`,
+  url: "/rpc",
   headers: (): Record<string, string> => {
     const slug = currentSlug();
     return slug ? { [TENANT_HEADER]: slug } : {};
   },
   interceptors: [
     onError((error) => {
-      if ((error as { code?: string }).code === "UNAUTHORIZED") void hardRedirect(loginUrl());
+      if (error instanceof ORPCError && error.code === "UNAUTHORIZED") void hardRedirect(loginUrl());
     }),
   ],
 });

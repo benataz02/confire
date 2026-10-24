@@ -5,6 +5,7 @@ import "./i18n.ts"; // registers the texts, restores the chosen language and loa
 import { Modals, ThemeProvider } from "@ui5/webcomponents-react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { ORPCError } from "@orpc/client";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen.ts";
@@ -15,7 +16,7 @@ import { client, meQuery, orpc, useCurrency } from "./orpc.ts";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: (n, err) => (err as { code?: string }).code !== "UNAUTHORIZED" && n < 3,
+      retry: (n, err) => !(err instanceof ORPCError && err.code === "UNAUTHORIZED") && n < 3,
     },
   },
 });

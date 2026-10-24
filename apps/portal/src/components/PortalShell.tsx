@@ -56,7 +56,7 @@ export function PortalShell() {
   const queryClient = useQueryClient();
   // Inside the supplier's portal, as the nav items name it.
   const pathname = useRouterState({ select: (s) => tenantPath(s.location.pathname) });
-  // Primed by _authed's beforeLoad, which only renders the shell for a user with a seat.
+  // Primed by $slug's beforeLoad, which only renders the shell for a user with a seat.
   const me = useQuery(meQuery).data as Me & { company: NonNullable<Me["company"]> };
   // Switching supplier only means something with more than one.
   const lobby = useQuery(lobbyQuery);

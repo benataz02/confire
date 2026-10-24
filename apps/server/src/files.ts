@@ -8,6 +8,7 @@ import { membershipOf } from "./orpc/base.ts";
 import { isInternalMember, seatOf } from "./portal/members.ts";
 import { tenantOf } from "./portal/orpc/base.ts";
 import { addFile, projectFileFor, type Actor, type Side } from "./project-lifecycle.ts";
+import { errorStatus } from "./serve.ts";
 
 // Files (spec D14): plain Hono routes, not oRPC — the RPC body cap is 2 MB. Both processes mount
 // them, each with its own side: the same session and the same tenant → membership (staff) or seat
@@ -92,7 +93,7 @@ const handle = (fn: (c: Context) => Promise<Response>) => async (c: Context) => 
   try {
     return await fn(c);
   } catch (e) {
-    if (e instanceof ORPCError) return c.json({ message: e.message }, e.status as 400);
+    if (e instanceof ORPCError) return c.json({ message: e.message }, errorStatus(e) as 400);
     console.error("[files]", e);
     Sentry.captureException(e);
     return c.json({ message: "Something went wrong" }, 500);

@@ -6,15 +6,15 @@ import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPag
 import { useDetailView } from "@confire/ui/useDetailView.ts";
 import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import type { HeaderConfig } from "@confire/ui/types.ts";
-import { orpc } from "../../../../orpc.ts";
-import { DOC_PAGES, docFeature, isDocEntity, type DocEntity } from "../../../../features/documents.ts";
-import { useI18n } from "../../../../i18n.ts";
+import { orpc } from "../../../orpc.ts";
+import { DOC_PAGES, docFeature, isDocEntity, type DocEntity } from "../../../features/documents.ts";
+import { useI18n } from "../../../i18n.ts";
 
 // One of the company's SAP documents (spec §9, §13.1): read-only, Preview of its print layout, and a
 // link to the project it came from when it traces back to one. No record navigation: next/previous
 // would walk every customer's documents.
 
-export const Route = createFileRoute("/$slug/_authed/docs/$entity_/$key")({
+export const Route = createFileRoute("/$slug/docs/$entity_/$key")({
   beforeLoad: ({ params }) => {
     if (!isDocEntity(params.entity)) throw redirect({ to: "/$slug", params });
   },

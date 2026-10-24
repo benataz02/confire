@@ -15,16 +15,16 @@ import { toast } from "@confire/ui/toast.ts";
 import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
 import { money } from "@confire/ui/money.ts";
 import { uploadFile } from "@confire/ui/files.ts";
-import { client, meQuery, orpc, type Me } from "../../../../orpc.ts";
-import { PROJECT_STATUS_KEY } from "../../../../features/labels.ts";
-import { useI18n } from "../../../../i18n.ts";
+import { client, meQuery, orpc, type Me } from "../../../orpc.ts";
+import { PROJECT_STATUS_KEY } from "../../../features/labels.ts";
+import { useI18n } from "../../../i18n.ts";
 
 // One project (spec §9): the configuration, its prices, its timeline. The engine runs on the server
 // (§7.1) — this page holds no model, no lookups and no formula, only the projection `get` and
 // `calculate` return. One edit is one call, debounced like the internal page; the response IS the
 // new state, so the cache is set from it rather than refetched.
 
-export const Route = createFileRoute("/$slug/_authed/projects/$id")({ component: Page });
+export const Route = createFileRoute("/$slug/projects/$id")({ component: Page });
 
 function Page() {
   const { id } = Route.useParams();

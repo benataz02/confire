@@ -6,7 +6,7 @@ export interface RouterContext {
 }
 
 // Bare root: the pages before a seat (an invitation, the invite-only page) render full-bleed; the
-// supplier shell lives in `_authed`.
+// supplier shell lives in `$slug`.
 export const Route = createRootRouteWithContext<RouterContext>()({
   component: () => <Outlet />,
 });

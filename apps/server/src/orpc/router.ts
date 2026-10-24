@@ -20,7 +20,7 @@ export const router = {
   // session learns its active organization: the dispatcher's landing place on the next /login.
   //
   // `currency` rides along because it answers a fourth shell-wide question — what unit is every
-  // money figure in — and this is the one call already primed in _authed.beforeLoad and cached
+  // money figure in — and this is the one call already primed in $slug's beforeLoad and cached
   // staleTime: Infinity. It is null when SAP has never been reachable; tenantCurrency never throws,
   // so an agent that is down costs a symbol, not the app shell.
   me: sessionProcedure.handler(async ({ context }) => {

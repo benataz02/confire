@@ -1,4 +1,4 @@
-import { createORPCClient, onError } from "@orpc/client";
+import { createORPCClient, onError, ORPCError } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import type { PortalRouter } from "@confire/server/portal-router";
@@ -7,17 +7,17 @@ import { notificationsApi } from "@confire/ui/notifications/api.ts";
 import { currentSlug, hardRedirect, loginUrl, TENANT_HEADER } from "@confire/ui/host.ts";
 
 // Same-origin (dev proxy / prod static) → the session cookie rides along. The supplier is the page's
-// path segment, sent as x-tenant on every call. Functions, so the module never touches `window` at
-// import time.
+// path segment, sent as x-tenant on every call. No `origin` (a relative URL fetch resolves at call
+// time) and `headers` a function, so the module never touches `window` at import time.
 const link = new RPCLink({
-  url: () => `${window.location.origin}/rpc`,
+  url: "/rpc",
   headers: (): Record<string, string> => {
     const slug = currentSlug();
     return slug ? { [TENANT_HEADER]: slug } : {};
   },
   interceptors: [
     onError((error) => {
-      if ((error as { code?: string }).code === "UNAUTHORIZED") void hardRedirect(loginUrl());
+      if (error instanceof ORPCError && error.code === "UNAUTHORIZED") void hardRedirect(loginUrl());
     }),
   ],
 });
@@ -26,7 +26,7 @@ export const orpc = createTanstackQueryUtils(client);
 /** The bell's and the Notifications page's data source (@confire/ui/notifications). */
 export const notifications = notificationsApi(client.notifications);
 
-/** Who am I on this supplier's portal — primed by `_authed`'s beforeLoad, cached for the page
+/** Who am I on this supplier's portal — primed by `$slug`'s beforeLoad, cached for the page
  *  session like the internal app's `me`. The server re-checks on every procedure regardless. */
 export const meQuery = orpc.me.queryOptions({ staleTime: Infinity, retry: false });
 
