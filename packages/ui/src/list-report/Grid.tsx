@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import {
-  AnalyticalTable, AnalyticalTableHooks, Bar, Button, Form, FormGroup, FormItem, IllustratedMessage, Label, Title,
+  AnalyticalTable, AnalyticalTableHooks, Bar, Button, Form, FormGroup, FormItem, IllustratedMessage, Label, ObjectStatus, Title,
   type AnalyticalTableCellInstance, type AnalyticalTableColumnDefinition, type AnalyticalTablePropTypes,
   type AnalyticalTableInstance, type ReactTableHooks,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import { decodeBool } from "@confire/b1";
+import { statusState } from "../documentStatus.ts";
 import { EntityLink, useCanOpen } from "../EntityLink.tsx";
 import { useUiI18n } from "../i18n.ts";
 import { endAligned, formatValue, optionLabel, parseIsoDate } from "../format.ts";
@@ -101,6 +102,9 @@ if (typeof document !== "undefined" && !document.getElementById(TABLE_ITEM)) {
   document.head.appendChild(el);
 }
 
+/** A `statusRows` grid's closed line (global.css). */
+const CLOSED_ROW = "confire-row-closed";
+
 // ConfiguratorForm's FORM_PROPS, so a grid sits in a page the way ConfigTable sits in a section.
 const GRID_FORM = { accessibleMode: "Edit", labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2", headerLevel: "H5" } as const;
 
@@ -119,7 +123,7 @@ export function GridForm({ name, headerText, children }: { name?: string; header
 export function Grid({
   title, columns, state, onStateChange, rows, total, loading, hasMore, onLoadMore, loadAll, keyOf,
   selectionMode = "None", selectedIds, onSelectionChange, onRowClick, toolbarActions, cellTemplates,
-  exportName, showSettings = true, fill = true, epoch, noDataText, expandGroups,
+  exportName, showSettings = true, fill = true, epoch, noDataText, expandGroups, statusRows,
 }: {
   title?: string;
   /** every column the view may show, resolved against metadata */
@@ -152,6 +156,8 @@ export function Grid({
   noDataText?: string;
   /** every row is loaded, so groups open as they appear (useExpandGroups) */
   expandGroups?: boolean;
+  /** document lines: a row whose first status column says closed reads muted */
+  statusRows?: boolean;
 }) {
   const canOpen = useCanOpen();
   const i18n = useUiI18n();
@@ -187,9 +193,14 @@ export function Grid({
     () =>
       visible.map((c) => {
         const template = cellTemplates?.[c.key];
+        // Inverted, as the local lists draw their status cells (configs, requests).
+        const show = (v: unknown) => {
+          const text = formatValue(v, c.type, c.options, c.integer);
+          return c.status && text ? <ObjectStatus inverted state={statusState(v)}>{text}</ObjectStatus> : <span>{text}</span>;
+        };
         const Cell = ({ cell }: AnalyticalTableCellInstance) => {
           // A group header row has no `original`, only the grouped value (react-table useGroupBy).
-          if (cell.isGrouped) return <span>{formatValue(cell.value, c.type, c.options, c.integer)}</span>;
+          if (cell.isGrouped) return show(cell.value);
           const r = ((cell.row as { original?: Row }).original ?? {}) as Row;
           const v = r[c.key];
           if (template) return <>{template(r, c)}</>;
@@ -204,7 +215,7 @@ export function Grid({
                 </EntityLink>
               );
           }
-          return <span>{formatValue(v, c.type, c.options, c.integer)}</span>;
+          return show(v);
         };
         return {
           id: c.key,
@@ -250,6 +261,12 @@ export function Grid({
   // commit rebuilds `columns`, which was "Maximum update depth exceeded".
   const latest = useRef({ onStateChange, widths: state.columnWidths });
   latest.current = { onStateChange, widths: state.columnWidths };
+
+  // A closed row is read off the first status column on screen — through a ref, because the hook
+  // list is fixed while the column can be hidden.
+  const statusKeyRef = useRef<string | undefined>(undefined);
+  statusKeyRef.current = statusRows ? visible.find((c) => c.status)?.key : undefined;
+
   const tableHooks = useMemo(
     () => [
       AnalyticalTableHooks.useOnColumnResize(({ columnWidth, header }) => {
@@ -260,8 +277,14 @@ export function Grid({
       }),
       // Fixed for a grid's lifetime, so the plugin list (and react-table's hook order) never changes.
       ...(expandGroups ? [useExpandGroups] : []),
+      ...(statusRows ? [(hooks: ReactTableHooks) => {
+        hooks.getRowProps.push((props: object, { row }: { row: { original?: Row } }) => {
+          const key = statusKeyRef.current;
+          return key && row.original?.[key] === "bost_Close" ? [props, { className: CLOSED_ROW }] : props;
+        });
+      }] : []),
     ],
-    [expandGroups],
+    [expandGroups, statusRows],
   );
 
   const handleSort = useCallback<NonNullable<AnalyticalTablePropTypes["onSort"]>>((e) => {

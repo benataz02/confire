@@ -1,6 +1,7 @@
-import { CheckBox, DatePicker, Input, Option, Select, Text, TextArea } from "@ui5/webcomponents-react";
+import { CheckBox, DatePicker, Input, ObjectStatus, Option, Select, Text, TextArea } from "@ui5/webcomponents-react";
 import { decodeBool } from "@confire/b1";
 import { CflField } from "../cfl/CflField.tsx";
+import { statusState } from "../documentStatus.ts";
 import { EntityLink, useCanOpen } from "../EntityLink.tsx";
 import { formatValue } from "../format.ts";
 import { showLink } from "../navigation.ts";
@@ -50,6 +51,7 @@ export function FormField({
       ? showLink({ link: field.link, value, row: formData, canOpen })
       : null;
     const text = formatValue(value, field.type, field.options, field.integer);
+    if (field.status && text) return <ObjectStatus state={statusState(value)}>{text}</ObjectStatus>;
     if (target)
       return (
         <EntityLink route={target.route} target={target.target} value={value}

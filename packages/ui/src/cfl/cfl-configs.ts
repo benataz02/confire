@@ -122,6 +122,18 @@ export const cfl = {
     ...o,
   }),
 
+  warehouses: (o: Overrides = {}): CflDialogConfig => ({
+    title: "Warehouse",
+    source: { kind: "entity", entitySet: "Warehouses" },
+    keyField: "WarehouseCode",
+    columns: [
+      { key: "WarehouseCode", width: 120 },
+      { key: "WarehouseName" },
+    ],
+    searchFields: ["WarehouseCode", "WarehouseName"],
+    ...o,
+  }),
+
   salesPersons: (o: Overrides = {}): CflDialogConfig => ({
     title: "Sales employee",
     source: { kind: "entity", entitySet: "SalesPersons" },

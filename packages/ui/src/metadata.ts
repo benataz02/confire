@@ -72,6 +72,8 @@ export function findConstraint(key: string, c: Constraints | undefined): [string
 }
 
 const isYesNoType = (edm: string) => /BoYesNoEnum$/.test(edm);
+/** DocumentStatus and LineStatus alike: both are SAPB1.BoStatus. */
+const isStatusType = (edm: string) => /\.BoStatus$/.test(edm);
 /** B1's integers are keys, document numbers and codes; its amounts and quantities are Edm.Double. */
 export const isIntegerType = (edm: string | undefined) => /^Edm\.(Int\d+|S?Byte)$/.test(edm ?? "");
 
@@ -101,6 +103,7 @@ export function resolveField(field: FormField, c: Constraints | undefined): Form
     ...(m.Udf ? { udf: true } : {}),
     ...(isYesNoType(m.EdmType) ? { yesNo: true } : {}),
     ...(isIntegerType(m.EdmType) ? { integer: true } : {}),
+    ...(isStatusType(m.EdmType) ? { status: true } : {}),
     ...(children ? { fields: children } : {}),
   };
 }
@@ -136,6 +139,7 @@ export function resolveColumns(columns: ListColumn[], c: Constraints | undefined
       ...(m.Udf ? { udf: true } : {}),
       ...(isYesNoType(m.EdmType) ? { yesNo: true } : {}),
       ...(isIntegerType(m.EdmType) ? { integer: true } : {}),
+      ...(isStatusType(m.EdmType) ? { status: true } : {}),
     };
   });
 }

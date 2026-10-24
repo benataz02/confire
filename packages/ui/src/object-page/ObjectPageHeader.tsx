@@ -34,7 +34,7 @@ export function objectPageTitle(o: {
   navigation?: RecordNavigation;
   /** the trail above the title */
   breadcrumbs?: Crumb[];
-  /** the layout view selector + Adapt layout */
+  /** the layout view menu + Adapt layout: Toolbar children, after the page's actions */
   layout?: ReactNode;
   t: (key: string, ...params: Array<string | number>) => string;
 }): ReactElement<ObjectPageTitlePropTypes> {
@@ -54,13 +54,7 @@ export function objectPageTitle(o: {
   const crumb = code == null || code === "" ? title || o.label : String(code);
   return (
     <ObjectPageTitle
-      // One slot for both: the layout selector has always sat above the title, the trail goes first.
-      breadcrumbs={o.breadcrumbs || o.layout ? (
-        <FlexBox alignItems="Center" wrap="Wrap" style={{ columnGap: "1rem" }}>
-          {o.breadcrumbs ? <PageBreadcrumbs items={o.breadcrumbs} current={crumb} /> : null}
-          {o.layout}
-        </FlexBox>
-      ) : undefined}
+      breadcrumbs={o.breadcrumbs ? <PageBreadcrumbs items={o.breadcrumbs} current={crumb} /> : undefined}
       header={<Title>{title || o.label}</Title>}
       subHeader={subtitle ? <Text>{subtitle}</Text> : undefined}
       navigationBar={o.navigation && !ctx.isNew ? (
@@ -84,6 +78,7 @@ export function objectPageTitle(o: {
           ) : null}
           {/* A Toolbar child has to be a ToolbarButton/Select or be wrapped, or it never overflows. */}
           {actions ? <ToolbarItem>{actions}</ToolbarItem> : null}
+          {o.layout}
         </Toolbar>
       }
     />

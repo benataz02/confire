@@ -1,12 +1,16 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
-  CheckBox, DateRangePicker, FilterBar, FilterGroupItem, Input, MultiComboBox, MultiComboBoxItem, Title,
-  VariantItem, VariantManagement,
+  Bar, Button, CheckBox, DateRangePicker, Dialog, FilterBar, FilterGroupItem, Input, Label, List, ListItemStandard,
+  MultiComboBox, MultiComboBoxItem, RadioButton, ResponsivePopover, Text, Title, ToolbarItem, VariantItem,
+  VariantManagement, type ButtonDomRef,
 } from "@ui5/webcomponents-react";
 import { CflField } from "../cfl/CflField.tsx";
 import { keysToTokens, tokensToKeys } from "../cfl/cfl-configs.ts";
 import { useUiI18n } from "../i18n.ts";
-import { cleanValues, isEmptyFilter, isMultiField, isRangeField, STANDARD_ID, type ViewsApi } from "../views.ts";
+import {
+  cleanValues, isEmptyFilter, isMultiField, isRangeField, pickInitial, STANDARD_ID, type View, type ViewsApi,
+} from "../views.ts";
 import type { FilterField, FilterValue, Row, ViewState } from "../types.ts";
 
 // beas-header (LIST-REPORT-OBJECT-PAGE.md §3.3), split in two because DynamicPage takes the title
@@ -86,6 +90,166 @@ export const ViewTitle = memo(function ViewTitle({ slot, title, views, size }: {
     </VariantManagement>
   );
 });
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- list and object views alike
+type AnyViews = ViewsApi<any>;
+type I18n = ReturnType<typeof useUiI18n>;
+const viewName = (v: View<unknown>, i18n: I18n) => (v.id === STANDARD_ID ? i18n.getText("UI_STANDARD_VIEW") : v.name);
+const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** The Object Page's layout views as a toolbar button, styled like Copy to: the views
+ *  in its popover, Save / Save As / Manage under them; Restore for a dirty system view lives on the
+ *  filter bar. A local table has system views only and no save chrome; with nothing to choose there
+ *  is no button. A Toolbar child: it brings its own ToolbarItem. */
+export const ViewMenu = memo(function ViewMenu({ title, views }: { title: string; views: AnyViews }) {
+  const i18n = useUiI18n();
+  const opener = useRef<ButtonDomRef>(null);
+  const [open, setOpen] = useState(false);
+  const [dialog, setDialog] = useState<"saveAs" | "manage" | null>(null);
+  if (views.local && views.views.length < 2) return null;
+  const canSave = views.dirty && !!views.active?.canEdit;
+  const close = (next: typeof dialog = null) => { setOpen(false); setDialog(next); };
+  return (
+    // Keeps an overflowed menu open under the popover, which would otherwise lose its opener.
+    <ToolbarItem preventOverflowClosing>
+      <Button ref={opener} design="Transparent" endIcon="slim-arrow-down" tooltip={title}
+        accessibilityAttributes={{ hasPopup: "dialog", expanded: open }} onClick={() => setOpen(true)}>
+        {`${views.active ? viewName(views.active, i18n) : title}${views.dirty ? " *" : ""}`}
+      </Button>
+      {open ? (
+        <ResponsivePopover open opener={opener.current ?? undefined} headerText={title} onClose={() => setOpen(false)}
+          footer={views.local ? undefined : (
+            <Bar design="Footer" endContent={
+              <>
+                {canSave ? <Button design="Emphasized" onClick={() => { views.save(); close(); }}>{i18n.getText("UI_SAVE")}</Button> : null}
+                <Button design={canSave ? "Transparent" : "Emphasized"} onClick={() => close("saveAs")}>{i18n.getText("UI_SAVE_AS")}</Button>
+                <Button design="Transparent" onClick={() => close("manage")}>{i18n.getText("UI_MANAGE")}</Button>
+              </>
+            } />
+          )}>
+          <List selectionMode="Single" onItemClick={(e) => {
+            const id = (e.detail.item as HTMLElement).dataset.viewId;
+            if (id) views.select(id);
+            close();
+          }}>
+            {views.views.map((v) => (
+              <ListItemStandard key={v.id} data-view-id={v.id} selected={v.id === views.active?.id}
+                description={v.visibility === "shared" ? v.author : undefined}
+                additionalText={v.isDefault ? i18n.getText("UI_DEFAULT") : undefined}>
+                {viewName(v, i18n)}
+              </ListItemStandard>
+            ))}
+          </List>
+        </ResponsivePopover>
+      ) : null}
+      {/* On the body: a Toolbar may move this item into its overflow, which is hidden once closed. */}
+      {dialog === "saveAs" ? createPortal(<SaveViewDialog views={views} onClose={() => setDialog(null)} />, document.body) : null}
+      {dialog === "manage" ? createPortal(<ManageViewsDialog views={views} onClose={() => setDialog(null)} />, document.body) : null}
+    </ToolbarItem>
+  );
+});
+
+/** Save As: the current state under a new name. The server refuses a taken name again. */
+function SaveViewDialog({ views, onClose }: { views: AnyViews; onClose: () => void }) {
+  const i18n = useUiI18n();
+  const [name, setName] = useState("");
+  const [isDefault, setDefault] = useState(false);
+  const [shared, setShared] = useState(false);
+  const taken = views.views.some((v) => same(viewName(v, i18n), name));
+  const save = () => {
+    views.saveAs({ name: name.trim(), visibility: shared && views.isAdmin ? "shared" : "personal", isDefault });
+    onClose();
+  };
+  return (
+    <Dialog open headerText={i18n.getText("UI_SAVE_VIEW")} onClose={onClose} footer={
+      <Bar design="Footer" endContent={
+        <>
+          <Button design="Emphasized" disabled={!name.trim() || taken} onClick={save}>{i18n.getText("UI_SAVE")}</Button>
+          <Button design="Transparent" onClick={onClose}>{i18n.getText("UI_CANCEL")}</Button>
+        </>
+      } />
+    }>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", minWidth: "20rem" }}>
+        <Label for="cf-save-view-name" required showColon>{i18n.getText("UI_NAME")}</Label>
+        <Input id="cf-save-view-name" value={name} onInput={(e) => setName(e.target.value)}
+          valueState={taken ? "Negative" : "None"}
+          valueStateMessage={taken ? <div>{i18n.getText("UI_NAME_TAKEN")}</div> : undefined} />
+        <CheckBox text={i18n.getText("UI_SET_DEFAULT")} checked={isDefault} onChange={(e) => setDefault(e.target.checked)} />
+        {views.isAdmin ? <CheckBox text={i18n.getText("UI_PUBLIC")} checked={shared} onChange={(e) => setShared(e.target.checked)} /> : null}
+      </div>
+    </Dialog>
+  );
+}
+
+/** Manage: rename, share, delete the views this user may edit, and pick the default among all. A
+ *  read-only view picked as default only clears the user's own (as UI5's VariantManagement did). */
+function ManageViewsDialog({ views, onClose }: { views: AnyViews; onClose: () => void }) {
+  const i18n = useUiI18n();
+  const [drafts, setDrafts] = useState<Record<string, { name: string; shared: boolean }>>(() => Object.fromEntries(
+    views.views.filter((v) => v.canEdit).map((v) => [v.id, { name: v.name, shared: v.visibility === "shared" }]),
+  ));
+  const [deleted, setDeleted] = useState<string[]>([]);
+  const [defaultId, setDefaultId] = useState(() => pickInitial(views.views, null).id);
+  const kept = views.views.filter((v) => !deleted.includes(v.id));
+  const nameOf = (v: View<unknown>) => drafts[v.id]?.name ?? viewName(v, i18n);
+  const bad = (v: View<unknown>) => !nameOf(v).trim() || kept.some((o) => o.id !== v.id && same(nameOf(o), nameOf(v)));
+  const save = () => {
+    void views.manage({
+      deleted,
+      updated: kept.flatMap((v) => {
+        const d = drafts[v.id];
+        if (!d) return [];
+        const next = {
+          id: v.id, name: d.name.trim(), isDefault: v.id === defaultId,
+          visibility: (views.isAdmin ? (d.shared ? "shared" : "personal") : v.visibility) as "personal" | "shared",
+        };
+        return next.name !== v.name || next.visibility !== v.visibility || next.isDefault !== v.isDefault ? [next] : [];
+      }),
+    });
+    onClose();
+  };
+  return (
+    <Dialog open headerText={i18n.getText("UI_MANAGE_VIEWS")} onClose={onClose} footer={
+      <Bar design="Footer" endContent={
+        <>
+          <Button design="Emphasized" disabled={kept.some(bad)} onClick={save}>{i18n.getText("UI_SAVE")}</Button>
+          <Button design="Transparent" onClick={onClose}>{i18n.getText("UI_CANCEL")}</Button>
+        </>
+      } />
+    }>
+      <div style={{
+        display: "grid", alignItems: "center", gap: "0.25rem 1rem",
+        gridTemplateColumns: `minmax(16rem, 1fr) auto${views.isAdmin ? " auto" : ""} 2.25rem`,
+      }}>
+        <Label>{i18n.getText("UI_NAME")}</Label>
+        <Label>{i18n.getText("UI_DEFAULT")}</Label>
+        {views.isAdmin ? <Label>{i18n.getText("UI_PUBLIC")}</Label> : null}
+        <span />
+        {kept.map((v) => {
+          const d = drafts[v.id];
+          return (
+            <Fragment key={v.id}>
+              {d ? (
+                <Input value={d.name} accessibleName={i18n.getText("UI_NAME")} valueState={bad(v) ? "Negative" : "None"}
+                  onInput={(e) => setDrafts((all) => ({ ...all, [v.id]: { ...d, name: e.target.value } }))} />
+              ) : <Text>{viewName(v, i18n)}</Text>}
+              <RadioButton name="cf-default-view" accessibleName={i18n.getText("UI_DEFAULT")} checked={v.id === defaultId}
+                onChange={() => setDefaultId(v.id)} />
+              {views.isAdmin ? (
+                <CheckBox accessibleName={i18n.getText("UI_PUBLIC")} disabled={!d} checked={d ? d.shared : v.visibility === "shared"}
+                  onChange={(e) => setDrafts((all) => ({ ...all, [v.id]: { ...d!, shared: e.target.checked } }))} />
+              ) : null}
+              {d ? (
+                <Button design="Transparent" icon="delete" tooltip={i18n.getText("UI_DELETE")} accessibleName={i18n.getText("UI_DELETE")}
+                  onClick={() => setDeleted((all) => [...all, v.id])} />
+              ) : <span />}
+            </Fragment>
+          );
+        })}
+      </div>
+    </Dialog>
+  );
+}
 
 type FilterState = Pick<ViewState, "adaptFilterKeys" | "filterValues" | "searchTerm">;
 export type FilterTemplate = (ctx: { value: FilterValue | undefined; setValue: (v: FilterValue) => void }) => ReactNode;

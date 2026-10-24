@@ -4,13 +4,32 @@ import type { FormField, ListColumn, ObjectViewState, Section } from "../types.t
 // Object views: personalization over the DECLARED sections and fields — which show, and in what
 // order. A view can only narrow and reorder what the feature declares; it never adds.
 
-/** The keys a section's layout lists: its form fields, or its table's columns. */
-const keysOf = (s: Section): string[] =>
-  s.table ? s.table.columns.map((c) => c.key) : sectionFields(s).map((f) => f.key);
+/** What a section's layout lists: its form fields, or its table's columns — a declared `hidden`
+ *  column being one Standard leaves out. */
+const entriesOf = (s: Section): ObjectViewState["sections"][number]["fields"] =>
+  s.table ? s.table.columns.map((c) => ({ key: c.key, visible: !c.hidden })) : sectionFields(s).map((f) => ({ key: f.key, visible: true }));
 
-/** Everything shown, in declared order — what Standard is. */
+/** Everything declared, in declared order — what Standard is. */
 export function defaultObjectState(sections: Section[]): ObjectViewState {
-  return { sections: sections.map((s) => ({ id: s.id, visible: true, fields: keysOf(s).map((key) => ({ key, visible: true })) })) };
+  return { sections: sections.map((s) => ({ id: s.id, visible: true, fields: entriesOf(s) })) };
+}
+
+/** A table section's grid settings (its gear) as the layout: `keys` shown in that order, every
+ *  other column hidden after them. Keys the section does not list are dropped. */
+export function withTableColumns(state: ObjectViewState, id: string, keys: string[]): ObjectViewState {
+  return {
+    sections: state.sections.map((s) => {
+      if (s.id !== id) return s;
+      const shown = keys.filter((k) => s.fields.some((f) => f.key === k));
+      return {
+        ...s,
+        fields: [
+          ...shown.map((key) => ({ key, visible: true })),
+          ...s.fields.filter((f) => !shown.includes(f.key)).map((f) => ({ key: f.key, visible: false })),
+        ],
+      };
+    }),
+  };
 }
 
 /** A saved layout against today's sections: its own order first, then whatever the feature gained
@@ -50,8 +69,13 @@ export function applyObjectView(sections: Section[], state: ObjectViewState, mus
       fs
         ?.filter((f) => f.controlType === "fieldGroup" || at.get(f.key)?.visible !== false || mustShow(f))
         .sort((a, b) => rank(a.key) - rank(b.key));
+    // The view decides, the declared `hidden` being only Standard's. Unchanged columns stay the same
+    // objects: EditGrid keeps its cells mounted while they are.
     const columns = (cs: ListColumn[]) =>
-      cs.map((c) => (at.get(c.key)?.visible === false ? { ...c, hidden: true } : c)).sort((a, b) => rank(a.key) - rank(b.key));
+      cs.map((c) => {
+        const shown = at.get(c.key)?.visible ?? !c.hidden;
+        return shown === !c.hidden ? c : { ...c, hidden: !shown };
+      }).sort((a, b) => rank(a.key) - rank(b.key));
     return [{
       ...s,
       ...(s.fields ? { fields: fields(s.fields) } : {}),

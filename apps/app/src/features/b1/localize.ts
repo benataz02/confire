@@ -79,10 +79,6 @@ export function localizedB1Feature(entity: string, t: AdminText): EntityFeature 
         ...s,
         label: SECTION[s.id] ? t(SECTION[s.id]!) : s.label,
         groups: s.groups?.map((g) => ({ ...g, label: GROUP[g.id] ? t(GROUP[g.id]!) : g.label })),
-        table: s.table && {
-          ...s.table,
-          columns: s.table.columns.map((c) => (c.key === "VisOrder" ? { ...c, label: t("ADMIN_COL_LINE_NO") } : c)),
-        },
       })),
     },
   };

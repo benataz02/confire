@@ -11,11 +11,17 @@ export type Crumb = { text: string; to: string };
  * click opens a tab; a plain click stays in the router, where the page's unsaved-changes blocker
  * still sees it.
  */
-export function PageBreadcrumbs({ items, current }: { items: Crumb[]; current: string }) {
+export function PageBreadcrumbs({ slot, items, current }: {
+  /** filled in by ObjectPageTitle's slot handling — forward it or the trail is never slotted */
+  slot?: string;
+  items: Crumb[];
+  current: string;
+}) {
   const router = useRouter();
   const go = useEntityNav();
   return (
     <Breadcrumbs
+      slot={slot}
       onItemClick={(e) => {
         const { altKey, ctrlKey, metaKey, shiftKey, item } = e.detail;
         const to = item.dataset.to; // none on the current page, which fires too

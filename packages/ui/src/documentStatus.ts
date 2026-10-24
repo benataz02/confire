@@ -1,4 +1,4 @@
-import type { Facet } from "./types.ts";
+import type { Facet, ValueState } from "./types.ts";
 
 /** B1's BoStatus member names (what the Service Layer sends) -> a status colour. Both apps' document
  *  pages read it. `text` stays the English id; a display site passes `t` to documentStatusText. */
@@ -8,6 +8,9 @@ export const DOCUMENT_STATUS: Facet["statusMapping"] = {
   bost_Paid: { state: "Positive", text: "Paid" },
   bost_Delivered: { state: "Positive", text: "Delivered" },
 };
+
+/** A status field's colour; a code the map does not know reads uncoloured. */
+export const statusState = (code: unknown): ValueState => DOCUMENT_STATUS?.[String(code ?? "")]?.state ?? "None";
 
 const DOCUMENT_STATUS_KEY: Record<string, string> = {
   bost_Open: "UI_STATUS_OPEN",

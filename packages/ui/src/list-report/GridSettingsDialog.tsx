@@ -184,6 +184,9 @@ export function GridSettingsDialog({ columns, state, onConfirm, onClose }: {
   const restore = () => { setItems(toItems(defaults)); setSortBy([]); setGroupBy([]); };
 
   const confirm = () => onConfirm({ columns: visibleKeys, sortBy, groupBy: groupBy.map((g) => g.field) });
+  // A tab with nothing to offer is not drawn (a document's lines sort and group by nothing).
+  const sortable = columns.filter((c) => c.sortable !== false && c.type !== "collection");
+  const groupable = columns.filter((c) => c.groupable === true);
 
   return (
     // A fixed size, so filtering the list or switching tabs does not make the dialog jump.
@@ -203,8 +206,8 @@ export function GridSettingsDialog({ columns, state, onConfirm, onClose }: {
         <Tab text={i18n.getText("UI_COLUMNS")} selected>
           <ColumnsTab items={items} onChange={setItems} />
         </Tab>
-        <Tab text={i18n.getText("UI_SORT")}>
-          <RulesTab rules={sortBy} fields={columns.filter((c) => c.sortable !== false && c.type !== "collection")}
+        {sortable.length ? <Tab text={i18n.getText("UI_SORT")}>
+          <RulesTab rules={sortBy} fields={sortable}
             add={(field) => ({ field, direction: "asc" as const })} onChange={setSortBy} addText={i18n.getText("UI_ADD_SORT")}
             render={(r, set) => (
               <Select style={{ width: "100%" }} value={r.direction}
@@ -213,11 +216,11 @@ export function GridSettingsDialog({ columns, state, onConfirm, onClose }: {
                 <Option value="desc">{i18n.getText("UI_DESCENDING")}</Option>
               </Select>
             )} />
-        </Tab>
-        <Tab text={i18n.getText("UI_GROUP")}>
-          <RulesTab rules={groupBy} fields={columns.filter((c) => c.groupable === true)}
+        </Tab> : null}
+        {groupable.length ? <Tab text={i18n.getText("UI_GROUP")}>
+          <RulesTab rules={groupBy} fields={groupable}
             add={(field) => ({ field })} onChange={setGroupBy} addText={i18n.getText("UI_ADD_GROUP")} render={() => null} />
-        </Tab>
+        </Tab> : null}
       </TabContainer>
     </Dialog>
   );

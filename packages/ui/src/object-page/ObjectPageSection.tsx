@@ -33,6 +33,8 @@ export type SectionContext = FormContext & {
   onExistenceError: (key: string, message: string | null) => void;
   onCheckStarted: (p: Promise<unknown>) => void;
   onRowSelect: (f: Field, row: Row) => void;
+  /** a table section's grid settings, written to the page layout; absent while it loads */
+  onTableColumns?: (sectionId: string, keys: string[]) => void;
   templates: Templates;
   /** page messages, drawn at the top of the first section */
   banner?: ReactNode;
@@ -102,6 +104,7 @@ export function objectPageSection(s: Section, ctx: SectionContext): ReactElement
         <GridForm name={s.label}>
           <EditGrid title={s.label} columns={s.table.columns} rows={rows} readOnly={!editable} fixedRows={s.table.fixedRows} errors={ctx.cellErrors[key]}
             toolbarActions={ctx.templates.tableActions?.[s.id]}
+            onColumnsChange={ctx.onTableColumns ? (keys) => ctx.onTableColumns!(s.id, keys) : undefined}
             onChange={(next) => ctx.updateField(key, next)} />
         </GridForm>
       </>

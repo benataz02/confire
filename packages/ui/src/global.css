@@ -20,6 +20,17 @@
   --_ui5wcr_Splitter_BarOutline: none;
 }
 
+/* AnalyticalTable rows draw no column lines; headers keep theirs. `data-column-id-cell` is on body
+   cells only (headers carry `data-column-id`); the last cell's end border is the table's outer edge. */
+[data-column-id-cell]:not(:last-child) {
+  border-inline-end: none;
+}
+
+/* Grid's `statusRows`: a closed line reads muted. */
+.confire-row-closed [data-column-id-cell] {
+  color: var(--sapContent_LabelColor);
+}
+
 /* View transitions — today only Grid's full-page toggle, which morphs the table between its slot and
    the page. Short because it answers a click; the root has nothing to crossfade and just ends with it. */
 ::view-transition-group(*),

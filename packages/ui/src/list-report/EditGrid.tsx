@@ -63,7 +63,16 @@ const ownKeys = (e: KeyboardEvent) => e.stopPropagation();
 /** The array position each grid row carries, so a cell and the selection name the line they mean. */
 const IDX = "#i";
 
-export function EditGrid({ title, columns, rows, onChange, readOnly, fixedRows, errors, toolbarActions }: {
+/** Shallow: a layout copies a column with a spread, so its values are the declared ones. */
+const sameColumn = (a: ListColumn, b: ListColumn) => {
+  const ks = Object.keys(a) as (keyof ListColumn)[];
+  return ks.length === Object.keys(b).length && ks.every((k) => a[k] === b[k]);
+};
+
+/** B1's "#": VisualOrder counts from 0, and a line not yet in SAP has none — its place is its number. */
+const lineNo: CellTemplate = (row) => <span>{Number(row.VisualOrder ?? row[IDX]) + 1}</span>;
+
+export function EditGrid({ title, columns, rows, onChange, readOnly, fixedRows, errors, toolbarActions, onColumnsChange }: {
   title?: string;
   columns: ListColumn[];
   rows: Row[];
@@ -74,18 +83,28 @@ export function EditGrid({ title, columns, rows, onChange, readOnly, fixedRows, 
   errors?: Record<string, string>;
   /** the caller's buttons, ahead of Add/Delete */
   toolbarActions?: (selection: Selection) => ReactNode;
+  /** enables the settings gear: the columns to show, in order (the rest are hidden) */
+  onColumnsChange?: (keys: string[]) => void;
 }) {
   const i18n = useUiI18n();
-  // The page re-applies its layout on every keystroke, which hands over a new column array whose
-  // shown columns are the same objects. Keep the last array while they are: Grid builds one Cell
-  // component per column off it, and a new one remounts the input under the cursor.
+  // The page re-applies its layout on every keystroke, which hands over a new column array (and a
+  // new copy of a column the layout shows against its declared `hidden`). Keep the last array while
+  // its columns are equal: Grid builds one Cell component per column off it, and a new one remounts
+  // the input under the cursor.
   const prev = useRef<ListColumn[]>([]);
   const shownCols = columns.filter((c) => !c.hidden);
-  const visible = shownCols.length === prev.current.length && shownCols.every((c, i) => c === prev.current[i])
+  const visible = shownCols.length === prev.current.length && shownCols.every((c, i) => sameColumn(c, prev.current[i]!))
     ? prev.current
     : (prev.current = shownCols);
+  // The hidden ones too, for the settings dialog — by key, as their objects are new on every apply.
+  const hidden = columns.filter((c) => c.hidden);
+  const hiddenKeys = hidden.map((c) => c.key).join(" ");
 
-  const gridColumns = useMemo(() => visible.map((c) => ({ ...c, sortable: false })), [visible]);
+  const gridColumns = useMemo(
+    () => [...visible, ...hidden].map((c) => ({ ...c, sortable: false })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visible, hiddenKeys],
+  );
   const state = useMemo<GridState>(() => ({ columns: visible.map((c) => c.key), sortBy: [], groupBy: [] }), [visible]);
   // `errors` too: the templates read them through the ref, and only new data re-renders the cells.
   const data = useMemo(() => rows.map((r, i) => ({ ...r, [IDX]: i })), [rows, errors]);
@@ -103,24 +122,30 @@ export function EditGrid({ title, columns, rows, onChange, readOnly, fixedRows, 
 
   // Stable for the column set (see `visible`); this render's lines and errors come through the ref.
   const cellTemplates = useMemo(
-    () => (readOnly ? undefined : Object.fromEntries(visible.filter(cellEditable).map((c): [string, CellTemplate] => [c.key, (row) => {
-      const i = row[IDX] as number;
-      const r = latest.current.rows[i] ?? {};
-      return (
-        <div style={{ width: "100%" }} onKeyDown={ownKeys}>
-          <FormField inline field={asField(c)} value={r[c.key]} formData={r} editable
-            error={latest.current.errors?.[cellKey(i, c.key)]}
-            onChange={(v) => setCell(i, { [c.key]: v })}
-            onRowSelect={c.onRowSelect ? (picked) => setCell(i, c.onRowSelect!(picked)) : undefined} />
-        </div>
-      );
-    }]))),
+    () => ({
+      VisualOrder: lineNo,
+      ...(readOnly ? {} : Object.fromEntries(visible.filter(cellEditable).map((c): [string, CellTemplate] => [c.key, (row) => {
+        const i = row[IDX] as number;
+        const r = latest.current.rows[i] ?? {};
+        return (
+          <div style={{ width: "100%" }} onKeyDown={ownKeys}>
+            <FormField inline field={asField(c)} value={r[c.key]} formData={r} editable
+              error={latest.current.errors?.[cellKey(i, c.key)]}
+              onChange={(v) => setCell(i, { [c.key]: v })}
+              onRowSelect={c.onRowSelect ? (picked) => setCell(i, c.onRowSelect!(picked)) : undefined} />
+          </div>
+        );
+      }]))),
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [visible, readOnly],
   );
 
   return (
-    <Grid title={title} columns={gridColumns} state={state} rows={data} fill={false} showSettings={false}
+    <Grid title={title} columns={gridColumns} state={state} rows={data} fill={false} statusRows
+      showSettings={!!onColumnsChange}
+      // Only the column set is the layout's; widths stay the table's own, as before.
+      onStateChange={onColumnsChange ? (patch) => { if (patch.columns) onColumnsChange(patch.columns); } : undefined}
       exportName={title} noDataText={i18n.getText("UI_NO_LINES")} cellTemplates={cellTemplates}
       selectionMode={readOnly ? "None" : "Multiple"}
       toolbarActions={readOnly && !toolbarActions ? undefined : (sel) => (

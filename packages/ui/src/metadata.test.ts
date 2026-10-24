@@ -50,6 +50,12 @@ test("BoYesNoEnum is flagged so the checkbox writes tYES/tNO", () => {
   expect(resolveField({ key: "Printed" }, C).yesNo).toBe(true);
 });
 
+test("BoStatus is flagged on fields and columns alike, so both draw an ObjectStatus", () => {
+  const c: Constraints = { ...C, LineStatus: { Type: "enum", EdmType: "SAPB1.BoStatus" } };
+  expect(resolveField({ key: "LineStatus" }, c).status).toBe(true);
+  expect(resolveColumns([{ key: "LineStatus" }, { key: "Printed" }], c).map((col) => !!col.status)).toEqual([true, false]);
+});
+
 test("editability: edit mode, the allowlist, and editableOnCreate only while creating", () => {
   const code = resolveField({ key: "CardCode" }, C);
   const total = resolveField({ key: "DocTotal" }, C);

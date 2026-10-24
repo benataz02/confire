@@ -3,6 +3,7 @@ import { useBlocker } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Bar, Button, Dialog, FlexBox, Menu, MenuItem, MessageStrip, ObjectPage as Ui5ObjectPage, SplitButton, Tab, TabContainer,
+  ToolbarButton,
 } from "@ui5/webcomponents-react";
 import { confirm } from "../confirm.ts";
 import { exists, notFoundMessage } from "../cfl/existence.ts";
@@ -10,11 +11,11 @@ import { useUiI18n } from "../i18n.ts";
 import { useUiSource } from "../source.tsx";
 import { validateCflCells } from "../list-report/EditGrid.tsx";
 import { ColumnsTab, type ColumnItem } from "../list-report/GridSettingsDialog.tsx";
-import { ViewTitle } from "../list-report/FilterHeader.tsx";
+import { ViewMenu } from "../list-report/FilterHeader.tsx";
 import { isFieldEditable, resolveSections, sectionFields, udfSection, type EntityConstraints } from "../metadata.ts";
 import { evalDyn, getFieldValidationError, isEmptyValue, matchErrorFields, validateForm } from "../validation.ts";
 import { sameState, useViews } from "../views.ts";
-import { applyObjectView, resolveObjectState } from "./objectView.ts";
+import { applyObjectView, resolveObjectState, withTableColumns } from "./objectView.ts";
 import { objectPageHeaderArea, objectPageTitle, type RecordNavigation } from "./ObjectPageHeader.tsx";
 import type { Crumb } from "../PageBreadcrumbs.tsx";
 import { objectPageSection, type SectionContext, type Templates } from "./ObjectPageSection.tsx";
@@ -335,6 +336,7 @@ export function ObjectPage(p: Templates & {
       const patch = f.onRowSelect?.(row);
       if (patch) setFormData((prev) => ({ ...prev, ...patch }));
     },
+    onTableColumns: layout.state ? (id, keys) => layout.setState((s) => withTableColumns(s, id, keys)) : undefined,
     templates: p,
   };
 
@@ -346,11 +348,11 @@ export function ObjectPage(p: Templates & {
   ) : null;
 
   const layoutControl = p.localViews ? undefined : (
-    <FlexBox alignItems="Center" style={{ gap: "0.25rem" }}>
-      <ViewTitle title={t("UI_LAYOUT")} views={layout} size="H6" />
-      <Button design="Transparent" icon="action-settings" tooltip={t("UI_ADAPT_LAYOUT")} accessibleName={t("UI_ADAPT_LAYOUT")}
+    <>
+      <ViewMenu title={t("UI_LAYOUT")} views={layout} />
+      <ToolbarButton design="Transparent" icon="action-settings" tooltip={t("UI_ADAPT_LAYOUT")} accessibleName={t("UI_ADAPT_LAYOUT")}
         disabled={!layout.state} onClick={() => setLayoutOpen(true)} />
-    </FlexBox>
+    </>
   );
 
   return (

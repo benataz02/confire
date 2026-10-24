@@ -58,6 +58,8 @@ export type ListColumn = {
   yesNo?: boolean;
   /** an Edm integer (a key, document number or code): shown without digit grouping */
   integer?: boolean;
+  /** BoStatus (DocumentStatus, LineStatus): drawn as an ObjectStatus */
+  status?: boolean;
 };
 
 /** §9.2 filter field. `key` is the property the filter compiles against. */
@@ -150,6 +152,7 @@ export type FormField = {
   udf?: boolean;
   yesNo?: boolean;
   integer?: boolean;
+  status?: boolean;
   metaEditable?: boolean;
   metaRequired?: boolean;
 };
