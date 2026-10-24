@@ -237,7 +237,7 @@ export function MasterdataEditor({ id }: { id?: string }) {
               {id && d.kind === "query" ? (
                 // Disabled while dirty for the same reason Duplicate is: the sync runs the SAVED
                 // query, so running it against edits still on screen would cache the wrong answer.
-                <ToolbarButton text={sync.isPending ? i18n.getText("ADMIN_SYNCING") : i18n.getText("ADMIN_SYNC_NOW")} icon="synchronize"
+                <ToolbarButton design="Transparent" text={sync.isPending ? i18n.getText("ADMIN_SYNCING") : i18n.getText("ADMIN_SYNC_NOW")} icon="synchronize"
                   accessibleName={i18n.getText("ADMIN_SYNC_NOW")} disabled={dirty || sync.isPending}
                   tooltip={dirty ? i18n.getText("ADMIN_SYNC_SAVE_FIRST") : i18n.getText("ADMIN_SYNC_TOOLTIP")}
                   onClick={() => sync.mutate({ id })} />
@@ -245,12 +245,12 @@ export function MasterdataEditor({ id }: { id?: string }) {
               {id ? (
                 // Disabled while dirty: duplicate copies what is stored, not what is on screen,
                 // and a clean copy also never trips the unsaved-changes blocker on the way out.
-                <ToolbarButton text={i18n.getText("ADMIN_DUPLICATE")} icon="copy" tooltip={dirty ? i18n.getText("ADMIN_SAVE_FIRST") : i18n.getText("ADMIN_DUPLICATE_TABLE")}
+                <ToolbarButton design="Transparent" text={i18n.getText("ADMIN_DUPLICATE")} icon="copy" tooltip={dirty ? i18n.getText("ADMIN_SAVE_FIRST") : i18n.getText("ADMIN_DUPLICATE_TABLE")}
                   accessibleName={i18n.getText("ADMIN_DUPLICATE_TABLE")} disabled={dirty || duplicate.isPending}
                   onClick={() => duplicate.mutate({ id })} />
               ) : null}
               {id ? (
-                <ToolbarButton text={i18n.getText("ADMIN_DELETE")} icon="delete" tooltip={i18n.getText("ADMIN_DELETE_TABLE")} accessibleName={i18n.getText("ADMIN_DELETE_TABLE")} disabled={remove.isPending}
+                <ToolbarButton design="Transparent" text={i18n.getText("ADMIN_DELETE")} icon="delete" tooltip={i18n.getText("ADMIN_DELETE_TABLE")} accessibleName={i18n.getText("ADMIN_DELETE_TABLE")} disabled={remove.isPending}
                   onClick={async () => {
                     if (await confirm({
                       title: i18n.getText("ADMIN_DELETE_TABLE"),

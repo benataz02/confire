@@ -1,13 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar, BusyIndicator, Button, Form, FormGroup, FormItem, Input, Label, MessageStrip, MultiInput, ObjectPage, ObjectPageSection,
   ObjectPageTitle, Panel, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Text, Title, Token, Toolbar, ToolbarButton,
 } from "@ui5/webcomponents-react";
-import type { Entries, TableRows, Val } from "@confire/config-engine";
 import { ConfiguratorForm, ConsistencyStatus } from "@confire/ui/configurator/ConfiguratorForm.tsx";
 import { addBatch } from "@confire/ui/configurator/formHelpers.ts";
+import { overlayForm, usePatchQueue, type InputPatch } from "@confire/ui/configurator/patch.ts";
 import { ProjectTimeline } from "@confire/ui/timeline/ProjectTimeline.tsx";
 import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
@@ -21,8 +20,9 @@ import { useI18n } from "../../../i18n.ts";
 
 // One project (spec §9): the configuration, its prices, its timeline. The engine runs on the server
 // (§7.1) — this page holds no model, no lookups and no formula, only the projection `get` and
-// `calculate` return. One edit is one call, debounced like the internal page; the response IS the
-// new state, so the cache is set from it rather than refetched.
+// `calculate` return. One commit is one call, sent at once and queued behind the one in flight like
+// the internal page; the response IS the new state, so the cache is set from it rather than
+// refetched. A complete project is calculated by the read itself — nothing here asks for it.
 
 export const Route = createFileRoute("/$slug/projects/$id")({ component: Page });
 
@@ -32,8 +32,8 @@ function Page() {
 }
 
 type Payload = Awaited<ReturnType<typeof client.projects.get>>;
-type Draft = { entries: Entries; batches: number[]; tables: TableRows };
 
+/** The batch field's message key — the server's `batches_required` key. */
 const BATCHES = "__batches";
 const NONE: never[] = [];
 
@@ -57,17 +57,11 @@ function ProjectPage({ id }: { id: string }) {
     enabled: q.data?.prices.kind === "quotation", retry: false,
   });
 
-  const [draft, setDraft] = useState<Draft | null>(null);
   const setPayload = (p: Payload) => qc.setQueryData(getKey, p);
-  const calc = useMutation(orpc.projects.calculate.mutationOptions({
-    // Only the draft that was sent: an edit typed while this call was in flight stays, and the
-    // effect sends it next. `{ id, ...draft }` keeps each field's reference — see the internal page.
-    onSuccess: (p, vars) => {
-      setDraft((cur) => (cur && cur.entries === vars.entries && cur.batches === vars.batches
-        && cur.tables === vars.tables ? null : cur));
-      setPayload(p);
-    },
-  }));
+  const queue = usePatchQueue<Payload>(
+    (op) => client.projects.calculate({ id, ...("patch" in op ? op.patch : {}) }),
+    { answer: setPayload, refused: () => void qc.invalidateQueries({ queryKey: getKey }) },
+  );
   // A status move: the list, the timeline and the documents all moved with it.
   const moved = (msg: string) => (p: Payload) => {
     setPayload(p);
@@ -97,52 +91,23 @@ function ProjectPage({ id }: { id: string }) {
   const p = q.data;
   const status = p?.project.status;
   const editable = buyer && (status === "draft" || status === "returned");
-  const { entries, batches, tables } = draft ?? {
-    entries: p?.project.entries ?? {}, batches: p?.project.batches ?? NONE, tables: p?.project.tables ?? {},
-  };
-  const edit = (patch: Partial<Draft>) => {
-    // Reopens the debounce after a refused edit — see the effect below. Only then: a reset detaches
-    // a pending call, and the effect would send a second calculate to race it.
-    if (calc.isError) calc.reset();
-    setDraft({ entries, batches, tables, ...patch });
-  };
-
-  // One call per pause in typing. `calc.isError` stops a refused edit retrying forever; the next
-  // edit's reset() reopens it.
-  useEffect(() => {
-    if (!editable || !draft || calc.isPending || calc.isError) return;
-    const t = setTimeout(() => calc.mutate({ id, ...draft }), 1000);
-    return () => clearTimeout(t);
-  }, [editable, draft, calc.isPending, calc.isError, id]);
-
-  // A complete project with no calculation yet (a fresh draft, a model the supplier changed): ask
-  // once. A failed calculation comes back as calcError, which stops this from asking again.
-  const needsCalc = !!p && editable && !draft && p.project.calculatedAt === null
-    && !p.missing.length && !p.prop.conflicts.length && !p.calcError;
-  useEffect(() => {
-    if (needsCalc && !calc.isPending && !calc.isError) calc.mutate({ id });
-  }, [needsCalc, calc.isPending, calc.isError, id]);
-
-  // What the form draws while an edit is in flight: the server's propagation with the typed values
-  // over it, so a select shows the pick at once rather than a second later. Visibility, defaults
-  // and options catch up when the answer lands.
-  const prop = useMemo(() => {
-    if (!p) return null;
-    if (!draft) return p.prop;
-    const values: Record<string, Val> = { ...p.prop.values };
-    for (const k of Object.keys(p.project.entries)) if (!(k in draft.entries)) delete values[k];
-    return { ...p.prop, values: { ...values, ...draft.entries } };
-  }, [p, draft]);
+  // What the user entered and the server has not answered yet, over the last answer: an echo of
+  // input. Visibility, defaults, options and prices catch up when the answer lands.
+  const pending = queue.pending;
+  const batches = pending?.batches ?? p?.project.batches ?? NONE;
+  const tables = pending?.tables ? { ...p?.project.tables, ...pending.tables } : p?.project.tables ?? {};
+  const edit = (patch: InputPatch) => queue.commit(patch);
 
   if (q.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
   if (q.error) return <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{q.error.message}</MessageStrip>;
-  if (!p || !prop || !status) return null;
+  if (!p || !status) return null;
 
+  const form = overlayForm(p.form, pending);
   const st = PROJECT_STATUS[status];
-  const calculating = calc.isPending || draft !== null || needsCalc;
-  const gaps = [...(p.project.name.trim() ? [] : [i18n.getText("PORTAL_GAP_NAME")]), ...p.missing.map((m) => m.message)];
-  const ready = gaps.length === 0 && !p.prop.conflicts.length && !p.calcError && p.project.calculatedAt !== null;
-  const error = calc.error ?? submit.error ?? resubmit.error ?? withdraw.error ?? respond.error ?? rename.error ?? remove.error;
+  const calculating = queue.sending;
+  const gaps = p.missing.map((m) => m.message);
+  const ready = gaps.length === 0 && !p.form.conflicts.length && !p.calcError && p.project.calculatedAt !== null;
+  const error = queue.error?.error ?? submit.error ?? resubmit.error ?? withdraw.error ?? respond.error ?? rename.error ?? remove.error;
   const answerable = buyer && status === "quoted" && p.project.quoteResponse === null;
 
   const reviewer = p.project.assigneeName ?? supplier;
@@ -166,13 +131,13 @@ function ProjectPage({ id }: { id: string }) {
         <Bar design="FloatingFooter"
           startContent={
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-              <ConsistencyStatus prop={prop} />
+              <ConsistencyStatus form={form} />
               {calculating ? <BusyIndicator active delay={0} size="S" /> : null}
             </div>
           }
           endContent={
-            <Button design="Emphasized" disabled={!ready || calculating || acting}
-              tooltip={ready ? undefined : i18n.getText("PORTAL_COMPLETE_FIRST", [...gaps, ...(p.prop.conflicts.length ? [i18n.getText("PORTAL_GAP_CONFLICTS")] : [])].join(", ") || i18n.getText("PORTAL_CALCULATING"))}
+            <Button design="Emphasized" disabled={!ready || queue.busy || acting}
+              tooltip={ready ? undefined : i18n.getText("PORTAL_COMPLETE_FIRST", [...gaps, ...(p.form.conflicts.length ? [i18n.getText("PORTAL_GAP_CONFLICTS")] : [])].join(", ") || i18n.getText("PORTAL_CALCULATING"))}
               onClick={() => (resend ? resubmit : submit).mutate({ id })}>
               {resend ? i18n.getText("PORTAL_RESUBMIT") : i18n.getText("PORTAL_SUBMIT")}
             </Button>
@@ -226,7 +191,15 @@ function ProjectPage({ id }: { id: string }) {
       footerArea={footer ?? undefined}>
       <ObjectPageSection id="configuration" titleText={i18n.getText("PORTAL_CONFIGURATION")}>
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem", paddingBlockEnd: "1rem" }}>
-          {error ? <MessageStrip design="Negative" hideCloseButton>{error.message}</MessageStrip> : null}
+          {error ? (
+            <MessageStrip design="Negative" hideCloseButton>
+              {error.message}
+              {/* An edit that never reached the server is kept; this sends it again. */}
+              {queue.error && !queue.error.refused ? (
+                <Button design="Transparent" icon="refresh" onClick={queue.retry}>{i18n.getText("PORTAL_RETRY")}</Button>
+              ) : null}
+            </MessageStrip>
+          ) : null}
           {p.calcError ? <MessageStrip design="Negative" hideCloseButton>{p.calcError}</MessageStrip> : null}
           {STATUS_NOTE[status] ? <MessageStrip design="Information" hideCloseButton>{STATUS_NOTE[status]}</MessageStrip> : null}
           <Panel accessibleRole="Region" headerText={i18n.getText("PORTAL_GENERAL")} headerLevel="H5">
@@ -254,7 +227,8 @@ function ProjectPage({ id }: { id: string }) {
                     valueStateMessage={<div>{i18n.getText("PORTAL_BATCH_REQUIRED")}</div>}
                     tokens={batches.map((b) => <Token key={b} text={String(b)} />)}
                     onChange={(e) => {
-                      edit({ batches: addBatch(batches, e.target.value ?? "") });
+                      const next = addBatch(batches, e.target.value ?? "");
+                      if (next !== batches) edit({ batches: next });
                       e.target.value = "";
                     }}
                     onTokenDelete={(e) => {
@@ -268,13 +242,11 @@ function ProjectPage({ id }: { id: string }) {
             </FormGroup>
           </Form>
           </Panel>
-          <ConfiguratorForm model={p.model.definition} lookups={p.lookups} lk={p.lookups} prop={prop}
-            entries={entries} readOnly={!editable} querySource={{ modelId: p.project.modelId }}
-            onChange={(next) => edit({ entries: next })}
-            // The server binds a picked row's columns itself on the next calculate.
-            onQueryPick={() => {}}
-            tables={tables} onTablesChange={editable ? (next) => edit({ tables: next }) : undefined}
-            batches={batches} badges={p.badges} evaluated={p.prop.tables} />
+          <ConfiguratorForm model={p.model.definition} form={form} tables={p.lookups.tables}
+            readOnly={!editable} querySource={{ modelId: p.project.modelId }}
+            onChange={(key, v) => edit(v === undefined ? { unset: [key] } : { set: { [key]: v } })}
+            rows={tables} onRowsChange={editable ? (key, rows) => edit({ tables: { [key]: rows } }) : undefined}
+            batches={batches} />
         </div>
       </ObjectPageSection>
       {pricesShown && (

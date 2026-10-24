@@ -118,12 +118,12 @@ function Masterdata() {
       cellTemplates={{ source: (row) => sourceLabel(String(row.source ?? ""), t) }}
       toolbarActions={({ rows: sel, clear }) => (
         <>
-          <Button design="Transparent" onClick={() => navigate({ to: "/$slug/masterdata/new" })}>{t("ADMIN_CREATE")}</Button>
-          <Button design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}
+          <Button icon="add" design="Transparent" onClick={() => navigate({ to: "/$slug/masterdata/new" })}>{t("ADMIN_CREATE")}</Button>
+          <Button icon="copy" design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}
             onClick={() => duplicate.mutate({ id: String(sel[0]!.id) })}>
             {t("ADMIN_DUPLICATE")}
           </Button>
-          <Button design="Transparent" disabled={!sel.length || remove.isPending}
+          <Button icon="delete" design="Transparent" disabled={!sel.length || remove.isPending}
             onClick={() => void del(sel, clear)}>
             {t("ADMIN_DELETE")}
           </Button>

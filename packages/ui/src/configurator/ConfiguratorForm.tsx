@@ -1,41 +1,35 @@
-import { useMemo } from "react";
 import {
   CheckBox, Form, FormGroup, FormItem, Icon, Input, Label, MultiComboBox, MultiComboBoxItem,
   ObjectStatus, Option, Panel, RadioButton, SegmentedButton, SegmentedButtonItem, Select, StepInput, Text, Title,
 } from "@ui5/webcomponents-react";
 import {
-  displayColumns, domainOf, isTableGroup, paramPrices, placedTables, refKeyCols,
-  type DomainOption, type Entries, type Group, type LookupRef, type ModelDef, type Propagation, type ResolvedLookups, type ResolvedTable, type TableDef, type TableRows, type Val,
+  isTableGroup, placedTables,
+  type FieldOption, type FormState, type Group, type LookupRef, type ModelDef, type ResolvedTable, type RowMoney, type TableRows, type Val,
 } from "@confire/config-engine";
 import { CflField } from "../cfl/CflField.tsx";
 import { cfl, type QueryScope } from "../cfl/cfl-configs.ts";
 import { TABLE_ITEM } from "../list-report/Grid.tsx";
 import { ConfigTable } from "./ConfigTable.tsx";
-import { displayValue, rowTable, setEntry } from "./formHelpers.ts";
-import { money, type ItemMoney } from "../money.ts";
+import type { Row } from "./configTableOps.ts";
+import { displayValue } from "./formHelpers.ts";
+import { money } from "../money.ts";
 import { useUiI18n } from "../i18n.ts";
 import { useUiSource } from "../source.tsx";
 
-/** The ref's display columns for one option value, joined — shown next to the option. */
-function extraOf(ref: LookupRef, t: ResolvedTable | undefined, val: Val): string | undefined {
-  if (!t) return undefined;
-  const vi = t.columns.indexOf(refKeyCols(ref, t.columns).valueCol);
-  const row = vi < 0 ? undefined : t.rows.find((r) => r[vi] === val);
-  if (!row) return undefined;
-  const s = displayColumns(ref, t.columns).map((c) => String(row[t.columns.indexOf(c)] ?? "")).filter(Boolean).join(" · ");
-  return s || undefined;
-}
+// The one form the builder preview, the configuration page and the portal render. It draws a form
+// state (config-engine's formState: values, options, visibility, requiredness, badges, broken rules)
+// and reports each change; it computes nothing. Scrolling, footers and consistency stay with the
+// caller.
 
-// The one form both the builder preview and the configuration page render. Fully controlled:
-// entries in, entries out; all engine work happens in propagate(). Scrolling, footers and
-// consistency stay with the caller.
+/** The items grid's money at the quantity the section shows. */
+export type ItemMoney = { batchQty: number; rows: (RowMoney | null)[] };
 
 /** The signature answer to "is this consistent and how big is it?" — one component so the
  *  string stays identical in the page footer and the preview. */
-export function ConsistencyStatus({ prop }: { prop: Propagation }) {
+export function ConsistencyStatus({ form }: { form: Pick<FormState, "conflicts" | "open"> }) {
   const i18n = useUiI18n();
-  const conflict = prop.conflicts.length ? prop.conflicts.map((c) => c.message).join(" · ") : null;
-  const open = prop.open.length;
+  const conflict = form.conflicts.length ? form.conflicts.map((c) => c.message).join(" · ") : null;
+  const open = form.open;
   return (
     <ObjectStatus state={conflict ? "Negative" : "Positive"}>
       {conflict ?? (open === 1 ? i18n.getText("UI_CONSISTENT_ONE") : i18n.getText("UI_CONSISTENT", String(open)))}
@@ -67,75 +61,55 @@ const FORM_PROPS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2" } as 
 // the whole Form (colSpan mirrors FORM_PROPS.layout) and the item breaks out of the column flow
 // (TABLE_ITEM). ConfigTable's Grid toolbar names the table, with its row count, and carries Add/Delete.
 
-export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, onQueryPick, disabled, readOnly, querySource, tables, onTablesChange, batches, itemMoney, itemBatch, onItemBatchChange, badges, evaluated }: {
+export function ConfiguratorForm({ model, form, tables, rows, onChange, onRowsChange, disabled, readOnly, querySource, batches, itemMoney, itemBatch, onItemBatchChange, formulaOverride }: {
   model: ModelDef;
-  /** Canonical first-page snapshot — seeds query value help. */
-  lookups: ResolvedLookups;
-  /** Canonical tables plus the current off-page row per query param. */
-  lk: ResolvedLookups;
-  prop: Propagation;
-  entries: Entries;
-  onChange: (next: Entries) => void;
-  onQueryPick: (paramKey: string, table: string, selected: ResolvedTable | undefined) => void;
+  form: FormState;
+  /** The display tables: query value helps' first page, the table cells' options. */
+  tables: Record<string, ResolvedTable>;
+  /** the stored rows of the model's tables, by table key — what the user typed */
+  rows?: TableRows;
+  /** one field changed; undefined = cleared */
+  onChange: (key: string, value: Val | undefined) => void;
+  /** omit to render the tables read-only */
+  onRowsChange?: (table: string, rows: Row[]) => void;
   disabled?: boolean;
   /** Locked (a quoted configuration). Form goes accessibleMode="Display" and fields render as
    *  Text — the UI5 display-form pattern. Not `disabled`: a pending save still shows inputs. */
   readOnly?: boolean;
   /** where a query field fetches its pages — nothing is fetched until the user opens or types */
   querySource: QueryScope;
-  /** per-project row data for the model's tables, by table key */
-  tables?: TableRows;
-  /** omit to render the tables read-only (builder preview) */
-  onTablesChange?: (next: TableRows) => void;
   /** batch quantities, for the items grid's batch picker */
   batches?: number[];
-  /** derived cost/price per items row; omit and the grid shows no money columns at all — which is
-   *  how the builder preview stays free of cost data */
+  /** cost/price per items row at `itemBatch`; omit and the grid shows no money columns at all —
+   *  which is how the builder preview and the portal stay free of cost data */
   itemMoney?: ItemMoney | null;
   /** the batch quantity `itemMoney` is priced at; omit onItemBatchChange and there is no picker */
   itemBatch?: number;
   onItemBatchChange?: (qty: number) => void;
-  /** Per-parameter price badges the server evaluated (the portal, spec §7.1): replaces the local
-   *  paramPrices, so no priceExpr has to reach the browser. Omit to compute them here. */
-  badges?: Record<string, number>;
-  /** Table rows the server evaluated, by table key (the portal): replaces ConfigTable's local
-   *  evalTableRows — the browser holds no formula to evaluate — and makes formula cells read-only. */
-  evaluated?: Record<string, Record<string, Val>[]>;
+  /** staff may type over a formula cell (a manual override); a client may not */
+  formulaOverride?: boolean;
 }) {
   const i18n = useUiI18n();
   const currency = useUiSource().useCurrency();
-  // Same source the rail's Costs card reads, so a badge and the card can never disagree.
-  const priceOf = useMemo(
-    () => new Map(badges ? Object.entries(badges) : paramPrices(model, prop, lk.tables).map((c) => [c.key, c.amount])),
-    [badges, model, prop, lk],
-  );
   const formMode = {
     accessibleMode: readOnly ? "Display" : "Edit",
     itemSpacing: readOnly ? "Large" : "Normal",
   } as const;
-  // Every rule a parameter is part of and currently breaks — the same conflicts the page's message
-  // list shows, so the field and the list cannot disagree. A rule over two fields marks both: either
-  // side can be the one the user changes to fix it.
-  const broken = useMemo(() => {
-    const m: Record<string, string[]> = {};
-    for (const c of prop.conflicts) for (const k of c.params) (m[k] ??= []).push(c.message);
-    return m;
-  }, [prop.conflicts]);
+  const fieldOf = (key: string) => form.fields[key] ?? { visible: true, required: false };
 
+  // A change that leaves the field as it was is not one — re-picking a default is, it makes the
+  // value the user's own.
   const set = (key: string, v: Val | undefined) => {
-    if (v === undefined) {
-      const ref = model.parameters.find((x) => x.key === key)?.domain;
-      if (ref?.kind === "options" && ref.ref.source === "query") onQueryPick(key, ref.ref.table, undefined);
-    }
-    const next = setEntry(entries, key, v);
-    if (next === entries) return;
-    onChange(next);
+    const f = fieldOf(key);
+    if (!f.defaulted && JSON.stringify(f.value) === JSON.stringify(v)) return;
+    onChange(key, v);
   };
 
   const control = (key: string) => {
     const p = model.parameters.find((x) => x.key === key)!;
-    const dom: DomainOption[] = prop.domains[key] ?? domainOf(model, lookups, key);
-    const v = prop.values[key];
+    const f = fieldOf(key);
+    const dom: FieldOption[] = f.options ?? [];
+    const v = f.value;
     if (readOnly || p.readonly) return <Text>{displayValue(v, dom)}</Text>;
 
     // Fiori: a mandatory field carries the asterisk on its label *and* a negative state while it is
@@ -143,10 +117,10 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
     // propagated value, so a field an auto-default filled already counts as answered.
     // Radio and checkbox get the asterisk only: a checkbox is never empty (false is an answer), and
     // painting every radio in a group negative would read as "these options are wrong".
-    // prop.required, not p.mandatory: it also holds requiredWhen — what missingInputs gates on.
-    const req = !!prop.required[key];
+    // f.required, not p.mandatory: it also holds requiredWhen — what the server's `missing` gates on.
+    const req = f.required;
     // A broken rule outranks an empty mandatory field: it is wrong now, not merely unfinished.
-    const rule = broken[key];
+    const rule = f.conflicts;
     const ruleState = rule ? "Negative" : "None";
     const ruleMessage = rule ? <div>{rule.join(" · ")}</div> : undefined;
     const reqProps = {
@@ -164,9 +138,9 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
             // Only the picked one goes red: it is the value that breaks the rule, not the group.
             <RadioButton key={i} name={`cfg-${key}`} text={o.label} checked={v === o.value}
               valueState={v === o.value ? ruleState : "None"}
-              disabled={disabled || !!o.eliminatedBy}
+              disabled={disabled || !!o.unavailable}
               // tooltip is a runtime ui5 prop the React typing omits (like Option's disabled).
-              {...(o.eliminatedBy ? ({ tooltip: i18n.getText("UI_UNAVAILABLE", o.eliminatedBy) } as Record<string, unknown>) : {})}
+              {...(o.unavailable ? ({ tooltip: i18n.getText("UI_UNAVAILABLE", o.unavailable) } as Record<string, unknown>) : {})}
               onChange={() => set(key, o.value)} />
           ))}
         </div>
@@ -174,7 +148,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
 
     if (p.ui === "checkbox" || (p.type === "boolean" && p.ui !== "select")) {
       // a checkbox can only be toggled if flipping it isn't eliminated — that reason is also the tooltip.
-      const blocked = dom.find((o) => o.value === (v !== true))?.eliminatedBy;
+      const blocked = dom.find((o) => o.value === (v !== true))?.unavailable;
       return (
         <CheckBox checked={v === true} disabled={disabled || !!blocked} valueState={ruleState}
           // tooltip is a runtime ui5 prop the React typing omits.
@@ -191,7 +165,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
             const texts = e.detail.items.map((i) => (i as HTMLElement).getAttribute("text")!);
             set(key, texts.length ? texts : undefined);
           }}>
-          {dom.filter((o) => !o.eliminatedBy).map((o, i) => (
+          {dom.filter((o) => !o.unavailable).map((o, i) => (
             <MultiComboBoxItem key={i} text={String(o.value)} selected={Array.isArray(v) && v.includes(String(o.value))} />
           ))}
         </MultiComboBox>
@@ -209,21 +183,18 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
 
     if (p.domain?.kind === "options" && p.domain.ref.source === "query") {
       const ref: LookupRef = p.domain.ref;
-      const canonical = lookups.tables[ref.table];
-      // Label mode: the option's label shows, its key is the entry. The picked row is bound
-      // locally (onQueryPick) so its `<param>_<column>` values are there before the recalculate.
+      const canonical = tables[ref.table];
+      // Label mode: the option's label shows, its key is the entry. The server binds the picked
+      // row's `<param>_<column>` values from the stored entry, even off the first page.
       return (
         <CflField config={{ dialogConfig: cfl.masterdataQuery(querySource, ref, canonical, { title: p.label }) }}
-          value={v ?? null} disabled={disabled} required={req} accessibleName={p.label}
+          value={v ?? null} disabled={disabled} required={req} accessibleName={p.label} commitOnly
           error={rule?.join(" · ")}
-          onValueChange={(nv) => set(key, nv === null || nv === "" ? undefined : (nv as Val))}
-          onRowSelect={(row) => onQueryPick(key, ref.table, rowTable(row, canonical))} />
+          onValueChange={(nv) => set(key, nv === null || nv === "" ? undefined : (nv as Val))} />
       );
     }
 
     if (dom.length) { // select (and boolean-with-select)
-      const tref = p.domain?.kind === "options" && p.domain.ref.source === "table" ? p.domain.ref : undefined;
-      const tbl = tref ? lk.tables[tref.table] : undefined;
       return (
         <Select value={v === undefined ? "" : JSON.stringify(v)} style={{ width: "100%" }} disabled={disabled}
           {...reqProps}
@@ -234,10 +205,10 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
           <Option value="" data-j="">—</Option>
           {dom.map((o, i) => (
             <Option key={i} value={JSON.stringify(o.value)} data-j={JSON.stringify(o.value)}
-              tooltip={o.eliminatedBy ? i18n.getText("UI_UNAVAILABLE", o.eliminatedBy) : undefined}
-              additionalText={o.eliminatedBy ? i18n.getText("UI_UNAVAILABLE_SHORT") : tref ? extraOf(tref, tbl, o.value) : undefined}
+              tooltip={o.unavailable ? i18n.getText("UI_UNAVAILABLE", o.unavailable) : undefined}
+              additionalText={o.unavailable ? i18n.getText("UI_UNAVAILABLE_SHORT") : o.extra}
               // Option supports disabled at runtime (ListItemBase); the React typing omits it.
-              {...(o.eliminatedBy ? ({ disabled: true } as Record<string, unknown>) : {})}>
+              {...(o.unavailable ? ({ disabled: true } as Record<string, unknown>) : {})}>
               {o.label}
             </Option>
           ))}
@@ -267,9 +238,7 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
   const byKey = new Map(model.structure.sections.map((s) => [s.key, s]));
   const defOf = (k: string) => (model.tables ?? []).find((t) => t.key === k);
   const shown = formSections(model, i18n.getText("UI_TABLES"));
-  const tableRows = tables ?? {};
-  const setRows = (key: string, rows: Record<string, Val>[]) =>
-    onTablesChange?.({ ...tableRows, [key]: rows });
+  const tableRows = rows ?? {};
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -319,44 +288,43 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
                 {/* data-param: table keys share the parameters' namespace, so a missing-row message
                     scrolls here the same way a parameter's does. */}
                 <FormItem className={TABLE_ITEM} data-param={g.table}>
-                  <ConfigTable def={def} rows={tableRows[g.table] ?? []}
-                    scopeVars={prop.values} lookups={lk} querySource={querySource}
-                    disabled={disabled || !onTablesChange} readOnly={readOnly}
+                  <ConfigTable def={def} rows={tableRows[g.table] ?? []} evaluated={form.tables[g.table] ?? []}
+                    tables={tables} querySource={querySource}
+                    disabled={disabled || !onRowsChange} readOnly={readOnly} formulaOverride={formulaOverride}
                     money={def.role === "items" ? itemMoney : undefined}
-                    evaluated={evaluated?.[g.table] ?? (evaluated ? [] : undefined)}
-                    onQueryPick={onQueryPick} onChange={(rows) => setRows(g.table, rows)} />
+                    onChange={(next) => onRowsChange?.(g.table, next)} />
                 </FormItem>
               </FormGroup>
             );
           }
-          const content = g.params.filter((k) => prop.visible[k]);
+          const content = g.params.filter((k) => fieldOf(k).visible);
           return (
             <FormGroup key={`${g.key}:${gi}`} headerText={head(g.title)}>
               {content.map((k) => {
                 const p = model.parameters.find((x) => x.key === k);
                 if (!p) return null;
-                const dom: DomainOption[] = prop.domains[k] ?? domainOf(model, lookups, k);
-                const eliminated = dom.filter((o) => o.eliminatedBy).length;
+                const f = fieldOf(k);
+                const eliminated = (f.options ?? []).filter((o) => o.unavailable).length;
                 // MultiComboBox filters eliminated options out (no per-item disabled in UI5 v2), so
                 // unlike Select/Radio it can't show them greyed — explain the gap with a count instead.
                 const showEliminatedNote = !readOnly && !p.readonly && p.ui === "multicombo" && eliminated > 0;
                 // RadioButton and CheckBox take a valueState but have no valueStateMessage slot, so
                 // the broken rule's message is spelled out under them instead.
-                const ruleNote = !readOnly && !p.readonly && broken[k]
+                const ruleNote = !readOnly && !p.readonly && f.conflicts
                   && (p.ui === "radio" || p.ui === "checkbox" || (p.type === "boolean" && p.ui !== "select"));
                 return (
                   <FormItem key={k} labelContent={
                     // labelSpan is 12, so the label owns a full-width row above its control — its
                     // right end IS the input's top-right corner, which is where the price belongs.
                     <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", width: "100%" }}>
-                      <Label required={!!prop.required[k] && !readOnly && !p.readonly}>
+                      <Label required={f.required && !readOnly && !p.readonly}>
                         {p.label + (p.unit ? ` (${p.unit})` : "")}
                         {p.help ? <Icon name="message-information" accessibleName={p.help} title={p.help}
                           style={{ marginInlineStart: "0.375rem", cursor: "help", color: "var(--sapContent_IconColor)" }} /> : null}
                       </Label>
-                      {priceOf.has(k) ? (
+                      {f.price !== undefined ? (
                         <ObjectStatus style={{ marginInlineStart: "auto" }}>
-                          {money(priceOf.get(k)!, currency)}
+                          {money(f.price, currency)}
                         </ObjectStatus>
                       ) : null}
                     </div>
@@ -366,14 +334,14 @@ export function ConfiguratorForm({ model, lookups, lk, prop, entries, onChange, 
                     <div data-param={k} style={{ display: "flex", flexDirection: "column", gap: "0.125rem", width: "100%" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
                         {control(k)}
-                        {prop.defaulted.has(k) ? <ObjectStatus state="Information">{i18n.getText("UI_AUTO")}</ObjectStatus> : null}
+                        {f.defaulted ? <ObjectStatus state="Information">{i18n.getText("UI_AUTO")}</ObjectStatus> : null}
                       </div>
                       {showEliminatedNote ? (
                         <Text style={{ fontSize: "0.75rem", color: "var(--sapContent_LabelColor)" }}>
                           {i18n.getText(eliminated === 1 ? "UI_OPTION_UNAVAILABLE" : "UI_OPTIONS_UNAVAILABLE", String(eliminated))}
                         </Text>
                       ) : null}
-                      {ruleNote ? broken[k]!.map((m, i) => (
+                      {ruleNote ? f.conflicts!.map((m, i) => (
                         <Text key={i} style={{ fontSize: "0.75rem", color: "var(--sapNegativeTextColor)" }}>{m}</Text>
                       )) : null}
                     </div>

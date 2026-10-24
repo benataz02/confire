@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
 import { Hono } from "hono";
-import type { Router } from "@orpc/server";
+import { call, type Router } from "@orpc/server";
+import { db, configModel, configProject } from "@confire/db";
 import { auth } from "../src/auth.ts";
 import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
 import { serve } from "../src/serve.ts";
-import { makeTenant, makeUser, tenantHeaders } from "./harness.ts";
+import { makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
 
 // The procedures as plain HTTP under /api/openapi (serve.ts): the docs and spec for signed-in users
 // only, and every procedure behind the same builder it has on /rpc.
@@ -44,4 +45,26 @@ test("a procedure over HTTP keeps its builder: session, then the membership join
   expect(await ok.json()).toMatchObject({ tenantId, role: "admin", user: { id: userId } });
   expect((await me(tenantHeaders(slug))).status).toBe(401);
   expect((await me(tenantHeaders(other.slug, cookie))).status).toBe(403);
+});
+
+// The view is what a future MCP client reads too, so it has to survive JSON as it is: a Set or a
+// Map in it would come out of the RPC client and the HTTP API as two different things.
+test("a configuration's view is plain JSON: get over /api/openapi is get over RPC", async () => {
+  const { tenantId, slug } = await makeTenant();
+  const { userId, cookie } = await makeUser("admin", tenantId);
+  const [m] = await db.insert(configModel).values({ tenantId, name: TEST_MODEL.name, definition: TEST_MODEL }).returning({ id: configModel.id });
+  const [p] = await db.insert(configProject).values({
+    tenantId, modelId: m!.id, name: "Plain", customer: { cardCode: "C1", cardName: "Acme" },
+    entries: { material: "steel" }, batches: [100, 500], createdBy: userId,
+  }).returning({ id: configProject.id });
+  const headers = tenantHeaders(slug, cookie);
+  await call(router.configs.get, { id: p!.id }, { context: { headers } }); // the first read calculates
+  const rpc = await call(router.configs.get, { id: p!.id }, { context: { headers } });
+  expect(rpc.candidates.rows.length).toBeGreaterThan(0);
+  expect(rpc.form.fields.coated!.defaulted).toBe(true); // what used to be a Set
+
+  headers.set("content-type", "application/json");
+  const res = await req(app(router), "/api/openapi/configs/get", { method: "POST", headers, body: JSON.stringify({ id: p!.id }) });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual(JSON.parse(JSON.stringify(rpc)));
 });

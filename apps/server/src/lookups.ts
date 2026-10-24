@@ -78,6 +78,8 @@ export type MasterdataRow = {
   syncedAt?: Date | null;
   syncError?: string | null;
   rowCount?: number;
+  /** the editor's last save — with syncedAt, what tells a stored calculation it is stale */
+  updatedAt?: Date;
 };
 export type MasterdataQueryRow = MasterdataRow & { query: MasterdataQuery };
 

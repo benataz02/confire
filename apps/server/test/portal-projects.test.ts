@@ -41,9 +41,9 @@ const events = async (projectId: string) =>
 /** Staff take a submitted request into review and pick the first candidate at every quantity. */
 async function acceptAndPick(s: Awaited<ReturnType<typeof setup>>, id: string) {
   await call(router.requests.accept, { id }, s.staff);
-  const { project } = await call(router.configs.calculate, { id }, s.staff);
+  const { candidates } = await call(router.configs.calculate, { id }, s.staff);
   await call(router.configs.select, {
-    projectId: id, selection: project.candidates[0]!.perBatch.map((b) => ({ candidateIdx: 0, batchQty: b.batchQty })),
+    projectId: id, selection: candidates.rows[0]!.perBatch.map((b) => ({ candidateIdx: 0, batchQty: b.batchQty })),
   }, s.staff);
 }
 
@@ -75,7 +75,7 @@ describe("portal projects", () => {
 
     // One edit is one call: the inputs are written and, complete, calculated — the page gets the
     // projection and the live indicative figures, never a candidate.
-    const pl = await call(portalRouter.projects.calculate, { id, entries: { material: "steel" } }, s.portal);
+    const pl = await call(portalRouter.projects.calculate, { id, set: { material: "steel" } }, s.portal);
     expect(pl.project.calculatedAt).not.toBeNull();
     expect(pl.prices.kind).toBe("live");
     expect(pl.prices.kind === "live" && pl.prices.rows.map((r) => r.batchQty)).toEqual([100, 500]);
@@ -87,8 +87,8 @@ describe("portal projects", () => {
     expect(submitted!.payload).toMatchObject({ inputs: { entries: { material: "steel" } }, prices: [{ batchQty: 100 }, { batchQty: 500 }] });
 
     // Submitted: nobody edits. The client withdraws or waits; staff accept first.
-    expect(await codeOf(call(portalRouter.projects.calculate, { id, entries: {} }, s.portal))).toBe("CONFLICT");
-    expect(await codeOf(call(router.configs.calculate, { id, entries: {} }, s.staff))).toBe("CONFLICT");
+    expect(await codeOf(call(portalRouter.projects.calculate, { id, set: {} }, s.portal))).toBe("CONFLICT");
+    expect(await codeOf(call(router.configs.calculate, { id, set: {} }, s.staff))).toBe("CONFLICT");
     expect((await inbox()).rows.map((r) => r.status)).toEqual(["submitted"]);
 
     await call(router.requests.accept, { id }, s.staff);
@@ -96,7 +96,7 @@ describe("portal projects", () => {
     expect(row).toMatchObject({ status: "in_review", assigneeId: s.admin.userId });
 
     // Staff edits write no event of their own; the transition that closes the round writes one.
-    await call(router.configs.calculate, { id, entries: { material: "alu" } }, s.staff);
+    await call(router.configs.calculate, { id, set: { material: "alu" } }, s.staff);
     expect((await events(id)).some((e) => e.kind === "revised")).toBe(false);
     await call(router.requests.sendBack, { id, note: "Aluminium is what we can do" }, s.staff);
     const kinds = (await events(id)).map((e) => e.kind);
@@ -110,7 +110,7 @@ describe("portal projects", () => {
     expect(tl.labels.material).toBe("Material");
 
     // Returned: the client's again.
-    await call(portalRouter.projects.calculate, { id, entries: { material: "alu", coated: true } }, s.portal);
+    await call(portalRouter.projects.calculate, { id, set: { material: "alu", coated: true } }, s.portal);
     await call(portalRouter.projects.resubmit, { id }, s.portal);
     expect((await inbox()).rows.map((r) => r.status)).toEqual(["submitted"]);
   });
@@ -118,7 +118,7 @@ describe("portal projects", () => {
   test("quote, decline, re-quote modifies the same quotation; a closed one is replaced; accept is final", async () => {
     const s = await setup("request");
     const { id } = await s.create();
-    await call(portalRouter.projects.calculate, { id, entries: { material: "steel" } }, s.portal);
+    await call(portalRouter.projects.calculate, { id, set: { material: "steel" } }, s.portal);
     // A request model shows no number before the quotation.
     expect((await call(portalRouter.projects.get, { id }, s.portal)).prices.kind).toBe("request");
     await call(portalRouter.projects.submit, { id }, s.portal);
@@ -141,9 +141,9 @@ describe("portal projects", () => {
     expect(reopened).toMatchObject({ status: "in_review", quoteResponse: "declined", assigneeId: s.admin.userId, b1DocEntry: first.posted.docEntry });
 
     // Re-quote an open quotation: PATCH in place, collections replaced, the key rewritten.
-    await call(router.configs.calculate, { id, entries: { material: "alu" } }, s.staff);
-    const { project: p2 } = await call(router.configs.calculate, { id }, s.staff);
-    await call(router.configs.select, { projectId: id, selection: [{ candidateIdx: 0, batchQty: p2.candidates[0]!.perBatch[0]!.batchQty }] }, s.staff);
+    await call(router.configs.calculate, { id, set: { material: "alu" } }, s.staff);
+    const { candidates: p2 } = await call(router.configs.calculate, { id }, s.staff);
+    await call(router.configs.select, { projectId: id, selection: [{ candidateIdx: 0, batchQty: p2.rows[0]!.perBatch[0]!.batchQty }] }, s.staff);
     const second = await quote(s, id);
     expect(second.draft.replaces).toEqual({ docEntry: first.posted.docEntry });
     expect(second.posted).toMatchObject({ mode: "updated", docEntry: first.posted.docEntry });
@@ -190,14 +190,14 @@ describe("portal projects", () => {
     await insertSeat(s.tenantId, s.company.cardCode, viewer.userId, "viewer");
     const viewerCtx = { context: { headers: tenantHeaders(s.slug, viewer.cookie) } };
     expect(await codeOf(call(portalRouter.projects.get, { id }, viewerCtx))).toBe("OK");
-    expect(await codeOf(call(portalRouter.projects.calculate, { id, entries: { material: "alu" } }, viewerCtx))).toBe("FORBIDDEN");
+    expect(await codeOf(call(portalRouter.projects.calculate, { id, set: { material: "alu" } }, viewerCtx))).toBe("FORBIDDEN");
 
     // Only the model's parameters, and never the read-only ones.
-    expect(await codeOf(call(portalRouter.projects.calculate, { id, entries: { bogus: 1 } }, s.portal))).toBe("BAD_REQUEST");
+    expect(await codeOf(call(portalRouter.projects.calculate, { id, set: { bogus: 1 } }, s.portal))).toBe("BAD_REQUEST");
     // Value help only over a table the model names.
     expect(await codeOf(call(portalRouter.projects.queryPage, { modelId: s.model.id, table: "anything" }, s.portal))).toBe("NOT_FOUND");
 
-    await call(portalRouter.projects.calculate, { id, entries: { material: "steel" } }, s.portal);
+    await call(portalRouter.projects.calculate, { id, set: { material: "steel" } }, s.portal);
     await call(portalRouter.projects.submit, { id }, s.portal);
 
     // Staff may not delete a request or change its model; an internal note never reaches the client.

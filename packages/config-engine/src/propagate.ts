@@ -280,28 +280,40 @@ export function propagate(
 const blank = (v: Val | undefined) =>
   v === undefined || v === null || v === "" || (Array.isArray(v) && !v.length);
 
+/** A message the server owes a reader: a stable `code` with positional `params`, so each page can
+ *  say it in its own language, and the English `message` an API or MCP client reads as it is.
+ *  `key` is the parameter or table key it is about (one namespace, check.ts enforces it). */
+export type Notice = { key?: string; code: string; params: string[]; message: string };
+
 /** What still has to be filled in before the configuration can be quoted, in form order: required
  *  parameters without a value, then the items grid — at least one row, and no blank required cell.
- *  `key` is the parameter or table key (one namespace, check.ts enforces it), so a caller can point
- *  at the field. The page hides its Create quote until this is empty; buildQuoteSeed refuses. */
+ *  The calculation waits for it to be empty (calculateProject); buildQuoteSeed refuses on it too. */
 export function missingInputs(
   model: ModelDef, lookups: ResolvedLookups, prop: Propagation, tableRows: TableRows,
-): { key: string; message: string }[] {
-  const out: { key: string; message: string }[] = [];
-  for (const p of model.parameters)
-    if (prop.required[p.key] && blank(prop.values[p.key])) out.push({ key: p.key, message: `${p.label || p.key} is required` });
+): Notice[] {
+  const out: Notice[] = [];
+  for (const p of model.parameters) {
+    const label = p.label || p.key;
+    if (prop.required[p.key] && blank(prop.values[p.key]))
+      out.push({ key: p.key, code: "param_required", params: [label], message: `${label} is required` });
+  }
   for (const t of model.tables ?? []) {
     const rows = tableRows[t.key] ?? [];
     const title = t.title || t.key;
-    if (t.role === "items" && !rows.length) out.push({ key: t.key, message: `${title}: add at least one row` });
+    if (t.role === "items" && !rows.length)
+      out.push({ key: t.key, code: "table_empty", params: [title], message: `${title}: add at least one row` });
     // Typed cells read raw — evalTableRows zero-fills them — and computed ones evaluated, so a
     // formula that yields a value counts as an answer.
     const evald = evalTableRows(t, rows, prop.values, lookups.tables);
     for (const c of t.columns) {
       if (!requiredColumn(t, c)) continue;
       const empty = rows.flatMap((r, i) => (blank(c.cell.kind === "formula" ? evald[i]![c.key] : r[c.key]) ? [i + 1] : []));
-      if (empty.length)
-        out.push({ key: t.key, message: `${title}: ${c.label || c.key} is empty in row${empty.length > 1 ? "s" : ""} ${empty.join(", ")}` });
+      if (!empty.length) continue;
+      const col = c.label || c.key;
+      out.push({
+        key: t.key, code: "cell_required", params: [title, col, empty.join(", ")],
+        message: `${title}: ${col} is empty in row${empty.length > 1 ? "s" : ""} ${empty.join(", ")}`,
+      });
     }
   }
   return out;

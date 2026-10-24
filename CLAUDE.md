@@ -188,7 +188,8 @@ B1's default lead series).
 by `save` — publishing must not bump `updatedAt`) becomes a client's project, `config_project` with
 `portalCardCode` set. **The engine runs on the server**: `portal/orpc/projects.ts` returns the
 projection in `portal/projection.ts` (pure, tested) and never a `ModelDef`, lookups or a candidate —
-that module is the fence in both directions (`acceptPortalInputs` is what a client may write).
+that module is the fence outward (`toPortalForm` over the shared form state), and `config-patch.ts`'
+external rules are what a client may write.
 **`project-lifecycle.ts` is the only writer of `status` and `config_project_event`**, imported by
 both processes: `transition()` locks the row and writes the status and its events in one
 transaction (it opens its own, then notifies after commit); `assertWritable(…, actor)` +
@@ -274,9 +275,13 @@ link (`sendOnSignIn`). The test harness verifies its users directly before signi
 
 ## `packages/config-engine` — the calculation core
 
-Pure, dependency-free (zod only), and the same code runs in the browser for live preview and on
-the server for the numbers that get stored. **Never trust the browser's figures**: handlers
-recompute.
+Pure, dependency-free (zod only). **The server is the one source of every figure**
+(`docs/superpowers/specs/2026-10-24-server-config-view-design.md`): both process pages send what the
+user changed and draw the view they get back. The engine runs in the browser only in the model
+builder's preview of an unsaved model, which nothing stores or quotes. `formState` turns a
+propagation into the plain-JSON form both pages draw (and the preview builds the same way);
+`money.ts`' `pairMoney` prices one (candidate, batch) pair — outputs, items split, a typed price wins
+— for both the page's cost breakdown (`costBreakdown`) and the quotation's lines.
 
 A `ModelDef` (one jsonb document) → `propagate` (iterate defaults/computed/visibility to a fixed
 point, eliminate impossible options) → `enumerate` (DFS over open parameters, capped at 200
@@ -296,7 +301,7 @@ it names an item, and `pricing.priceList` (a B1 `PriceListNo`) says which price,
 model has a BOM, `checkModel` refuses it otherwise. `bomItemCodes` decides which codes to look up:
 the string literals in each `itemCode` expression (the builder's value help writes one), plus the
 resolved domain of a bare identifier, because a parameter holding the code is the other shipped
-shape. It is also what keeps `prices` small enough to send to the browser. An item with no line for
+shape. It is also what keeps the price read small. An item with no line for
 the price list costs 0 and its BOM line is flagged `unpriced`; the process page names each one as a
 warning, so one missing price never stops a calculation (or offline work). The item query declares
 **no columns** on purpose: `columns` becomes `$select`, `ItemPrices` is a complex collection B1 rejects
@@ -309,20 +314,33 @@ out of the router so the portal process can import it without the internal auth)
 configuration is re-priced against what the cache says now rather than what it said then —
 `quotedValue`/`quotedCost` are the only frozen numbers, captured when the quotation is posted. (A portal
 submit freezes the client's inputs and indicative prices — on its append-only event row, not the
-project.)
+project.) A stored calculation is **stale** once the model or a masterdata row it reads
+(`syncTables`: synced or edited) is newer than `calculatedAt`, and every read that answers a view
+refreshes a stale one first while its side may write the project (`liveProject`) — a locked project
+shows its stored calculation as it is.
 
 **Inputs and candidates move in one statement.** `candidates` is emptied in the same `UPDATE` that
 writes `entries`/`batches`/`tables`, so a reader sees either the old inputs with their candidates or
 the new inputs with none — never a mismatched pair. That is why there is no `calculated` status:
 `calculatedAt !== null` is the whole freshness signal. Who may write a project's inputs is
 `assertWritable` (`project-lifecycle.ts`): an internal configuration until it is quoted, a client's
-request only in the status that is that side's (§7).
+request only in the status that is that side's (§7). An edit is a **patch** (`config-patch.ts`:
+`set`/`unset`/`batches`/whole `tables`), validated against the model with one refusal naming every
+problem, then **merged in SQL** (`entries || set - unset`), so two writers of different fields never
+overwrite each other. The calculation's own write touches only candidates/selection/`calculatedAt`,
+and only if `updated_at` is still what it read — a patch landing meanwhile wins. It never enumerates
+while the view's `missing` (name, customer, batches, required parameters, the items grid) is
+non-empty or a rule is broken, and a calculation that cannot complete is state (`calculation:
+failed`), never a thrown error, and is not stored.
 
-**One edit is one call.** `configs.calculate` writes the inputs and recomputes in a single handler,
-and returns exactly what `configs.get` returns; `update`/`select` return the same payload.
-The client sets its query cache from the response (`setProject` in `ConfigProcessPage.tsx`) rather
-than invalidating, so the page holds one `draft` object and `draft !== null` is its whole dirty
-check.
+**One edit is one call.** `configs.calculate` writes the patch (name and customer too) and answers
+the view (`config-view.ts`: form state, `missing`, candidates' prices, per-quantity costs, coded
+`issues` — plain JSON, no raw engine output); `get`/`update` (the model switch, nothing else) add the
+model, `select` answers the same. The page commits on change, never per keystroke, with no timer:
+`usePatchQueue` (`@confire/ui/configurator/patch.ts`) keeps one call in flight, merges commits
+meanwhile, puts picks behind edits, and the page draws the pending patch over the last answer
+(`useConfigProcess.ts`). A 4xx drops the pending patch and refetches; a failure to reach the server
+keeps it for Retry. The portal's `projects.calculate` takes the same patch.
 
 ## `packages/b1` — the SAP connector
 
@@ -437,8 +455,9 @@ generates a page.
   (`QuoteCreatePage` seeding `entities.one`) still land. `global.css` (UI5 quirks the shells need) lives
   there too. `bun run test:ui` runs its tests. The portal provides its own (`apps/portal/src/main.tsx`):
   value help over `projects.queryPage`, personal views only.
-- **Shared beyond the shells:** `configurator/` (`ConfiguratorForm`, `ConfigTable`: the internal page
-  computes in the browser; the portal passes server-evaluated `badges`/`evaluated` instead), `money.ts`,
+- **Shared beyond the shells:** `configurator/` (`ConfiguratorForm`, `ConfigTable`: both draw a server
+  form state — the preview's is built locally — and report each change; `patch.ts`, the patch merge and
+  the one-in-flight queue both SPAs send through), `money.ts`,
   `timeline/` (`ProjectTimeline`, `PROJECT_STATUS`) and `confirm.ts`'s `promptNote`.
 - **Features are declared.** `apps/app/src/features/b1/` (documents, business partners, items; `B1_FEATURES`
   is the registry — the `/b1/$entity` routes accept nothing else, and the side nav and search list

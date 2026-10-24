@@ -5,17 +5,15 @@ import {
   db, configModel, configProject, configProjectEvent, user,
   type ConfigProject, type PortalPrice,
 } from "@confire/db";
-import {
-  DslError, EntriesZ, missingInputs, propagate, referencedTables, TableRowsZ,
-} from "@confire/config-engine";
+import { formState, referencedTables } from "@confire/config-engine";
 import { portalBuyerProcedure, portalMemberProcedure } from "./base.ts";
 import { quotationIn, tenantConnector, viaB1 } from "../../b1.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
-import { cachedLookups, calculateProject, loadModel, QueryPageZ, queryTablePage } from "../../config-project.ts";
+import { liveProject, loadModel, QueryPageZ, queryTablePage } from "../../config-project.ts";
+import { PatchZ, patchColumns, patchProblems, touchesEngine } from "../../config-patch.ts";
 import { assertWritable, inputsOf, recordCreated, transition, writableBy, type Action, type Actor } from "../../project-lifecycle.ts";
 import {
-  acceptPortalInputs, toPortalBadges, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalProp,
-  toPortalRows,
+  toPortalForm, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalRows,
 } from "../projection.ts";
 
 // The client's projects (spec §7, §9, §11). One project = one configuration, fenced on the seat's
@@ -26,9 +24,6 @@ type Seat = { tenantId: string; cardCode: string; cardName: string; user: { id: 
 const actorOf = (c: Seat): Actor => ({ userId: c.user.id, side: "external", cardCode: c.cardCode });
 /** The seat's company's projects: a company is (tenant, CardCode), never the CardCode alone. */
 const seatFence = (c: Seat) => and(eq(configProject.tenantId, c.tenantId), eq(configProject.portalCardCode, c.cardCode));
-
-/** The batch field's message key: data-param shares its namespace with parameter keys. */
-const BATCHES = "__batches";
 
 const PROJECT_FIELDS: SqlFields = {
   name: { col: configProject.name, kind: "string" },
@@ -63,20 +58,15 @@ async function pricesOf(p: ConfigProject, indicative: boolean): Promise<
   return { kind: "submitted", rows: (e?.payload as { prices?: PortalPrice[] } | null)?.prices ?? [], at: e?.at ?? p.updatedAt };
 }
 
-/** The one payload `get` and `calculate` return (§7.1). */
-async function payload(c: Seat, id: string, calcError: string | null = null) {
-  const p = await ownProject(c, id);
-  const model = await loadModel(c.tenantId, p.modelId);
+/** The one payload `get`, `calculate` and the lifecycle actions return (§7.1). The read brings a
+ *  stale calculation up to date first while the client may write the project (liveProject), so a
+ *  complete draft is calculated without the page having to ask. */
+async function payload(c: Seat, id: string) {
+  const live = await liveProject(c.tenantId, and(eq(configProject.id, id), seatFence(c))!, "external");
+  const { row: p, model, lookups, prop } = live;
   const def = model.definition;
-  const lookups = await cachedLookups(c.tenantId, model, p.entries, p.tables);
-  let prop;
-  try {
-    prop = propagate(def, lookups, p.entries, p.tables);
-  } catch (e) {
-    if (e instanceof DslError) throw new ORPCError("BAD_REQUEST", { message: e.message });
-    throw e;
-  }
   const indicative = model.portalPricing === "indicative";
+  const form = toPortalForm(formState(def, lookups, prop, p.tables), indicative);
   const [assignee] = p.assigneeId ? await db.select({ name: user.name }).from(user).where(eq(user.id, p.assigneeId)).limit(1) : [];
   return {
     project: {
@@ -86,16 +76,12 @@ async function payload(c: Seat, id: string, calcError: string | null = null) {
       createdAt: p.createdAt, updatedAt: p.updatedAt, assigneeName: assignee?.name ?? null,
     },
     model: { id: model.id, name: model.name, portalPricing: model.portalPricing, definition: toPortalModelDef(def) },
-    prop: toPortalProp(def, prop, lookups, p.tables),
-    lookups: toPortalLookups(def, prop, lookups),
+    form,
+    lookups: toPortalLookups(def, form, lookups),
     // The submit gate, in form order — the same rule the internal Create quote follows.
-    missing: [
-      ...(p.batches.length ? [] : [{ key: BATCHES, message: "Add at least one batch quantity" }]),
-      ...missingInputs(def, lookups, prop, p.tables),
-    ],
-    badges: indicative ? toPortalBadges(def, prop, lookups) : {},
+    missing: live.missing,
     prices: await pricesOf(p, indicative),
-    calcError,
+    calcError: live.calculation.state === "failed" ? live.calculation.message ?? null : null,
   };
 }
 
@@ -105,9 +91,8 @@ async function submit(c: Seat, id: string, action: Extract<Action, "submit" | "r
   const pl = await payload(c, id);
   const [p] = await db.select({ calculatedAt: configProject.calculatedAt }).from(configProject).where(eq(configProject.id, id)).limit(1);
   const gaps = [
-    ...(pl.project.name.trim() ? [] : ["a name"]),
     ...pl.missing.map((m) => m.message),
-    ...(pl.prop.conflicts.length ? ["no conflicts"] : []),
+    ...(pl.form.conflicts.length ? ["no conflicts"] : []),
   ];
   if (gaps.length) throw new ORPCError("BAD_REQUEST", { message: `Before submitting: ${gaps.join("; ")}` });
   if (!p?.calculatedAt) throw new ORPCError("BAD_REQUEST", { message: "The configuration is still calculating — try again in a moment" });
@@ -180,41 +165,23 @@ export const projectsRouter = {
     return { ok: true };
   }),
 
-  /** One edit is one call (§7.1): write the inputs and empty the candidates in one statement, then
-   *  recalculate once the inputs are complete. A calculation that fails keeps the edit and comes
-   *  back as `calcError` — the page says why rather than losing what was typed. */
+  /** One edit is one call (§7.1): write what changed, emptying the candidates in the same
+   *  statement, and answer the payload — which calculates once the inputs are complete. A
+   *  calculation that fails keeps the edit and comes back as `calcError`. */
   calculate: portalBuyerProcedure
-    .input(z.object({
-      id: z.uuid(),
-      entries: EntriesZ.optional(),
-      batches: z.array(z.number().int().min(1)).max(50).optional(),
-      tables: TableRowsZ.optional(),
-    }))
+    .input(z.object({ id: z.uuid(), ...PatchZ }))
     .handler(async ({ input, context }) => {
       await assertWritable(context.tenantId, input.id, actorOf(context));
-      const { id, batches, ...edits } = input;
-      if (Object.keys(edits).length || batches) {
+      const { id, ...patch } = input;
+      if (touchesEngine(patch)) {
         const stored = await ownProject(context, id);
-        const model = await loadModel(context.tenantId, stored.modelId);
-        let accepted;
-        try {
-          accepted = acceptPortalInputs(model.definition, stored, edits);
-        } catch (e) {
-          throw new ORPCError("BAD_REQUEST", { message: e instanceof Error ? e.message : String(e) });
-        }
+        const problems = patchProblems((await loadModel(context.tenantId, stored.modelId)).definition, patch, "external");
+        if (problems.length) throw new ORPCError("BAD_REQUEST", { message: `Not editable here: ${problems.join("; ")}` });
         const written = await db.update(configProject)
-          .set({ ...accepted, ...(batches ? { batches } : {}), candidates: [], selection: null, calculatedAt: null, updatedAt: new Date() })
+          .set({ ...patchColumns(patch), candidates: [], selection: null, calculatedAt: null, updatedAt: new Date() })
           .where(and(eq(configProject.id, id), seatFence(context), writableBy("external")))
           .returning({ id: configProject.id });
         if (!written.length) throw new ORPCError("CONFLICT", { message: "This project moved on meanwhile — reload it" });
-      }
-      const pl = await payload(context, id);
-      if (pl.missing.length || pl.prop.conflicts.length || !pl.project.name.trim()) return pl;
-      try {
-        await calculateProject(context.tenantId, id);
-      } catch (e) {
-        if (e instanceof ORPCError && e.code === "BAD_REQUEST") return payload(context, id, e.message);
-        throw e;
       }
       return payload(context, id);
     }),

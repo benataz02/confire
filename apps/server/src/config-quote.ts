@@ -3,14 +3,12 @@ import { ORPCError } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
 import { db, configProject, type ConfigCandidate, type ConfigSelection } from "@confire/db";
 import {
-  bindings,
   computeOutputs,
   DslError,
-  itemSplit,
+  itemsTableOf,
   missingInputs,
+  pairMoney,
   propagate,
-  typedPrice,
-  type ItemsTable,
   type ModelDef,
   type Outputs,
   type ResolvedLookups,
@@ -64,18 +62,11 @@ export function configDocumentCommandId(input: {
   return createHash("sha256").update(raw).digest("hex");
 }
 
-/** Whole cents, the way B1 rounds a line total. */
-const round2 = (n: number) => Math.round(n * 100) / 100;
-
 /** Header fields the quote page may set on a configurator quotation. Read off the Quotations
  *  profile so the page's write allowlist and the entity page's cannot drift; deliberately NOT the
  *  profile's `editableCollections` or its `U_` escape hatch — DocumentLines come from the item
  *  matrix and U_CF_Key is the dedup key, both the server's alone. */
 export const QUOTE_HEADER = new Set(ENTITY_PROFILES.Quotations!.editable);
-
-/** The one items table a model may declare, if it declared one. checkModel caps it at one. */
-const itemsTableOf = (model: ModelDef): ItemsTable | undefined =>
-  (model.tables ?? []).find((t): t is ItemsTable => t.role === "items");
 
 /**
  * The quotation's DocumentLines and the engineered totals behind them, from the persisted project
@@ -84,8 +75,10 @@ const itemsTableOf = (model: ModelDef): ItemsTable | undefined =>
  *
  * One selected (candidate, batch) pair is normally one line. With an items table it is n lines —
  * merge production yields several different items from one run, so the cost is joint and can only
- * be *split*, never computed per item. `value` is the sum of the lines actually built, which is
- * what makes the stored `quotedValue` and the posted document agree by construction.
+ * be *split*, never computed per item. Each pair is priced by the engine's pairMoney, the same unit
+ * the process page's Cost elements pane is drawn from, so the two cannot disagree. `value` is the
+ * sum of the lines actually built, which makes the stored `quotedValue` and the posted document
+ * agree by construction.
  */
 export function buildQuoteLines(
   project: ConfigProjectRow, model: ModelDef, lookups: ResolvedLookups,
@@ -98,16 +91,17 @@ export function buildQuoteLines(
   for (const s of project.selection ?? []) {
     const cand = project.candidates[s.candidateIdx];
     if (!cand) continue;
-    let out;
+    let pm;
     try {
-      out = computeOutputs(model, lookups, cand.assignment, s.batchQty, project.tables);
+      pm = pairMoney(model, lookups, cand.assignment, s.batchQty, project.tables);
     } catch (e) {
       if (e instanceof DslError || e instanceof RangeError) {
         throw new ORPCError("BAD_REQUEST", { message: e.message });
       }
       throw e;
     }
-    cost += out.unitCost * s.batchQty;
+    cost += pm.cost;
+    value += pm.value;
 
     const desc =
       Object.entries(cand.assignment)
@@ -115,46 +109,25 @@ export function buildQuoteLines(
         .map(([k, v]) => `${k}: ${v}`)
         .join(", ") || "Configuration";
 
-    // itemSplit drops the rows that ship nothing, or the shares would not sum to the total.
-    const scope = { ...bindings(model, lookups, cand.assignment, project.tables).values, qty: s.batchQty };
-    const split = !items ? [] : itemSplit(
-      items, project.tables[items.key] ?? [], scope, lookups.tables, s.batchQty,
-      { cost: out.unitCost * s.batchQty, price: out.unitPrice * s.batchQty },
-    );
-
-    if (!items || split.length === 0) {
-      lines.push({
-        ItemCode: model.pricing.quoteItemCode,
-        ItemDescription: desc,
-        Quantity: s.batchQty,
-        UnitPrice: out.unitPrice,
-      });
-      value += out.unitPrice * s.batchQty;
+    if (!pm.lines.length) {
+      lines.push({ ItemCode: model.pricing.quoteItemCode, ItemDescription: desc, Quantity: s.batchQty, UnitPrice: pm.outputs.unitPrice });
       continue;
     }
-
-    for (const l of split) {
-      // The salesperson's price wins over the split: the grid showed it, so the document carries
-      // it. It is read off `raw`, because the price is not a declared column and so never appears
-      // in the evaluated row.
-      const unitPrice = typedPrice(l.raw) ?? l.price / l.quantity;
+    for (const l of pm.lines) {
       const line: Record<string, unknown> = {
         // the configurator's generic item stays the B1 item; the customer-facing code rides along
         // in a mapped UDF, so no article master has to be created per configuration.
         ItemCode: model.pricing.quoteItemCode,
         ItemDescription: desc,
         Quantity: l.quantity,
-        UnitPrice: unitPrice,
+        // the salesperson's price wins over the split: the grid showed it, so the document carries it
+        UnitPrice: l.unitPrice,
       };
-      for (const [col, field] of Object.entries(items.map ?? {})) {
+      for (const [col, field] of Object.entries(items?.map ?? {})) {
         const v: Val | undefined = l.row[col];
         if (v !== undefined && v !== null) line[field] = v;
       }
       lines.push(line);
-      // B1 re-derives LineTotal as round(Quantity * UnitPrice), so rounding the same way here is
-      // what keeps DocTotal equal to the stored quotedValue. It used to follow from splitShares'
-      // whole-cent guarantee; a hand-typed price moves the total, so that no longer covers it.
-      value += round2(unitPrice * l.quantity);
     }
   }
   return { lines, value, cost };

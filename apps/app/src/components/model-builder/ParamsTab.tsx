@@ -6,7 +6,7 @@ import {
   type TableHeaderRowDomRef,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/AddColumn.js";
-import { isTableGroup, itemsTable, propagate, type Entries, type ResolvedLookups, type TableRows } from "@confire/config-engine";
+import { formState, isTableGroup, itemsTable, propagate, type Entries, type ResolvedLookups, type TableRows } from "@confire/config-engine";
 import type { Issue, ModelDef, Param, TableDef } from "@confire/config-engine";
 import { confirm } from "@confire/ui/confirm.ts";
 import { ExprInput } from "./ExprInput.tsx";
@@ -16,7 +16,7 @@ import { localizeItems } from "./starterModel.ts";
 import { TitleDialog, type TitleIcon } from "./TitleDialog.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import { ConfiguratorForm } from "@confire/ui/configurator/ConfiguratorForm.tsx";
-import { mergeQueryPicks, setQueryPick, type QueryPicks } from "@confire/ui/configurator/formHelpers.ts";
+import { setEntry } from "@confire/ui/configurator/formHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { applyMove, canDrop, deleteNode, duplicateParam, parseRowKey, placeParam, placeTable, rowKeyOf, tableKeyAt, type Placement, type RowRef } from "./structureOps.ts";
 import { useI18n } from "../../i18n.ts";
@@ -500,12 +500,14 @@ function PreviewPane({ modelId, draft, issues, lookups, lookupsFailed, onRetryLo
   const i18n = useI18n();
   const [entries, setEntries] = useState<Entries>({});
   const [tables, setTables] = useState<TableRows>({});
-  const [picks, setPicks] = useState<QueryPicks>({});
   const lastGood = useRef(draft);
   if (issues.length === 0) lastGood.current = draft;
   const previewModel = issues.length === 0 ? draft : lastGood.current;
-  const lk = lookups ? mergeQueryPicks(lookups, picks) : undefined;
-  const prop = lk ? propagate(previewModel, lk, entries, tables) : null;
+  // The one place the engine still runs in the browser: an unsaved model has no row on the server,
+  // and nothing previewed here is stored or quoted. Same form state the server builds, so the form
+  // has one input shape. ponytail: a value picked off a query field's first page binds no derived
+  // columns here (the server binds them from the stored entry); a preview has none stored.
+  const form = lookups ? formState(previewModel, lookups, propagate(previewModel, lookups, entries, tables), tables) : null;
 
   return (
     <div style={{ flex: "1 1 auto", minInlineSize: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
@@ -517,11 +519,11 @@ function PreviewPane({ modelId, draft, issues, lookups, lookupsFailed, onRetryLo
         </div>
       ) : null}
       <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-        {lookups && lk && prop ? (
-          <ConfiguratorForm model={previewModel} lookups={lookups} lk={lk} prop={prop} entries={entries} onChange={setEntries}
-            onQueryPick={(k, t, sel) => setPicks((p) => setQueryPick(p, k, t, sel))}
+        {lookups && form ? (
+          <ConfiguratorForm model={previewModel} form={form} tables={lookups.tables} formulaOverride
+            onChange={(key, v) => setEntries((e) => setEntry(e, key, v))}
             querySource={{ modelId }}
-            tables={tables} onTablesChange={setTables} />
+            rows={tables} onRowsChange={(key, rows) => setTables((cur) => ({ ...cur, [key]: rows }))} />
         ) : lookupsFailed ? null : <BusyIndicator active delay={0} />}
       </div>
     </div>

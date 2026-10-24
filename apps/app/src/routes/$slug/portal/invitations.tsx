@@ -106,7 +106,7 @@ function Invitations() {
             <Button design="Transparent" icon="paper-plane" onClick={() => setInviting(true)}>
               {t("ADMIN_INVITE_NEW_CLIENT")}
             </Button>
-            <Button design="Transparent"
+            <Button design="Transparent" icon="cancel"
               disabled={cancel.isPending || !sel.some((r) => r.state === "pending" || r.state === "expired")}
               onClick={() => void cancelSelected(sel, clear)}>
               {t("ADMIN_CANCEL_INVITE")}

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { propagate, type ModelDef, type ResolvedLookups } from "@confire/config-engine";
+import { formState, propagate, type ModelDef, type ResolvedLookups } from "@confire/config-engine";
 import {
-  acceptPortalInputs, toPortalBadges, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalProp, toPortalRows,
+  toPortalForm, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalRows,
 } from "../src/portal/projection.ts";
 
 // The portal fence (spec §7.1), both directions. Pure: no database, no agent.
@@ -62,26 +62,42 @@ describe("toPortalModelDef", () => {
   });
 });
 
-describe("toPortalProp / toPortalLookups", () => {
+describe("toPortalForm / toPortalLookups", () => {
   const prop = propagate(model, lookups, { grade: "A" }, tables);
-  const pp = toPortalProp(model, prop, lookups, tables);
+  const form = formState(model, lookups, prop, tables);
+  const pf = toPortalForm(form, true);
+  const json = JSON.stringify(pf);
 
-  test("values are parameter keys only — no computed, no derived <param>_<column>", () => {
+  test("fields are parameter keys only — no computed, no derived <param>_<column>", () => {
     expect(prop.values.grade_cost).toBe(5); // the engine has it…
     expect(prop.values.margin).toBe(0.4);
-    expect(Object.keys(pp.values).sort()).toEqual(["grade", "locked"]); // …the client does not
+    expect(Object.keys(pf.fields)).toEqual(["grade", "secret", "locked"]); // …the client does not
+    expect(json).not.toContain("grade_cost");
+  });
+
+  test("a hidden field is visible: false and nothing else — its default stays home", () => {
+    expect(form.fields.secret!.value).toBe(42);
+    expect(pf.fields.secret).toEqual({ visible: false, required: false });
+    expect(pf.fields.grade).toMatchObject({ value: "A", required: true });
   });
 
   test("tables arrive evaluated, declared columns only — a typed unit price stays home", () => {
-    expect(pp.tables.items).toEqual([
+    expect(pf.tables.items).toEqual([
       { itemcode: "X1", quantity: 2, double: 4 },
       { itemcode: "X2", quantity: 1, double: 50 }, // an override shows as its value
     ]);
+    expect(json).not.toContain("99");
   });
 
-  test("lookups: the named option tables, hidden columns out but the key kept; no prices", () => {
-    const lk = toPortalLookups(model, prop, lookups);
-    expect(lk.prices).toBeUndefined();
+  test("badges are amounts, and only on an indicative model; the expression stays home", () => {
+    expect(pf.fields.grade!.price).toBe(10);
+    expect(toPortalForm(form, false).fields.grade!.price).toBeUndefined();
+  });
+
+  test("lookups: the named option tables, hidden columns out but the key kept; no prices, no domains", () => {
+    const lk = toPortalLookups(model, pf, lookups);
+    expect(lk).not.toHaveProperty("prices");
+    expect(lk).not.toHaveProperty("domains");
     expect(Object.keys(lk.tables)).toEqual(["grades"]); // not the item-price catalog
     expect(lk.tables.grades!.columns).toEqual(["code", "name"]); // `code` is the key: kept though hidden
     expect(lk.tables.grades!.rows).toEqual([["A", "Alpha"], ["B", "Beta"]]);
@@ -91,10 +107,6 @@ describe("toPortalProp / toPortalLookups", () => {
   test("a value-help page follows the same column rule", () => {
     const page = toPortalPage(model, "grades", { columns: ["code", "name", "cost"], rows: [["C", "Gamma", 9]], hidden: ["cost"] });
     expect(page).toEqual({ columns: ["code", "name"], rows: [["C", "Gamma"]] });
-  });
-
-  test("badges are amounts; the expression stays home", () => {
-    expect(toPortalBadges(model, prop, lookups)).toEqual({ grade: 10 });
   });
 });
 
@@ -114,28 +126,8 @@ describe("toPortalPrices", () => {
   });
 });
 
-describe("acceptPortalInputs", () => {
-  const stored = { entries: { grade: "A", locked: 7, gone: 1 }, tables };
-
-  test("a client's change to a parameter is accepted", () => {
-    expect(acceptPortalInputs(model, stored, { entries: { grade: "B", locked: 7, gone: 1 } }).entries).toEqual({ grade: "B", locked: 7, gone: 1 });
-  });
-
-  test("a change to a read-only or unknown key is refused; leaving it as stored is not", () => {
-    expect(() => acceptPortalInputs(model, stored, { entries: { grade: "A", locked: 8, gone: 1 } })).toThrow(/locked/);
-    expect(() => acceptPortalInputs(model, stored, { entries: { grade: "A", locked: 7, gone: 1, margin: 0.9 } })).toThrow(/margin/);
-  });
-
-  test("a table sent back unchanged keeps the staff's overrides", () => {
-    const r = acceptPortalInputs(model, stored, { tables: toPortalRows(model, tables) });
-    expect(r.tables).toEqual(tables);
-  });
-
-  test("a client edit replaces the table; a price or formula cell is refused", () => {
-    const edited = { items: [{ itemcode: "X1", quantity: 3 }] };
-    expect(acceptPortalInputs(model, stored, { tables: edited }).tables).toEqual(edited);
-    expect(() => acceptPortalInputs(model, stored, { tables: { items: [{ itemcode: "X1", quantity: 3, unitprice: 1 }] } })).toThrow(/unitprice/);
-    expect(() => acceptPortalInputs(model, stored, { tables: { items: [{ itemcode: "X1", double: 1 }] } })).toThrow(/double/);
-    expect(() => acceptPortalInputs(model, stored, { tables: { other: [] } })).toThrow(/other/);
+describe("toPortalRows", () => {
+  test("a stored table goes out with its writable cells only: no override, no typed price", () => {
+    expect(toPortalRows(model, tables)).toEqual({ items: [{ itemcode: "X1", quantity: 2 }, { itemcode: "X2", quantity: 1 }] });
   });
 });

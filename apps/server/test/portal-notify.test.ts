@@ -62,7 +62,7 @@ async function setup() {
   /** A project the buyer created and calculated, still a draft. */
   const draft = async () => {
     const { id } = await call(portalRouter.projects.create, { modelId: model!.id, name: "Kabel 1" }, on(buyer.cookie));
-    await call(portalRouter.projects.calculate, { id, entries: { material: "steel" } }, on(buyer.cookie));
+    await call(portalRouter.projects.calculate, { id, set: { material: "steel" } }, on(buyer.cookie));
     return id;
   };
   /** A user's bell at this tenant, newest first, through their own app's router, once every
@@ -177,7 +177,7 @@ describe("notifications", () => {
 
     // `revised` sends nothing of its own: the send-back lists the change.
     m = await mark();
-    await call(router.configs.calculate, { id, entries: { material: "alu" } }, s.as(s.admin.cookie));
+    await call(router.configs.calculate, { id, set: { material: "alu" } }, s.as(s.admin.cookie));
     await call(router.requests.sendBack, { id, note: "Aluminium is what we can do" }, s.as(s.admin.cookie));
     to = await mailSince(m);
     expect(to(s.buyer.email).map((x) => x.subject)).toEqual(["Changes requested on Kabel 1"]);
@@ -193,9 +193,9 @@ describe("notifications", () => {
     const id = await s.draft();
     await call(portalRouter.projects.submit, { id }, s.on(s.buyer.cookie));
     await call(router.requests.accept, { id }, s.as(s.admin.cookie));
-    const { project } = await call(router.configs.calculate, { id }, s.as(s.admin.cookie));
+    const { candidates } = await call(router.configs.calculate, { id }, s.as(s.admin.cookie));
     await call(router.configs.select, {
-      projectId: id, selection: project.candidates[0]!.perBatch.map((b) => ({ candidateIdx: 0, batchQty: b.batchQty })),
+      projectId: id, selection: candidates.rows[0]!.perBatch.map((b) => ({ candidateIdx: 0, batchQty: b.batchQty })),
     }, s.as(s.admin.cookie));
     const d = await call(router.configs.quoteDraft, { projectId: id }, s.as(s.admin.cookie));
     let m = await mark();
@@ -391,7 +391,7 @@ describe("files", () => {
 
     const m = await mark();
     const { id } = await call(portalRouter.projects.create, { modelId: (await db.select().from(configModel).where(eq(configModel.tenantId, s.tenantId)))[0]!.id, name: "P" }, s.on(s.buyer.cookie));
-    await call(portalRouter.projects.calculate, { id, entries: { material: "steel" } }, s.on(s.buyer.cookie));
+    await call(portalRouter.projects.calculate, { id, set: { material: "steel" } }, s.on(s.buyer.cookie));
     await call(portalRouter.projects.submit, { id }, s.on(s.buyer.cookie));
     await call(router.requests.accept, { id }, s.as(s.admin.cookie));
     const mail = (await mailSince(m))(s.buyer.email)[0]!;

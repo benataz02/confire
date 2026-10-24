@@ -1,16 +1,16 @@
 import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Button, CheckBox, Input, Option, Select, Text } from "@ui5/webcomponents-react";
 import {
-  columnOptions, evalTableRows, requiredColumn, COST_COL, PRICE_COL, typedPrice,
-  type ResolvedLookups, type ResolvedTable, type TableColumn, type TableDef, type Val,
+  columnOptions, requiredColumn, COST_COL, PRICE_COL,
+  type ResolvedTable, type RowMoney, type TableColumn, type TableDef, type Val,
 } from "@confire/config-engine";
 import { CflField } from "../cfl/CflField.tsx";
 import { cfl, type QueryScope } from "../cfl/cfl-configs.ts";
 import { Grid, type CellTemplate, type GridState } from "../list-report/Grid.tsx";
 import type { ListColumn } from "../types.ts";
-import { displayValue, rowTable } from "./formHelpers.ts";
+import { displayValue } from "./formHelpers.ts";
 import { addRow, pasteRows, removeRows, setCell, type Row } from "./configTableOps.ts";
-import { money as fmtMoney, type ItemMoney } from "../money.ts";
+import { money as fmtMoney } from "../money.ts";
 import { useUiI18n } from "../i18n.ts";
 import { useUiSource } from "../source.tsx";
 
@@ -36,40 +36,35 @@ const header = (c: TableColumn) => c.label + (c.unit ? ` (${c.unit})` : "");
  * table only feeds sums into the model's formulas — the difference is entirely in what the server
  * does with the rows, so the editing surface is identical.
  *
- * Controlled, like ConfiguratorForm: rows in, rows out, every computed cell re-derived here rather
- * than stored. The cell controls follow ConfiguratorForm.control()'s branch order so a column and a
- * parameter of the same type look and behave the same.
+ * Controlled, like ConfiguratorForm: rows in, rows out. Every computed cell is the server's — a
+ * formula cell shows `evaluated`, the rows the last answer evaluated. Each cell commits on change
+ * (blur, Enter, a pick), never per keystroke: a commit is a call. The cell controls follow
+ * ConfiguratorForm.control()'s branch order so a column and a parameter of the same type look and
+ * behave the same.
  */
-export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPick, disabled, readOnly, querySource, money, evaluated: given }: {
+export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, readOnly, querySource, money, formulaOverride }: {
   def: TableDef;
+  /** the stored rows — what the user typed, a pending edit included */
   rows: Row[];
-  /** the model's current values — row formulas read these, and row cells shadow them */
-  scopeVars: Record<string, Val>;
-  lookups: ResolvedLookups;
+  /** the rows as the server evaluated them, formula cells filled in */
+  evaluated: Record<string, Val>[];
+  /** the display tables: option cells' lists, query cells' first page */
+  tables: Record<string, ResolvedTable>;
   onChange: (rows: Row[]) => void;
-  /** an off-page query pick, so its `<column>_<source column>` values bind before the next
-   *  recalculate. Keyed per cell — two rows of the same column pick independently. */
-  onQueryPick?: (key: string, table: string, selected: ResolvedTable | undefined) => void;
   disabled?: boolean;
   /** quoted/locked: cells are Text, add/delete are gone. See ConfiguratorForm. */
   readOnly?: boolean;
   querySource: QueryScope;
-  /** Derived cost/price per row for an `items` grid; null = the columns with nothing in them yet.
-   *  Absent = no money columns at all, which is how the builder preview stays free of cost data. */
-  money?: ItemMoney | null;
-  /** Rows the server evaluated (the portal): used instead of evaluating here, and formula cells
-   *  become read-only — typing over a formula is a salesperson's override, not a client's. */
-  evaluated?: Record<string, Val>[];
+  /** Cost/price per row for an `items` grid; null = the columns with nothing in them yet. Absent =
+   *  no money columns at all, which is how the builder preview and the portal stay free of cost. */
+  money?: { batchQty: number; rows: (RowMoney | null)[] } | null;
+  /** a formula cell can be typed over (a salesperson's override); off, it is read-only (a client) */
+  formulaOverride?: boolean;
 }) {
   // Off `me`, not off a prop: the currency is the tenant's, identical for every table on the page,
   // so threading it down from the model was carrying a constant through four components.
   const i18n = useUiI18n();
   const currency = useUiSource().useCurrency();
-  // Same function the server runs, so a computed cell cannot disagree with the quote.
-  const evaluated = useMemo(
-    () => given ?? evalTableRows(def, rows, scopeVars, lookups.tables),
-    [given, def, rows, scopeVars, lookups],
-  );
   // An items grid is never capped and never empty: its rows are the quotation's lines.
   const maxRows = def.role === "calc" ? def.maxRows : undefined;
   const atMax = maxRows !== undefined && rows.length >= maxRows;
@@ -89,11 +84,11 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
 
   const priceCell = (ri: number) => {
     // Same contract a formula cell's override follows: the split until someone types, and the
-    // clear icon hands it back. typedPrice is the test buildQuoteLines applies, so the cell cannot
-    // show a number the quotation will reject.
-    const typed = typedPrice(rows[ri]);
-    const overridden = typed !== undefined;
-    const value = typed ?? money?.rows[ri]?.unitPrice;
+    // clear icon hands it back. The stored cell is what the user typed (the server refuses anything
+    // but a price of 0 or more), so it shows as typed until the answer prices it.
+    const stored = rows[ri]?.[PRICE_COL];
+    const overridden = typeof stored === "number";
+    const value = overridden ? stored : money?.rows[ri]?.unitPrice;
     if (readOnly) return <Text>{moneyText(value)}</Text>;
     return (
       <Input style={{ width: "100%" }} type="Number" accessibleName={priceHeader}
@@ -101,9 +96,10 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
         showClearIcon={overridden} valueState={overridden ? "Information" : "None"}
         valueStateMessage={<div>{i18n.getText("UI_HAND_PRICE")}</div>}
         disabled={disabled}
-        onInput={(e) => {
+        onChange={(e) => {
           const raw = e.target.value ?? "";
-          onChange(setCell(rows, ri, PRICE_COL, raw === "" ? null : Number(raw)));
+          const next = raw === "" ? null : Number(raw);
+          if (next !== (stored ?? null)) onChange(setCell(rows, ri, PRICE_COL, next));
         }} />
     );
   };
@@ -117,18 +113,18 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
     // evalTableRows applies the same rule server-side, which is what makes the quote agree.
     const computed = c.cell.kind === "formula";
     const overridden = computed && stored !== undefined && stored !== null;
-    const value = computed ? (evaluated[ri]?.[c.key] ?? null) : stored;
-    // Same rule missingInputs applies, so a red cell is exactly what keeps Create quote hidden.
+    const value = computed ? (overridden ? stored : evaluated[ri]?.[c.key] ?? null) : stored;
+    // The column's own flag and the cell's emptiness: the asterisk and the red, as on a field.
     const req = requiredColumn(def, c);
     const blank = req && (value === undefined || value === null || value === "");
 
-    if (readOnly || (computed && given)) {
+    if (readOnly || (computed && !formulaOverride)) {
       if (computed) return <Text>{show(value ?? null)}</Text>;
       if (c.type === "boolean")
         return <Text>{displayValue(stored, [{ value: true, label: i18n.getText("UI_YES") }, { value: false, label: i18n.getText("UI_NO") }])}</Text>;
       if (c.cell.kind === "options") {
         // Items grid: the stored code is what rides to SAP; don't swap it for the lookup label.
-        const opts = def.role === "items" ? [] : columnOptions(c, lookups);
+        const opts = def.role === "items" ? [] : columnOptions(c, tables);
         return <Text>{displayValue(stored, opts)}</Text>;
       }
       return <Text>{displayValue(stored, [])}</Text>;
@@ -144,23 +140,22 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
 
     if (c.cell.kind === "options" && c.cell.ref.source === "query") {
       const ref = c.cell.ref;
-      const pickKey = `${def.key}.${c.key}.${ri}`;
-      const canonical = lookups.tables[ref.table];
-      // An items grid shows the code (plain mode): the stored code is what rides to SAP.
+      const canonical = tables[ref.table];
+      // An items grid shows the code (plain mode): the stored code is what rides to SAP. The server
+      // binds the picked row's other columns from the stored cell, even off the first page.
       return (
         <CflField
           config={{ dialogConfig: cfl.masterdataQuery(querySource, ref, canonical, { title: header(c), showValue: def.role === "items" }) }}
-          value={stored ?? null} disabled={disabled} required={req} accessibleName={header(c)}
-          onRowSelect={(row) => onQueryPick?.(pickKey, ref.table, rowTable(row, canonical))}
+          value={stored ?? null} disabled={disabled} required={req} accessibleName={header(c)} commitOnly
           onValueChange={(nv) => {
-            if (nv === undefined || nv === null || nv === "") onQueryPick?.(pickKey, ref.table, undefined);
-            set(nv === undefined || nv === "" ? null : (nv as Val));
+            const next = nv === undefined || nv === "" ? null : (nv as Val);
+            if (next !== (stored ?? null)) set(next);
           }} />
       );
     }
 
     if (c.cell.kind === "options") {
-      const opts = columnOptions(c, lookups);
+      const opts = columnOptions(c, tables);
       return (
         <Select style={{ width: "100%" }} disabled={disabled} required={req}
           valueState={blank ? "Negative" : "None"} valueStateMessage={<div>{i18n.getText("UI_REQUIRED", header(c))}</div>}
@@ -186,9 +181,10 @@ export function ConfigTable({ def, rows, scopeVars, lookups, onChange, onQueryPi
         showClearIcon={overridden} valueState={overridden ? "Information" : blank ? "Negative" : "None"}
         valueStateMessage={<div>{overridden ? i18n.getText("UI_HAND_FORMULA") : i18n.getText("UI_REQUIRED", header(c))}</div>}
         disabled={disabled}
-        onInput={(e) => {
+        onChange={(e) => {
           const raw = e.target.value ?? "";
-          set(raw === "" ? null : c.type === "number" ? Number(raw) : raw);
+          const next = raw === "" ? null : c.type === "number" ? Number(raw) : raw;
+          if (next !== (stored ?? null)) set(next);
         }} />
     );
   };

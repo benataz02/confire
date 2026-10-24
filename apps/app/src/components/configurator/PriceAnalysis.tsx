@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import {
-  Label, MessageStrip, MultiComboBox, MultiComboBoxItem, ObjectStatus, Tag, Text, Title,
+  Label, MultiComboBox, MultiComboBoxItem, ObjectStatus, Tag, Text, Title,
 } from "@ui5/webcomponents-react";
 import { LineChart } from "@ui5/webcomponents-react-charts";
-import type { Entries, ModelDef } from "@confire/config-engine";
+import type { ModelDef } from "@confire/config-engine";
+import type { client } from "../../orpc.ts";
 import {
-  bestByBatch, candidateLabel, chartRows, fmt, lineKey, margin, mergeSelection, openKeys, percent, sortRows,
-  type PricedCandidate, type Sel,
+  candidateLabel, chartRows, fmt, lineKey, mergeSelection, percent, sortRows, type Sel,
 } from "./runView.ts";
 import { money } from "@confire/ui/money.ts";
 import { useCurrency } from "../../orpc.ts";
@@ -27,18 +27,16 @@ const keyOf = (r: Row) => lineKey(toSel(r));
 /** Cheapest first inside each quantity — the question this list answers. */
 const DEFAULT_SORT: GridState["sortBy"] = [{ field: QTY, direction: "asc" }, { field: PRICE, direction: "asc" }];
 
+type Candidates = Awaited<ReturnType<typeof client.configs.get>>["candidates"];
+
 // The candidates view: one grid row per candidate × batch quantity, so a ticked row IS one future
 // quotation line. Each open parameter is a column and a filter. Below it, how the price moves with
-// quantity. No cost, no margin column.
-export function PriceAnalysis({ model, entries, candidates, selection, onSelect, capped, widest, disabled }: {
+// quantity. Every figure and the Lowest tag are the view's; the cap is a message-popover warning.
+export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, selection, onSelect, disabled }: {
   model: ModelDef;
-  entries: Entries;
-  candidates: PricedCandidate[];
+  candidates: Candidates;
   selection: Sel[];
   onSelect: (selection: Sel[]) => void;
-  /** enumeration hit its cap; the configuration page also says so in its message popover */
-  capped?: boolean;
-  widest?: { key: string; size: number };
   /** locked (quoted), or about to be replaced: the ticks still show, they just stop taking clicks */
   disabled?: boolean;
 }) {
@@ -46,13 +44,10 @@ export function PriceAnalysis({ model, entries, candidates, selection, onSelect,
   const i18n = useI18n();
   const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
   const [filters, setFilters] = useState<Record<string, string[]>>({});
-  const keys = openKeys(model, entries, candidates);
-  const best = bestByBatch(candidates);
   const batches = candidates[0]?.perBatch.map((b) => b.batchQty) ?? [];
-  const withCost = candidates.some((c) => c.perBatch.some((b) => b.unitCost !== undefined));
   const paramLabel = (k: string) => model.parameters.find((p) => p.key === k)?.label ?? k;
 
-  // Keyed on the keys' contents: openKeys hands back a new array every render.
+  // Keyed on the keys' contents: a new view is a new array.
   const qtyText = t("CONFIG_QUANTITY");
   const priceText = t("CONFIG_UNIT_PRICE");
   const marginText = t("CONFIG_MARGIN");
@@ -62,9 +57,9 @@ export function PriceAnalysis({ model, entries, candidates, selection, onSelect,
     ...keys.map((k) => ({ key: k, label: paramLabel(k), groupable: true })),
     { key: QTY, label: qtyText, type: "number" as const, groupable: true },
     { key: PRICE, label: priceText, type: "number" as const },
-    ...(withCost ? [{ key: MARGIN, label: marginText, type: "number" as const }] : []),
+    { key: MARGIN, label: marginText, type: "number" as const },
     { key: TOTAL, label: totalText, type: "number" as const },
-  ], [keys.join(), model.parameters, withCost, qtyText, priceText, marginText, totalText]);
+  ], [keys.join(), model.parameters, qtyText, priceText, marginText, totalText]);
   // Sort, grouping and widths are the user's until the column set changes under them (a
   // recalculation that leaves other parameters open), then they start over.
   const sig = columns.map((c) => c.key).join();
@@ -93,8 +88,7 @@ export function PriceAnalysis({ model, entries, candidates, selection, onSelect,
 
   const all = candidates.flatMap((c, i) => c.perBatch.map((b): Row => ({
     ...Object.fromEntries(keys.map((k) => [k, String(c.assignment[k] ?? "—")])),
-    [IDX]: i, [QTY]: b.batchQty, [PRICE]: b.unitPrice, [TOTAL]: b.total, [LOWEST]: best[b.batchQty] === i,
-    [MARGIN]: b.unitCost === undefined ? null : margin(b.unitPrice, b.unitCost),
+    [IDX]: i, [QTY]: b.batchQty, [PRICE]: b.unitPrice, [TOTAL]: b.total, [LOWEST]: b.lowest, [MARGIN]: b.margin,
   })));
   // One filter per column that actually varies — a single value has nothing to narrow.
   const domains = [...keys.map((k) => ({ key: k, label: paramLabel(k) })), { key: QTY, label: qtyText }]
@@ -120,13 +114,6 @@ export function PriceAnalysis({ model, entries, candidates, selection, onSelect,
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      {capped ? (
-        <MessageStrip design="Critical" hideCloseButton>
-          {widest
-            ? t("CONFIG_CAPPED_BACK_WIDEST", String(candidates.length), paramLabel(widest.key), String(widest.size))
-            : t("CONFIG_CAPPED_BACK", String(candidates.length))}
-        </MessageStrip>
-      ) : null}
       {domains.length ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem 1rem" }}>
           {domains.map((d) => (

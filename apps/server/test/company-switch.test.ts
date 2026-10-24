@@ -75,11 +75,11 @@ describe("following a company switch", () => {
     const project = async () => (await db.select().from(configProject).where(eq(configProject.id, id)))[0]!;
 
     const { id } = await call(portalRouter.projects.create, { modelId: model!.id, name: "Kabel" }, portal);
-    await call(portalRouter.projects.calculate, { id, entries: { material: "steel" } }, portal);
+    await call(portalRouter.projects.calculate, { id, set: { material: "steel" } }, portal);
     await call(portalRouter.projects.submit, { id }, portal);
     await call(router.requests.accept, { id }, staff);
-    const { project: calc } = await call(router.configs.calculate, { id }, staff);
-    await call(router.configs.select, { projectId: id, selection: [{ candidateIdx: 0, batchQty: calc.candidates[0]!.perBatch[0]!.batchQty }] }, staff);
+    const { candidates: calc } = await call(router.configs.calculate, { id }, staff);
+    await call(router.configs.select, { projectId: id, selection: [{ candidateIdx: 0, batchQty: calc.rows[0]!.perBatch[0]!.batchQty }] }, staff);
 
     const first = await post();
     expect(first.mode).toBe("created");

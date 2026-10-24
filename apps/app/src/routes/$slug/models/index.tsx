@@ -90,12 +90,12 @@ function Models() {
       error={remove.error ?? duplicate.error}
       toolbarActions={({ rows: sel, clear }) => (
         <>
-          <Button design="Transparent" onClick={() => { void navigate({ to: "/$slug/models/new" }); }}>{t("MODEL_NEW")}</Button>
-          <Button design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}
+          <Button icon="add" design="Transparent" onClick={() => { void navigate({ to: "/$slug/models/new" }); }}>{t("ADMIN_CREATE")}</Button>
+          <Button icon="copy" design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}
             onClick={() => duplicate.mutate({ id: String(sel[0]!.id) })}>
             {t("MODEL_DUPLICATE")}
           </Button>
-          <Button design="Transparent" disabled={!sel.length || remove.isPending}
+          <Button icon="delete" design="Transparent" disabled={!sel.length || remove.isPending}
             onClick={() => void del(sel, clear)}>
             {t("MODEL_DELETE")}
           </Button>

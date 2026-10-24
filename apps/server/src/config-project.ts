@@ -1,30 +1,32 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
-import { db, configMasterdata, configModel, configProject, type ConfigCandidate } from "@confire/db";
+import { and, eq, getTableColumns, sql, type SQL } from "drizzle-orm";
+import { db, configMasterdata, configModel, configProject, type ConfigCandidate, type ConfigProject } from "@confire/db";
 import {
-  computeOutputs, DslError, enumerate, propagate, syncTables,
-  type Entries, type ModelDef, type ResolvedLookups, type TableRows,
+  computeOutputs, DslError, enumerate, missingInputs, propagate, syncTables,
+  type Entries, type ModelDef, type Notice, type Propagation, type ResolvedLookups, type TableRows,
 } from "@confire/config-engine";
 import {
   bindEntryValues, masterdataVersion, queryPageSource, resolveLookups, toResolvedTable,
   type MasterdataRow, type RowCache,
 } from "./lookups.ts";
 import { ensureFresh, pageRows, rowCache } from "./masterdata-sync.ts";
+import { canWrite, type Side } from "./project-lifecycle.ts";
 
 // The configuration engine's server half: model, lookups, calculate, value-help paging. Moved out
 // of orpc/routers/configs.ts (spec §7.5) because that module imports orpc/base.ts and with it the
 // internal auth.ts, which the portal process must not build. Both processes import this one.
 
 /** Every masterdata row of a tenant, in the shape the resolvers take. `id` is in there because it
- *  is the key of the row cache, and the sync state because a resolve reports it. */
+ *  is the key of the row cache, the sync state because a view reports it, and both timestamps
+ *  because they are what makes a stored calculation stale. */
 export async function masterdataRows(tenantId: string): Promise<MasterdataRow[]> {
   return db
     .select({
       id: configMasterdata.id, name: configMasterdata.name, kind: configMasterdata.kind,
       columns: configMasterdata.columns, rows: configMasterdata.rows, query: configMasterdata.query,
       syncedAt: configMasterdata.syncedAt, syncError: configMasterdata.syncError,
-      rowCount: configMasterdata.rowCount,
+      rowCount: configMasterdata.rowCount, updatedAt: configMasterdata.updatedAt,
     })
     .from(configMasterdata)
     .where(eq(configMasterdata.tenantId, tenantId));
@@ -55,8 +57,8 @@ export const modelLabels = (def: ModelDef | undefined): Record<string, string> =
 // Redis/LRU only if the server ever scales past one Bun process.
 //
 // Short, because a miss is now a handful of indexed SQL reads rather than a round trip to the
-// customer's network. It exists to stop the process page's auto-calculate re-projecting the same
-// tables on every keystroke, and nothing more.
+// customer's network. It exists to stop every view — one per committed edit — re-projecting the same
+// tables, and nothing more.
 const CACHE_TTL_MS = 30_000;
 // The *promise* is cached, not the value: concurrent cold callers then share one resolve.
 const lookupCache = new Map<string, { at: number; lookups: Promise<ResolvedLookups> }>();
@@ -70,7 +72,7 @@ const lookupCache = new Map<string, { at: number; lookups: Promise<ResolvedLooku
  *
  *  Keyed by the model and the masterdata version and nothing else. A configuration's entries stay
  *  out of the key deliberately: they are unbounded user input, and a key that grew with them would
- *  turn this Map into a leak and miss on every keystroke. `bindEntryValues` is the per-
+ *  turn this Map into a leak and miss on every edit. `bindEntryValues` is the per-
  *  configuration half, and it is cheap enough not to need caching. */
 function canonicalLookups(
   tenantId: string, model: LoadedModel, cache?: RowCache, rows?: MasterdataRow[],
@@ -145,76 +147,141 @@ export async function liveEngine(
   return { model, lookups: await cachedLookups(tenantId, model, project.entries, project.tables) };
 }
 
-/** The calculate path.
+// ---- The calculation ------------------------------------------------------------------------
+
+/** The General fields' message keys. `__`: they share the page's data-param namespace with
+ *  parameter and table keys. */
+export const NAME_KEY = "__name";
+export const CUSTOMER_KEY = "__customer";
+export const BATCHES_KEY = "__batches";
+
+/** What a project still needs before it is calculated and quoted, in form order: General's name,
+ *  customer and batch quantities, then the model's required parameters and items grid. Empty is
+ *  the whole gate — the calculation waits for it, and the page's Create quote shows once it is. */
+export function missingOf(
+  model: ModelDef, lookups: ResolvedLookups, prop: Propagation,
+  p: Pick<ConfigProject, "name" | "customer" | "batches" | "tables">,
+): Notice[] {
+  return [
+    ...(p.name.trim() ? [] : [{ key: NAME_KEY, code: "name_required", params: [], message: "Enter a name" }]),
+    // cardCode, not just a truthy customer: a half-filled one would otherwise reach the B1 seed.
+    ...(p.customer?.cardCode ? [] : [{ key: CUSTOMER_KEY, code: "customer_required", params: [], message: "Pick a customer" }]),
+    ...(p.batches.length ? [] : [{ key: BATCHES_KEY, code: "batches_required", params: [], message: "Add at least one batch quantity" }]),
+    ...missingInputs(model, lookups, prop, p.tables),
+  ];
+}
+
+/** A stored calculation is stale once the model changed after it, or any masterdata row the model
+ *  reads was synced or edited after it — a price sync must reach the candidates, not only the
+ *  quotation. Absent counts as stale. */
+export function isStale(calculatedAt: Date | null, model: LoadedModel, md: MasterdataRow[]): boolean {
+  if (!calculatedAt) return true;
+  if (calculatedAt < model.updatedAt) return true;
+  const named = syncTables(model.definition);
+  return md.some((r) => named.has(r.name)
+    && ((!!r.syncedAt && r.syncedAt > calculatedAt) || (!!r.updatedAt && r.updatedAt > calculatedAt)));
+}
+
+/** waiting: something is missing, or there are conflicts. failed: nothing valid completes the
+ *  inputs, or a formula broke — the inputs are saved, and the message says why. */
+export type Calculation = { state: "waiting" | "current" | "failed"; message?: string };
+
+/** The row as the calculation reads it, plus its version: `updated_at` as text, exact to the
+ *  microsecond — a JS Date would round a database-set default to the millisecond and never match. */
+const projectRow = (where: SQL) =>
+  db.select({ ...getTableColumns(configProject), version: sql<string>`${configProject.updatedAt}::text` })
+    .from(configProject).where(where).limit(1).then((r) => r[0]);
+export type ProjectRow = NonNullable<Awaited<ReturnType<typeof projectRow>>>;
+
+/**
+ * Recalculate a project from the row it was read as. Never enumerates while anything is missing or
+ * a rule is broken. A failure is state, not an error: the inputs are kept, and it is not stored —
+ * the next read of a complete project tries again, which picks up a fixed model or a refilled cache.
  *
- *  Reuse: a project whose model is unchanged keeps its candidates instead of re-enumerating.
- *  `calculatedAt` is what proves those candidates still match the project's own entries — every
- *  writer of entries/batches/tables empties `candidates` and nulls `calculatedAt` in the same
- *  statement, so a non-null one cannot describe stale inputs.
- *
- *  `cache` stays injectable for tests; omitted, cachedLookups builds one for the tenant — and only
- *  past the reuse check, so a no-op recalculate never pays for it. */
-export async function calculateProject(
-  tenantId: string, projectId: string, cache?: RowCache,
-) {
-  const [project] = await db
-    .select({
-      modelId: configProject.modelId, entries: configProject.entries,
-      batches: configProject.batches, tables: configProject.tables, candidates: configProject.candidates,
-      calculatedAt: configProject.calculatedAt, updatedAt: configProject.updatedAt,
-    })
-    .from(configProject)
-    .where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId)))
-    .limit(1);
-  if (!project) throw new ORPCError("NOT_FOUND");
-  const { entries, batches, tables: tableRows } = project;
-  if (!batches.length) throw new ORPCError("BAD_REQUEST", { message: "Add at least one batch quantity" });
-
-  const model = await loadModel(tenantId, project.modelId);
-
-  // Runs before the lookups resolve: a no-op recalculate must not pay for a resolution it is
-  // about to throw away. The process page auto-calculates ~1s after every edit.
-  if (project.calculatedAt && project.calculatedAt >= model.updatedAt) {
-    return {
-      projectVersion: project.updatedAt.toISOString(), reused: true,
-      candidateCount: project.candidates.length, capped: project.candidates.length >= 200,
-      widest: undefined, candidates: project.candidates,
-    };
-  }
-
-  const lookups = await cachedLookups(tenantId, model, entries, tableRows, cache);
-
+ * The write is the calculation only (candidates, selection, calculatedAt), and only if the row is
+ * still at the version it was read at. A patch that landed meanwhile wins: `lost` says the result
+ * was dropped, and the newer writer's own call calculates. It does not touch `updatedAt` — a
+ * refresh on read is not an edit, so lists do not reorder under it.
+ */
+export async function recalculate(
+  tenantId: string, row: ProjectRow, model: LoadedModel, lookups: ResolvedLookups,
+  gate: { missing: Notice[]; conflicts: unknown[] },
+): Promise<Calculation & { lost: boolean }> {
+  const write = async (set: Partial<typeof configProject.$inferInsert>) => {
+    const done = await db.update(configProject).set(set)
+      .where(and(eq(configProject.id, row.id), eq(configProject.tenantId, tenantId),
+        sql`${configProject.updatedAt} = ${row.version}::timestamptz`))
+      .returning({ id: configProject.id });
+    return done.length === 0;
+  };
+  // Stale candidates never outlive the gate, or a failure: they go, and nothing replaces them.
+  const clear = () => (row.candidates.length ? write({ candidates: [], selection: null, calculatedAt: null }) : Promise.resolve(false));
+  if (gate.missing.length || gate.conflicts.length) return { state: "waiting", lost: await clear() };
+  let candidates: ConfigCandidate[];
   try {
-    const pre = propagate(model.definition, lookups, entries, tableRows);
-    if (pre.conflicts.length)
-      throw new ORPCError("BAD_REQUEST", {
-        message: `Configuration has conflicts: ${pre.conflicts.map((c) => c.message).join("; ")}`,
-      });
-    const en = enumerate(model.definition, lookups, entries, 200, tableRows);
+    const en = enumerate(model.definition, lookups, row.entries, 200, row.tables);
     if (!en.candidates.length)
-      throw new ORPCError("BAD_REQUEST", { message: "No valid configuration completes the current entries" });
-    const candidates: ConfigCandidate[] = en.candidates.map((assignment) => ({
+      return { state: "failed", message: "No valid configuration completes the current entries", lost: await clear() };
+    candidates = en.candidates.map((assignment) => ({
       assignment,
-      perBatch: batches.map((batchQty) => ({
-        batchQty, outputs: computeOutputs(model.definition, lookups, assignment, batchQty, tableRows),
+      perBatch: row.batches.map((batchQty) => ({
+        batchQty, outputs: computeOutputs(model.definition, lookups, assignment, batchQty, row.tables),
       })),
     }));
-
-    // One row, overwritten in place: entries and candidates move together. calculatedAt going
-    // non-null here is the only claim that they match — there is no status flag restating it.
-    // The selection goes too: it is indices into the list being replaced.
-    const now = new Date();
-    const updated = await db.update(configProject)
-      .set({ entries, batches, candidates, selection: null, calculatedAt: now, updatedAt: now })
-      .where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId)))
-      .returning({ id: configProject.id });
-    if (!updated.length) throw new ORPCError("NOT_FOUND");
-    return {
-      projectVersion: now.toISOString(), reused: false,
-      candidateCount: candidates.length, capped: en.capped, widest: en.widest, candidates,
-    };
   } catch (e) {
-    if (e instanceof DslError) throw new ORPCError("BAD_REQUEST", { message: e.message });
+    if (e instanceof DslError || e instanceof RangeError) return { state: "failed", message: e.message, lost: await clear() };
     throw e;
   }
+  // calculatedAt going non-null is the only claim that inputs and candidates match. The selection
+  // goes too: it is indices into the list being replaced.
+  return { state: "current", lost: await write({ candidates, selection: null, calculatedAt: new Date() }) };
+}
+
+/**
+ * A project as every view reads it: the row, its model and lookups, the propagation and what is
+ * missing — with its calculation brought up to date first when `side` may write it and it is absent
+ * or stale. A locked project shows its stored calculation as it is. Both processes' views and
+ * `calculateProject` come through here, so a view is always current without a client effect.
+ */
+export async function liveProject(tenantId: string, where: SQL, side: Side, cache?: RowCache) {
+  const read = async () => {
+    const row = await projectRow(where);
+    if (!row) throw new ORPCError("NOT_FOUND");
+    return row;
+  };
+  const derive = async (row: ProjectRow) => {
+    const lookups = await cachedLookups(tenantId, model, row.entries, row.tables, cache, md);
+    let prop: Propagation;
+    try {
+      prop = propagate(model.definition, lookups, row.entries, row.tables);
+    } catch (e) {
+      if (e instanceof DslError) throw new ORPCError("BAD_REQUEST", { message: e.message });
+      throw e;
+    }
+    return { lookups, prop, missing: missingOf(model.definition, lookups, prop, row) };
+  };
+  const shown = (row: ProjectRow): Calculation => ({ state: row.candidates.length ? "current" : "waiting" });
+
+  let row = await read();
+  const model = await loadModel(tenantId, row.modelId);
+  const md = await masterdataRows(tenantId);
+  let d = await derive(row);
+  let calculation = shown(row);
+  const gateOpen = !d.missing.length && !d.prop.conflicts.length;
+  if (canWrite(row, side) && isStale(row.calculatedAt, model, md) && (gateOpen || row.candidates.length)) {
+    const r = await recalculate(tenantId, row, model, d.lookups, { missing: d.missing, conflicts: d.prop.conflicts });
+    row = await read();
+    // Lost: the newer row is built once, as it is — no loop.
+    if (r.lost) { d = await derive(row); calculation = shown(row); }
+    else calculation = { state: r.state, ...(r.message ? { message: r.message } : {}) };
+  }
+  return { row, model, md, ...d, calculation };
+}
+export type LiveProject = Awaited<ReturnType<typeof liveProject>>;
+
+/** Bring one project's calculation up to date, as a staff read would. What `configs.duplicate`
+ *  runs on its copy, and the tests' way in. */
+export async function calculateProject(tenantId: string, projectId: string, cache?: RowCache): Promise<Calculation> {
+  const live = await liveProject(tenantId, and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId))!, "internal", cache);
+  return live.calculation;
 }

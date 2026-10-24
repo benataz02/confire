@@ -132,12 +132,12 @@ function Configs() {
         const quotedSel = sel.some((r) => r.status === "quoted");
         return (
           <>
-            <Button design="Transparent" disabled={!first}
+            <Button icon="add" design="Transparent" disabled={!first}
               tooltip={first ? undefined : t("CONFIG_NO_MODELS")}
               onClick={() => { void navigate({ to: "/$slug/configs/new" }); }}>
-              {t("CONFIG_NEW")}
+              {t("ADMIN_CREATE")}
             </Button>
-            <Button design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}
+            <Button icon="copy" design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}
               onClick={() => duplicate.mutate({ id: String(sel[0]!.id) })}>
               {duplicate.isPending ? t("CONFIG_DUPLICATING") : t("CONFIG_DUPLICATE")}
             </Button>

@@ -24,15 +24,15 @@ const zeroOf = (t: TableColumn["type"]): Val => (t === "number" ? 0 : t === "boo
 
 const numOf = (v: Val | undefined): number => (typeof v === "number" ? v : 0);
 
-/** Options for an `options` cell. Same `ResolvedLookups` the engine already holds: a manual ref
- *  carries its own list, a table/query ref reads the fetched rows — so no new server-side domain
- *  plumbing, only `referencedTables` has to name the table. */
-export function columnOptions(col: TableColumn, lookups: ResolvedLookups): Option[] {
+/** Options for an `options` cell: a manual ref carries its own list, a table/query ref reads the
+ *  resolved rows — the display tables the form already holds, so only `referencedTables` has to
+ *  name the table. */
+export function columnOptions(col: TableColumn, tables: Record<string, ResolvedTable>): Option[] {
   if (col.cell.kind !== "options") return [];
   const ref = col.cell.ref;
   if (ref.source === "manual")
     return ref.options.map((o) => ({ value: o.value, label: o.label ?? String(o.value) }));
-  const t = lookups.tables[ref.table];
+  const t = tables[ref.table];
   if (!t) return [];
   const { valueCol, labelCol } = refKeyCols(ref, t.columns);
   const vi = t.columns.indexOf(valueCol);
@@ -45,7 +45,7 @@ export function columnOptions(col: TableColumn, lookups: ResolvedLookups): Optio
  *  parameter's options domain gets (propagate.ts), scoped to the row it was picked in. A `table`
  *  source is resolved whole, so this always binds; a `query` source resolves one page, and a value
  *  off it leaves the keys absent — undecidable, exactly like an unbound parameter. That is what
- *  enrichLookups (server) and the value help's onPick (browser) re-append the picked row for. */
+ *  bindEntryValues (server) re-appends the picked row for, from the stored cell. */
 function derivedCells(
   key: string,
   ref: LookupRef,

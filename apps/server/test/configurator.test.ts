@@ -2,11 +2,11 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, configMasterdata, configMasterdataRow, configModel, configProject, type ConfigCandidate } from "@confire/db";
 import type { Entries, ModelDef, ResolvedLookups } from "@confire/config-engine";
-import { cachedLookups, calculateProject, loadModel } from "../src/config-project.ts";
+import { cachedLookups, calculateProject, liveEngine, liveProject, loadModel, recalculate } from "../src/config-project.ts";
 import { applySelection, buildQuoteLines, configDocumentCommandId, createQuote } from "../src/config-quote.ts";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
-import type { RowCache } from "../src/lookups.ts";
+import { bumpMasterdata, type RowCache } from "../src/lookups.ts";
 
 const tenantId = `test-cfg-${crypto.randomUUID()}`;
 
@@ -30,6 +30,9 @@ const model: ModelDef = {
   pricing: { priceExpr: "unitCost * 2", quoteItemCode: "BOX", priceList: 1, itemTable: "catalog" },
   batchDefaults: [10],
 };
+
+/** Every project the calculation should run on has a customer: it is part of the gate. */
+const ACME = { cardCode: "C1", cardName: "Acme" };
 
 // The masterdata ids the fakes dispatch on, filled by seedQueryTable.
 const ids: Record<string, string> = {};
@@ -76,7 +79,7 @@ const seed = async (name: string, def: ModelDef, entries: Entries, batches: numb
   const [m] = await db.insert(configModel).values({ tenantId, name: def.name, definition: def })
     .returning({ id: configModel.id });
   const [p] = await db.insert(configProject)
-    .values({ tenantId, modelId: m!.id, name, batches, entries, createdBy: "tester" })
+    .values({ tenantId, modelId: m!.id, name, batches, entries, customer: ACME, createdBy: "tester" })
     .returning({ id: configProject.id });
   return p!.id;
 };
@@ -138,11 +141,10 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     const id = await seed("proj", model, {}, [10]);
 
     const res = await calculateProject(tenantId, id, fakeFetch);
-    // 2 sizes × 2 grades, nothing constrained away
-    expect(res.candidateCount).toBe(4);
-    expect(res.capped).toBe(false);
+    expect(res.state).toBe("current");
 
     const project = await load(id);
+    // 2 sizes × 2 grades, nothing constrained away
     expect(project.status).toBe("draft"); // "calculated" is calculatedAt, not a status
     expect(project.calculatedAt).not.toBeNull();
     expect(project.candidates).toHaveLength(4);
@@ -217,9 +219,9 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     expect(lk.domains.material!.map((o) => o.value)).toEqual(["A", "B"]);
   });
 
-  // The auto-calculate on the process page fires ~1s after every field edit. Each calculation used
-  // to re-GET every query table through the agent; this counts the fetches so that regression is loud.
-  test("recalculating does not re-fetch query tables: reuse short-circuits, and the cache absorbs the rest", async () => {
+  // Every view refreshes its calculation, so a read happens per edit. Each calculation used to
+  // re-GET every query table through the agent; this counts the fetches so that regression is loud.
+  test("reading again does not re-fetch query tables or recalculate; an edit recalculates from the cache", async () => {
     await seedQueryTable("items", ["ItemCode"]);
     await seedQueryTable("catalog", []);
     const id = await seed("no-refetch", model, {}, [10]);
@@ -230,15 +232,14 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
       return fakeFetch(mdId, q);
     };
 
-    const first = await calculateProject(tenantId, id, counting);
-    expect(first.reused).toBe(false);
+    await calculateProject(tenantId, id, counting);
     expect(reads).toBe(2); // the query table's canonical page, plus the BOM's price read
+    const first = await load(id);
 
-    // Nothing changed: the reuse check must return before any lookup resolution, so the fetch
-    // count cannot move and the stored candidates come straight back.
-    const again = await calculateProject(tenantId, id, counting);
-    expect(again.reused).toBe(true);
-    expect(again.candidateCount).toBe(first.candidateCount);
+    // Nothing changed: the canonical resolve comes out of the memo, and a current calculation is
+    // not run again.
+    expect((await calculateProject(tenantId, id, counting)).state).toBe("current");
+    expect((await load(id)).calculatedAt).toEqual(first.calculatedAt);
     expect(reads).toBe(2);
 
     // A real edit through the API: configs.calculate writes entries AND empties candidates in one
@@ -246,9 +247,8 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     // entries produced these candidates". Reuse must not fire.
     await db.update(configProject).set({ entries: { size: "L" }, candidates: [], calculatedAt: null })
       .where(eq(configProject.id, id));
-    const edited = await calculateProject(tenantId, id, counting);
-    expect(edited.reused).toBe(false);
-    expect(edited.candidateCount).toBe(2); // size pinned to L, two grades left
+    await calculateProject(tenantId, id, counting);
+    expect((await load(id)).candidates).toHaveLength(2); // size pinned to L, two grades left
 
     // Still two. The model was never touched, so the canonical resolve came out of the cache, and
     // binding the new entry read nothing because `size` is a manual domain — only a query-backed
@@ -261,12 +261,14 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     await seedQueryTable("catalog", []);
     const id = await seed("model-edit", model, {}, [10]);
     await calculateProject(tenantId, id, fakeFetch);
-    expect((await calculateProject(tenantId, id, fakeFetch)).reused).toBe(true);
+    const { modelId, calculatedAt } = await load(id);
+    await calculateProject(tenantId, id, fakeFetch);
+    expect((await load(id)).calculatedAt).toEqual(calculatedAt); // current: not run again
 
-    const { modelId } = await load(id);
     await db.update(configModel).set({ updatedAt: new Date(Date.now() + 1000) })
       .where(eq(configModel.id, modelId));
-    expect((await calculateProject(tenantId, id, fakeFetch)).reused).toBe(false);
+    await calculateProject(tenantId, id, fakeFetch);
+    expect((await load(id)).calculatedAt!.getTime()).toBeGreaterThan(calculatedAt!.getTime());
   });
 
   test("a recalculation drops the selection — its indices point into the replaced list", async () => {
@@ -276,8 +278,8 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     await calculateProject(tenantId, id, fakeFetch);
     await db.update(configProject).set({ selection: [{ candidateIdx: 0, batchQty: 10 }] })
       .where(eq(configProject.id, id));
-    // A reuse replaces nothing, so the pick survives it.
-    expect((await calculateProject(tenantId, id, fakeFetch)).reused).toBe(true);
+    // A current calculation replaces nothing, so the pick survives a read.
+    await calculateProject(tenantId, id, fakeFetch);
     expect((await load(id)).selection).toHaveLength(1);
 
     const { modelId } = await load(id);
@@ -343,9 +345,10 @@ describe("config tables (integration)", () => {
     const projectId = await seed("merged", tableModel, { thickness: 3 }, [3]);
     await db.update(configProject).set({ tables: rows }).where(eq(configProject.id, projectId));
 
-    const r = await calculateProject(tenantId, projectId, noFetch);
-    expect(r.candidates).toHaveLength(1);
-    const out = r.candidates[0]!.perBatch[0]!.outputs;
+    await calculateProject(tenantId, projectId, noFetch);
+    const { candidates } = await load(projectId);
+    expect(candidates).toHaveLength(1);
+    const out = candidates[0]!.perBatch[0]!.outputs;
     // holes_minutes = (10*3 + 20*3)/10 = 9 -> total 5 + 9*3 = 32 min at 60/h = 32 EUR labour
     expect(out.ops[0]!.totalMin).toBe(32);
 
@@ -374,10 +377,13 @@ describe("config tables (integration)", () => {
     expect(Math.abs(cents(lines[1]!) - total / 3)).toBeLessThanOrEqual(1);
   });
 
-  test("no rows in the item matrix is the pre-feature single line", async () => {
+  // An empty grid is missing (the calculation waits for a row), so the case left is rows that ship
+  // nothing: the split has nobody to divide over, and the pair is one line again.
+  test("an item matrix that ships nothing is the pre-feature single line", async () => {
     await seedQueryTable("catalog", []); // tableModel prices its SHEET line out of it
     const projectId = await seed("unmerged", tableModel, { thickness: 3 }, [3]);
-    await db.update(configProject).set({ tables: { holes: rows.holes } }).where(eq(configProject.id, projectId));
+    await db.update(configProject).set({ tables: { holes: rows.holes, parts: [{ code: "PART-A", quantity: 0, area: 1 }] } })
+      .where(eq(configProject.id, projectId));
     await calculateProject(tenantId, projectId, noFetch);
     const [project] = await db.select().from(configProject).where(eq(configProject.id, projectId));
     const { lines } = buildQuoteLines(
@@ -444,7 +450,7 @@ describe("config tables (integration)", () => {
     const [m] = await db.insert(configModel).values({ tenantId: tid, name: noBom.name, definition: noBom })
       .returning({ id: configModel.id });
     const [p] = await db.insert(configProject)
-      .values({ tenantId: tid, modelId: m!.id, name: "stale", batches: [3], entries: { thickness: 3 }, tables: rows, createdBy: admin.userId })
+      .values({ tenantId: tid, modelId: m!.id, name: "stale", batches: [3], entries: { thickness: 3 }, tables: rows, customer: ACME, createdBy: admin.userId })
       .returning({ id: configProject.id });
     const projectId = p!.id;
 
@@ -461,9 +467,9 @@ describe("config tables (integration)", () => {
       router.configs.calculate, { id: projectId, tables: { ...rows, holes: [{ size: 99 }] } }, ctx,
     );
     expect(res.project.tables).toEqual({ ...rows, holes: [{ size: 99 }] });
-    expect(res.project.candidates.length).toBeGreaterThan(0);
+    expect(res.candidates.rows.length).toBeGreaterThan(0);
 
-    // Not the reuse path: the edit nulled calculatedAt, so this is a fresh calculation.
+    // The edit nulled calculatedAt, so this is a fresh calculation.
     const after = await stored();
     expect(after.calculatedAt!.getTime()).toBeGreaterThan(before.calculatedAt!.getTime());
     expect(after.status).toBe("draft"); // still a draft — "calculated" is not a status any more
@@ -612,13 +618,14 @@ describe.skipIf(!process.env.DATABASE_URL)("calculating with no agent at all", (
       .values({ tenantId: offlineTenant, name: model.name, definition: model })
       .returning({ id: configModel.id });
     const [p] = await db.insert(configProject)
-      .values({ tenantId: offlineTenant, modelId: m!.id, name: "offline", batches: [10], entries: {}, createdBy: "tester" })
+      .values({ tenantId: offlineTenant, modelId: m!.id, name: "offline", batches: [10], entries: {}, customer: ACME, createdBy: "tester" })
       .returning({ id: configProject.id });
 
-    const res = await calculateProject(offlineTenant, p!.id);
-    expect(res.candidateCount).toBe(4); // 2 sizes × 2 grades — the grades came from the cache
+    expect((await calculateProject(offlineTenant, p!.id)).state).toBe("current");
+    const [stored] = await db.select().from(configProject).where(eq(configProject.id, p!.id));
+    expect(stored!.candidates).toHaveLength(4); // 2 sizes × 2 grades — the grades came from the cache
 
-    const outputs = res.candidates!.find((c) => c.assignment.size === "S")!.perBatch[0]!.outputs;
+    const outputs = stored!.candidates.find((c) => c.assignment.size === "S")!.perBatch[0]!.outputs;
     expect(outputs.unitCost).toBeCloseTo(5);   // material 3 from the cached ItemPrices, labour 2
     expect(outputs.unitPrice).toBeCloseTo(10);
   });

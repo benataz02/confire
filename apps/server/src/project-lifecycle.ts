@@ -36,6 +36,12 @@ export const writableBy = (side: Side) => side === "external"
   ? inArray(configProject.status, ["draft", "returned"])
   : and(ne(configProject.status, "quoted"), or(isNull(configProject.portalCardCode), eq(configProject.status, "in_review")));
 
+/** assertWritable's rule as a plain test, for a project already loaded: what a view refreshes on
+ *  read (config-project.ts) and what a page locks. */
+export const canWrite = (p: Pick<ConfigProject, "status" | "portalCardCode">, side: Side): boolean =>
+  p.portalCardCode === null ? side === "internal" && p.status !== "quoted"
+  : side === "external" ? p.status === "draft" || p.status === "returned" : p.status === "in_review";
+
 /** Client-facing words for a status (spec §7). */
 export const STATUS_LABEL: Record<ProjectStatus, string> = {
   draft: "Draft", submitted: "Submitted", in_review: "In review", returned: "Changes requested",
@@ -209,8 +215,7 @@ export async function assertWritable(
     if (p.status === "quoted") throw new ORPCError("CONFLICT", { message: "Configuration is quoted and locked" });
     return p;
   }
-  const ok = actor.side === "external" ? p.status === "draft" || p.status === "returned" : p.status === "in_review";
-  if (!ok) {
+  if (!canWrite(p, actor.side)) {
     throw new ORPCError("CONFLICT", {
       message: actor.side === "external"
         ? `This project is ${STATUS_LABEL[p.status].toLowerCase()} and can't be changed`

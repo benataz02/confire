@@ -1,47 +1,6 @@
-import type { DomainOption, Entries, ResolvedLookups, ResolvedTable, Val } from "@confire/config-engine";
+import type { Entries, Val } from "@confire/config-engine";
 
 // Pure helpers for ConfiguratorForm, kept UI-free so they're unit-testable without the UI5 runtime.
-
-/** Current off-page/search row per query parameter. Keyed by param, not table, so two fields
- *  sharing a query still replace independently. */
-export type QueryPicks = Record<string, { table: string; columns: string[]; row: Val[] }>;
-
-export function setQueryPick(
-  picks: QueryPicks, paramKey: string, table: string, selected: ResolvedTable | undefined,
-): QueryPicks {
-  const row = selected?.rows[0];
-  if (!row || !selected) {
-    if (!(paramKey in picks)) return picks;
-    const next = { ...picks };
-    delete next[paramKey];
-    return next;
-  }
-  const cur = picks[paramKey];
-  if (cur && cur.table === table && JSON.stringify(cur.row) === JSON.stringify(row)
-    && JSON.stringify(cur.columns) === JSON.stringify(selected.columns)) return picks;
-  return { ...picks, [paramKey]: { table, columns: selected.columns, row } };
-}
-
-/** Append each pick's current row to `tables`. Domains stay the canonical snapshot. */
-export function mergeQueryPicks(base: ResolvedLookups, picks: QueryPicks): ResolvedLookups {
-  const extras = Object.values(picks);
-  if (!extras.length) return base;
-  const added: Record<string, { columns: string[]; rows: Val[][] }> = {};
-  for (const p of extras) {
-    const slot = (added[p.table] ??= { columns: p.columns, rows: [] });
-    slot.rows.push(p.row);
-  }
-  const tables = { ...base.tables };
-  for (const [name, extra] of Object.entries(added)) {
-    const canonical = tables[name];
-    const rows = [...extra.rows, ...(canonical?.rows ?? [])];
-    tables[name] = {
-      ...(canonical ?? { columns: extra.columns, rows: [] }),
-      rows: [...new Map(rows.map((r) => [JSON.stringify(r), r])).values()],
-    };
-  }
-  return { domains: base.domains, tables };
-}
 
 export function setEntry(entries: Entries, key: string, v: Val | undefined): Entries {
   if (v === undefined) {
@@ -54,15 +13,8 @@ export function setEntry(entries: Entries, key: string, v: Val | undefined): Ent
   return { ...entries, [key]: v };
 }
 
-/** A picked value-help row as the one-row ResolvedTable a query pick binds: the masterdata table's
- *  own columns, or the row's when the table declares none (an Items query, stored raw). */
-export function rowTable(row: Record<string, unknown>, canonical: ResolvedTable | undefined): ResolvedTable {
-  const columns = canonical?.columns.length ? canonical.columns : Object.keys(row);
-  return { columns, rows: [columns.map((c) => (row[c] ?? null) as Val)] };
-}
-
 /** Display-mode string for a field: option label when the domain has one, else the raw value. */
-export function displayValue(v: Val | undefined, dom: DomainOption[]): string {
+export function displayValue(v: Val | undefined, dom: { value: Val; label: string }[]): string {
   if (v === undefined || v === null) return "";
   if (Array.isArray(v)) return v.map((x) => displayValue(x, dom)).join(", ");
   return dom.find((o) => o.value === v)?.label ?? String(v);

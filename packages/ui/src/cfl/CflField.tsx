@@ -27,7 +27,7 @@ const trimmed = (v: unknown) => (typeof v === "string" ? v.trim() : v);
 export function CflField({
   config, value, onValueChange, onRowSelect, onExistenceError, onCheckStarted,
   editable = true, disabled, placeholder, maxLength, error, required, link, formData, mustExist: mustExistProp,
-  accessibleName,
+  accessibleName, commitOnly,
 }: {
   config: CflFieldConfig;
   /** single: the key; multi-select: the token rows */
@@ -50,6 +50,9 @@ export function CflField({
   formData?: Row;
   mustExist?: boolean;
   accessibleName?: string;
+  /** Report the value on change (blur, Enter, a pick), never per keystroke: for a consumer whose
+   *  every value change is a server call (the configurator). The typed text shows meanwhile. */
+  commitOnly?: boolean;
 }) {
   const i18n = useUiI18n();
   const showAll = (n: number) => i18n.getText("UI_SHOW_ALL_N", String(n));
@@ -275,7 +278,7 @@ export function CflField({
           latestText.current = t;
           setTyped(t);
           // Plain single select: every keystroke is the value (Beas valueChange(text)).
-          if (!multi && !labelMode) onValueChange(t === "" ? null : t);
+          if (!multi && !labelMode && !commitOnly) onValueChange(t === "" ? null : t);
           suggest(t);
         }}
         onChange={(e) => onChange(e.target.value ?? "")}
