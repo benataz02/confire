@@ -1,13 +1,12 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useRouterState } from "@tanstack/react-router";
+import { useRouterState } from "@tanstack/react-router";
 import type { UIMessage } from "@tanstack/ai-react";
 import { TextPart } from "@tanstack/ai-react/ui";
 import {
-  Bar, BusyIndicator, Button, Icon, IllustratedMessage, Label, Link, MessageStrip, Tag, Text, TextArea, Title, Token,
+  Bar, BusyIndicator, Button, Icon, Label, Link, MessageStrip, Tag, Text, TextArea, Title, Token,
 } from "@ui5/webcomponents-react";
 import type { TextAreaDomRef } from "@ui5/webcomponents-react";
-import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import { useLanguage } from "@confire/ui/i18n.ts";
 import { FILE_MAX_MB } from "@confire/ui/files.ts";
 import { ORPCError } from "@orpc/client";
@@ -121,7 +120,6 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
   const shell = useAssistantShell();
   const i18n = useI18n();
   const t = (k: string, ...a: string[]) => i18n.getText(k, ...a);
-  const navigate = useNavigate({ from: "/$slug" });
   const { language } = useLanguage();
   const status = useQuery(orpc.assistant.status.queryOptions());
   const me = useQuery(meQuery);
@@ -294,16 +292,6 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
       onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled) addFiles(e.dataTransfer.files); }}>
       <div ref={scroller} className="cf-assistant__body"
         onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 40; }}>
-        {off ? (
-          // Two different fixes: an admin turns the switch on; whoever runs the server sets its API key.
-          <IllustratedMessage name="NoData" design="Spot"
-            titleText={t(status.data?.reason === "no_key" ? "ASSISTANT_NO_KEY" : "ASSISTANT_OFF")}
-            subtitleText={t(status.data?.reason === "no_key" ? "ASSISTANT_NO_KEY_SUB" : "ASSISTANT_OFF_SUB")}>
-            {status.data?.isAdminHint && status.data.reason === "switch" ? (
-              <Link onClick={() => void navigate({ to: "/$slug/settings", search: { tab: "assistant" } })}>{t("ASSISTANT_OFF_SETTINGS")}</Link>
-            ) : null}
-          </IllustratedMessage>
-        ) : null}
         {limited ? <MessageStrip design="Critical" hideCloseButton>{t("ASSISTANT_LIMIT")}</MessageStrip> : null}
         {!off && !chat.messages.length ? (
           <div className="cf-assistant__welcome">

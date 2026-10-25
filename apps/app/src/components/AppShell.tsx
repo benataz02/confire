@@ -10,18 +10,19 @@ import {
 } from "@ui5/webcomponents-react";
 import type { SideNavigationPropTypes, NavigationLayoutDomRef, NavigationLayoutPropTypes } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
-import { meQuery, notifications, useIsAdmin } from "../orpc.ts";
+import { meQuery, notifications, orpc, useIsAdmin } from "../orpc.ts";
 import { authUrl, hardRedirect, tenantPath } from "@confire/ui/host.ts";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { NotificationsPopover, useUnreadCount } from "@confire/ui/notifications/Notifications.tsx";
 import { B1_FEATURES } from "../features/b1/index.ts";
 import { GlobalSearch, type SearchEntry } from "./GlobalSearch.tsx";
-import { useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import type { MouseEvent } from "react";
 import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 import { LANGUAGES, useLanguage } from "@confire/ui/i18n.ts";
 import { useI18n } from "../i18n.ts";
 import { AssistantProvider, useAssistantShell } from "../assistant/AssistantProvider.tsx";
+import { assistantToggle } from "../assistant/toggle.ts";
 
 export const B1_NAV_KEY: Record<string, string> = {
   Quotations: "NAV_QUOTATIONS",
@@ -80,6 +81,12 @@ function Shell() {
   const i18n = useI18n();
   const { language, setLanguage } = useLanguage();
   const assistant = useAssistantShell();
+  // Off here (the workspace's switch, or no API key on the server): the toggle is disabled and says why.
+  const assistantStatus = useQuery(orpc.assistant.status.queryOptions());
+  const toggle = assistantToggle(assistantStatus.data, (k) => i18n.getText(k));
+  const { open: assistantOpen, close: closeAssistant } = assistant;
+  useEffect(() => { if (toggle.disabled && assistantOpen && assistantStatus.data) closeAssistant(); },
+    [toggle.disabled, assistantOpen, assistantStatus.data, closeAssistant]);
 
   // Identity + org role in one query, already primed by $slug's beforeLoad — a cache read.
   // Role decides whether the Settings item shows; the server gates it too.
@@ -187,8 +194,8 @@ function Shell() {
               const target = e.detail.targetRef;
               setBellOpener((cur) => (cur ? null : target));
             }}
-            assistant={<ToggleButton icon="da" pressed={assistant.open} tooltip={i18n.getText("ASSISTANT_TITLE")}
-              accessibleName={i18n.getText("ASSISTANT_TITLE")} accessibilityAttributes={{ expanded: assistant.open }}
+            assistant={<ToggleButton icon="da" pressed={assistant.open} disabled={toggle.disabled} tooltip={toggle.tooltip}
+              accessibleName={toggle.tooltip} accessibilityAttributes={{ expanded: assistant.open }}
               onClick={assistant.toggle} />}
             accessibilityAttributes={{
               notifications: { expanded: bellOpener !== null, hasPopup: "dialog" },
