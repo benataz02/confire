@@ -30,3 +30,9 @@ export const uploadFile = (projectId: string, file: File, internalOnly = false) 
 
 /** The tenant's branding logo (D20): internal admins, PNG or JPEG, 1 MB. */
 export const uploadLogo = (file: File) => post<{ id: string }>(`${tenantFiles()}/logo`, file);
+
+/** A file dropped into the assistant before there is a configuration: into the user's own thread
+ *  (`assistant_file`), PDF, PNG or JPEG by its bytes. Answers the reference the thread stores. */
+export const uploadAssistantFile = (threadId: string, file: File) =>
+  post<{ ref: { kind: "assistant"; id: string; name: string; mime: string } }>(
+    `${tenantFiles()}/assistant/${threadId}?${new URLSearchParams({ name: file.name })}`, file);

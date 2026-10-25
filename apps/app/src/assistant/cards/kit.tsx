@@ -43,7 +43,7 @@ const STEP = 3;
 
 /** Three rows, three more per "Show more", up to the twenty a tool answers. `total` past the rows
  *  offers the whole list. */
-export function ListCard({ title, subtitle, items, total, openAll, openAllText, noData, moreText }: {
+export function ListCard({ title, subtitle, items, total, openAll, openAllText, noData, moreText, children }: {
   title: string;
   subtitle?: string;
   items: CardItem[];
@@ -52,6 +52,8 @@ export function ListCard({ title, subtitle, items, total, openAll, openAllText, 
   openAllText?: string;
   noData: string;
   moreText?: string;
+  /** under the list, before "Open all" */
+  children?: ReactNode;
 }) {
   const [shown, setShown] = useState(STEP);
   const visible = items.slice(0, shown);
@@ -69,6 +71,7 @@ export function ListCard({ title, subtitle, items, total, openAll, openAllText, 
           </ListItemStandard>
         ))}
       </List>
+      {children}
       {openAll && total !== undefined && total > items.length ? (
         <div style={FOOTER}><Link onClick={openAll}>{openAllText}</Link></div>
       ) : null}

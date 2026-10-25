@@ -4,18 +4,21 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import type { UIMessage } from "@tanstack/ai-react";
 import { TextPart } from "@tanstack/ai-react/ui";
 import {
-  Bar, BusyIndicator, Button, Icon, IllustratedMessage, Label, Link, MessageStrip, Tag, Text, TextArea, Title,
+  Bar, BusyIndicator, Button, Icon, IllustratedMessage, Label, Link, MessageStrip, Tag, Text, TextArea, Title, Token,
 } from "@ui5/webcomponents-react";
 import type { TextAreaDomRef } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import { useLanguage } from "@confire/ui/i18n.ts";
+import { FILE_MAX_MB } from "@confire/ui/files.ts";
+import { ORPCError } from "@orpc/client";
 import { useI18n } from "../i18n.ts";
 import { client, meQuery, orpc } from "../orpc.ts";
 import { useAssistantShell } from "./AssistantProvider.tsx";
 import { nextReplies } from "./replies.ts";
 import { routeContext, type RouteContext } from "./routeContext.ts";
-import { useAssistantChat, useAssistantThread, type Thread } from "./useAssistant.ts";
-import { progressText, renderTool } from "./cards/registry.tsx";
+import { useAssistantChat, useAssistantInvalidate, useAssistantThread, type Thread } from "./useAssistant.ts";
+import { progressText, renderTool, type CardCtx } from "./cards/registry.tsx";
+import { READABLE, refuseFile, sendDrop } from "./intake.ts";
 import "./assistant.css";
 
 // The assistant panel (assistant spec §4.2, plan "The look"): Joule's side panel, floating over the
@@ -120,19 +123,63 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
   const me = useQuery(meQuery);
   const view = useQuery({ ...orpc.configs.get.queryOptions({ input: { id: route.projectId ?? "" } }), enabled: !!route.projectId });
   const { chat, refusal, clearRefusal } = useAssistantChat(thread);
+  const invalidate = useAssistantInvalidate();
+  const qc = useQueryClient();
   const [text, setText] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [dropError, setDropError] = useState<string | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [threadProjectId, setThreadProjectId] = useState(thread.projectId);
   const input = useRef<TextAreaDomRef>(null);
+  const picker = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const latest = useRef(chat.messages);
+  latest.current = chat.messages;
+  const timeline = useQuery({ ...orpc.timeline.list.queryOptions({ input: { projectId: route.projectId ?? "" } }), enabled: !!route.projectId });
 
-  const busy = chat.isLoading;
+  const busy = chat.isLoading || !!pending;
   const off = status.data && !status.data.enabled;
   const limited = !!status.data?.limitReached;
   const disabled = !!off || limited;
 
+  /** A refusal as the panel says it: its own text for a code it knows, else the server's words. */
+  const errorText = (e: unknown) => {
+    const code = e instanceof ORPCError ? e.code : (e as { code?: string })?.code;
+    const key = `ASSISTANT_ERR_${code}`;
+    if (code && i18n.getText(key, String(FILE_MAX_MB)) !== key) return i18n.getText(key, String(FILE_MAX_MB));
+    return e instanceof Error ? e.message : t("ASSISTANT_FAILED");
+  };
+  const append = (ms: UIMessage[]) => { chat.setMessages([...latest.current, ...ms]); invalidate(); };
+
+  const addFiles = (list: FileList | File[]) => {
+    const picked = [...list];
+    const refused = picked.map(refuseFile).find(Boolean);
+    setDropError(refused ? errorText(refused) : null);
+    setFiles((fs) => [...fs, ...picked.filter((f) => !refuseFile(f))]);
+  };
+
+  const drop = async (msg: string) => {
+    setPending(t("ASSISTANT_READING", files.map((f) => f.name).join(", ")));
+    setDropError(null);
+    stick.current = true;
+    try {
+      append(await sendDrop({ projectId: route.projectId, threadId: thread.id, files, text: msg }));
+      setFiles([]);
+      setText("");
+    } catch (e) {
+      setDropError(errorText(e));
+    } finally {
+      setPending(null);
+    }
+  };
+
   const send = (s: string) => {
     const msg = s.trim();
-    if (!msg || busy || disabled) return;
+    if (busy || disabled) return;
+    if (files.length) { void drop(msg); return; }
+    if (!msg) return;
     clearRefusal();
     setText("");
     stick.current = true;
@@ -156,6 +203,44 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
     ? nextReplies({ kind, view: view.data }, (k) => t(k)) : [];
   const firstName = (me.data?.user?.name || me.data?.user?.email || "").split(/[ @]/)[0] ?? "";
 
+  // The files on this configuration the chat has not read yet (a client's request comes with its
+  // drawing on the timeline): offered as one "Read files" step.
+  // By id, and by name: starting a configuration copies the drop to new ids on its timeline.
+  const readRefs = new Set(chat.messages.flatMap((m) => m.parts.flatMap((p) => {
+    if (p.type !== "document" && p.type !== "image") return [];
+    const meta = p.metadata as { title?: string; file?: { id: string; name: string } } | undefined;
+    return [meta?.file?.id, meta?.file?.name ?? meta?.title];
+  })));
+  const unread = route.projectId ? (timeline.data?.events ?? []).flatMap((e) => {
+    const f = e.kind === "file" ? e.payload as { fileId: string; name: string } | null : null;
+    const mime = f && (/\.pdf$/i.test(f.name) ? "application/pdf" : /\.png$/i.test(f.name) ? "image/png" : /\.jpe?g$/i.test(f.name) ? "image/jpeg" : null);
+    return f && mime && !readRefs.has(f.fileId) && !readRefs.has(f.name) ? [{ kind: "project" as const, id: f.fileId, name: f.name, mime }] : [];
+  }) : [];
+  const readUnread = async () => {
+    setPending(t("ASSISTANT_READING", unread.map((f) => f.name).join(", ")));
+    setDropError(null);
+    try {
+      append((await client.assistant.extract({ threadId: thread.id, projectId: route.projectId!, refs: unread })).messages as UIMessage[]);
+    } catch (e) {
+      setDropError(errorText(e));
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const lastDropMsg = [...chat.messages].reverse().find((m) => m.role === "user" && m.parts.some((p) => p.type === "document" || p.type === "image"));
+  const cardCtx: CardCtx = {
+    projectId: route.projectId, threadId: thread.id, threadProjectId,
+    onStarted: (id) => {
+      setThreadProjectId(id);
+      // The configuration's thread is this one: the panel keeps this chat on its page.
+      qc.setQueryData(orpc.assistant.thread.queryKey({ input: { projectId: id } }), { id: thread.id, projectId: id, messages: [...latest.current] });
+    },
+    append, setPending,
+    lastFiles: (lastDropMsg?.parts ?? []).flatMap((p) => (p.type === "document" || p.type === "image") ? [String((p.metadata as { title?: string } | undefined)?.title ?? "")] : []),
+    errorText,
+  };
+
   const renderPart = (m: UIMessage, p: UIMessage["parts"][number], i: number): ReactNode => {
     if (p.type === "text") {
       if ((p as { metadata?: { fileLabel?: boolean } }).metadata?.fileLabel || !p.content.trim()) return null;
@@ -174,12 +259,12 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
           </div>
         );
       }
-      return <div key={i} className="cf-assistant__card">{renderTool({ name: p.name, input: p.input, output, error }, { projectId: route.projectId })}</div>;
+      return <div key={i} className="cf-assistant__card">{renderTool({ name: p.name, input: p.input, output, error }, cardCtx)}</div>;
     }
     return null;
   };
 
-  const files = (m: UIMessage) => m.parts.flatMap((p, i) => {
+  const attachedOf = (m: UIMessage) => m.parts.flatMap((p, i) => {
     if (p.type !== "document" && p.type !== "image") return [];
     const title = (p.metadata as { title?: string } | undefined)?.title ?? "";
     return [<Tag key={i} design="Neutral" wrappingType="None"
@@ -187,7 +272,10 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
   });
 
   return (
-    <>
+    <div className={`cf-assistant__chat${dragging ? " cf-assistant--drop" : ""}`}
+      onDragOver={(e) => { if (disabled) return; e.preventDefault(); setDragging(true); }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
+      onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled) addFiles(e.dataTransfer.files); }}>
       <div ref={scroller} className="cf-assistant__body"
         onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 40; }}>
         {off ? (
@@ -210,7 +298,7 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
         ) : null}
         {chat.messages.map((m) => {
           const parts = m.parts.map((p, i) => renderPart(m, p, i)).filter(Boolean);
-          const attached = m.role === "user" ? files(m) : [];
+          const attached = m.role === "user" ? attachedOf(m) : [];
           if (!parts.length && !attached.length) return null;
           return (
             <div key={m.id} className={`cf-assistant__turn${m.role === "user" ? " cf-assistant__turn--user" : ""}`}>
@@ -219,7 +307,9 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
             </div>
           );
         })}
-        {busy && last?.role === "user" ? (
+        {pending ? (
+          <div className="cf-assistant__busy" aria-live="polite"><BusyIndicator active size="S" /><Text>{pending}</Text></div>
+        ) : chat.isLoading && last?.role === "user" ? (
           <div className="cf-assistant__busy" aria-live="polite"><BusyIndicator active size="S" /><Text>{t("ASSISTANT_WORKING")}</Text></div>
         ) : null}
         {failed ? (
@@ -237,7 +327,23 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
         ) : null}
       </div>
       <div className="cf-assistant__foot">
+        {dropError ? <MessageStrip design="Negative" onClose={() => setDropError(null)}>{dropError}</MessageStrip> : null}
+        {unread.length && !disabled ? (
+          <div><Button icon="ai" disabled={busy} onClick={() => void readUnread()}>{t("ASSISTANT_READ_FILES", String(unread.length))}</Button></div>
+        ) : null}
+        {files.length ? (
+          <div className="cf-assistant__chips">
+            {files.map((f, i) => (
+              <Token key={`${f.name}${i}`} text={f.name} onClick={() => setFiles((fs) => fs.filter((_, j) => j !== i))}
+                aria-label={t("ASSISTANT_REMOVE_FILE", f.name)} />
+            ))}
+          </div>
+        ) : null}
         <div className="cf-assistant__composer">
+          <input ref={picker} type="file" multiple accept={READABLE.join(",")} hidden
+            onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
+          <Button design="Transparent" icon="attachment" tooltip={t("ASSISTANT_ATTACH")} accessibleName={t("ASSISTANT_ATTACH")}
+            disabled={disabled || busy} onClick={() => picker.current?.click()} />
           <TextArea ref={input} growing growingMaxRows={8} rows={1} value={text} disabled={disabled}
             placeholder={t("ASSISTANT_PLACEHOLDER")} accessibleName={t("ASSISTANT_PLACEHOLDER")}
             onInput={(e) => setText(e.target.value)}
@@ -246,7 +352,7 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
             <Button design="Emphasized" icon="stop" tooltip={t("ASSISTANT_STOP")} accessibleName={t("ASSISTANT_STOP")} onClick={() => chat.stop()} />
           ) : (
             <Button design="Emphasized" icon="paper-plane" tooltip={t("ASSISTANT_SEND")} accessibleName={t("ASSISTANT_SEND")}
-              disabled={disabled || !text.trim()} onClick={() => send(text)} />
+              disabled={disabled || (!text.trim() && !files.length)} onClick={() => send(text)} />
           )}
         </div>
         <Label className="cf-assistant__notice" wrappingType="Normal">
@@ -254,6 +360,6 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
           <span className="cf-assistant__notice--short">{t("ASSISTANT_NOTICE_SHORT")}</span>
         </Label>
       </div>
-    </>
+    </div>
   );
 }

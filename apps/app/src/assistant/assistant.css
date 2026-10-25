@@ -29,6 +29,7 @@
 .cf-assistant--drop { outline: 2px dashed var(--sapContent_FocusColor); outline-offset: -0.5rem; }
 
 .cf-assistant__head { flex: none; }
+.cf-assistant__chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .cf-assistant__heading { display: flex; flex-direction: column; min-width: 0; }
 .cf-assistant__sub { color: var(--sapContent_LabelColor); font-size: var(--sapFontSmallSize); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

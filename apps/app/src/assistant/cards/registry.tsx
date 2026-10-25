@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { UIMessage } from "@tanstack/ai-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { AnalyticalCardHeader, Button, Card, Link, ObjectStatus, Text } from "@ui5/webcomponents-react";
@@ -13,13 +14,31 @@ import { orpc, useCurrency } from "../../orpc.ts";
 import type { ConfigView } from "../../components/configurator/useConfigProcess.ts";
 import { configItems, documentItems, documentStatus, openAllOf, requestItems, type CardLink, type ListCardData } from "./data.ts";
 import { ListCard, ObjectCard, type CardItem } from "./kit.tsx";
+import { ProposalCard, type Proposal } from "./ProposalCard.tsx";
+import { ExtractionCard, type ExtractResult } from "./ExtractionCard.tsx";
 
 // Tool name → card (plan "The look"). The tool's name picks the card, never the model, and the card
 // draws the tool's output, so its figures are the server's. A card's actions navigate or scroll the
 // page; none calls the model.
 
 export type ToolPart = { name: string; input: unknown; output: unknown; error?: string };
-type Ctx = { projectId: string | null };
+
+/** What a card may know and do beyond its tool's output: where the panel is, and the chat's few
+ *  direct writes (a step the card runs answers messages the chat shows as they are). */
+export type CardCtx = {
+  /** the page's configuration */
+  projectId: string | null;
+  threadId: string;
+  /** the thread's configuration, once one was started from it */
+  threadProjectId: string | null;
+  onStarted(projectId: string): void;
+  append(messages: UIMessage[]): void;
+  setPending(text: string | null): void;
+  /** the files of the last drop, by name */
+  lastFiles: string[];
+  errorText(e: unknown): string;
+};
+type Ctx = CardCtx;
 
 const MUTED = { color: "var(--sapContent_LabelColor)" } as const;
 const DOC_TITLE: Record<string, string> = { Quotations: "NAV_QUOTATIONS", Orders: "NAV_ORDERS", BusinessPartners: "NAV_BP" };
@@ -142,6 +161,10 @@ function ToolCard({ part, ctx }: { part: ToolPart; ctx: Ctx }) {
       );
     case "home_overview":
       return <OverviewCard o={out} />;
+    case "read_request":
+      return <ProposalCard p={out as Proposal} ctx={ctx} />;
+    case "extract_values":
+      return <ExtractionCard r={out as ExtractResult} ctx={ctx} />;
     case "timeline_list":
       return <HistoryCard projectId={String(input.projectId ?? "")} out={out} here={ctx.projectId === input.projectId} />;
     default: {
@@ -191,7 +214,7 @@ function ConfigCard({ view, ctx }: { view: ConfigView; ctx: Ctx }) {
   );
 }
 
-type Source = { file: string; page: number | null; quote: string } | { chat: string };
+export type Source = { file: string; page: number | null; quote: string } | { chat: string };
 
 /** A source as one line: `RFQ.pdf p.1 · "W 200"`, or the user's own words. */
 export function sourceText(s: Source | undefined, t: (k: string, ...a: Array<string | number>) => string): string | undefined {
