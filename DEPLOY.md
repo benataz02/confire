@@ -189,6 +189,11 @@ CF_ZONE_ID=...
 CF_ACCESS_CLIENT_ID=....access
 CF_ACCESS_CLIENT_SECRET=...
 
+# The assistant: Claude (console.anthropic.com → API Keys). Unset = off for every workspace; each
+# workspace is also off until its admin turns it on in Settings → Assistant. Optional, with defaults:
+# ASSISTANT_MODEL (claude-sonnet-5-5) and ASSISTANT_MONTHLY_LIMIT_USD (25, per workspace, per month)
+ANTHROPIC_API_KEY=sk-ant-...
+
 # §4; until these are set the backup container restart-loops
 R2_ENDPOINT=https://<account-id>.eu.r2.cloudflarestorage.com
 R2_BUCKET=confire-backups
@@ -593,3 +598,17 @@ maintenance window.
 
 Certificates renew themselves (Caddy). Old images are pruned on every deploy. Nothing else is
 scheduled.
+
+### Assistant spend
+
+Every model call is a row in `ai_usage` (cost in USD, from the token counts and the price table in
+`apps/server/src/assistant/usage.ts`). A workspace's admin sees its own month in Settings → Assistant;
+across workspaces, on the server:
+
+```bash
+docker compose exec db psql -U confire -c "select tenant_id, sum(cost) from ai_usage where at >= date_trunc('month', now()) group by 1"
+```
+
+`assistant-eval` in `tenant_id` is Confire's own eval runs (`scripts/assistant-eval.ts`). A workspace
+at `ASSISTANT_MONTHLY_LIMIT_USD` is refused until the month turns; raising the limit is an `.env`
+change plus `docker compose up -d`.

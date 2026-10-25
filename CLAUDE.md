@@ -273,6 +273,59 @@ Email + password sign-in requires a verified address (`requireEmailVerification`
 no session, and an unverified sign-in is refused with `EMAIL_NOT_VERIFIED` after mailing a fresh
 link (`sendOnSignIn`). The test harness verifies its users directly before signing them in.
 
+## The assistant
+
+`apps/server/src/assistant/` and `apps/app/src/assistant/` (`docs/superpowers/specs/2026-10-24-ai-assistant-design.md`;
+phases 1–2 built, MCP is phase 3). Claude through TanStack AI (`@tanstack/ai` + `-anthropic` on the
+server, `@tanstack/ai-react` in the app); `model.ts` is the one provider seam (`ASSISTANT_MODEL`,
+default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and the preload drops
+`ANTHROPIC_API_KEY`). Staff only: the portal has no assistant.
+
+- **Two fixed structured calls, then the chat.** A drop in the panel runs `assistant.intake`
+  (`intake.ts`: model, customer, name over the models' descriptions — nothing is created), then
+  `assistant.start` (no model call: `createProject(…, "assistant")`, the thread linked, the drop copied
+  to `project_file`), then `assistant.extract` (`extract.ts`). Typed messages go to the chat,
+  `POST /api/assistant` (`route.ts`, AG-UI over SSE, staff process only). Intake and extract write
+  their results into the thread as tool-call/result pairs, so the chat reads one history; their tools
+  (`read_request`, `extract_values`) are in every tool set because a request naming an undefined tool
+  is refused.
+- **Extraction fills empty fields only.** `modelBlock` (the cache breakpoint: stable per model version,
+  it lists options whether a rule rules them out or not) and `extractionSchema` (generated per model:
+  objects and `anyOf` only — Claude's structured output takes `additionalProperties: false`, no `oneOf`,
+  no bounds) feed one call; `planApply` (pure) turns the answer into one patch plus questions — a
+  filled field that differs, an option the list lacks or a rule rules out, a number out of range,
+  anything unsure. The view is read again after the model answers, so what the user typed meanwhile
+  stands. A locked configuration, a switched-off workspace and an over-cap drop are refused before
+  any model call (unbilled).
+- **Provenance is on the configuration**: `config_project.sources` (key → `{ value, source }`), written
+  only by `configs.calculate`'s optional `sources` in the same UPDATE as the patch; a write of a key
+  without a source drops it (a human edit, the portal's included). The page marks a field ✦ while its
+  entry still equals `value`, 💬 while a question is open (`marks.ts`). The chat's `configs_calculate`
+  tool requires a source per written value (`missingSources`): no value from nowhere.
+- **Tools are the procedures** (`tools.ts`), run with `call(procedure, input, { context: { headers } })`
+  under the chat request's own headers — the builders are the permission; the page registry
+  (`pages.ts`, route id → tools + prompt section) is a hint. Lists are capped at 20 rows (`LIST_CAP`,
+  Joule's list card). No tool posts to SAP: `propose_quotation` is `quoteDraft`, posting stays the
+  quote page's.
+- **Threads** (`threads.ts`) are server-owned and append-only (Sonnet 5.5 refuses edited history): the
+  route takes only the last user message's text from the client. One run per thread under a lease
+  (`takeLease`/`withThread`, `THREAD_BUSY`); one thread per (user, configuration) plus general ones.
+  Stored file parts keep a reference (`metadata.file`), never bytes; `hydrate` refills them. File refs
+  are fenced by tenant and by their own project or thread. Only PDF, PNG and JPEG, by their bytes.
+- **Metered and capped**: `usage.ts` writes one `ai_usage` row per model call (`meter` middleware, cost
+  from `PRICES`) and `assertAssistant` refuses when the workspace's switch (`assistant_settings`) is off
+  (`ASSISTANT_OFF`, an admin's fix), the server has no `ANTHROPIC_API_KEY` (`ASSISTANT_UNAVAILABLE`, the
+  operator's fix — the panel and Settings say which), or this month's cost reached
+  `ASSISTANT_MONTHLY_LIMIT_USD` (default 25). `rateLimit` is 20 calls a
+  minute per user. Env read with `||`, not `??`: compose passes an unset variable as `""`.
+- **The panel** (`AssistantPanel.tsx`) is shell state (`AssistantProvider` around `AppShell`), floating
+  over the page's right edge. **The tool's name picks the card** (`cards/registry.tsx`), never the
+  model, and a card renders the tool's output — its figures are the server's; a card's actions
+  navigate, scroll the page to a field, or call a procedure directly (the question chips, Pick), never
+  the model. Colours come only from the theme's `--sapAssistant_*` parameters (the panel scopes the
+  emphasized-button parameters to them). `scripts/assistant-eval.ts` is the hand-run eval (it spends
+  money and says so first).
+
 ## `packages/config-engine` — the calculation core
 
 Pure, dependency-free (zod only). **The server is the one source of every figure**

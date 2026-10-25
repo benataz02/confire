@@ -77,6 +77,11 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
       MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+      # The assistant (apps/server/src/assistant): Claude, staff process only. No key = off everywhere,
+      # whatever a workspace's switch says. Unset model/limit = claude-sonnet-5-5 and $25 a month.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-}
+      ASSISTANT_MONTHLY_LIMIT_USD: ${ASSISTANT_MONTHLY_LIMIT_USD:-}
     depends_on:
       db:
         condition: service_healthy

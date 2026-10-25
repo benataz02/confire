@@ -1,6 +1,6 @@
 # The assistant: from a drawing to a configuration, and Confire over MCP
 
-2026-10-24 · design, for approval
+2026-10-24 · design · **phases 1–2 built 2026-10-25** (plan `docs/superpowers/plans/2026-10-24-ai-assistant.md`); MCP (phase 3) not yet
 
 ## 1. Why
 
@@ -292,8 +292,9 @@ New schema, shipped with its migration (`db:generate`) and re-exported from `sch
   - *External AI (MCP)* on/off
 
   Both are **off until an admin turns them on**, and each names where data goes: drawings to Anthropic
-  for the first, Confire data to the user's own AI provider for the second. The builder picks where
-  they live, following the `portal_settings` precedent (one jsonb document) or a column.
+  for the first, Confire data to the user's own AI provider for the second. Built: the first is the
+  column `assistant_settings.assistant` (a column, not jsonb: the chat route filters on it). The `mcp`
+  switch comes with phase 3, beside it.
 
 The timeline: a configuration created from the panel records its `created` event with
 `via: "assistant"` in the payload, and its attachments as `file` events, so it reads "created by the
@@ -420,18 +421,22 @@ New dependencies are listed as direct dependencies wherever they are imported:
   intake as a drop.
 - Pricing and billing over `ai_usage`; per-workspace limits; an EU-region provider; bring-your-own-key.
 
-## 9. Left to the builder
+## 9. Left to the builder — answered (2026-10-24/25)
 
-- Where the two workspace switches live.
-- How the ⚙ marker is known: whether the form state already tells a rule or default value from a typed
-  one, or `formState` needs to say so.
-- The enum size above which an option list becomes a validated string.
-- Whether `@tanstack/ai-persistence`'s message store fits the one-table thread, or a plain read and
-  write is less code.
-- Whether Better Auth's MCP plugin accepts a resource per workspace path. If it insists on one
-  resource URL, use one `/api/mcp` with the workspace chosen at consent and carried by the grant, and
-  say so in this document.
-- Prompt wording, effort level and the price table's figures (verify against current Claude pricing).
+| Question | Decision |
+|---|---|
+| Where the switches live | Table `assistant_settings` (tenant pk, `assistant` boolean). The `mcp` column comes with phase 3. |
+| How ⚙ is known | Already known: `FieldState.defaulted` (a `defaultExpr` filled it). Rules only eliminate options and never set values, so ⚙ is the existing "Auto" status. |
+| Enum size | `ENUM_MAX = 60` options. Query-backed fields are always a string in the schema, checked against the cache (`queryTablePage({ match })`). A hand-typed list past 60 is still listed whole in the model block. |
+| `@tanstack/ai-persistence` | Not used: one jsonb column plus an append under a lease is less code, and its store merges *client* messages by id, which §4.7 forbids. |
+| Intake orchestration | Fixed steps from the panel: `assistant.intake`, `assistant.start`, `assistant.extract`. The chat model runs only for typed messages. |
+| Monthly limit | `ASSISTANT_MONTHLY_LIMIT_USD`, default 25, one value for every workspace. |
+| Drawings in the chat's context | Kept: a thread's files stay at the turn they were dropped and are re-sent each turn under prompt caching. |
+| Per-workspace MCP resource | Phase 3. |
+| Prices | Verified 2026-10-24 on platform.claude.com/docs/en/about-claude/pricing: Sonnet 5.5 $2 / $2.50 cache write / $0.10 cache read / $10; Haiku 5.5 $0.10 / $0.125 / $0.01 / $0.50 (×5 past 100k prompt tokens). |
+| Prompt wording, effort | `EXTRACT_SYSTEM`, `INTAKE_SYSTEM` and `SYSTEM` in `apps/server/src/assistant/`; effort left at the model's default until the eval has about 30 cases (§6). |
+| Data in the chat | Cards, not prose: the tool's name picks the card (`apps/app/src/assistant/cards/registry.tsx`), the card draws the tool's output, and the model writes one or two sentences around it. |
+| Product name | "Assistant" (`da` icon): "Joule" is SAP's. |
 
 ## 10. My calls
 
