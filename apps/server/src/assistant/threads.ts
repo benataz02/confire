@@ -3,7 +3,7 @@ import type { ContentPart, ModelMessage } from "@tanstack/ai";
 import { and, desc, eq, isNull, or, lt, sql } from "drizzle-orm";
 import { db, assistantThread, configProject } from "@confire/db";
 import { internalVisible } from "../project-lifecycle.ts";
-import { fileBytes, type FileMeta, type FileRef } from "./files.ts";
+import { fileBytes, type Fence, type FileMeta, type FileRef } from "./files.ts";
 
 // The assistant's threads (assistant spec §4.7): server-owned history, loaded by id and never taken
 // from the client. Append-only — Sonnet 5.5 refuses edited history (preserved thinking), so nothing
@@ -106,10 +106,10 @@ export function dehydrate(m: ModelMessage): ModelMessage {
 }
 
 /** Stored messages as the model reads them: each file part's bytes loaded again by its reference. */
-export async function hydrate(tenantId: string, ms: ModelMessage[]): Promise<ModelMessage[]> {
+export async function hydrate(tenantId: string, ms: ModelMessage[], fence: Fence = {}): Promise<ModelMessage[]> {
   const refs = ms.flatMap((m) => (Array.isArray(m.content) ? m.content.map(fileOf).filter((r): r is FileRef => !!r) : []));
   if (!refs.length) return ms;
-  const bytes = await fileBytes(tenantId, refs);
+  const bytes = await fileBytes(tenantId, refs, fence);
   return ms.map((m) => !Array.isArray(m.content) ? m : {
     ...m,
     content: m.content.map((p) => {

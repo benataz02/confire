@@ -5,7 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { refKeyCols, type Entries, type FieldOption, type FormState, type ModelDef, type Param, type TableDef, type TableRows, type Val } from "@confire/config-engine";
 import { configProject, type ValueSource } from "@confire/db";
 import { queryTablePage } from "../config-project.ts";
-import { patchProblems } from "../config-patch.ts";
+import { PatchZ, patchProblems } from "../config-patch.ts";
 import { configView } from "../config-view.ts";
 import { configsRouter } from "../orpc/routers/configs.ts";
 import { assertWritable, internalVisible } from "../project-lifecycle.ts";
@@ -326,6 +326,14 @@ export async function extractInto(ctx: Ctx, projectId: string, input: { refs: Fi
     delete plan.patch.tables![k];
     delete plan.sources[k];
     plan.questions.push({ key: k, why: "not_an_option", detail: problems.join("; "), read: rows, candidates: [] });
+  }
+
+  // Quantities the procedure's input would refuse (a fraction, zero, more than it takes) are asked
+  // too: refused there, they would fail the whole read after it was paid for.
+  if (plan.patch.batches && !PatchZ.batches.safeParse(plan.patch.batches).success) {
+    plan.questions.push({ key: "batches", why: "not_an_option", detail: "Quantities are whole numbers from 1, at most 50 of them", read: plan.patch.batches, candidates: [] });
+    delete plan.patch.batches;
+    delete plan.sources.batches;
   }
 
   const applied: ExtractResult["applied"] = [];

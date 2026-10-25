@@ -94,7 +94,7 @@ export function assistantRoutes(): Hono {
     let block: string | null = null;
     let name: string | undefined;
     try {
-      hydrated = await hydrate(tenantId, thread.messages);
+      hydrated = await hydrate(tenantId, thread.messages, { threadId: thread.id, ...(thread.projectId ? { projectId: thread.projectId } : {}) });
       if (page.kind === "configure" && thread.projectId) {
         const where = and(eq(configProject.id, thread.projectId), eq(configProject.tenantId, tenantId), internalVisible)!;
         const { live, view } = await configView(tenantId, where).catch(() => ({ live: null, view: null }));

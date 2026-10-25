@@ -226,6 +226,15 @@ describe.skipIf(!process.env.DATABASE_URL)("extractInto", () => {
     expect(r.applied).toEqual([]);
   });
 
+  test("quantities the patch would refuse become a question; the rest is still written", async () => {
+    const w = await world();
+    w.fake.setResponses([answer({ set: [s("size", "S")], batches: { qtys: [0.5, 200], source: SRC } })]);
+    const r = await extractInto(w.ctx, w.id, { refs: [await w.file()], text: "" });
+    expect((await w.load()).entries).toEqual({ size: "S" });
+    expect((await w.load()).batches).toEqual([10]);
+    expect(r.questions).toContainEqual(expect.objectContaining({ key: "batches", why: "not_an_option" }));
+  });
+
   test("locked: refused before the model is called", async () => {
     const w = await world();
     await db.update(configProject).set({ status: "quoted" }).where(eq(configProject.id, w.id));

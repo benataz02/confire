@@ -70,7 +70,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads", () => {
     const stored = await ownThread(w.tenantId, w.a.userId, t.id);
     expect(stored.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(JSON.stringify(stored.messages)).not.toContain(PDF.toString("base64"));
-    const [back] = await hydrate(w.tenantId, stored.messages);
+    expect(JSON.stringify(await hydrate(w.tenantId, stored.messages))).not.toContain(PDF.toString("base64")); // no project named: not read
+    const [back] = await hydrate(w.tenantId, stored.messages, { projectId: w.projectId });
     expect((back!.content as { source?: { value: string } }[])[0]!.source!.value).toBe(PDF.toString("base64"));
     expect(lastDrop(stored.messages)).toEqual({ refs: [ref], text: "50 pcs" });
   });

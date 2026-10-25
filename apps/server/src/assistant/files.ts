@@ -23,8 +23,8 @@ export const REQUEST_FILE_CAP = 24 * 1024 * 1024;
 /** A file part's Confire metadata: the adapter forwards `title` only. */
 export type FileMeta = { title: string; file: FileRef };
 
-/** Where a call's refs may point beyond the tenant: a project's files to that project, a drop's to
- *  that thread — so a crafted ref cannot read a colleague's drop or a client's draft. */
+/** Where a call's refs may point beyond the tenant: a project's files to that project (none without
+ *  one), a drop's to that thread — so a crafted ref cannot read a colleague's drop or a client's draft. */
 export type Fence = { projectId?: string; threadId?: string };
 
 /** The bytes behind refs, fenced by tenant and `fence`. Sizes are summed before any byte is read, so
@@ -34,7 +34,9 @@ export async function fileBytes(tenantId: string, refs: FileRef[], fence: Fence 
   const ids = (kind: FileRef["kind"]) => refs.filter((r) => r.kind === kind).map((r) => r.id);
   const pIds = ids("project");
   const aIds = ids("assistant");
-  const pFence = pIds.length ? and(eq(projectFile.tenantId, tenantId), inArray(projectFile.id, pIds), projectId ? eq(projectFile.projectId, projectId) : undefined) : null;
+  // A configuration's file only with that configuration named: tenant alone would let a crafted ref
+  // read any configuration's files, a client's private draft included.
+  const pFence = pIds.length && projectId ? and(eq(projectFile.tenantId, tenantId), inArray(projectFile.id, pIds), eq(projectFile.projectId, projectId)) : null;
   const aFence = aIds.length ? and(eq(assistantFile.tenantId, tenantId), inArray(assistantFile.id, aIds), threadId ? eq(assistantFile.threadId, threadId) : undefined) : null;
   const sizes = [
     ...(pFence ? await db.select({ size: projectFile.size }).from(projectFile).where(pFence) : []),

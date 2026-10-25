@@ -103,6 +103,18 @@ describe.skipIf(!process.env.DATABASE_URL)("assistant router", () => {
     expect((await db.select().from(assistantThread).where(eq(assistantThread.id, threadId)))[0]!.messages).toHaveLength(5);
   });
 
+  test("intake on a general thread reads only its own drop: a project ref elsewhere is not read", async () => {
+    const w = await world();
+    const { threadId, ref } = await drop(w);
+    const { id: other } = await call(router.configs.create, { modelId: w.modelId, name: "Someone else's", customer: null }, w.adminCtx);
+    const [secret] = await db.insert(projectFile).values({ tenantId: w.tenantId, projectId: other, name: "secret.pdf", mime: "application/pdf", size: PDF.length, data: PDF }).returning({ id: projectFile.id });
+    let sent = "";
+    w.fake.setResponses([({ request }) => { sent = JSON.stringify(request.messages); return { text: JSON.stringify({ modelId: null, why: "", customer: { name: null, emailDomain: null }, name: "x" }) }; }]);
+    await call(router.assistant.intake, { threadId, text: "x", refs: [ref, { kind: "project", id: secret!.id, name: "secret.pdf", mime: "application/pdf" }] }, w.staff);
+    expect(sent).toContain("RFQ_ACME.pdf");
+    expect(sent).not.toContain("secret.pdf");
+  });
+
   test("a forged x-tenant is refused; another user's thread is not found", async () => {
     const w = await world();
     const other = await world();
