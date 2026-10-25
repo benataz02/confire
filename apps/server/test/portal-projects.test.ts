@@ -216,6 +216,21 @@ describe("portal projects", () => {
     expect(await codeOf(call(portalRouter.projects.remove, { id }, s.portal))).toBe("CONFLICT");
   });
 
+  test("a client's edit drops the staff's source for that key; the portal never sees sources", async () => {
+    const s = await setup();
+    const { id } = await s.create();
+    await call(portalRouter.projects.calculate, { id, set: { material: "steel" } }, s.portal);
+    await call(portalRouter.projects.submit, { id }, s.portal);
+    await call(router.requests.accept, { id }, s.staff);
+    const src = { file: "RFQ.pdf", page: 1, quote: "ALU" };
+    const staff = await call(router.configs.calculate, { id, set: { material: "alu" }, sources: { material: src } }, s.staff);
+    expect(staff.project.sources).toEqual({ material: { value: "alu", source: src } });
+    await call(router.requests.sendBack, { id, note: "Aluminium" }, s.staff);
+    const view = await call(portalRouter.projects.calculate, { id, set: { material: "steel" } }, s.portal);
+    expect(JSON.stringify(view).includes('"sources"')).toBe(false);
+    expect((await db.select().from(configProject).where(eq(configProject.id, id)))[0]!.sources).toEqual({});
+  });
+
   test("an unpublished model is not in the catalog and cannot be started", async () => {
     const s = await setup();
     await db.update(configModel).set({ portal: false }).where(eq(configModel.id, s.model.id));

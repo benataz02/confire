@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { sql, type SQL } from "drizzle-orm";
-import { configProject } from "@confire/db";
+import { configProject, type ValueSource } from "@confire/db";
 import {
   EntriesZ, PRICE_COL, TableRowsZ,
   type Entries, type ModelDef, type Param, type TableDef, type TableRows, type Val,
@@ -21,6 +21,18 @@ export const PatchZ = {
   tables: TableRowsZ.optional()
     .describe("Each changed table's full rows, by table key. A table not named is left alone."),
 };
+
+/** Where a written value came from (assistant spec §4.7): the exact text read off a file, or the
+ *  user's own words in a chat. */
+export const SourceZ = z.union([
+  z.object({
+    file: z.string().min(1).describe("The file's name"),
+    page: z.number().int().nullable().describe("The page it was read on, or null for an image"),
+    quote: z.string().min(1).describe("The exact text read"),
+  }),
+  z.object({ chat: z.string().min(1).describe("The user's own words, as they wrote them") }),
+]);
+export const SourcesZ = z.record(z.string(), SourceZ);
 
 export type InputPatch = { set?: Entries; unset?: string[]; batches?: number[]; tables?: TableRows };
 
@@ -97,8 +109,10 @@ export function patchProblems(model: ModelDef, patch: InputPatch, side: Side): s
  * ponytail: tables are replaced per table, not per cell — rows have no identity to merge on, so a
  * client's edit to a table drops a salesperson's overrides in it. Per-row patches once rows get ids.
  */
-export function patchColumns(p: InputPatch): { entries?: SQL; tables?: SQL; batches?: number[] } {
-  const out: { entries?: SQL; tables?: SQL; batches?: number[] } = {};
+export function patchColumns(
+  p: InputPatch, sources?: Record<string, ValueSource>, other: Record<string, unknown> = {},
+): { entries?: SQL; tables?: SQL; batches?: number[]; sources?: SQL } {
+  const out: { entries?: SQL; tables?: SQL; batches?: number[]; sources?: SQL } = {};
   if (Object.keys(p.set ?? {}).length || p.unset?.length) {
     // `jsonb - text` once per key: drizzle spreads an array parameter into a list, so a text[] would
     // not survive as one parameter.
@@ -106,5 +120,22 @@ export function patchColumns(p: InputPatch): { entries?: SQL; tables?: SQL; batc
   }
   if (Object.keys(p.tables ?? {}).length) out.tables = sql`${configProject.tables} || ${JSON.stringify(p.tables)}::jsonb`;
   if (p.batches !== undefined) out.batches = p.batches;
+  // Provenance moves with the values in the same statement: a written key with a source stores
+  // { value, source }, and one without (a human edit, the portal's included) drops its marker.
+  const written = writtenOf(p, other);
+  const dropped = [...(p.unset ?? []), ...Object.keys(written).filter((k) => !sources?.[k])];
+  const fresh = Object.fromEntries(
+    Object.entries(written).filter(([k]) => sources?.[k] && !p.unset?.includes(k)).map(([k, value]) => [k, { value, source: sources![k] }]),
+  );
+  if (dropped.length || Object.keys(fresh).length)
+    out.sources = sql`(${configProject.sources} || ${JSON.stringify(fresh)}::jsonb)${sql.join(dropped.map((k) => sql` - ${k}::text`))}`;
   return out;
+}
+
+/** What a patch writes, by the key its source is filed under: parameters and tables by their key,
+ *  the batch quantities as `batches`, and `other` (calculate's customer) as given. */
+export function writtenOf(p: InputPatch, other: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    ...p.set, ...p.tables, ...(p.batches !== undefined ? { batches: p.batches } : {}), ...other,
+  };
 }

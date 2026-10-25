@@ -207,3 +207,35 @@ describe.skipIf(!process.env.DATABASE_URL)("the configuration process", () => {
     expect(at20.items[1]).toMatchObject({ unitPrice: 4, typed: true });
   });
 });
+
+describe.skipIf(!process.env.DATABASE_URL)("sources", () => {
+  const SRC = { file: "RFQ.pdf", page: 1, quote: "Size S" } as const;
+  test("a sourced write stores value and source; a human edit of that key drops it", async () => {
+    const s = await setup(); const id = await s.create();
+    const v1 = await s.calc({ id, set: { size: "S", note: "x" }, sources: { size: SRC } });
+    expect(v1.project.sources).toEqual({ size: { value: "S", source: SRC } });
+    const v2 = await s.calc({ id, set: { size: "L" } }); // no source: the page
+    expect(v2.project.sources).toEqual({});
+  });
+  test("batches and tables carry their sources; a name-only write leaves them", async () => {
+    const s = await setup(); const id = await s.create();
+    const chat = { chat: "50 and 200 pieces" };
+    const v = await s.calc({ id, batches: [50, 200], tables: { holes: [{ d: 4 }] }, sources: { batches: chat, holes: SRC } });
+    expect(v.project.sources).toEqual({ batches: { value: [50, 200], source: chat }, holes: { value: [{ d: 4 }], source: SRC } });
+    expect((await s.calc({ id, name: "Renamed" })).project.sources).toEqual(v.project.sources);
+  });
+  test("unset drops the source; a source for an unwritten key is refused", async () => {
+    const s = await setup(); const id = await s.create();
+    await s.calc({ id, set: { size: "S" }, sources: { size: SRC } });
+    expect((await s.calc({ id, unset: ["size"] })).project.sources).toEqual({});
+    await expect(s.calc({ id, set: { note: "x" }, sources: { size: SRC } })).rejects.toThrow("size is not written");
+  });
+  test("model switch clears sources; duplicate keeps them", async () => {
+    const s = await setup(); const id = await s.create();
+    await s.calc({ id, set: { size: "S" }, sources: { size: SRC } });
+    const { id: copy } = await call(router.configs.duplicate, { id }, s.ctx);
+    expect((await load(copy)).sources).toEqual({ size: { value: "S", source: SRC } });
+    const [other] = await db.insert(configModel).values({ tenantId: s.tenantId, name: "Other", definition: PRICED }).returning({ id: configModel.id });
+    expect((await call(router.configs.update, { id, modelId: other!.id }, s.ctx)).project.sources).toEqual({});
+  });
+});

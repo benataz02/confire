@@ -14,7 +14,7 @@ import { copyName } from "../../copy-name.ts";
 import {
   cachedLookups, calculateProject, liveEngine, loadModel, masterdataRows, QueryPageZ, queryTablePage,
 } from "../../config-project.ts";
-import { PatchZ, patchColumns, patchProblems, touchesEngine } from "../../config-patch.ts";
+import { PatchZ, SourcesZ, patchColumns, patchProblems, touchesEngine, writtenOf } from "../../config-patch.ts";
 import { configView } from "../../config-view.ts";
 import { applySelection, createQuote, quoteDraft, validateSelectionPairs } from "../../config-quote.ts";
 import { assertWritable, internalVisible, recordCreated, writableBy } from "../../project-lifecycle.ts";
@@ -235,7 +235,7 @@ export const configsRouter = {
         // configs.create inserts an empty name, so a copy of a not-yet-named draft would be
         // called " (copy)" without the fallback.
         name: copyName(row.name.trim() || "Configuration", taken.map((t) => t.name)),
-        customer: row.customer, entries: row.entries, batches: row.batches, tables: row.tables,
+        customer: row.customer, entries: row.entries, batches: row.batches, tables: row.tables, sources: row.sources,
         createdBy: context.userId,
       })
       .returning({ id: configProject.id });
@@ -270,7 +270,7 @@ export const configsRouter = {
         const updated = await db
           .update(configProject)
           .set({
-            modelId: model.id, entries: {}, batches: model.definition.batchDefaults, tables: {},
+            modelId: model.id, entries: {}, batches: model.definition.batchDefaults, tables: {}, sources: {},
             // Candidates go with the inputs that produced them, or the page renders the old
             // model's assignments against the new definition.
             candidates: [], selection: null, calculatedAt: null, updatedAt: new Date(),
@@ -380,9 +380,15 @@ export const configsRouter = {
       // Read the BP here if a hand-crafted code starts showing up on quotations.
       customer: Customer.nullable().optional().describe("The SAP business partner the quotation goes to (CardCode and CardName); null clears it"),
       ...PatchZ,
+      sources: SourcesZ.optional()
+        .describe("Where each written value came from, by field key (a parameter, a table, `batches` or `customer`): the exact text read off a file with its page, or the user's own words. Optional; the in-app assistant always sends it."),
     }))
     .handler(async ({ input, context }) => {
-      const { id, name, customer, ...patch } = input;
+      const { id, name, customer, sources, ...patch } = input;
+      const other = customer !== undefined ? { customer } : {};
+      const written = writtenOf(patch, other);
+      for (const k of Object.keys(sources ?? {}))
+        if (!(k in written)) throw new ORPCError("BAD_REQUEST", { message: `sources: ${k} is not written by this call` });
       const p = await assertWritable(context.tenantId, id, { userId: context.userId, side: "internal" });
       // The customer is the company (spec §7).
       if (p.portalCardCode !== null && customer !== undefined)
@@ -394,7 +400,7 @@ export const configsRouter = {
         const problems = patchProblems((await loadModel(context.tenantId, row!.modelId)).definition, patch, "internal");
         if (problems.length) throw new ORPCError("BAD_REQUEST", { message: `Not accepted: ${problems.join("; ")}` });
       }
-      if (engine || name !== undefined || customer !== undefined) {
+      if (engine || name !== undefined || customer !== undefined || sources !== undefined) {
         // Inputs and candidates move in ONE statement: a reader sees the old inputs with their
         // candidates or the new inputs with none, never a mismatched pair. Name and customer feed no
         // figure, so they keep the candidates and the picks — except clearing the customer, which
@@ -402,7 +408,7 @@ export const configsRouter = {
         const written = await db
           .update(configProject)
           .set({
-            ...patchColumns(patch),
+            ...patchColumns(patch, sources, other),
             ...(name !== undefined ? { name } : {}),
             ...(customer !== undefined ? { customer } : {}),
             ...(engine || customer === null ? { candidates: [], selection: null, calculatedAt: null } : {}),

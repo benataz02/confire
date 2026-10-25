@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ModelDef } from "@confire/config-engine";
-import { patchProblems, touchesEngine } from "../src/config-patch.ts";
+import { patchColumns, patchProblems, touchesEngine } from "../src/config-patch.ts";
 
 // The patch validator, both sides (pure). The external rules are what acceptPortalInputs enforced.
 
@@ -73,5 +73,13 @@ describe("patchProblems", () => {
     expect(touchesEngine({ set: {}, unset: [], tables: {} })).toBe(false);
     expect(touchesEngine({ unset: ["width"] })).toBe(true);
     expect(touchesEngine({ batches: [1] })).toBe(true);
+  });
+});
+
+describe("patchColumns: sources", () => {
+  test("a write that may carry sources gets a sources column; a name-only write none", () => {
+    expect(patchColumns({ set: { a: 1 } }, {}).sources).toBeDefined();
+    expect(patchColumns({ set: { a: 1 } }).sources).toBeDefined(); // no source: drops a's marker
+    expect(patchColumns({}, undefined).sources).toBeUndefined();
   });
 });

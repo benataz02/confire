@@ -96,7 +96,7 @@ export function composeView(live: Pick<LiveProject, "row" | "model" | "md" | "lo
   return {
     project: {
       id: row.id, name: row.name, customer: row.customer, status: row.status, modelId: row.modelId,
-      entries: row.entries, batches: row.batches, tables: row.tables, selection: row.selection,
+      entries: row.entries, batches: row.batches, tables: row.tables, sources: row.sources, selection: row.selection,
       calculatedAt: row.calculatedAt, b1DocEntry: row.b1DocEntry, b1Company: row.b1Company,
       quoteResponse: row.quoteResponse, portalCardCode: row.portalCardCode, assigneeId: row.assigneeId,
       updatedAt: row.updatedAt,
