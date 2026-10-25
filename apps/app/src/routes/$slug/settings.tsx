@@ -13,8 +13,9 @@ import { PairingCode } from "../../components/PairingCode.tsx";
 import { PortalDocFields } from "../../components/settings/PortalDocFields.tsx";
 import { PortalOnboarding } from "../../components/settings/PortalOnboarding.tsx";
 import { PortalBranding } from "../../components/settings/PortalBranding.tsx";
+import { AssistantSettings } from "../../components/settings/AssistantSettings.tsx";
 
-const TABS = ["agent", "portal", "notifications"] as const;
+const TABS = ["agent", "portal", "assistant", "notifications"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 // Not under _admin: Notifications is every member's own switches (notifications spec §10). The other
@@ -52,6 +53,9 @@ function Settings() {
                 <PortalBranding /><PortalDocFields /><PortalOnboarding />
               </div>
             ) : null}
+          </Tab>
+          <Tab text={i18n.getText("ASSISTANT_TAB")} data-key="assistant" selected={tab === "assistant"}>
+            {tab === "assistant" ? <div style={PAGE}><AssistantSettings /></div> : null}
           </Tab>
         </>
       ) : null}
