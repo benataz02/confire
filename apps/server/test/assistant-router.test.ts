@@ -117,14 +117,17 @@ describe.skipIf(!process.env.DATABASE_URL)("assistant router", () => {
     expect(await codeOf(call(router.assistant.settings, undefined, w.staff))).toBe("FORBIDDEN");
     expect(await codeOf(call(router.assistant.usage, undefined, w.staff))).toBe("FORBIDDEN");
     await call(router.assistant.saveSettings, { assistant: false }, w.adminCtx);
-    expect(await call(router.assistant.settings, undefined, w.adminCtx)).toEqual({ assistant: false });
-    expect(await call(router.assistant.status, undefined, w.staff)).toEqual({ enabled: false, limitReached: false, isAdminHint: false });
+    expect(await call(router.assistant.settings, undefined, w.adminCtx)).toEqual({ assistant: false, available: true });
+    expect(await call(router.assistant.status, undefined, w.staff)).toEqual({ enabled: false, reason: "switch", limitReached: false, isAdminHint: false });
     await call(router.assistant.saveSettings, { assistant: true }, w.adminCtx);
     await db.insert(aiUsage).values({
       tenantId: w.tenantId, userId: "u", projectId: crypto.randomUUID(), model: "claude-sonnet-5-5", kind: "chat",
       inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: String(MONTHLY_LIMIT_USD),
     });
-    expect(await call(router.assistant.status, undefined, w.adminCtx)).toEqual({ enabled: true, limitReached: true, isAdminHint: true });
+    expect(await call(router.assistant.status, undefined, w.adminCtx)).toEqual({ enabled: true, reason: null, limitReached: true, isAdminHint: true });
+    // switched on, but the server has no API key: say that, not "turn it on in Settings"
+    useTestAdapter(null);
+    expect(await call(router.assistant.status, undefined, w.adminCtx)).toMatchObject({ enabled: false, reason: "no_key" });
     expect(await call(router.assistant.usage, undefined, w.adminCtx)).toMatchObject({ cost: MONTHLY_LIMIT_USD, limit: MONTHLY_LIMIT_USD, assisted: 1 });
   });
 

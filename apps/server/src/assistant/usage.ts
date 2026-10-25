@@ -56,7 +56,7 @@ export function meter(m: Meter): ChatMiddleware {
 }
 
 // ponytail: one env default; per-workspace override when a customer needs a different limit.
-export const MONTHLY_LIMIT_USD = Number(process.env.ASSISTANT_MONTHLY_LIMIT_USD ?? 25);
+export const MONTHLY_LIMIT_USD = Number(process.env.ASSISTANT_MONTHLY_LIMIT_USD || 25); // "" from compose = unset
 
 const THIS_MONTH = sql`date_trunc('month', now())`;
 
@@ -78,10 +78,18 @@ export const assistantOn = async (tenantId: string): Promise<boolean> => {
   return !!s?.on;
 };
 
+/** Why the assistant cannot run here, or null: the workspace's switch (an admin's to turn on), or no
+ *  API key on this server (the operator's to set) — two different fixes, so two different answers. */
+export async function offReason(tenantId: string): Promise<"switch" | "no_key" | null> {
+  if (!(await assistantOn(tenantId))) return "switch";
+  return available() ? null : "no_key";
+}
+
 /** Before any model call: the workspace's switch, a provider to call, and money left this month. */
 export async function assertAssistant(tenantId: string): Promise<void> {
-  if (!available() || !(await assistantOn(tenantId)))
-    throw new ORPCError("ASSISTANT_OFF", { message: "The assistant is off for this workspace" });
+  const off = await offReason(tenantId);
+  if (off === "switch") throw new ORPCError("ASSISTANT_OFF", { message: "The assistant is off for this workspace" });
+  if (off === "no_key") throw new ORPCError("ASSISTANT_UNAVAILABLE", { message: "The assistant is not set up on this server (no Claude API key)" });
   if ((await monthUsage(tenantId)).cost >= MONTHLY_LIMIT_USD)
     throw new ORPCError("ASSISTANT_LIMIT", { message: "This workspace has used its assistant budget for this month" });
 }
@@ -100,5 +108,5 @@ export function rateLimit(userId: string): void {
 
 /** The plain route's answer to a coded refusal (oRPC answers its own). */
 export const REFUSAL_STATUS: Record<string, number> = {
-  ASSISTANT_OFF: 403, ASSISTANT_LIMIT: 429, THREAD_BUSY: 409, TOO_MANY_REQUESTS: 429,
+  ASSISTANT_OFF: 403, ASSISTANT_UNAVAILABLE: 503, ASSISTANT_LIMIT: 429, THREAD_BUSY: 409, TOO_MANY_REQUESTS: 429,
 };

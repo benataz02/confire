@@ -42,6 +42,8 @@ function SwitchCard() {
         {q.error ? <MessageStrip design="Negative" hideCloseButton>{q.error.message}</MessageStrip>
           : !q.data ? <BusyIndicator active /> : null}
         {save.error ? <MessageStrip design="Negative" hideCloseButton>{save.error.message}</MessageStrip> : null}
+        {q.data?.assistant && !q.data.available
+          ? <MessageStrip design="Critical" hideCloseButton>{i18n.getText("ASSISTANT_SWITCH_NO_KEY")}</MessageStrip> : null}
         <Text>{i18n.getText("ASSISTANT_SWITCH_INFO")}</Text>
       </FlexBox>
     </Card>

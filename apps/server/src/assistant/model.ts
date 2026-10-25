@@ -5,7 +5,8 @@ import { anthropicText } from "@tanstack/ai-anthropic";
 // no per-tenant choice. Effort stays at the model's default until the eval says otherwise. Tests
 // swap the adapter for a fake; with neither a key nor a fake the assistant is unavailable.
 
-export const ASSISTANT_MODEL = process.env.ASSISTANT_MODEL ?? "claude-sonnet-5-5";
+// `||`, not `??`: compose passes an unset variable as "".
+export const ASSISTANT_MODEL = process.env.ASSISTANT_MODEL || "claude-sonnet-5-5";
 
 let testAdapter: AnyTextAdapter | null = null;
 

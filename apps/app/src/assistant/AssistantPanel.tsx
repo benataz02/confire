@@ -295,8 +295,11 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
       <div ref={scroller} className="cf-assistant__body"
         onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 40; }}>
         {off ? (
-          <IllustratedMessage name="NoData" design="Spot" titleText={t("ASSISTANT_OFF")} subtitleText={t("ASSISTANT_OFF_SUB")}>
-            {status.data?.isAdminHint ? (
+          // Two different fixes: an admin turns the switch on; whoever runs the server sets its API key.
+          <IllustratedMessage name="NoData" design="Spot"
+            titleText={t(status.data?.reason === "no_key" ? "ASSISTANT_NO_KEY" : "ASSISTANT_OFF")}
+            subtitleText={t(status.data?.reason === "no_key" ? "ASSISTANT_NO_KEY_SUB" : "ASSISTANT_OFF_SUB")}>
+            {status.data?.isAdminHint && status.data.reason === "switch" ? (
               <Link onClick={() => void navigate({ to: "/$slug/settings", search: { tab: "assistant" } })}>{t("ASSISTANT_OFF_SETTINGS")}</Link>
             ) : null}
           </IllustratedMessage>

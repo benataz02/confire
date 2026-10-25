@@ -11,7 +11,7 @@ import { ASSISTANT_MODEL, available } from "../../assistant/model.ts";
 import {
   appendMessages, dehydrate, lastDrop, linkProject, newThread, ownThread, threadFor, withThread, type Thread,
 } from "../../assistant/threads.ts";
-import { assertAssistant, assistantOn, MONTHLY_LIMIT_USD, monthUsage, rateLimit } from "../../assistant/usage.ts";
+import { assertAssistant, assistantOn, MONTHLY_LIMIT_USD, monthUsage, offReason, rateLimit } from "../../assistant/usage.ts";
 
 // The assistant's fixed steps (spec §4.1), called by the panel: read the request (`intake`), start
 // the configuration it proposes (`start`, no model call), read its values (`extract`). Each step's
@@ -65,9 +65,11 @@ export async function startFromThread(
 export const assistantRouter = {
   /** The panel's empty state: on, over budget, and whether to show the Settings link. Never throws. */
   status: userProcedure.handler(async ({ context }) => {
-    const enabled = available() && await assistantOn(context.tenantId);
+    const reason = await offReason(context.tenantId);
     return {
-      enabled,
+      enabled: reason === null,
+      /** why not: "switch" (an admin turns it on in Settings) or "no_key" (the server has no API key) */
+      reason,
       limitReached: (await monthUsage(context.tenantId)).cost >= MONTHLY_LIMIT_USD,
       isAdminHint: isAdmin(context.role),
     };
@@ -132,14 +134,15 @@ export const assistantRouter = {
       });
     }),
 
-  settings: adminProcedure.handler(async ({ context }) => ({ assistant: await assistantOn(context.tenantId) })),
+  /** The switch, and whether this server can call Claude at all (an API key is set). */
+  settings: adminProcedure.handler(async ({ context }) => ({ assistant: await assistantOn(context.tenantId), available: available() })),
 
   saveSettings: adminProcedure
     .input(z.object({ assistant: z.boolean() }))
     .handler(async ({ input, context }) => {
       await db.insert(assistantSettings).values({ tenantId: context.tenantId, assistant: input.assistant })
         .onConflictDoUpdate({ target: assistantSettings.tenantId, set: { assistant: input.assistant, updatedAt: new Date() } });
-      return { assistant: input.assistant };
+      return { assistant: input.assistant, available: available() };
     }),
 
   /** This month's spend against the limit, and the configurations it went to. */

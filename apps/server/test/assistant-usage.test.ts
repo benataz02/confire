@@ -42,8 +42,8 @@ describe.skipIf(!process.env.DATABASE_URL)("budget", () => {
     expect(await codeOf(assertAssistant(tenantId))).toBe("ASSISTANT_OFF");
     await db.insert(assistantSettings).values({ tenantId, assistant: true });
     expect(await codeOf(assertAssistant(tenantId))).toBe("OK");
-    useTestAdapter(null); // and no API key in tests: unavailable
-    expect(await codeOf(assertAssistant(tenantId))).toBe("ASSISTANT_OFF");
+    useTestAdapter(null); // the switch is on, but this server has no API key: a different refusal
+    expect(await codeOf(assertAssistant(tenantId))).toBe("ASSISTANT_UNAVAILABLE");
   });
 
   test("refuses at the limit; last month's spend does not count", async () => {
@@ -69,4 +69,13 @@ describe.skipIf(!process.env.DATABASE_URL)("budget", () => {
     expect(rows[0]).toMatchObject({ userId: "u1", kind: "chat", threadId: null });
     expect(Number(rows[0]!.cost)).toBeGreaterThan(0);
   });
+});
+
+test("compose's empty variables mean the defaults, not an empty model and a zero budget", () => {
+  // docker-compose passes an unset `${X:-}` as "" — read at module load, so in a fresh process.
+  const r = Bun.spawnSync(["bun", "-e", `const u = await import("${import.meta.dir}/../src/assistant/usage.ts"); const m = await import("${import.meta.dir}/../src/assistant/model.ts"); console.log(JSON.stringify([m.ASSISTANT_MODEL, u.MONTHLY_LIMIT_USD]))`], {
+    env: { ...process.env, ASSISTANT_MODEL: "", ASSISTANT_MONTHLY_LIMIT_USD: "" },
+  });
+  expect(r.stderr.toString()).toBe("");
+  expect(JSON.parse(r.stdout.toString())).toEqual(["claude-sonnet-5-5", 25]);
 });
