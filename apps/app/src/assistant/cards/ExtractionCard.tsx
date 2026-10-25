@@ -21,7 +21,7 @@ export function ExtractionCard({ r, ctx }: { r: ExtractResult; ctx: CardCtx }) {
   const projectId = ctx.threadProjectId ?? ctx.projectId;
   const files = [...new Set(r.applied.flatMap((a) => ("file" in a.source ? [a.source.file] : [])))];
   return (
-    <ListCard title={t("ASSISTANT_READ_FROM", files.join(", ") || t("ASSISTANT_READ_FROM_TEXT"))}
+    <ListCard title={files.length ? t("ASSISTANT_READ_FROM", files.join(", ")) : t("ASSISTANT_TOOL_extract_values")}
       subtitle={t("ASSISTANT_READ_COUNTS", r.applied.length, r.questions.length)}
       items={r.applied.map((a) => ({
         id: a.key, title: `${a.label}: ${show(a.value)}`, description: sourceText(a.source, t), icon: "ai",

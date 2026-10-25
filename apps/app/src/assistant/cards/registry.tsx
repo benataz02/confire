@@ -16,6 +16,7 @@ import { configItems, documentItems, documentStatus, openAllOf, requestItems, ty
 import { ListCard, ObjectCard, type CardItem } from "./kit.tsx";
 import { ProposalCard, type Proposal } from "./ProposalCard.tsx";
 import { ExtractionCard, type ExtractResult } from "./ExtractionCard.tsx";
+import { QuoteCard, type QuoteDraft } from "./QuoteCard.tsx";
 
 // Tool name → card (plan "The look"). The tool's name picks the card, never the model, and the card
 // draws the tool's output, so its figures are the server's. A card's actions navigate or scroll the
@@ -60,7 +61,7 @@ export function useScrollToField() {
   const navigate = useNavigate({ from: "/$slug" });
   return (projectId: string, key: string, here: boolean) => {
     const go = () => {
-      const el = document.querySelector<HTMLElement>(`[data-param="${CSS.escape(key)}"]`);
+      const el = document.querySelector<HTMLElement>(`[data-param="${CSS.escape(key)}"]`) ?? document.getElementById(key);
       el?.scrollIntoView({ block: "center" });
       (el?.querySelector<HTMLElement>(FOCUSABLE) ?? el)?.focus();
     };
@@ -165,6 +166,8 @@ function ToolCard({ part, ctx }: { part: ToolPart; ctx: Ctx }) {
       return <ProposalCard p={out as Proposal} ctx={ctx} />;
     case "extract_values":
       return <ExtractionCard r={out as ExtractResult} ctx={ctx} />;
+    case "propose_quotation":
+      return <QuoteCard projectId={String(input.projectId ?? "")} d={out as QuoteDraft} />;
     case "timeline_list":
       return <HistoryCard projectId={String(input.projectId ?? "")} out={out} here={ctx.projectId === input.projectId} />;
     default: {

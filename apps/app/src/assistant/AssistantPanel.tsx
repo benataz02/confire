@@ -19,6 +19,10 @@ import { routeContext, type RouteContext } from "./routeContext.ts";
 import { useAssistantChat, useAssistantInvalidate, useAssistantThread, type Thread } from "./useAssistant.ts";
 import { progressText, renderTool, type CardCtx } from "./cards/registry.tsx";
 import { READABLE, refuseFile, sendDrop } from "./intake.ts";
+import { openQuestions } from "./questions.ts";
+import { QuestionCard } from "./cards/QuestionCard.tsx";
+import { CandidatesCard } from "./cards/CandidatesCard.tsx";
+import type { ExtractResult } from "./cards/ExtractionCard.tsx";
 import "./assistant.css";
 
 // The assistant panel (assistant spec §4.2, plan "The look"): Joule's side panel, floating over the
@@ -131,6 +135,7 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
   const [pending, setPending] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [threadProjectId, setThreadProjectId] = useState(thread.projectId);
+  const [kept, setKept] = useState<ReadonlySet<string>>(new Set());
   const input = useRef<TextAreaDomRef>(null);
   const picker = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -228,6 +233,17 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
     }
   };
 
+  // The configuration's live state, under the chat: what is still open, then what can be picked.
+  const extracts = chat.messages.flatMap((m) => m.parts.flatMap((p) =>
+    p.type === "tool-call" && p.name === "extract_values" ? [(p.output ?? parse(results.get(p.id)?.content)) as ExtractResult] : []))
+    .filter((x) => x && Array.isArray(x.questions));
+  const live = route.projectId && view.data && chat.messages.length ? view.data : null;
+  const questions = live ? openQuestions(live, extracts, kept) : [];
+  const questionKeys = questions.map((q) => q.key);
+  const { setQuestionKeys } = shell;
+  const projectKey = route.projectId;
+  useEffect(() => { if (projectKey) setQuestionKeys(projectKey, questionKeys); }, [projectKey, questionKeys.join("\u0000"), setQuestionKeys]);
+
   const lastDropMsg = [...chat.messages].reverse().find((m) => m.role === "user" && m.parts.some((p) => p.type === "document" || p.type === "image"));
   const cardCtx: CardCtx = {
     projectId: route.projectId, threadId: thread.id, threadProjectId,
@@ -319,6 +335,15 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
             {" "}
             {lastUser ? <Link onClick={() => send(textOf(lastUser))}>{t("ASSISTANT_RETRY")}</Link> : null}
           </MessageStrip>
+        ) : null}
+        {live && questions.length ? (
+          <div className="cf-assistant__card">
+            <QuestionCard projectId={route.projectId!} view={live} questions={questions} here
+              onKeep={(k) => setKept((s) => new Set([...s, k]))} />
+          </div>
+        ) : null}
+        {live && !live.missing.length && live.candidates.rows.length ? (
+          <div className="cf-assistant__card"><CandidatesCard projectId={route.projectId!} view={live} /></div>
         ) : null}
         {replies.length ? (
           <div className="cf-assistant__chips">
