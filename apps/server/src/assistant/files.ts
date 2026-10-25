@@ -23,14 +23,19 @@ export const REQUEST_FILE_CAP = 24 * 1024 * 1024;
 /** A file part's Confire metadata: the adapter forwards `title` only. */
 export type FileMeta = { title: string; file: FileRef };
 
-/** The bytes behind refs, fenced by tenant (and a project's by that project when given). Sizes are
- *  summed before any byte is read, so a refused request never loads them. */
-export async function fileBytes(tenantId: string, refs: FileRef[], projectId?: string): Promise<Map<string, Buffer>> {
+/** Where a call's refs may point beyond the tenant: a project's files to that project, a drop's to
+ *  that thread — so a crafted ref cannot read a colleague's drop or a client's draft. */
+export type Fence = { projectId?: string; threadId?: string };
+
+/** The bytes behind refs, fenced by tenant and `fence`. Sizes are summed before any byte is read, so
+ *  a refused request never loads them. */
+export async function fileBytes(tenantId: string, refs: FileRef[], fence: Fence = {}): Promise<Map<string, Buffer>> {
+  const { projectId, threadId } = fence;
   const ids = (kind: FileRef["kind"]) => refs.filter((r) => r.kind === kind).map((r) => r.id);
   const pIds = ids("project");
   const aIds = ids("assistant");
   const pFence = pIds.length ? and(eq(projectFile.tenantId, tenantId), inArray(projectFile.id, pIds), projectId ? eq(projectFile.projectId, projectId) : undefined) : null;
-  const aFence = aIds.length ? and(eq(assistantFile.tenantId, tenantId), inArray(assistantFile.id, aIds)) : null;
+  const aFence = aIds.length ? and(eq(assistantFile.tenantId, tenantId), inArray(assistantFile.id, aIds), threadId ? eq(assistantFile.threadId, threadId) : undefined) : null;
   const sizes = [
     ...(pFence ? await db.select({ size: projectFile.size }).from(projectFile).where(pFence) : []),
     ...(aFence ? await db.select({ size: assistantFile.size }).from(assistantFile).where(aFence) : []),
@@ -58,8 +63,8 @@ export function filePart(ref: FileRef, data: Buffer): ContentPart | null {
  * The refs as content parts, each named by a text part before it: an image has no title on the wire,
  * and a value's source names its file. Unreadable types and refs outside the fence are skipped.
  */
-export async function fileParts(tenantId: string, refs: FileRef[], projectId?: string): Promise<ContentPart[]> {
-  const bytes = await fileBytes(tenantId, refs, projectId);
+export async function fileParts(tenantId: string, refs: FileRef[], fence: Fence = {}): Promise<ContentPart[]> {
+  const bytes = await fileBytes(tenantId, refs, fence);
   return refs.flatMap((ref) => {
     const data = bytes.get(ref.id);
     const part = data && filePart(ref, data);

@@ -52,6 +52,7 @@ async function main(): Promise<void> {
   const { liveEngine } = await import("../apps/server/src/config-project.ts");
   const { modelBlock, readExtraction } = await import("../apps/server/src/assistant/extract.ts");
   const { docType, fileParts } = await import("../apps/server/src/assistant/files.ts");
+  const { readRequest } = await import("../apps/server/src/assistant/intake.ts");
   const { ASSISTANT_MODEL } = await import("../apps/server/src/assistant/model.ts");
   const { costOf } = await import("../apps/server/src/assistant/usage.ts");
 
@@ -78,7 +79,8 @@ async function main(): Promise<void> {
     const { model, lookups } = await liveEngine(p.tenantId, { modelId: p.modelId, entries: {} });
     const form = formState(model.definition, lookups, propagate(model.definition, lookups, {}, {}), {});
     const pages = byProject.get(p.id)!.reduce((n, f) => n + pagesOf(f.data), 0);
-    estimate += costOf(ASSISTANT_MODEL, { input: pages * 1500 + modelBlock(model.definition, form).length / 4, cacheRead: 0, cacheWrite: 0, output: 1000 });
+    // twice: the intake proposal reads the same pages
+    estimate += 2 * costOf(ASSISTANT_MODEL, { input: pages * 1500 + modelBlock(model.definition, form).length / 4, cacheRead: 0, cacheWrite: 0, output: 1000 });
     cases.push({ p, model, form });
   }
   console.log(`${cases.length} case(s) on ${ASSISTANT_MODEL}, estimated $${estimate.toFixed(2)}`);
@@ -89,25 +91,29 @@ async function main(): Promise<void> {
   }
 
   const started = new Date();
-  const totals = { filled: 0, asked: 0, total: 0, differs: 0 };
+  const totals = { filled: 0, asked: 0, total: 0, differs: 0, proposed: 0 };
   for (const { p, model, form } of cases) {
     const refs = byProject.get(p.id)!.map((f) => ({ kind: "project" as const, id: f.id, name: f.name, mime: f.mime }));
-    const parts = await fileParts(p.tenantId, refs, p.id);
+    const parts = await fileParts(p.tenantId, refs, { projectId: p.id });
     // Confire's own spend, metered apart: it never counts against the workspace's limit or its
     // assisted configurations.
     const meter = { tenantId: EVAL, userId: EVAL, threadId: null, projectId: null, kind: "extract" as const };
     const x = await readExtraction({ def: model.definition, form, parts, text: "", meter });
+    // The first call too: does it propose the model the configuration was made with? No SAP read is
+    // wanted here, so its headers name no session and the customer lookup fails quietly.
+    const proposal = await readRequest({ headers: new Headers(), tenantId: p.tenantId }, { parts, text: "", meter });
     const writable = model.definition.parameters.filter((q) => !q.readonly).map((q) => q.key);
     const r = scoreCase(p.entries, x, writable);
     totals.filled += r.filled; totals.asked += r.asked; totals.total += r.total; totals.differs += r.differs.length;
-    console.log(`\n${p.name} (${model.name}): filled ${r.filled}/${r.total}, asked ${r.asked}, differs ${r.differs.length}`);
+    if (proposal.model?.id === p.modelId) totals.proposed++;
+    console.log(`\n${p.name} (${model.name}): filled ${r.filled}/${r.total}, asked ${r.asked}, differs ${r.differs.length}, proposed ${proposal.model?.name ?? "no model"}`);
     for (const d of r.differs)
       console.log(`  ${d.key}: read ${canon(d.read)}, stored ${canon(d.stored)} — ${d.source.file} p.${d.source.page ?? "-"} "${d.source.quote}"  [misread / revised?]`);
   }
   const [spent] = await db.select({ cost: sql<string>`coalesce(sum(${aiUsage.cost}), 0)` }).from(aiUsage)
     .where(and(eq(aiUsage.tenantId, EVAL), eq(aiUsage.kind, "extract"), gte(aiUsage.at, started)));
   const share = totals.total ? Math.round((totals.filled / totals.total) * 100) : 0;
-  console.log(`\nfilled ${share}% (${totals.filled}/${totals.total}), asked ${totals.asked}, differs ${totals.differs}, spent $${Number(spent?.cost ?? 0).toFixed(4)}`);
+  console.log(`\nfilled ${share}% (${totals.filled}/${totals.total}), asked ${totals.asked}, differs ${totals.differs}, model proposed ${totals.proposed}/${cases.length}, spent $${Number(spent?.cost ?? 0).toFixed(4)}`);
   await pool.end();
 }
 

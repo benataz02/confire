@@ -123,15 +123,35 @@ const partial = async (tenantId: string, id: string) => {
   return view;
 };
 
-const Customer = z.object({ cardCode: z.string().min(1), cardName: z.string() });
+export const Customer = z.object({ cardCode: z.string().min(1), cardName: z.string() });
+
+/** A new configuration of a model, and its `created` event in the same transaction. The assistant's
+ *  start passes `via` so the timeline says who made it. */
+export async function createProject(
+  tenantId: string, userId: string, input: { modelId: string; name: string; customer?: z.infer<typeof Customer> | null },
+  via?: "assistant",
+) {
+  const model = await loadModel(tenantId, input.modelId);
+  return db.transaction(async (tx) => {
+    const [ins] = await tx
+      .insert(configProject)
+      .values({
+        tenantId, modelId: model.id, name: input.name, customer: input.customer ?? null,
+        batches: model.definition.batchDefaults, createdBy: userId,
+      })
+      .returning({ id: configProject.id });
+    await recordCreated(tx, tenantId, ins!.id, { userId, side: "internal" }, via ? { via } : undefined);
+    return { id: ins!.id };
+  });
+}
 
 export const configsRouter = {
   // Members can list models (id + name only) to start a configuration; editing stays admin-only.
   models: userProcedure
-    .meta(openapi({ summary: "List the models", description: "Every model a configuration can be started from: id and name." }))
+    .meta(openapi({ summary: "List the models", description: "Every model a configuration can be started from: id, name, and the author's description of what it configures." }))
     .handler(({ context }) =>
     db
-      .select({ id: configModel.id, name: configModel.name })
+      .select({ id: configModel.id, name: configModel.name, description: sql<string | null>`${configModel.definition}->>'description'` })
       .from(configModel)
       .where(eq(configModel.tenantId, context.tenantId))
       .orderBy(configModel.name),
@@ -194,21 +214,7 @@ export const configsRouter = {
       name: z.string().trim().min(1).describe("The configuration's name"),
       customer: Customer.nullable().optional().describe("The SAP business partner the quotation will go to"),
     }))
-    .handler(async ({ input, context }) => {
-      const model = await loadModel(context.tenantId, input.modelId);
-      return db.transaction(async (tx) => {
-        const [ins] = await tx
-          .insert(configProject)
-          .values({
-            tenantId: context.tenantId, modelId: model.id, name: input.name,
-            customer: input.customer ?? null,
-            batches: model.definition.batchDefaults, createdBy: context.userId,
-          })
-          .returning({ id: configProject.id });
-        await recordCreated(tx, context.tenantId, ins!.id, { userId: context.userId, side: "internal" });
-        return { id: ins!.id };
-      });
-    }),
+    .handler(({ input, context }) => createProject(context.tenantId, context.userId, input)),
 
   // Copy the inputs, then recalculate so the copy opens against what the cache says now. Deliberately
   // no assertWritable: duplicating a *quoted* configuration is the point — the source stays

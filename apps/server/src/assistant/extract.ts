@@ -284,11 +284,12 @@ type Ctx = { headers: Headers; tenantId: string; userId: string; threadId: strin
  * one round trip to Postgres. Close it with a "set only where absent" merge in SQL if it bites.
  */
 export async function extractInto(ctx: Ctx, projectId: string, input: { refs: FileRef[]; text: string }): Promise<ExtractResult> {
+  const fence = { projectId, ...(ctx.threadId ? { threadId: ctx.threadId } : {}) };
   await assertAssistant(ctx.tenantId);
   await assertWritable(ctx.tenantId, projectId, { userId: ctx.userId, side: "internal" });
   const where = and(eq(configProject.id, projectId), eq(configProject.tenantId, ctx.tenantId), internalVisible)!;
   const before = await configView(ctx.tenantId, where);
-  const parts = await fileParts(ctx.tenantId, input.refs, projectId);
+  const parts = await fileParts(ctx.tenantId, input.refs, fence);
   if (!parts.length && !input.text.trim()) throw new ORPCError("BAD_REQUEST", { message: "Nothing to read: drop a PDF, PNG or JPEG, or paste the text" });
 
   const m: Meter = { tenantId: ctx.tenantId, userId: ctx.userId, threadId: ctx.threadId, projectId, kind: "extract" };

@@ -116,8 +116,8 @@ function fenced<T extends { portalCardCode: string | null; status: ProjectStatus
 }
 
 /** The project's `created` event — internal configurations too. */
-export const recordCreated = (q: DbOrTx, tenantId: string, projectId: string, actor: Actor) =>
-  append(q, { tenantId, projectId, kind: "created", actor });
+export const recordCreated = (q: DbOrTx, tenantId: string, projectId: string, actor: Actor, payload?: ProjectEventPayload) =>
+  append(q, { tenantId, projectId, kind: "created", actor, payload });
 
 async function fencedProject(q: DbOrTx, tenantId: string, projectId: string, actor: Actor) {
   const [row] = await q.select({ portalCardCode: configProject.portalCardCode, status: configProject.status })

@@ -44,7 +44,10 @@ describe.skipIf(!process.env.DATABASE_URL)("threads", () => {
   test("one run per thread", async () => {
     const w = await world();
     const t = await newThread(w.tenantId, w.a.userId);
-    const first = withThread(t.id, () => new Promise((r) => setTimeout(r, 50)));
+    let inside!: () => void;
+    const entered = new Promise<void>((r) => (inside = r));
+    const first = withThread(t.id, async () => { inside(); await new Promise((r) => setTimeout(r, 50)); });
+    await entered; // the first run holds the lease
     expect(await codeOf(withThread(t.id, async () => "second"))).toBe("THREAD_BUSY");
     await first;
     expect(await withThread(t.id, async () => "after")).toBe("after"); // released

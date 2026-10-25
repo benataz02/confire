@@ -241,6 +241,7 @@ export function ProjectTimeline({
             const title = e.kind === "quoted" && q
               ? i18n.getText(q.mode === "updated" ? "UI_QUOTE_UPDATED" : "UI_QUOTE_SENT", q.docNum == null ? "" : String(q.docNum)).replace(/\s+/g, " ")
               : e.kind === "assigned" ? i18n.getText("UI_EVT_ASSIGNED", (e.payload as { assigneeName?: string } | null)?.assigneeName ?? "")
+              : e.kind === "created" && (e.payload as { via?: string } | null)?.via === "assistant" ? i18n.getText("UI_EVT_CREATED_ASSISTANT")
               : known ? i18n.getText(k.title(side)) : k.title(side);
             const mine = e.actorSide === side;
             return (
