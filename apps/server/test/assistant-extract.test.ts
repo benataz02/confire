@@ -1,9 +1,16 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
+import { fakeText, type FakeResponseStep } from "@tanstack/ai/testing";
+import { db, aiUsage, assistantSettings, configModel, configProject, projectFile } from "@confire/db";
 import { itemsTable, type FormState, type ModelDef, type Val } from "@confire/config-engine";
 import {
-  extractionSchema, modelBlock, planApply, type Extraction, type FileSource,
+  extractInto, extractionSchema, modelBlock, planApply, type Extraction, type FileSource,
 } from "../src/assistant/extract.ts";
+import type { FileRef } from "../src/assistant/files.ts";
+import { useTestAdapter } from "../src/assistant/model.ts";
+import { router } from "../src/orpc/router.ts";
+import { call, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
 
 // The extraction's pure half (assistant spec §4.4): what the model is told, the schema its answer
 // must fit, and how a read becomes a patch plus questions. Values fill empty fields only; anything
@@ -144,4 +151,115 @@ test("modelBlock is stable and names help, rules and allowed values", () => {
   // a rule eliminating an option changes the form, not the block: it stays cacheable
   const ruled = { ...FORM, fields: { ...FORM.fields, size: { ...FORM.fields.size!, options: [{ value: "S", label: "Small", unavailable: "No S in steel" }, { value: "L", label: "Large" }] } } };
   expect(modelBlock(DEF, ruled)).toBe(b);
+});
+
+// --- the call and its write (DB) -----------------------------------------------------------------
+
+const BOX: ModelDef = {
+  name: "Box",
+  parameters: [
+    {
+      key: "size", label: "Size", type: "string", ui: "select", mandatory: true,
+      domain: { kind: "options", ref: { source: "manual", options: [{ value: "S" }, { value: "L" }] } },
+    },
+    { key: "width", label: "Width", type: "number", ui: "input", domain: { kind: "range", min: 10, max: 500 } },
+    { key: "note", label: "Note", type: "string", ui: "input" },
+  ],
+  structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["size", "width", "note"] }] }] },
+  computed: [], tables: [], constraints: [], bom: [], routing: [],
+  pricing: { priceExpr: "1", quoteItemCode: "BOX" },
+  batchDefaults: [10],
+};
+const PDF = Buffer.from("%PDF-1.4 a drawing");
+const answer = (p: Partial<Extraction>): FakeResponseStep => ({ text: JSON.stringify(x(p)) });
+
+async function world(on = true) {
+  const { tenantId, slug } = await makeTenant();
+  const admin = await makeUser("admin", tenantId);
+  const headers = tenantHeaders(slug, admin.cookie);
+  if (on) await db.insert(assistantSettings).values({ tenantId, assistant: true });
+  const [m] = await db.insert(configModel).values({ tenantId, name: "Box", definition: BOX }).returning({ id: configModel.id });
+  const { id } = await call(router.configs.create, { modelId: m!.id, name: "Box", customer: null }, { context: { headers } });
+  const file = async (name = "RFQ.pdf", data = PDF): Promise<FileRef> => {
+    const [f] = await db.insert(projectFile).values({ tenantId, projectId: id, name, mime: "application/pdf", size: data.length, data }).returning({ id: projectFile.id });
+    return { kind: "project", id: f!.id, name, mime: "application/pdf" };
+  };
+  const fake = fakeText();
+  useTestAdapter(fake);
+  const ctx = { headers, tenantId, userId: admin.userId, threadId: null };
+  const calc = (input: { set?: Record<string, Val> }) => call(router.configs.calculate, { id, ...input }, { context: { headers } });
+  const load = async () => (await db.select().from(configProject).where(eq(configProject.id, id)))[0]!;
+  const usage = () => db.select().from(aiUsage).where(eq(aiUsage.tenantId, tenantId));
+  return { tenantId, id, file, fake, ctx, calc, load, usage };
+}
+const codeOf = (p: Promise<unknown>) => p.then(() => "OK", (e: { code?: string }) => e.code);
+
+describe.skipIf(!process.env.DATABASE_URL)("extractInto", () => {
+  afterEach(() => useTestAdapter(null));
+
+  test("reads, fills the empty fields with their sources, asks the rest, meters the call", async () => {
+    const w = await world();
+    w.fake.setResponses([answer({
+      set: [s("size", "S"), s("width", 900, { file: "RFQ.pdf", page: 1, quote: "W 900" })],
+      unsure: [{ key: "note", why: "smudged", candidates: [] }],
+    })]);
+    const r = await extractInto(w.ctx, w.id, { refs: [await w.file()], text: "50 pcs" });
+    const row = await w.load();
+    expect(row.entries).toEqual({ size: "S" });
+    expect(row.sources.size!.source).toEqual({ file: "RFQ.pdf", page: 1, quote: "SIZE S" });
+    expect(r.applied).toEqual([{ key: "size", label: "Size", value: "S", source: SRC }]);
+    expect(r.questions.map((q) => [q.key, q.why])).toEqual([["width", "out_of_range"], ["note", "unsure"]]);
+    const rows = await w.usage();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "extract", projectId: w.id });
+  });
+
+  test("a value typed while the model reads wins", async () => {
+    const w = await world();
+    w.fake.setResponses([async () => {
+      await w.calc({ set: { size: "L" } });
+      return { text: JSON.stringify(x({ set: [s("size", "S")] })) };
+    }]);
+    const r = await extractInto(w.ctx, w.id, { refs: [await w.file()], text: "" });
+    expect((await w.load()).entries.size).toBe("L");
+    expect(r.questions).toContainEqual(expect.objectContaining({ key: "size", why: "differs", read: "S" }));
+    expect(r.applied).toEqual([]);
+  });
+
+  test("locked: refused before the model is called", async () => {
+    const w = await world();
+    await db.update(configProject).set({ status: "quoted" }).where(eq(configProject.id, w.id));
+    w.fake.setResponses([answer({ set: [s("size", "S")] })]);
+    expect(await codeOf(extractInto(w.ctx, w.id, { refs: [await w.file()], text: "" }))).toBe("CONFLICT");
+    expect(w.fake.state.callCount).toBe(0);
+    expect(await w.usage()).toHaveLength(0);
+  });
+
+  test("attachments over the request cap are refused, unbilled", async () => {
+    const w = await world();
+    const big = Buffer.concat([PDF, Buffer.alloc(9 * 1024 * 1024)]);
+    const refs = [await w.file("a.pdf", big), await w.file("b.pdf", big), await w.file("c.pdf", big)];
+    w.fake.setResponses([answer({})]);
+    expect(await codeOf(extractInto(w.ctx, w.id, { refs, text: "" }))).toBe("PAYLOAD_TOO_LARGE");
+    expect(w.fake.state.callCount).toBe(0);
+  });
+
+  test("switch off: ASSISTANT_OFF, nothing read", async () => {
+    const w = await world(false);
+    w.fake.setResponses([answer({ set: [s("size", "S")] })]);
+    expect(await codeOf(extractInto(w.ctx, w.id, { refs: [await w.file()], text: "" }))).toBe("ASSISTANT_OFF");
+    expect(w.fake.state.callCount).toBe(0);
+    expect((await w.load()).entries).toEqual({});
+  });
+
+  test("another tenant's file is not read", async () => {
+    const w = await world();
+    const other = await world();
+    let sent = "";
+    w.fake.setResponses([({ request }) => { sent = JSON.stringify(request.messages); return { text: JSON.stringify(x({})) }; }]);
+    useTestAdapter(w.fake);
+    await extractInto(w.ctx, w.id, { refs: [await other.file("theirs.pdf"), await w.file("ours.pdf")], text: "x" });
+    expect(sent).toContain("ours.pdf");
+    expect(sent).not.toContain("theirs.pdf");
+  });
 });
