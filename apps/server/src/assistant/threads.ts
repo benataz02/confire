@@ -53,18 +53,28 @@ export async function ownThread(tenantId: string, userId: string, threadId: stri
   return asThread(t);
 }
 
-/** One run at a time: a five-minute lease taken in one UPDATE, released when `fn` settles. A second
- *  tab sending meanwhile is refused rather than interleaved into the history. */
-export async function withThread<T>(threadId: string, fn: () => Promise<T>): Promise<T> {
+/** One run at a time: a five-minute lease taken in one UPDATE. A second tab sending meanwhile is
+ *  refused rather than interleaved into the history. The streamed chat takes and releases it around
+ *  its run; everything else goes through `withThread`. */
+export async function takeLease(threadId: string): Promise<void> {
   const taken = await db.update(assistantThread)
     .set({ busyUntil: sql`now() + interval '5 minutes'` })
     .where(and(eq(assistantThread.id, threadId), or(isNull(assistantThread.busyUntil), lt(assistantThread.busyUntil, sql`now()`))))
     .returning({ id: assistantThread.id });
   if (!taken.length) throw new ORPCError("THREAD_BUSY", { message: "This chat is answering in another tab — wait for it to finish" });
+}
+
+export async function releaseLease(threadId: string): Promise<void> {
+  await db.update(assistantThread).set({ busyUntil: null }).where(eq(assistantThread.id, threadId));
+}
+
+/** `fn` under the thread's lease, released when it settles. */
+export async function withThread<T>(threadId: string, fn: () => Promise<T>): Promise<T> {
+  await takeLease(threadId);
   try {
     return await fn();
   } finally {
-    await db.update(assistantThread).set({ busyUntil: null }).where(eq(assistantThread.id, threadId));
+    await releaseLease(threadId);
   }
 }
 
