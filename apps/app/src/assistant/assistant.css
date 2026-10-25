@@ -1,0 +1,75 @@
+/* The assistant panel (assistant spec §4.2): Joule's layout over the theme's own assistant
+ * parameters, so it follows Horizon, Horizon Dark and the high-contrast themes with no colour here.
+ * Custom properties inherit into shadow DOM: scoping the emphasized-button parameters makes the
+ * panel's emphasized buttons the assistant's colour while the page's stay blue. */
+.cf-assistant {
+  --cf-assistant-w: 26rem;
+  --sapButton_Emphasized_Background: var(--sapAssistant_Background);
+  --sapButton_Emphasized_BorderColor: var(--sapAssistant_BorderColor);
+  --sapButton_Emphasized_TextColor: var(--sapAssistant_TextColor);
+  --sapButton_Emphasized_Hover_Background: var(--sapAssistant_Hover_Background);
+  --sapButton_Emphasized_Hover_BorderColor: var(--sapAssistant_Hover_BorderColor);
+  position: fixed;
+  z-index: 10;
+  inset-block: calc(var(--cf-shellbar-bottom, 3.25rem) + 0.5rem) 0.5rem;
+  inset-inline-end: 0.5rem;
+  inline-size: min(var(--cf-assistant-w), 100vw - 1rem);
+  display: flex;
+  flex-direction: column;
+  background: var(--sapGroup_ContentBackground);
+  border-radius: var(--sapElement_BorderCornerRadius);
+  box-shadow: var(--sapContent_Shadow2);
+  overflow: hidden;
+  container-type: inline-size;
+  font-family: var(--sapFontFamily);
+  color: var(--sapTextColor);
+}
+.cf-assistant--wide { --cf-assistant-w: min(48rem, 60vw); }
+.cf-assistant[hidden] { display: none; }
+.cf-assistant--drop { outline: 2px dashed var(--sapContent_FocusColor); outline-offset: -0.5rem; }
+
+.cf-assistant__head { flex: none; }
+.cf-assistant__heading { display: flex; flex-direction: column; min-width: 0; }
+.cf-assistant__sub { color: var(--sapContent_LabelColor); font-size: var(--sapFontSmallSize); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 1 rem from the edge, 1.5 rem between groupings, 0.5 rem inside one. */
+.cf-assistant__body { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 1.5rem; }
+.cf-assistant__turn { display: flex; flex-direction: column; gap: 0.5rem; }
+.cf-assistant__turn--user { align-items: flex-end; }
+.cf-assistant__bubble {
+  max-width: 85%;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--sapElement_BorderCornerRadius);
+  font-family: var(--sapFontFamily);
+  font-size: var(--sapFontSize);
+  overflow-wrap: anywhere;
+}
+.cf-assistant__bubble--user {
+  background: var(--sapAssistant_Question_Background);
+  color: var(--sapAssistant_Question_TextColor);
+  border: 1px solid var(--sapAssistant_Question_BorderColor);
+  white-space: pre-wrap;
+}
+.cf-assistant__bubble--answer {
+  align-self: flex-start;
+  background: var(--sapAssistant_Answer_Background);
+  color: var(--sapAssistant_Answer_TextColor);
+  border: 1px solid var(--sapAssistant_Answer_BorderColor);
+}
+.cf-assistant__bubble--answer p { margin: 0 0 0.5rem; }
+.cf-assistant__bubble--answer p:last-child { margin-bottom: 0; }
+.cf-assistant__card { align-self: stretch; max-width: 40rem; }
+.cf-assistant__files { display: flex; flex-wrap: wrap; gap: 0.25rem; justify-content: flex-end; }
+.cf-assistant__busy { display: flex; align-items: center; gap: 0.5rem; color: var(--sapContent_LabelColor); }
+.cf-assistant__chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.cf-assistant__welcome { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.cf-assistant__foot { flex: none; padding: 0.5rem 1rem 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; border-top: 1px solid var(--sapGroup_TitleBorderColor); }
+.cf-assistant__composer { display: flex; align-items: flex-end; gap: 0.5rem; }
+.cf-assistant__composer ui5-textarea { flex: 1; }
+.cf-assistant__notice { color: var(--sapContent_LabelColor); font-size: var(--sapFontSmallSize); }
+.cf-assistant__notice--short { display: none; }
+@container (max-width: 20rem) {
+  .cf-assistant__notice--long { display: none; }
+  .cf-assistant__notice--short { display: inline; }
+}

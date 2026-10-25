@@ -21,6 +21,7 @@ import type { MouseEvent } from "react";
 import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 import { LANGUAGES, useLanguage } from "@confire/ui/i18n.ts";
 import { useI18n } from "../i18n.ts";
+import { AssistantProvider, useAssistantShell } from "../assistant/AssistantProvider.tsx";
 
 export const B1_NAV_KEY: Record<string, string> = {
   Quotations: "NAV_QUOTATIONS",
@@ -50,8 +51,12 @@ const THEME_KEY: Record<string, string> = {
 
 // The app shell for every signed-in page. The workspace is the path's first segment; the auth gate
 // lives in the $slug route (beforeLoad), this only renders the chrome. Nav targets and `pathname`
-// are paths inside the workspace.
+// are paths inside the workspace. The assistant's panel is shell state, around it all.
 export function AppShell() {
+  return <AssistantProvider><Shell /></AssistantProvider>;
+}
+
+function Shell() {
   const go = useEntityNav();
   const router = useRouter();
   const navigate = useNavigate({ from: "/$slug" });
@@ -74,6 +79,7 @@ export function AppShell() {
   const { theme, setTheme: setThemeState, density, setDensity } = useAppearance();
   const i18n = useI18n();
   const { language, setLanguage } = useLanguage();
+  const assistant = useAssistantShell();
 
   // Identity + org role in one query, already primed by $slug's beforeLoad — a cache read.
   // Role decides whether the Settings item shows; the server gates it too.
@@ -181,7 +187,9 @@ export function AppShell() {
               const target = e.detail.targetRef;
               setBellOpener((cur) => (cur ? null : target));
             }}
-            assistant={<ToggleButton icon="da" tooltip="Joule" />}
+            assistant={<ToggleButton icon="da" pressed={assistant.open} tooltip={i18n.getText("ASSISTANT_TITLE")}
+              accessibleName={i18n.getText("ASSISTANT_TITLE")} accessibilityAttributes={{ expanded: assistant.open }}
+              onClick={assistant.toggle} />}
             accessibilityAttributes={{
               notifications: { expanded: bellOpener !== null, hasPopup: "dialog" },
               profile: { expanded: userMenuOpen, hasPopup: "menu" },
