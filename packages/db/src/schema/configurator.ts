@@ -75,6 +75,10 @@ export type ConfigMasterdata = typeof configMasterdata.$inferSelect;
 export const PROJECT_STATUSES = ["draft", "submitted", "in_review", "returned", "declined", "quoted"] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 export type ProjectCustomer = { cardCode: string; cardName: string };
+/** Where a value came from: a quote read off a named file, or the user's own words in the chat. */
+export type ValueSource = { file: string; page: number | null; quote: string } | { chat: string };
+/** By field key (a parameter, a table, or `batches`): the value the source wrote, and the source. */
+export type ProjectSources = Record<string, { value: unknown; source: ValueSource }>;
 export type QuoteResponse = "accepted" | "declined";
 
 // One enumerated configuration, priced per batch quantity, and the user's pick of one.
@@ -115,6 +119,10 @@ export const configProject = pgTable(
     // column rather than more keys in `entries`: Entries values are compared with === across
     // propagate/enumerate/enrichLookups, and widening Val to hold row arrays would touch all of it.
     tables: jsonb("tables").$type<TableRows>().notNull().default({}),
+    // Value provenance (assistant spec §4.7). Written only by `configs.calculate` (and copied by
+    // duplicate), in the same UPDATE as the patch: a write without a source for a key drops it. A
+    // key's marker shows while its entry still equals `value`.
+    sources: jsonb("sources").$type<ProjectSources>().notNull().default({}),
     candidates: jsonb("candidates").$type<ConfigCandidate[]>().notNull().default([]),
     selection: jsonb("selection").$type<ConfigSelection[]>(),
     // When `candidates` was computed, and null whenever they are empty. Compared against
@@ -168,7 +176,9 @@ export type ProjectEventPayload =
   | { docEntry: number; docNum: number | null; value: number; mode: "created" | "updated"; inputs: ProjectInputs; company?: string | null }
   | { fileId: string; name: string; size: number }
   /** `assigned`: the name is snapshotted, so the timeline needs no join */
-  | { assigneeId: string; assigneeName: string };
+  | { assigneeId: string; assigneeName: string }
+  /** `created` from the assistant's panel */
+  | { via: "assistant" };
 
 // The project's timeline (spec §6, §8), append-only. project-lifecycle.ts writes every status
 // event in the same transaction as the guarded status UPDATE; comments are written beside it.
@@ -196,7 +206,7 @@ export const configProjectEvent = pgTable(
 export type ConfigProjectEvent = typeof configProjectEvent.$inferSelect;
 
 // node-postgres reads bytea as a Buffer and writes one as is.
-const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+export const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 
 // Attachments (spec D14) in Postgres: a project's files, and the tenant's branding logo
 // (`projectId` null — the one row GET /files/:id serves without a session, D20). Append-only like

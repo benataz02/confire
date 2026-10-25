@@ -43,6 +43,13 @@
       "when": 1792773244967,
       "tag": "0005_bp_language",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792916229978,
+      "tag": "0006_assistant",
+      "breakpoints": true
     }
   ]
 }
