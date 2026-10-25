@@ -61,7 +61,11 @@ const FORM_PROPS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2" } as 
 // the whole Form (colSpan mirrors FORM_PROPS.layout) and the item breaks out of the column flow
 // (TABLE_ITEM). ConfigTable's Grid toolbar names the table, with its row count, and carries Add/Delete.
 
-export function ConfiguratorForm({ model, form, tables, rows, onChange, onRowsChange, disabled, readOnly, querySource, batches, itemMoney, itemBatch, onItemBatchChange, formulaOverride }: {
+/** A field's provenance mark: the assistant wrote it (with the source as its tip), or a question about
+ *  it is open in the assistant. Drawn beside the rule's "Auto". */
+export type FieldMark = { kind: "assistant"; tip: string } | { kind: "question" };
+
+export function ConfiguratorForm({ model, form, tables, rows, onChange, onRowsChange, disabled, readOnly, querySource, batches, itemMoney, itemBatch, onItemBatchChange, formulaOverride, marks, onMarkPress }: {
   model: ModelDef;
   form: FormState;
   /** The display tables: query value helps' first page, the table cells' options. */
@@ -78,6 +82,9 @@ export function ConfiguratorForm({ model, form, tables, rows, onChange, onRowsCh
   readOnly?: boolean;
   /** where a query field fetches its pages — nothing is fetched until the user opens or types */
   querySource: QueryScope;
+  /** the staff app's assistant marks, by parameter key; the portal and the preview pass none */
+  marks?: Record<string, FieldMark>;
+  onMarkPress?: (key: string, opener: HTMLElement) => void;
   /** batch quantities, for the items grid's batch picker */
   batches?: number[];
   /** cost/price per items row at `itemBatch`; omit and the grid shows no money columns at all —
@@ -335,6 +342,8 @@ export function ConfiguratorForm({ model, form, tables, rows, onChange, onRowsCh
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
                         {control(k)}
                         {f.defaulted ? <ObjectStatus state="Information">{i18n.getText("UI_AUTO")}</ObjectStatus> : null}
+                        {marks?.[k] ? <MarkIcon mark={marks[k]!} label={i18n.getText("UI_MARK_QUESTION")}
+                          onPress={(el) => onMarkPress?.(k, el)} /> : null}
                       </div>
                       {showEliminatedNote ? (
                         <Text style={{ fontSize: "0.75rem", color: "var(--sapContent_LabelColor)" }}>
@@ -356,5 +365,16 @@ export function ConfiguratorForm({ model, form, tables, rows, onChange, onRowsCh
       );
       })}
     </div>
+  );
+}
+
+/** ✦ (the AI colour, SAP blue) or 💬, pressable: its tip is the source (XAI level 1), a press opens
+ *  the quote (level 2) or the question. */
+function MarkIcon({ mark, label, onPress }: { mark: FieldMark; label: string; onPress: (el: HTMLElement) => void }) {
+  const tip = mark.kind === "assistant" ? mark.tip : label;
+  return (
+    <Icon name={mark.kind === "assistant" ? "ai" : "discussion"} mode="Interactive" accessibleName={tip} title={tip}
+      style={{ flex: "none", color: mark.kind === "assistant" ? "var(--sapBrandColor)" : "var(--sapContent_IconColor)" }}
+      onClick={(e) => onPress(e.currentTarget as HTMLElement)} />
   );
 }

@@ -1,9 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BusyIndicator, Button, DynamicSideContent, IllustratedMessage, ListItemStandard, MessageStrip,
-  ObjectPage, ObjectPageSection, ObjectPageTitle, Panel, SelectDialog, Tag, Text, Title, ToggleButton, Toolbar,
+  Link, ObjectPage, ObjectPageSection, ObjectPageTitle, Panel, Popover, ResponsivePopover, SelectDialog, Tag, Text, Title,
+  ToggleButton, Toolbar,
   ToolbarButton, ToolbarItem,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
@@ -28,6 +29,9 @@ import { useConfigProcess } from "./useConfigProcess.ts";
 import { PageMessages } from "../PageMessages.tsx";
 import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
 import { useSectionParam } from "../../lib/sectionParam.ts";
+import { useAssistantShell } from "../../assistant/AssistantProvider.tsx";
+import { fieldMarks, sourceTip, type Sources } from "../../assistant/marks.ts";
+import type { Source } from "../../assistant/cards/registry.tsx";
 
 type Head = { name: string; modelId: string; customer: { cardCode: string; cardName: string } | null };
 
@@ -145,6 +149,14 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   // Anything a model switch would throw away, the pending edit included, so the field locks on the
   // first change rather than when its answer lands.
   const modelLocked = Object.keys(entries).length > 0 || Object.values(tables).some((rows) => rows.length > 0) || queue.busy;
+  // The assistant (spec §4.1): the page tells the panel when an edit is still on its way, and draws
+  // which values the assistant wrote and which wait on a question in the panel.
+  const assistant = useAssistantShell();
+  const { setDirty } = assistant;
+  useEffect(() => { setDirty(queue.busy); return () => setDirty(false); }, [queue.busy, setDirty]);
+  const [markOpen, setMarkOpen] = useState<{ key: string; opener: HTMLElement } | null>(null);
+  const [noticeOpener, setNoticeOpener] = useState<HTMLElement | null>(null);
+
   const general = (
     <GeneralForm locked={locked} request={!!request} isNew={isNew} head={head} batches={batches}
       modelName={model?.name} models={models.data ?? []}
@@ -169,6 +181,16 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   if (q.error)
     return <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{q.error.message}</MessageStrip>;
   if (!view || !project || !model || !form) return null;
+
+  const sources = (view.project.sources ?? {}) as Sources;
+  const marks = fieldMarks(entries as Record<string, unknown>, sources, assistant.questionKeys[id] ?? [], (s) => sourceTip(s, (k, ...a) => t(k, ...a.map(String))));
+  const anyRead = Object.values(marks).some((m) => m.kind === "assistant");
+  const pressMark = (key: string, opener: HTMLElement) => {
+    if (marks[key]?.kind === "question") { if (!assistant.open) assistant.toggle(); return; }
+    setMarkOpen({ key, opener });
+  };
+  const marked = markOpen ? sources[markOpen.key] : undefined;
+  const markSource = marked?.source as Source | undefined;
 
   const st = PROJECT_STATUS[project.status] ?? PROJECT_STATUS.draft;
   const candidates = view.candidates;
@@ -387,6 +409,11 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
           {/* The main pane scrolls itself. The section's inline padding sits outside that
               pane, so without this the form meets the scrollbar. */}
           <div style={{ display: "flex", flexDirection: "column", gap: "1rem", paddingBlockEnd: "1rem", paddingInlineEnd: "0.5rem" }}>
+            {/* The local AI notice, interactive (Fiori: a quotation is high-stakes): once, while
+                any value the assistant read is still on the page. */}
+            {anyRead ? (
+              <Link design="Subtle" onClick={(e) => setNoticeOpener(e.currentTarget as HTMLElement)}>{t("ASSISTANT_NOTICE")}</Link>
+            ) : null}
             {general}
             {/* Read-only has no edit to lose, so a locked page shows its configuration regardless. */}
             {!headReady && !locked ? (
@@ -394,6 +421,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
                 subtitleText={t("CONFIG_COMPLETE_GENERAL_SUB")} />
             ) : proc.lookups.data ? (
               <ConfiguratorForm model={model.definition} form={form} tables={proc.lookups.data.tables}
+                marks={marks} onMarkPress={pressMark}
                 rows={tables} readOnly={locked} querySource={{ modelId: project.modelId }} formulaOverride
                 onChange={(key, v) => proc.commit(v === undefined ? { unset: [key] } : { set: { [key]: v } })}
                 onRowsChange={(key, rows) => proc.commit({ tables: { [key]: rows } })}
@@ -406,6 +434,23 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
             ) : <BusyIndicator active delay={0} />}
           </div>
         </DynamicSideContent>
+        <ResponsivePopover open={!!markOpen && !!markSource} opener={markOpen?.opener} headerText={t("ASSISTANT_MARK_TITLE")}
+          onClose={() => setMarkOpen(null)}>
+          {markSource ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", maxWidth: "22rem" }}>
+              <Text style={{ color: "var(--sapContent_LabelColor)" }}>
+                {"chat" in markSource ? t("ASSISTANT_MARK_CHAT")
+                  : markSource.page === null ? markSource.file : t("ASSISTANT_MARK_PAGE", markSource.file, String(markSource.page))}
+              </Text>
+              <Text style={{ fontStyle: "italic" }}>“{"chat" in markSource ? markSource.chat : markSource.quote}”</Text>
+              {"quote" in markSource && String(marked!.value) !== markSource.quote.trim()
+                ? <Text>{t("ASSISTANT_MARK_READ", Array.isArray(marked!.value) ? marked!.value.join(", ") : String(marked!.value))}</Text> : null}
+            </div>
+          ) : null}
+        </ResponsivePopover>
+        <Popover open={!!noticeOpener} opener={noticeOpener ?? undefined} onClose={() => setNoticeOpener(null)}>
+          <Text style={{ maxWidth: "22rem", display: "block" }}>{t("ASSISTANT_NOTICE_LONG")}</Text>
+        </Popover>
       </ObjectPageSection>
       {/* The count rides in the tab, like the model builder's issue counts — the Fiori anchor-bar
           counter. */}
