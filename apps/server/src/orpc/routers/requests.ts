@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { openapi } from "@orpc/openapi";
 import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db, configModel, configProject, portalCompany, user } from "@confire/db";
 import { userProcedure } from "../base.ts";
@@ -38,7 +39,12 @@ const decide = (action: Action) =>
   });
 
 export const requestsRouter = {
-  rows: userProcedure.input(ListPageZ).handler(async ({ input, context }) => {
+  rows: userProcedure
+    .meta(openapi({
+      summary: "List the clients' requests",
+      description: "One page of the portal requests: clients' configurations from their first submit on. Fields: name, cardName and cardCode (the client company), modelName, status (submitted, in_review, returned, declined, quoted), assignee, mine (yes when the caller holds it), quoteResponse (accepted, declined or empty), updatedAt. Filter with `query.filter` (eq, in, contains…), search with `query.search`; newest first. Answers `rows`, `total` and `nextSkip`.",
+    }))
+    .input(ListPageZ).handler(async ({ input, context }) => {
     const { where, orderBy } = compileQuery(fieldsFor(context.userId), input.query);
     const raw = await db
       .select({
@@ -77,7 +83,12 @@ export const requestsRouter = {
 
 /** The project timeline, staff side (spec §8): every event, internal notes included. */
 export const timelineRouter = {
-  list: userProcedure.input(z.object({ projectId: z.uuid() })).handler(({ input, context }) =>
+  list: userProcedure
+    .meta(openapi({
+      summary: "A configuration's history",
+      description: "Every event on a configuration or request, oldest first: created, submitted, accepted, returned, quoted, comments, files, reassignments, with who did it and when. Internal notes included (staff only).",
+    }))
+    .input(z.object({ projectId: z.uuid().describe("The configuration's id") })).handler(({ input, context }) =>
     timelineEvents(context.tenantId, input.projectId, { userId: context.userId, side: "internal" })),
 
   /** Live SAP: the quotations and what they became. Separate from `list` so a down agent costs

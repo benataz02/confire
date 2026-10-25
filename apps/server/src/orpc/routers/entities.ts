@@ -1,4 +1,5 @@
 import { ORPCError } from "@orpc/server";
+import { openapi } from "@orpc/openapi";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db, ListQueryZ, portalCompany } from "@confire/db";
@@ -82,6 +83,10 @@ export const entitiesRouter = {
    *  b1Of(context.tenantId), and `one`/`update` stay admin.
    *  ponytail: one open reader; narrow to an entity allowlist if the read surface matters. */
   rows: userProcedure
+    .meta(openapi({
+      summary: "Read SAP records",
+      description: "One page of an SAP Business One entity set, read live through the workspace's agent: Quotations, Orders, BusinessPartners and the rest. `query.select` names the fields (SAP's own names: DocNum, CardCode, CardName, DocDate, DocTotal, DocumentStatus…), `query.filter` narrows (eq, ne, in, contains, ge/le on dates), `query.search` is free text over string fields. Enum values are SAP's member names (bost_Open, cCustomer). Fails when SAP is unreachable.",
+    }))
     .input(z.object({
       entity: EntityZ,
       query: ListQueryZ,

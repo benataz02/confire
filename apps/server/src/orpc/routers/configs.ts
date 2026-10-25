@@ -174,7 +174,12 @@ export const configsRouter = {
    *  ListReport pages a Postgres list exactly the way it pages a B1 entity set. `customerName` is
    *  flattened out of the `customer` jsonb here rather than in the browser: it has to be sortable
    *  and filterable server-side now that the page only ever holds one page. */
-  rows: userProcedure.input(ListPageZ).handler(async ({ input, context }) => {
+  rows: userProcedure
+    .meta(openapi({
+      summary: "List the configurations",
+      description: "One page of the workspace's own configurations (clients' requests are `requests.rows`). Fields: name, modelName, customerName, status (draft, quoted), mine (yes when the caller started it), updatedAt. Filter with `query.filter` (eq, in, contains…), search with `query.search`; newest first. Answers `rows`, `total` and `nextSkip`.",
+    }))
+    .input(ListPageZ).handler(async ({ input, context }) => {
     const { where, orderBy } = compileQuery(configFields(context.userId), input.query);
     const raw = await db
       .select({

@@ -50,13 +50,16 @@ export const userProcedure = base.use(requireSession).use(async ({ context, next
   return next({ context: { tenantId: row.tenantId, role: row.role, userId: context.user.id } });
 });
 
-/** Like userProcedure, but only org admins/owners — gates Settings and the model builder. */
-export const adminProcedure = userProcedure.use(({ context, next }) => {
+/** The admin check, named so a caller (the assistant's tool list) can tell an admin procedure. */
+export const requireAdmin = base.$context<InitialContext & { role: string }>().middleware(({ context, next }) => {
   if (context.role !== "admin" && context.role !== "owner") {
     throw new ORPCError("FORBIDDEN", { message: "Admins only" });
   }
   return next({});
 });
+
+/** Like userProcedure, but only org admins/owners — gates Settings and the model builder. */
+export const adminProcedure = userProcedure.use(requireAdmin);
 
 /** Session only: the sign-in host's calls (no workspace yet), and `me`. */
 export const sessionProcedure = base.use(requireSession);

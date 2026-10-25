@@ -9,7 +9,7 @@ import { copyToProject, fileParts, type FileRef } from "../../assistant/files.ts
 import { readRequest } from "../../assistant/intake.ts";
 import { ASSISTANT_MODEL, available } from "../../assistant/model.ts";
 import {
-  appendMessages, dehydrate, lastDrop, linkProject, newThread, ownThread, threadFor, withThread,
+  appendMessages, dehydrate, lastDrop, linkProject, newThread, ownThread, threadFor, withThread, type Thread,
 } from "../../assistant/threads.ts";
 import { assertAssistant, assistantOn, MONTHLY_LIMIT_USD, monthUsage, rateLimit } from "../../assistant/usage.ts";
 
@@ -45,6 +45,21 @@ async function append(threadId: string, msgs: ModelMessage[], title?: string) {
   const stored = msgs.map(dehydrate);
   await appendMessages(threadId, stored, title);
   return modelMessagesToUIMessages(stored);
+}
+
+/** A general thread's configuration: created `via` the assistant, the thread linked to it (and
+ *  `thread.projectId` set, for the rest of a chat run), the last drop copied in as its files. */
+export async function startFromThread(
+  ctx: { tenantId: string; userId: string }, t: Thread,
+  input: { modelId: string; name: string; customer?: z.infer<typeof Customer> | null },
+): Promise<{ id: string }> {
+  if (t.projectId) throw new ORPCError("BAD_REQUEST", { message: "This chat already belongs to a configuration" });
+  const { id } = await createProject(ctx.tenantId, ctx.userId, input, "assistant");
+  await linkProject(t.id, id);
+  t.projectId = id;
+  const drop = lastDrop(t.messages);
+  if (drop) await copyToProject(ctx.tenantId, id, { userId: ctx.userId, side: "internal" }, drop.refs);
+  return { id };
 }
 
 export const assistantRouter = {
@@ -92,13 +107,7 @@ export const assistantRouter = {
     .input(z.object({ threadId: z.uuid(), modelId: z.uuid(), name: z.string().trim().min(1), customer: Customer.nullable() }))
     .handler(async ({ input, context }) => {
       rateLimit(context.userId);
-      const t = await ownThread(context.tenantId, context.userId, input.threadId);
-      if (t.projectId) throw new ORPCError("BAD_REQUEST", { message: "This chat already belongs to a configuration" });
-      const { id } = await createProject(context.tenantId, context.userId, input, "assistant");
-      await linkProject(t.id, id);
-      const drop = lastDrop(t.messages);
-      if (drop) await copyToProject(context.tenantId, id, { userId: context.userId, side: "internal" }, drop.refs);
-      return { id };
+      return startFromThread(context, await ownThread(context.tenantId, context.userId, input.threadId), input);
     }),
 
   /** Read values into the thread's configuration: the files and text given, or the last drop. */

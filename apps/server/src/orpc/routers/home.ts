@@ -1,3 +1,4 @@
+import { openapi } from "@orpc/openapi";
 import { and, count, eq, sql } from "drizzle-orm";
 import { db, configMasterdata, configModel, configProject, invitation } from "@confire/db";
 import { userProcedure } from "../base.ts";
@@ -10,7 +11,12 @@ import { openInvitation, portalInvitationOf } from "../../portal/members.ts";
 const n = (cond: ReturnType<typeof sql>) => sql<number>`count(*) filter (where ${cond})::int`;
 
 export const homeRouter = {
-  overview: userProcedure.handler(async ({ context: { tenantId, userId } }) => {
+  overview: userProcedure
+    .meta(openapi({
+      summary: "The caller's month at a glance",
+      description: "The caller's own figures: their drafts, the requests they hold in review, what they quoted this month (count and value), plus the workspace's drafts and new client requests waiting. Postgres only, so it answers with SAP offline.",
+    }))
+    .handler(async ({ context: { tenantId, userId } }) => {
     const internal = sql`${configProject.portalCardCode} is null`;
     const mine = sql`${configProject.createdBy} = ${userId}`;
     // Mine = an internal configuration I started, or a client's request I hold.
