@@ -20,7 +20,7 @@ import { errorStatus } from "./serve.ts";
 
 export const FILE_MAX = 10 * 1024 * 1024;
 export const LOGO_MAX = 1024 * 1024;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The body, counted on the stream: null as soon as it passes `max`, never buffered past it (the
  *  loop's early exit cancels the stream). */
@@ -56,7 +56,7 @@ type Who = { tenantId: string; actor: Actor; canUpload: boolean; isAdmin: boolea
 
 /** The procedures' own boundary, for a plain route: a session, then the path's tenant joined to this
  *  user's membership (staff) or seat (portal — and never the supplier's own staff). */
-async function whoFor(side: Side, c: Context): Promise<Who> {
+export async function whoFor(side: Side, c: Context): Promise<Who> {
   const headers = c.req.raw.headers;
   const data = await auth.api.getSession({ headers, query: { disableCookieCache: true } });
   if (!data) throw new ORPCError("UNAUTHORIZED");
@@ -89,7 +89,7 @@ function fileResponse(f: { name: string; mime: string; data: Buffer }, dispositi
 }
 
 /** An ORPCError as the procedures would answer it; anything else a 500. */
-const handle = (fn: (c: Context) => Promise<Response>) => async (c: Context) => {
+export const handle = (fn: (c: Context) => Promise<Response>) => async (c: Context) => {
   try {
     return await fn(c);
   } catch (e) {
