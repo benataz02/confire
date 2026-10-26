@@ -18,6 +18,8 @@
     "@tanstack/react-query": "^5.101.0",
     "@tanstack/react-router": "^1.170.16",
     "@ui5/webcomponents": "^2.27.2",
+    "@ui5/webcomponents-ai": "^2.27.2",
+    "@ui5/webcomponents-ai-react": "^2.27.2",
     "@ui5/webcomponents-base": "^2.27.2",
     "@ui5/webcomponents-fiori": "^2.27.2",
     "@ui5/webcomponents-icons": "^2.27.2",

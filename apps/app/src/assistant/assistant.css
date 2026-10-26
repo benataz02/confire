@@ -1,7 +1,8 @@
 /* The assistant panel (assistant spec §4.2): Joule's layout over the theme's own assistant
  * parameters, so it follows Horizon, Horizon Dark and the high-contrast themes with no colour here.
  * Custom properties inherit into shadow DOM: scoping the emphasized-button parameters makes the
- * panel's emphasized buttons the assistant's colour while the page's stay blue. */
+ * panel's emphasized buttons the assistant's colour while the page's stay blue. The layout inside is
+ * FlexBox; what is left here is the floating panel and the chat bubbles, which UI5 has no part for. */
 .cf-assistant {
   --cf-assistant-w: 26rem;
   --sapButton_Emphasized_Background: var(--sapAssistant_Background);
@@ -10,39 +11,82 @@
   --sapButton_Emphasized_Hover_Background: var(--sapAssistant_Hover_Background);
   --sapButton_Emphasized_Hover_BorderColor: var(--sapAssistant_Hover_BorderColor);
   position: fixed;
-  z-index: 10;
+  /* Under the shell, over the page: NavigationLayout stacks its side nav at 2 and its ShellBar at 3 (so
+   * the collapsed nav's flyout overlaps the panel); an ObjectPage is its own context at 0, and a
+   * DynamicPage's layers stop at 1, which the panel wins by coming later in the DOM. */
+  z-index: 1;
   inset-block: calc(var(--cf-shellbar-bottom, 3.25rem) + 0.5rem) 0.5rem;
   inset-inline-end: 0.5rem;
   inline-size: min(var(--cf-assistant-w), 100vw - 1rem);
   display: flex;
   flex-direction: column;
-  background: var(--sapGroup_ContentBackground);
+}
+/* The panel is a ui5-card: its content part is the column the head and the chat fill. */
+.cf-assistant__card { flex: 1; min-height: 0; }
+.cf-assistant__card::part(root) {
+  /* A page's own background, as a List Report draws behind its table: cards and the composer stand out. */
+  background: var(--sapBackgroundColor);
   border-radius: var(--sapElement_BorderCornerRadius);
   box-shadow: var(--sapContent_Shadow2);
-  overflow: hidden;
-  container-type: inline-size;
-  font-family: var(--sapFontFamily);
-  color: var(--sapTextColor);
 }
+.cf-assistant__card::part(content) { height: 100%; display: flex; flex-direction: column; color: var(--sapTextColor); }
 .cf-assistant--wide { --cf-assistant-w: min(48rem, 60vw); }
+/* Docked: the AI configuration page, a card at the page's content margin. The panel sets its own box
+ * over the page's slot; the reading column is centred by padding, so the scrollbar stays at the card's edge. */
+.cf-assistant--page { inset: auto; inline-size: auto; box-sizing: border-box; padding: var(--sapContent_Space_S); }
+.cf-assistant--page .cf-assistant__card::part(root) {
+  border-radius: var(--sapTile_BorderCornerRadius);
+  box-shadow: var(--sapContent_Shadow0);
+}
+.cf-assistant--page .cf-assistant__body,
+.cf-assistant--page .cf-assistant__foot { padding-inline: max(1rem, (100% - 48rem) / 2); }
 .cf-assistant[hidden] { display: none; }
 .cf-assistant--drop { outline: 2px dashed var(--sapContent_FocusColor); outline-offset: -0.5rem; }
 
-.cf-assistant__head { flex: none; }
-.cf-assistant__chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.cf-assistant__heading { display: flex; flex-direction: column; min-width: 0; }
-.cf-assistant__sub { color: var(--sapContent_LabelColor); font-size: var(--sapFontSmallSize); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The head: the theme's assistant gradient (Joule's; flat in the high-contrast themes), the bar on it
+ * drawn in the assistant's text colour. While the chat is empty the hero below the bar holds the
+ * greeting; the first message collapses it — a 1fr → 0fr grid row, which animates where `auto` does not. */
+.cf-assistant__head {
+  background: var(--sapAssistant_BackgroundGradient);
+  --sapPageHeader_Background: transparent;
+  --sapContent_HeaderShadow: none;
+  --sapTextColor: var(--sapAssistant_TextColor);
+  --sapGroup_TitleTextColor: var(--sapAssistant_TextColor);
+  --sapContent_LabelColor: var(--sapAssistant_TextColor);
+  --sapButton_Lite_TextColor: var(--sapAssistant_TextColor);
+  --sapButton_Lite_Hover_TextColor: var(--sapAssistant_Hover_TextColor);
+  --sapButton_Lite_Hover_Background: var(--sapAssistant_Hover_Background);
+  --sapButton_Lite_Hover_BorderColor: var(--sapAssistant_Hover_BorderColor);
+  --sapButton_Lite_Active_Background: var(--sapAssistant_Active_Background);
+  --sapButton_Lite_Active_BorderColor: var(--sapAssistant_Active_BorderColor);
+  --sapButton_Active_TextColor: var(--sapAssistant_Active_TextColor);
+}
+.cf-assistant__hero {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition: grid-template-rows 0.4s ease-in-out, opacity 0.25s, visibility 0s 0.4s;
+}
+.cf-assistant:has(.cf-assistant__welcome) .cf-assistant__hero {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition: grid-template-rows 0.4s ease-in-out, opacity 0.4s;
+}
+.cf-assistant__hero > div { min-height: 0; overflow: hidden; }
+.cf-assistant__hello { padding: 1.5rem 1rem 2.5rem; text-align: center; }
+.cf-assistant__hello > ui5-icon { inline-size: 3rem; block-size: 3rem; color: var(--sapAssistant_TextColor); }
+@media (prefers-reduced-motion: reduce) { .cf-assistant__hero { transition: none !important; } }
 
-/* 1 rem from the edge, 1.5 rem between groupings, 0.5 rem inside one. */
-.cf-assistant__body { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 1.5rem; }
-.cf-assistant__turn { display: flex; flex-direction: column; gap: 0.5rem; }
-.cf-assistant__turn--user { align-items: flex-end; }
+.cf-assistant__chat { flex: 1; min-height: 0; }
+.cf-assistant__body { flex: 1; overflow-y: auto; padding: 1rem; }
+.cf-assistant__foot { padding: 0.5rem 1rem 0.75rem; border-top: 1px solid var(--sapGroup_TitleBorderColor); }
+
 .cf-assistant__bubble {
   max-width: 85%;
   padding: 0.5rem 0.75rem;
   border-radius: var(--sapElement_BorderCornerRadius);
-  font-family: var(--sapFontFamily);
-  font-size: var(--sapFontSize);
   overflow-wrap: anywhere;
 }
 .cf-assistant__bubble--user {
@@ -59,18 +103,14 @@
 }
 .cf-assistant__bubble--answer p { margin: 0 0 0.5rem; }
 .cf-assistant__bubble--answer p:last-child { margin-bottom: 0; }
-.cf-assistant__card { align-self: stretch; max-width: 40rem; }
-.cf-assistant__files { display: flex; flex-wrap: wrap; gap: 0.25rem; justify-content: flex-end; }
-.cf-assistant__busy { display: flex; align-items: center; gap: 0.5rem; color: var(--sapContent_LabelColor); }
-.cf-assistant__chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.cf-assistant__welcome { display: flex; flex-direction: column; gap: 0.75rem; }
 
-.cf-assistant__foot { flex: none; padding: 0.5rem 1rem 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; border-top: 1px solid var(--sapGroup_TitleBorderColor); }
-.cf-assistant__composer { display: flex; align-items: flex-end; gap: 0.5rem; }
-.cf-assistant__composer ui5-textarea { flex: 1; }
-.cf-assistant__notice { color: var(--sapContent_LabelColor); font-size: var(--sapFontSmallSize); }
-.cf-assistant__notice--short { display: none; }
-@container (max-width: 20rem) {
-  .cf-assistant__notice--long { display: none; }
-  .cf-assistant__notice--short { display: inline; }
+/* The composer's textarea as tall as its buttons at one row (36 px cozy, 26 compact): UI5 draws it
+ * 2 px taller (line + 8/7 px padding + a 1 px wrapper edge each side). Its padding variables also size
+ * the mirror `growing` measures, so they are the one knob — private (`--_ui5_`), so recheck on a UI5
+ * bump; at worst it is 2 px off again. The margin is UI5's block margin, which buttons do not have. */
+.cf-assistant__composer > ui5-textarea {
+  flex: 1;
+  margin: 0;
+  --_ui5_textarea_padding_top: var(--_ui5-compact-size, .125rem) var(--_ui5-cozy-size, .4375rem);
+  --_ui5_textarea_padding_bottom: var(--_ui5-compact-size, .0625rem) var(--_ui5-cozy-size, .375rem);
 }

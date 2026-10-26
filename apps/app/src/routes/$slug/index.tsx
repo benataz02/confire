@@ -66,6 +66,8 @@ function Home() {
     {
       title: t("NAV_CONFIGURATOR"),
       tiles: [
+        // The chat alone, from the client's request to the quote page. Off, the page says why.
+        { title: t("ASSISTANT_PAGE_TITLE"), subtitle: t("ASSISTANT_PAGE_SUB"), icon: "ai", to: "/assistant" },
         { title: t("NAV_CONFIGS"), subtitle: t("HOME_DRAFTS"), icon: "sales-quote", value: o?.drafts, to: "/configs", search: { status: "draft" } },
         ...(isAdmin ? [
           { title: t("NAV_MODELS"), icon: "tree", value: o?.models, to: "/models" },
@@ -83,12 +85,12 @@ function Home() {
       ],
     },
     // SAP pages open live lists: a count would be a call to the agent, which the home never makes.
-    ...(isAdmin ? [{
+    {
       title: t("NAV_SAP"),
       tiles: Object.values(B1_FEATURES).map((f) => ({
         title: B1_NAV_KEY[f.entity] ? t(B1_NAV_KEY[f.entity]!) : f.entity, icon: f.icon, to: `/b1/${f.entity}`,
       })),
-    }] : []),
+    },
   ];
 
   return (

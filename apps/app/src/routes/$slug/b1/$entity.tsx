@@ -2,10 +2,10 @@ import { useMemo, useState } from "react";
 import { createFileRoute, redirect, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BusyIndicator, Toolbar, ToolbarButton } from "@ui5/webcomponents-react";
-import { client, orpc } from "../../../../orpc.ts";
-import { useI18n } from "../../../../i18n.ts";
-import { b1Feature } from "../../../../features/b1/index.ts";
-import { localizedB1Feature } from "../../../../features/b1/localize.ts";
+import { client, orpc, useIsAdmin } from "../../../orpc.ts";
+import { useI18n } from "../../../i18n.ts";
+import { b1Feature } from "../../../features/b1/index.ts";
+import { localizedB1Feature, useCodeNames } from "../../../features/b1/localize.ts";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
 import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
@@ -16,9 +16,9 @@ import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { toast } from "@confire/ui/toast.ts";
 import { useUiI18n } from "@confire/ui/i18n.ts";
 import { PrintActions } from "@confire/ui/PrintActions.tsx";
-import { CloseQuotations, CopyTo } from "../../../../features/b1/documents.tsx";
-import { InviteNewClientDialog } from "../../../../components/portal/BpPortal.tsx";
-import { b1Label } from "../../../../components/AppShell.tsx";
+import { CloseQuotations, CopyTo } from "../../../features/b1/documents.tsx";
+import { InviteNewClientDialog } from "../../../components/portal/BpPortal.tsx";
+import { b1Label } from "../../../components/AppShell.tsx";
 import type { EntityFeature, ListQuery, Row } from "@confire/ui/types.ts";
 
 // One declared B1 entity's list — or, with the `#create` fragment, its object page in create mode
@@ -26,7 +26,7 @@ import type { EntityFeature, ListQuery, Row } from "@confire/ui/types.ts";
 // `#copy`, a copy's draft (`?from=Orders&docs=1,2`, opened by Copy to). Only the declared features
 // have a page; any other entity set name goes home.
 
-export const Route = createFileRoute("/$slug/_admin/b1/$entity")({
+export const Route = createFileRoute("/$slug/b1/$entity")({
   beforeLoad: ({ params }) => {
     if (!b1Feature(params.entity)) throw redirect({ to: "/$slug", params });
   },
@@ -56,6 +56,7 @@ function EntityList({ feature }: { feature: EntityFeature }) {
   const { entity } = feature;
   const qc = useQueryClient();
   const meta = useFieldConstraints(entity);
+  const constraints = useCodeNames(feature, meta.data);
   const [query, setQuery] = useState<ListQuery | null>(null);
   // The cursor is B1's own @odata.nextLink, sealed server-side; page 1 also asks for the count.
   const data = useListView(
@@ -75,6 +76,8 @@ function EntityList({ feature }: { feature: EntityFeature }) {
     onSuccess: (fresh) => qc.setQueryData(orpc.entities.metadata.queryOptions({ input: { entity } }).queryKey, fresh),
   });
   const [inviting, setInviting] = useState(false);
+  // Inviting a client writes a portal invitation (adminProcedure). Opening the partner does not.
+  const isAdmin = useIsAdmin();
 
   if (meta.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
   if (meta.error) return <PageError error={meta.error} />;
@@ -84,7 +87,7 @@ function EntityList({ feature }: { feature: EntityFeature }) {
     <>
       <ListReport
         feature={feature.list}
-        constraints={meta.data.fields}
+        constraints={constraints!.fields}
         data={data}
         onQuery={setQuery}
         keyOf={(r) => String(r[feature.keyField] ?? "")}
@@ -92,8 +95,8 @@ function EntityList({ feature }: { feature: EntityFeature }) {
         error={refresh.error}
         headerActions={
           <Toolbar design="Transparent">
-            {/* A new client, no CardCode yet (spec §5.1). /b1 is admin/owner only, as is the call. */}
-            {entity === "BusinessPartners" ? (
+            {/* A new client, no CardCode yet (spec §5.1). The invitation itself is admin-only. */}
+            {entity === "BusinessPartners" && isAdmin ? (
               <ToolbarButton design="Transparent" icon="paper-plane" text={i18n.getText("ADMIN_INVITE_NEW_CLIENT")} onClick={() => setInviting(true)} />
             ) : null}
             <ToolbarButton design="Transparent" icon="refresh" tooltip={i18n.getText("ADMIN_REFRESH_SAP_FIELDS")} accessibleName={i18n.getText("ADMIN_REFRESH_SAP_FIELDS")}
@@ -126,12 +129,13 @@ function EntityCreate({ feature }: { feature: EntityFeature }) {
   const d = useDetailView({ entity: feature.entity, route, isNew: true });
   // Fresh per "Create and new": the epoch is what makes a new, empty record.
   const seed = useMemo(() => feature.detail.createDefaults?.() ?? {}, [feature, d.createEpoch]);
+  const constraints = useCodeNames(feature, d.constraints);
 
   if (d.loading) return <ObjectPageSkeleton />;
-  if (d.error || !d.constraints) return <PageError error={d.error ?? new Error(i18n.getText("ADMIN_NO_METADATA"))} />;
-  if (!d.constraints.writable) return <PageError error={new Error(i18n.getText("ADMIN_READONLY", d.constraints.label))} />;
+  if (d.error || !constraints) return <PageError error={d.error ?? new Error(i18n.getText("ADMIN_NO_METADATA"))} />;
+  if (!constraints.writable) return <PageError error={new Error(i18n.getText("ADMIN_READONLY", constraints.label))} />;
   return (
-    <ObjectPage key={d.createEpoch} isNew entity={feature.entity} constraints={d.constraints} data={seed}
+    <ObjectPage key={d.createEpoch} isNew entity={feature.entity} constraints={constraints} data={seed}
       sections={feature.detail.sections} header={feature.detail.header}
       onSave={d.save} onCancelCreate={() => open(route)}
       breadcrumbs={[{ text: b1Label(feature.entity, (k) => i18n.getText(k)), to: route }]} />

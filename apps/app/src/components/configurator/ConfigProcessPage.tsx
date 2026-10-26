@@ -9,7 +9,7 @@ import {
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import { itemsTableOf, type Val } from "@confire/config-engine";
-import { orpc, useCurrency, useIsAdmin } from "../../orpc.ts";
+import { orpc, useCurrency } from "../../orpc.ts";
 import { money as formatMoney } from "@confire/ui/money.ts";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
 import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
@@ -54,7 +54,6 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const navigate = useNavigate({ from: "/$slug" });
   const currency = useCurrency();
   const sectionParam = useSectionParam();
-  const isAdmin = useIsAdmin(); // /b1 is admin/owner only
   const proc = useConfigProcess(id, isNew, {
     left: (to, msg) => {
       if (msg) toast(t(msg));
@@ -322,7 +321,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
                     : r.tables === 1 ? t("CONFIG_TOAST_SYNCED_ONE", String(r.count))
                     : t("CONFIG_TOAST_SYNCED_MANY", String(r.count), String(r.tables))),
                 })} />
-              {quotationHere && isAdmin ? (
+              {quotationHere ? (
                 <ToolbarButton icon="document-text" design="Transparent" text={t("CONFIG_OPEN_QUOTE")}
                   onClick={() => navigate({
                     to: "/$slug/b1/$entity/$key",
@@ -505,7 +504,6 @@ function RequestTimeline({ id }: { id: string }) {
   const qc = useQueryClient();
   const navigate = useNavigate({ from: "/$slug" });
   const currency = useCurrency();
-  const isAdmin = useIsAdmin();
   const listKey = orpc.timeline.list.queryKey({ input: { projectId: id } });
   const timeline = useQuery(orpc.timeline.list.queryOptions({ input: { projectId: id } }));
   // Live SAP, so it may fail on its own without taking the events with it.
@@ -520,9 +518,7 @@ function RequestTimeline({ id }: { id: string }) {
       documents={documents.data} documentsError={documents.error as Error | null}
       onComment={(note, internalOnly) => comment.mutateAsync({ projectId: id, note, internalOnly })}
       onUpload={(file, internalOnly) => uploadFile(id, file, internalOnly).then(() => qc.invalidateQueries({ queryKey: listKey }))}
-      onOpenDocument={isAdmin
-        ? (entity, key) => void navigate({ to: "/$slug/b1/$entity/$key", params: { entity, key: String(key) } })
-        : undefined}
-      canPreview={isAdmin} />
+      onOpenDocument={(entity, key) => void navigate({ to: "/$slug/b1/$entity/$key", params: { entity, key: String(key) } })}
+      canPreview />
   );
 }

@@ -1,17 +1,18 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { AnalyticalCardHeader, Button, Card, NumericSideIndicator, ObjectStatus, Panel, Tag } from "@ui5/webcomponents-react";
-import { LineChart } from "@ui5/webcomponents-react-charts";
+import { Button, FlexBox, Panel } from "@ui5/webcomponents-react";
 import { formatLocale } from "@confire/ui/format.ts";
 import { money } from "@confire/ui/money.ts";
 import { useI18n } from "../../i18n.ts";
 import { client, orpc, useCurrency } from "../../orpc.ts";
 import type { ConfigView } from "../../components/configurator/useConfigProcess.ts";
+import { lineKey, mergeSelection, type Sel } from "../../components/configurator/runView.ts";
 import { ListCard, TableCard } from "./kit.tsx";
 
-// Once nothing is missing (assistant spec §4.1 step 5): the lowest price per batch quantity as a KPI
-// and a curve, one row per quantity to pick from — a pick is `configs.select` directly, no model —
-// similar past quotes on request, and the way on to the quote page. The figures are the view's.
+// Once nothing is missing (assistant spec §4.1 step 5): one row per batch quantity, its lowest price,
+// selected while picked — a change is `configs.select` directly, no model, merged as the page's grid
+// merges, so a pick of another candidate made on the page stays — similar past quotes on request, and
+// the way on to the quote page. The figures are the view's.
 
 export function CandidatesCard({ projectId, view }: { projectId: string; view: ConfigView }) {
   const i18n = useI18n();
@@ -20,51 +21,30 @@ export function CandidatesCard({ projectId, view }: { projectId: string; view: C
   const navigate = useNavigate({ from: "/$slug" });
   const currency = useCurrency();
   const similar = useQuery(orpc.configs.similar.queryOptions({ input: { id: projectId, entries: view.project.entries as Record<string, never> } }));
-  const qtys = view.project.batches;
   const rows = view.candidates.rows;
   // The lowest-priced candidate at each quantity: the server marks it.
-  const best = qtys.map((q) => {
+  const best = view.project.batches.map((q) => {
     const idx = rows.findIndex((r) => r.perBatch.some((b) => b.batchQty === q && b.lowest));
     const b = rows[idx]?.perBatch.find((x) => x.batchQty === q);
-    return { q, idx, unitPrice: b?.unitPrice ?? 0, total: b?.total ?? 0 };
+    return { q, idx, key: lineKey({ candidateIdx: idx, batchQty: q }), unitPrice: b?.unitPrice ?? 0, total: b?.total ?? 0 };
   }).filter((b) => b.idx >= 0);
-  const picked = (idx: number, q: number) => view.selection.picks.some((p) => p.candidateIdx === idx && p.batchQty === q);
-  const pick = async (idx: number) => {
-    const answer = await client.configs.select({ projectId, selection: qtys.map((q) => ({ candidateIdx: idx, batchQty: q })) });
+  const picks = new Set(view.selection.picks.map(lineKey));
+  const pick = async (keys: string[]) => {
+    const on: Sel[] = best.filter((b) => keys.includes(b.key)).map((b) => ({ candidateIdx: b.idx, batchQty: b.q }));
+    const answer = await client.configs.select({ projectId, selection: mergeSelection(view.selection.picks, new Set(best.map((b) => b.key)), on) });
     qc.setQueryData(orpc.configs.get.queryKey({ input: { id: projectId } }), (prev: ConfigView | undefined) => (prev ? { ...prev, ...answer } : prev));
   };
-  const first = best[0];
-  const fmt = new Intl.NumberFormat(formatLocale(), { maximumFractionDigits: 2, minimumFractionDigits: 2 });
   const qtyFmt = new Intl.NumberFormat(formatLocale());
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-      <Card header={
-        <AnalyticalCardHeader titleText={t("ASSISTANT_CANDIDATES")} subtitleText={first ? t("ASSISTANT_CANDIDATES_SUB", qtyFmt.format(first.q)) : undefined}
-          value={first ? fmt.format(first.unitPrice) : "—"} scale={currency}>
-          <NumericSideIndicator titleText={t("ASSISTANT_CANDIDATES")} number={rows.length} />
-          <NumericSideIndicator titleText={t("ASSISTANT_QTYS")} number={qtys.map((q) => qtyFmt.format(q)).join(", ")} />
-        </AnalyticalCardHeader>
-      }>
-        {best.length > 1 ? (
-          <LineChart style={{ height: "10rem" }} noLegend dataset={best.map((b) => ({ qty: b.q, price: b.unitPrice }))}
-            dimensions={[{ accessor: "qty", formatter: (v) => qtyFmt.format(Number(v)) }]}
-            measures={[{ accessor: "price", label: t("ASSISTANT_UNIT_PRICE"), hideDataLabel: true, width: 2, formatter: (v: number) => money(v, currency) }]} />
-        ) : null}
-      </Card>
+    <FlexBox direction="Column" gap="0.5rem">
       <TableCard title={t("ASSISTANT_PER_QTY")}
-        columns={[{ key: "qty", label: t("ASSISTANT_QTY"), end: true }, { key: "unit", label: t("ASSISTANT_UNIT_PRICE"), end: true }, { key: "total", label: t("ASSISTANT_TOTAL"), end: true }, { key: "pick", label: "" }]}
+        columns={[{ key: "qty", label: t("ASSISTANT_QTY"), end: true }, { key: "unit", label: t("ASSISTANT_CARD_UNIT_PRICE"), end: true }, { key: "total", label: t("ASSISTANT_TOTAL"), end: true }]}
         rows={best.map((b) => ({
-          id: String(b.q),
-          cells: {
-            qty: qtyFmt.format(b.q),
-            unit: <span>{money(b.unitPrice, currency)} <Tag design="Positive" hideStateIcon>{t("ASSISTANT_LOWEST")}</Tag></span>,
-            total: money(b.total, currency),
-            pick: picked(b.idx, b.q)
-              ? <ObjectStatus state="Positive" showDefaultIcon>{t("ASSISTANT_PICKED")}</ObjectStatus>
-              : <Button design="Transparent" onClick={() => void pick(b.idx)}>{t("ASSISTANT_PICK")}</Button>,
-          },
+          id: b.key,
+          cells: { qty: qtyFmt.format(b.q), unit: money(b.unitPrice, currency), total: money(b.total, currency) },
         }))}
+        selected={best.filter((b) => picks.has(b.key)).map((b) => b.key)} onSelect={(keys) => void pick(keys)}
         footer={
           <Button design="Emphasized" disabled={!view.selection.picks.length}
             onClick={() => void navigate({ to: "/$slug/configs/$id/quote", params: { id: projectId } })}>{t("ASSISTANT_CARD_REVIEW")}</Button>
@@ -78,6 +58,6 @@ export function CandidatesCard({ projectId, view }: { projectId: string; view: C
             })} />
         </Panel>
       ) : null}
-    </div>
+    </FlexBox>
   );
 }

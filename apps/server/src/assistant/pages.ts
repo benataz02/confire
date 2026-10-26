@@ -31,7 +31,23 @@ export const GENERAL: Page = {
   section: () => "The user is in the staff app, outside any one configuration: on the home page or a list. You can start a configuration from the files dropped in this chat, and answer about configurations, clients' requests and SAP documents.",
 };
 
+/** The AI configuration page (the staff app's /assistant): the chat alone, no form on screen. */
+const NO_FORM = "The user works in this chat alone, with no form on screen: ask for what is missing, and once nothing is, show the candidates with configs_get and prepare the quotation with propose_quotation. They review and post it on the quote page.";
+
+const start: Page = {
+  ...GENERAL,
+  section: () => [
+    "The user is on the AI configuration page, to set up a new configuration in this chat. They drop the client's files, paste an email, or tell you what the client asked for.",
+    "Without files, find the model with configs_models and the customer with entities_rows (BusinessPartners), confirm the model, the customer and a short name with the user, then create it with configs_create.",
+    NO_FORM,
+  ].join("\n"),
+};
+
+const configureChat: Page = { ...configure, section: (p) => `${configure.section(p)}\n${NO_FORM}` };
+
 export const PAGES: Record<string, Page> = {
+  "/$slug/assistant/": start,
+  "/$slug/assistant/$id": configureChat,
   "/$slug/configs/$id": configure,
   "/$slug/configs/$id_/quote": configure,
   "/$slug/models/$id": model,

@@ -12,6 +12,7 @@ import type { SideNavigationPropTypes, NavigationLayoutDomRef, NavigationLayoutP
 import { authClient } from "../auth-client.ts";
 import { meQuery, notifications, orpc, useIsAdmin } from "../orpc.ts";
 import { authUrl, hardRedirect, tenantPath } from "@confire/ui/host.ts";
+import { initials } from "@confire/ui/format.ts";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { NotificationsPopover, useUnreadCount } from "@confire/ui/notifications/Notifications.tsx";
 import { B1_FEATURES } from "../features/b1/index.ts";
@@ -89,7 +90,8 @@ function Shell() {
     [toggle.disabled, assistantOpen, assistantStatus.data, closeAssistant]);
 
   // Identity + org role in one query, already primed by $slug's beforeLoad — a cache read.
-  // Role decides whether the Settings item shows; the server gates it too.
+  // Role decides the model builder, master data and invitations. SAP pages and Settings show for
+  // every member; Settings itself sends a non-admin to Notifications.
   const me = useQuery(meQuery);
   const user = me.data?.user;
   const isAdmin = useIsAdmin();
@@ -112,19 +114,20 @@ function Shell() {
     const label = (key: string) => i18n.getText(key);
     return [
       page(label("NAV_CONFIGS"), "/configs", "sales-quote"),
+      page(label("ASSISTANT_PAGE_TITLE"), "/assistant", "ai"),
       page(label("SHELL_SEARCH_PORTAL_REQUESTS"), "/requests", "inbox"),
+      ...Object.values(B1_FEATURES).map((f) => {
+        const navKey = B1_NAV_KEY[f.entity];
+        return {
+          group: "Menus" as const,
+          text: navKey ? label(navKey) : f.entity,
+          description: label("NAV_SAP"),
+          icon: f.icon,
+          run: () => go(`/b1/${f.entity}`),
+        };
+      }),
       ...(isAdmin
         ? [
-            ...Object.values(B1_FEATURES).map((f) => {
-              const navKey = B1_NAV_KEY[f.entity];
-              return {
-                group: "Menus" as const,
-                text: navKey ? label(navKey) : f.entity,
-                description: label("NAV_SAP"),
-                icon: f.icon,
-                run: () => go(`/b1/${f.entity}`),
-              };
-            }),
             page(label("NAV_MODELS"), "/models", "tree"),
             page(label("SHELL_SEARCH_MASTERDATA"), "/masterdata", "table-view"),
             page(label("SHELL_SEARCH_PORTAL_INVITATIONS"), "/portal/invitations", "paper-plane"),
@@ -186,7 +189,9 @@ function Shell() {
               </ShellBarBranding>
             }
             content={<GlobalSearch entries={searchEntries} isAdmin={isAdmin} />}
-            profile={<Avatar id="user-menu-opener" initials='BA' />}
+            profile={<Avatar id="user-menu-opener" initials={initials(user?.name ?? "")}>
+              {user?.image ? <img src={user.image} alt={user.name} /> : null}
+            </Avatar>}
             onProfileClick={() => setUserMenuOpen((open) => !open)}
             showNotifications
             notificationsCount={unread ? String(unread) : undefined}
@@ -194,8 +199,9 @@ function Shell() {
               const target = e.detail.targetRef;
               setBellOpener((cur) => (cur ? null : target));
             }}
-            assistant={<ToggleButton icon="da" pressed={assistant.open} disabled={toggle.disabled} tooltip={toggle.tooltip}
-              accessibleName={toggle.tooltip} accessibilityAttributes={{ expanded: assistant.open }}
+            // On the AI configuration page the chat is the page: the toggle shows it, and has nothing to switch.
+            assistant={<ToggleButton icon="da" pressed={assistant.open || !!assistant.dock} disabled={toggle.disabled || !!assistant.dock}
+              tooltip={toggle.tooltip} accessibleName={toggle.tooltip} accessibilityAttributes={{ expanded: assistant.open || !!assistant.dock }}
               onClick={assistant.toggle} />}
             accessibilityAttributes={{
               notifications: { expanded: bellOpener !== null, hasPopup: "dialog" },
@@ -210,15 +216,16 @@ function Shell() {
             onSignOutClick={signOut}
             accounts={
               <UserMenuAccount
-                avatarInitials={user?.name?.substring(0, 2).toUpperCase() ?? 'U'}
+                avatarInitials={initials(user?.name ?? "")}
+                avatarSrc={user?.image ?? undefined}
                 titleText={user?.name}
                 description={user?.email}
               />
             }
             showEditAccounts
             showEditButton
-            showManageAccount
-            showOtherAccounts
+            //showManageAccount
+            //showOtherAccounts
           >
             <UserMenuItem text={i18n.getText("NAV_THEMES")} icon="person-placeholder" >
               {THEMES.map((item) => {
@@ -272,20 +279,19 @@ function Shell() {
               selected={pathname === "/settings"} />
           }
         >
-          {isAdmin ? (
-                <SideNavigationGroup text={i18n.getText("NAV_SAP")} expanded>
-                  {Object.values(B1_FEATURES).map((f) => {
-                    const navKey = B1_NAV_KEY[f.entity];
-                    return (
-                      <SideNavigationItem key={f.entity}
-                        text={navKey ? i18n.getText(navKey) : f.entity}
-                        icon={f.icon}
-                        data-to={`/b1/${f.entity}`}
-                        selected={pathname === `/b1/${f.entity}` || pathname.startsWith(`/b1/${f.entity}/`)} />
-                    );
-                  })}
-                </SideNavigationGroup>
-              ) : null}
+          <SideNavigationItem text={i18n.getText("NAV_HOME")} icon="home" data-to="/" selected={pathname === "/"} />
+          <SideNavigationGroup text={i18n.getText("NAV_SAP")} expanded>
+            {Object.values(B1_FEATURES).map((f) => {
+              const navKey = B1_NAV_KEY[f.entity];
+              return (
+                <SideNavigationItem key={f.entity}
+                  text={navKey ? i18n.getText(navKey) : f.entity}
+                  icon={f.icon}
+                  data-to={`/b1/${f.entity}`}
+                  selected={pathname === `/b1/${f.entity}` || pathname.startsWith(`/b1/${f.entity}/`)} />
+              );
+            })}
+          </SideNavigationGroup>
               <SideNavigationGroup text={i18n.getText("NAV_CONFIGURATOR")} expanded>
                 <SideNavigationItem
                   text={i18n.getText("NAV_CONFIGS")}

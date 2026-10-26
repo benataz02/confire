@@ -27,12 +27,13 @@ export type ToolPart = { name: string; input: unknown; output: unknown; error?: 
 /** What a card may know and do beyond its tool's output: where the panel is, and the chat's few
  *  direct writes (a step the card runs answers messages the chat shows as they are). */
 export type CardCtx = {
-  /** the page's configuration */
+  /** the configuration whose form is on screen (none on the AI configuration page) */
   projectId: string | null;
   threadId: string;
   /** the thread's configuration, once one was started from it */
   threadProjectId: string | null;
-  onStarted(projectId: string): void;
+  /** links the chat to it and opens its page: the form, or (docked) the chat's own */
+  onStarted(projectId: string): Promise<void>;
   append(messages: UIMessage[]): void;
   setPending(text: string | null): void;
   /** the files of the last drop, by name */

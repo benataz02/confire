@@ -53,8 +53,7 @@ export function ProposalCard({ p, ctx }: { p: Proposal; ctx: CardCtx }) {
     setError(null);
     try {
       const { id } = await client.assistant.start({ threadId: ctx.threadId, modelId, name: name.trim(), customer });
-      ctx.onStarted(id);
-      await navigate({ to: "/$slug/configs/$id", params: { id } });
+      await ctx.onStarted(id);
       ctx.setPending(t("ASSISTANT_READING", ctx.lastFiles.join(", ") || "…"));
       try {
         ctx.append((await client.assistant.extract({ threadId: ctx.threadId, projectId: id })).messages);
@@ -71,7 +70,6 @@ export function ProposalCard({ p, ctx }: { p: Proposal; ctx: CardCtx }) {
   return (
     <Card header={<CardHeader titleText={t("ASSISTANT_PROPOSAL")} subtitleText={p.why} />}>
       <FlexBox direction="Column" style={BODY}>
-        <Text style={NOTICE}>{t("ASSISTANT_NOTICE")}</Text>
         <Label for="cf-proposal-model" required>{t("ASSISTANT_PROPOSAL_MODEL")}</Label>
         <Select id="cf-proposal-model" value={modelId} disabled={busy} onChange={(e) => setModelId(e.detail.selectedOption.value ?? "")}>
           {modelId ? null : <Option value="">{t("ASSISTANT_PROPOSAL_NO_MODEL")}</Option>}

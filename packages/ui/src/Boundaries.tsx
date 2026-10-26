@@ -1,17 +1,20 @@
 import { useNavigate, useParams, useRouter, type ErrorComponentProps, type NotFoundRouteProps } from "@tanstack/react-router";
 import { Button, IllustratedMessage } from "@ui5/webcomponents-react";
 import { useUiI18n } from "./i18n.ts";
+import { useAppearance } from "./appearance.ts";
 import "@ui5/webcomponents-fiori/dist/illustrations/ErrorScreen.js";
 import "@ui5/webcomponents-fiori/dist/illustrations/PageNotFound.js";
 import "@ui5/webcomponents-fiori/dist/illustrations/tnt/CodePlaceholder.js";
 
 // Router-wide boundaries, wired as createRouter defaults in each app's main.tsx. Any route can still
-// override with its own errorComponent/notFoundComponent.
+// override with its own errorComponent/notFoundComponent. Each applies the saved theme and density
+// itself: a `$slug` whose beforeLoad failed draws this in place of the shell, which is what applies them.
 
 // `reset()` is router.invalidate() under the hood — it re-runs the loader, so retry is real.
 export function RouteError({ error, reset }: ErrorComponentProps) {
   const router = useRouter();
   const i18n = useUiI18n();
+  useAppearance();
   return (
     <IllustratedMessage
       name="ErrorScreen"
@@ -33,6 +36,7 @@ export function RouteNotFound(_props: NotFoundRouteProps) {
   const navigate = useNavigate();
   const { slug } = useParams({ strict: false });
   const i18n = useUiI18n();
+  useAppearance();
   return (
     <IllustratedMessage name="PageNotFound" design="Scene" titleText={i18n.getText("UI_PAGE_MISSING")}
       subtitleText={i18n.getText("UI_PAGE_MISSING_SUB")}>

@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -18,12 +18,18 @@ import { AssistantSettings } from "../../components/settings/AssistantSettings.t
 const TABS = ["agent", "portal", "assistant", "notifications"] as const;
 type SettingsTab = (typeof TABS)[number];
 
-// Not under _admin: Notifications is every member's own switches (notifications spec §10). The other
-// tabs are admin-only here as UX; their procedures are adminProcedure.
+// Notifications is every member's own switches (notifications spec §10). The other tabs are
+// admin-only: the route sends anyone else to Notifications, and their procedures are adminProcedure.
 export const Route = createFileRoute("/$slug/settings")({
   validateSearch: (s: Record<string, unknown>): { tab?: SettingsTab } => ({
     tab: TABS.includes(s.tab as SettingsTab) ? (s.tab as SettingsTab) : undefined,
   }),
+  beforeLoad: ({ context, params, search }) => {
+    const admin = context.me.role === "admin" || context.me.role === "owner";
+    if (!admin && search.tab !== "notifications") {
+      throw redirect({ to: "/$slug/settings", params, search: { tab: "notifications" }, replace: true });
+    }
+  },
   component: Settings,
 });
 

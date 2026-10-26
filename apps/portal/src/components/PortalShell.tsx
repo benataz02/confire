@@ -14,6 +14,7 @@ import { ROLE_KEY } from "../features/labels.ts";
 import { authClient } from "../auth-client.ts";
 import { lobbyQuery, meQuery, notifications, type Me } from "../orpc.ts";
 import { authUrl, hardRedirect, tenantPath } from "@confire/ui/host.ts";
+import { initials } from "@confire/ui/format.ts";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { NotificationsPopover, useUnreadCount } from "@confire/ui/notifications/Notifications.tsx";
 import { DOC_PAGES } from "../features/documents.ts";
@@ -22,9 +23,6 @@ import { DOC_PAGES } from "../features/documents.ts";
 // pattern as the internal AppShell, wearing the supplier's name and logo (D20). Fiori: no shell-bar
 // Back button (the browser's does that), the branding element leads home, the profile opens the
 // user menu.
-
-const initials = (name: string) =>
-  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
 
 /** The supplier's accent (D20) as Horizon's own variables, so the shell bar and every emphasized
  *  button follow it. Save refused an accent white text can't be read on (4.5:1). */
@@ -114,7 +112,9 @@ export function PortalShell() {
                 {me.tenant.name}
               </ShellBarBranding>
             }
-            profile={<Avatar id="portal-user-menu" initials={initials(me.user.name)} />}
+            profile={<Avatar id="portal-user-menu" initials={initials(me.user.name)}>
+              {me.user.image ? <img src={me.user.image} alt={me.user.name} /> : null}
+            </Avatar>}
             onProfileClick={() => setMenuOpen((open) => !open)}
             showNotifications
             notificationsCount={unread ? String(unread) : undefined}
@@ -135,6 +135,7 @@ export function PortalShell() {
             accounts={
               <UserMenuAccount
                 avatarInitials={initials(me.user.name)}
+                avatarSrc={me.user.image ?? undefined}
                 titleText={me.user.name}
                 subtitleText={me.user.email}
                 description={`${me.company.cardName} · ${i18n.getText(ROLE_KEY[me.company.role])}`}

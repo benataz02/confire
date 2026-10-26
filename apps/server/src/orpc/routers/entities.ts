@@ -4,7 +4,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db, ListQueryZ, portalCompany } from "@confire/db";
 import { coerceKey, rowsOf, type Key } from "@confire/b1";
-import { adminProcedure, userProcedure } from "../base.ts";
+import { userProcedure } from "../base.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
 import { assertEntity, entitySchema, toConstraints } from "../../entity-meta.ts";
 import { compileList } from "../../entity-list.ts";
@@ -20,9 +20,8 @@ import { DEFAULT_PAGE } from "../../lookups.ts";
 // curated entities in entity-profiles.ts, and only on the fields those profiles name. That rule
 // lives in `curated()` below, not in whether a page happened to draw a button.
 //
-// adminProcedure: row reads and every write are admin/owner only. `rows` and `metadata` are the
-// exceptions — see the notes on them. What they have in common is that neither reaches SAP for
-// business data on its own behalf.
+// userProcedure throughout: any staff member may open these pages. A portal customer never reaches
+// them — userProcedure refuses an external role. What may be written is still curated(), below.
 
 const EntityZ = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "must be an entity set name");
 const KeyZ = z.union([z.string(), z.number(), z.record(z.string(), z.union([z.string(), z.number()]))]);
@@ -58,10 +57,9 @@ export const entitiesRouter = {
   /** One entity's field constraints (Beas' /api/metadata/{Entity}), the write rule folded in as
    *  Editable/Required. Cached with the schema; `refresh` re-reads $metadata.
    *
-   *  userProcedure, not adminProcedure: this is field *shape* read from entity_meta in Postgres.
-   *  The configurator's quote page renders a Quotations draft with it, and every value-help dialog
-   *  over a B1 entity adds that entity's undeclared fields as hidden columns from it. No row ever
-   *  comes back through here — `one` is still admin. */
+   *  Field *shape* read from entity_meta in Postgres. The configurator's quote page renders a
+   *  Quotations draft with it, and every value-help dialog over a B1 entity adds that entity's
+   *  undeclared fields as hidden columns from it. No row comes back through here. */
   metadata: userProcedure
     .input(z.object({ entity: EntityZ, refresh: z.boolean().optional() }))
     .handler(async ({ input, context }) => {
@@ -77,10 +75,9 @@ export const entitiesRouter = {
   /** One page of rows for a list query. The query is compiled to OData here — the browser never
    *  sends a filter string.
    *
-   *  userProcedure, not adminProcedure: the configurator's customer value help (BusinessPartners,
-   *  in ConfigProcessPage) is used by every internal member, not just admins. EntityZ is any
-   *  entity set name, so this is a read over everything B1 exposes — still tenant-scoped through
-   *  b1Of(context.tenantId), and `one`/`update` stay admin.
+   *  The configurator's customer value help (BusinessPartners, in ConfigProcessPage) and the B1
+   *  lists both read through here. EntityZ is any entity set name, so this is a read over
+   *  everything B1 exposes — still tenant-scoped through b1Of(context.tenantId).
    *  ponytail: one open reader; narrow to an entity allowlist if the read surface matters. */
   rows: userProcedure
     .meta(openapi({
@@ -105,7 +102,7 @@ export const entitiesRouter = {
     }),
 
   /** One row, with its ETag — which is what makes a curated edit safe. */
-  one: adminProcedure
+  one: userProcedure
     .input(z.object({ entity: EntityZ, key: KeyZ }))
     .handler(async ({ input, context }) => {
       const b1 = await b1Of(context.tenantId);
@@ -116,7 +113,7 @@ export const entitiesRouter = {
   /** First/previous/next/last record, walking the single key field the way Beas' record navigation
    *  does: `gt`/`lt` the current key, ordered by it, one row. A composite-key entity has no single
    *  order to walk, so it answers null. `key` is absent for first/last. */
-  neighbor: adminProcedure
+  neighbor: userProcedure
     .input(z.object({ entity: EntityZ, key: KeyZ.optional(), dir: z.enum(["first", "prev", "next", "last"]) }))
     .handler(async ({ input, context }) => {
       const b1 = await b1Of(context.tenantId);
@@ -144,7 +141,7 @@ export const entitiesRouter = {
 
   /** Curated update. Requires the ETag read back with the row: without If-Match a concurrent
    *  edit is a silent overwrite, and B1 answers a stale one with 412 -> CONFLICT. */
-  update: adminProcedure
+  update: userProcedure
     .input(z.object({
       entity: EntityZ,
       key: KeyZ,
@@ -178,7 +175,7 @@ export const entitiesRouter = {
     }),
 
   /** Curated create. `prefer: representation` means the created document comes back in one call. */
-  create: adminProcedure
+  create: userProcedure
     .input(z.object({ entity: EntityZ, data: z.record(z.string(), z.unknown()) }))
     .handler(async ({ input, context }) => {
       const profile = curated(input.entity);
@@ -198,7 +195,7 @@ export const entitiesRouter = {
   /** The copy's draft page: the target document `copy` would post, unposted, and the form it is
    *  drawn with — the target's fields, editable only where `copy` takes a change (CopyHeaderZ, a
    *  line's quantity). DeliveryNotes and Invoices stay read-only targets: this is their only form. */
-  copyDraft: adminProcedure
+  copyDraft: userProcedure
     .input(CopyZ)
     .handler(async ({ input, context }) => {
       const { flow, b1, sources } = await copySources(context.tenantId, input);
@@ -219,7 +216,7 @@ export const entitiesRouter = {
    *  which is what makes B1 close the source lines instead of creating an unlinked document.
    *  Several sources of one business partner merge into one target. The draft page's changes ride
    *  along: the header allowlist, and `lines` — the kept lines with their quantities. */
-  copy: adminProcedure
+  copy: userProcedure
     .input(CopyZ.extend({
       header: CopyHeaderZ.optional(),
       lines: z.array(z.object({ baseEntry: z.number().int(), baseLine: z.number().int(), quantity: z.number().positive() })).min(1).optional(),
@@ -241,7 +238,7 @@ export const entitiesRouter = {
    *  Confire writes — and the agent allowlists the action name again on its side. A re-quote of a
    *  closed quotation posts a new one, so closing is how staff say "start over in SAP".
    *  ponytail: unverified (spec §16) — what B1 answers a Close on a quotation already closed. */
-  close: adminProcedure
+  close: userProcedure
     .input(z.object({ entity: z.literal("Quotations"), key: z.number().int() }))
     .handler(async ({ input, context }) => {
       const b1 = await b1Of(context.tenantId);
@@ -251,8 +248,8 @@ export const entitiesRouter = {
     }),
 
   /** The document's own SAP print layout, rendered by the API Gateway on-prem and returned as
-   *  base64. `/b1` is admin-only already; PRINTABLE is the second gate and the one that travels. */
-  print: adminProcedure
+   *  base64. PRINTABLE is the gate, and the agent allowlists the route again on its side. */
+  print: userProcedure
     .input(z.object({ entity: EntityZ, docEntry: z.number().int() }))
     .handler(({ input, context }) => printDocument(context.tenantId, input.entity, input.docEntry)),
 };

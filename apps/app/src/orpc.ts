@@ -56,8 +56,8 @@ export function useCurrency(): string | undefined {
   return useQuery(meQuery).data?.currency ?? undefined;
 }
 
-/** admin/owner: who may open the /b1 pages and the model builder. Hides links only — `_admin`
- *  and the server enforce it. */
+/** admin/owner: the model builder, portal invitations, and Settings besides Notifications.
+ *  Hides those links only — the server's adminProcedure is the boundary. `/b1` is every staff member's. */
 export function useIsAdmin(): boolean {
   const role = useQuery(meQuery).data?.role;
   return role === "admin" || role === "owner";

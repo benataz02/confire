@@ -58,7 +58,8 @@ export const requireAdmin = base.$context<InitialContext & { role: string }>().m
   return next({});
 });
 
-/** Like userProcedure, but only org admins/owners — gates Settings and the model builder. */
+/** Like userProcedure, but only org admins/owners — gates Settings (not a member's own
+ *  notifications), the model builder and portal invitations. The SAP pages are userProcedure. */
 export const adminProcedure = userProcedure.use(requireAdmin);
 
 /** Session only: the sign-in host's calls (no workspace yet), and `me`. */

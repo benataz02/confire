@@ -61,3 +61,7 @@ export function formatValue(v: unknown, type?: FieldType, options?: Option[], in
       return typeof v === "object" ? JSON.stringify(v) : String(v);
   }
 }
+
+/** A person's avatar initials: the first letter of their first two words ("Ana María López" → "AM"). */
+export const initials = (name: string) =>
+  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";

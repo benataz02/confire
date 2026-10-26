@@ -4,7 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Bar, Button, BusyIndicator, MessageStrip } from "@ui5/webcomponents-react";
 import { toast } from "@confire/ui/toast.ts";
 import { useI18n } from "../../i18n.ts";
-import { orpc, useIsAdmin } from "../../orpc.ts";
+import { orpc } from "../../orpc.ts";
 import { localizedB1Feature } from "../../features/b1/localize.ts";
 import { useFieldConstraints } from "@confire/ui/metadata.ts";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
@@ -37,9 +37,6 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
   );
   const qc = useQueryClient();
   const navigate = useNavigate({ from: "/$slug" });
-  // The B1 pages are admin/owner only — _admin bounces everyone else off /b1 — so a plain member
-  // stays here and reads the confirmation rather than being sent to the configurations list.
-  const canOpenInB1 = useIsAdmin();
   const meta = useFieldConstraints("Quotations");
   const draft = useQuery({ ...orpc.configs.quoteDraft.queryOptions({ input: { projectId } }), retry: false });
   const backToConfig = () => navigate({ to: "/$slug/configs/$id", params: { id: projectId } });
@@ -67,14 +64,12 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
         </MessageStrip>
         <Bar design="Footer" endContent={
           <>
-            {canOpenInB1 ? (
-              <Button design="Emphasized" onClick={() => navigate({
-                to: "/$slug/b1/$entity/$key",
-                params: { entity: "Quotations", key: String(d.quoted!.docEntry) },
-              })}>
-                {t("CONFIG_OPEN_QUOTE")}
-              </Button>
-            ) : null}
+            <Button design="Emphasized" onClick={() => navigate({
+              to: "/$slug/b1/$entity/$key",
+              params: { entity: "Quotations", key: String(d.quoted!.docEntry) },
+            })}>
+              {t("CONFIG_OPEN_QUOTE")}
+            </Button>
             <Button onClick={backToConfig}>{t("CONFIG_BACK")}</Button>
           </>
         } />
@@ -117,10 +112,6 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
         if (d.portal) {
           toast(r.mode === "updated" ? t("CONFIG_TOAST_QUOTE_UPDATED") : t("CONFIG_TOAST_QUOTE_SENT"));
           void backToConfig();
-          return;
-        }
-        if (!canOpenInB1) {
-          void draft.refetch(); // staying: the confirmation needs `quoted`
           return;
         }
         // SAP answers the POST with the whole document, which is exactly what entities.one reads —

@@ -21,6 +21,9 @@ test("registry: a configuration page configures; unknown routes get the general 
   expect(pageFor("/$slug/models/$id").kind).toBe("model");
   expect(pageFor("/$slug/whatever").kind).toBe("general");
   expect(pageFor("/$slug/whatever")).toBe(GENERAL);
+  // The AI configuration page: the general set to start one, the configure set once it exists.
+  expect(pageFor("/$slug/assistant/").tools).toContain("configs_create");
+  expect(pageFor("/$slug/assistant/$id").kind).toBe("configure");
 });
 
 test("no tool posts, and no tool is admin-only", () => {

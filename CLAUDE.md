@@ -102,8 +102,10 @@ origin is `routes/index.tsx`, the dispatcher's). A link never names or changes i
 `useNavigate({ from: "/$slug" })` + `to: "/$slug/…"`, which carries the param over, and the shells'
 declared routes (`/b1/Items`) go through `useEntityNav` (`@confire/ui/EntityLink.tsx`), which puts them
 under `/$slug`. Moving to another tenant is always a full page load — the query cache never holds two.
-The staff app's admin-only pages (`/b1/*`) sit under the pathless `_admin` layout; Settings does not — its
-Notifications tab is every member's (`?tab=notifications`), the other tabs are admin-only in the page.
+SAP Business One pages (`/b1/*`) are every staff member's. Settings is the admin-only page: its
+Notifications tab is every member's (`?tab=notifications`; a non-admin opening Settings lands there),
+and the other tabs are admin-only in the route and in the page. The model builder and portal
+invitations stay admin-only.
 The oRPC link sends the slug as **`x-tenant`** on every call; the plain file routes carry it in their
 path (`/files/<slug>/…`), because a download is a link. `tenant.ts` is the only place a slug is read
 off a request (`tenantSlug`, with the reserved names: the staff SPA's top-level pages and the server's
@@ -319,7 +321,9 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   `ASSISTANT_MONTHLY_LIMIT_USD` (default 25). `rateLimit` is 20 calls a
   minute per user. Env read with `||`, not `??`: compose passes an unset variable as `""`.
 - **The panel** (`AssistantPanel.tsx`) is shell state (`AssistantProvider` around `AppShell`), floating
-  over the page's right edge. **The tool's name picks the card** (`cards/registry.tsx`), never the
+  over the page's right edge — or docked as the page itself on **AI configuration** (`/assistant`, then
+  `/assistant/$id` once it started one; the home tile): the route renders an empty slot (`AssistantDock`)
+  the same panel lays itself over, so a move to the configuration's page keeps one live chat. **The tool's name picks the card** (`cards/registry.tsx`), never the
   model, and a card renders the tool's output — its figures are the server's; a card's actions
   navigate, scroll the page to a field, or call a procedure directly (the question chips, Pick), never
   the model. Colours come only from the theme's `--sapAssistant_*` parameters (the panel scopes the

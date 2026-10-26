@@ -14,10 +14,12 @@ test("the deepest match wins", () => {
 test("a configuration's page and its quote page carry the configuration", () => {
   expect(routeContext([m("/$slug"), m("/$slug/configs/$id", { id: "p1" })]).projectId).toBe("p1");
   expect(routeContext([m("/$slug"), m("/$slug/configs/$id_/quote", { id: "p1" })]).projectId).toBe("p1");
+  expect(routeContext([m("/$slug"), m("/$slug/assistant/$id", { id: "p1" })]).projectId).toBe("p1");
 });
 
 test("lists and the model builder carry none", () => {
   expect(routeContext([m("/$slug/configs/")]).projectId).toBeNull();
+  expect(routeContext([m("/$slug/assistant/")]).projectId).toBeNull();
   expect(routeContext([m("/$slug/models/$id", { id: "m1" })]).projectId).toBeNull();
   expect(routeContext([])).toEqual({ routeId: "/", params: {}, projectId: null });
 });

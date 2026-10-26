@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useI18n } from "../../../../i18n.ts";
-import { b1Feature } from "../../../../features/b1/index.ts";
-import { localizedB1Feature } from "../../../../features/b1/localize.ts";
-import { b1Label } from "../../../../components/AppShell.tsx";
+import { useI18n } from "../../../i18n.ts";
+import { b1Feature } from "../../../features/b1/index.ts";
+import { localizedB1Feature, useCodeNames } from "../../../features/b1/localize.ts";
+import { b1Label } from "../../../components/AppShell.tsx";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
 import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import { useDetailView } from "@confire/ui/useDetailView.ts";
@@ -12,7 +12,7 @@ import { useDetailView } from "@confire/ui/useDetailView.ts";
 // writable, on the fields its write allowlist names, and every save carries the ETag read with
 // the row — a concurrent change comes back as a conflict instead of a silent overwrite.
 
-export const Route = createFileRoute("/$slug/_admin/b1/$entity_/$key")({
+export const Route = createFileRoute("/$slug/b1/$entity_/$key")({
   beforeLoad: ({ params }) => {
     if (!b1Feature(params.entity)) throw redirect({ to: "/$slug", params });
   },
@@ -27,11 +27,12 @@ function EntityRecord() {
     [entity, i18n],
   );
   const d = useDetailView({ entity, routeKey: key, route: `/b1/${entity}` });
+  const constraints = useCodeNames(feature, d.constraints);
 
   if (d.loading) return <ObjectPageSkeleton />;
-  if (d.error || !d.constraints || !d.row) return <PageError error={d.error ?? new Error(i18n.getText("ADMIN_NOT_FOUND"))} />;
+  if (d.error || !constraints || !d.row) return <PageError error={d.error ?? new Error(i18n.getText("ADMIN_NOT_FOUND"))} />;
   return (
-    <ObjectPage {...feature.detail.templates} entity={entity} constraints={d.constraints} data={d.row}
+    <ObjectPage {...feature.detail.templates} entity={entity} constraints={constraints} data={d.row}
       sections={feature.detail.sections} header={feature.detail.header}
       // No ETag means B1 gave us nothing to guard the write with; refuse rather than send a blind PATCH.
       editDisabled={!d.etag}

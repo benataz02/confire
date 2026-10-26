@@ -52,8 +52,7 @@ const date = (v: unknown) => {
   return d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString(formatLocale()) : "";
 };
 
-/** SAP rows. A link only where the reader may open the page (`/b1/*` is admin-only): a member sees
- *  the rows, unlinked, rather than a link to a page that refuses them. */
+/** SAP rows. A link only where `canOpen` says the reader may open the page. */
 export function documentItems(entity: string, out: Page<Record<string, unknown>>, canOpen: (route: string) => boolean, t: T): ListCardData {
   const route = `/b1/${entity}`;
   const may = canOpen(route);

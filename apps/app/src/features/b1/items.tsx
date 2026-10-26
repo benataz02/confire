@@ -48,4 +48,5 @@ export const items: EntityFeature = {
       { id: "notes", label: "Notes", fields: [{ key: "User_Text", controlType: "textarea" }] },
     ],
   },
+  codeNames: { ItemsGroupCode: { entitySet: "ItemGroups", value: "Number", label: "GroupName" } },
 };

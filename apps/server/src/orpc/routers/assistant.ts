@@ -9,7 +9,7 @@ import { copyToProject, fileParts, type FileRef } from "../../assistant/files.ts
 import { readRequest } from "../../assistant/intake.ts";
 import { ASSISTANT_MODEL, available } from "../../assistant/model.ts";
 import {
-  appendMessages, dehydrate, lastDrop, linkProject, newThread, ownThread, threadFor, withThread, type Thread,
+  appendMessages, clearThread, dehydrate, lastDrop, linkProject, newThread, ownThread, threadFor, withThread, type Thread,
 } from "../../assistant/threads.ts";
 import { assertAssistant, assistantOn, MONTHLY_LIMIT_USD, monthUsage, offReason, rateLimit } from "../../assistant/usage.ts";
 
@@ -83,7 +83,14 @@ export const assistantRouter = {
       return { id: t.id, projectId: t.projectId, messages: modelMessagesToUIMessages(t.messages) };
     }),
 
-  newThread: userProcedure.handler(async ({ context }) => ({ id: (await newThread(context.tenantId, context.userId)).id })),
+  /** New chat: a new general thread, or with a configuration its thread started over. */
+  newThread: userProcedure
+    .input(z.object({ projectId: z.uuid().optional() }).optional())
+    .handler(async ({ input, context }) => ({
+      id: (input?.projectId
+        ? await clearThread(context.tenantId, context.userId, input.projectId)
+        : await newThread(context.tenantId, context.userId)).id,
+    })),
 
   /** Read a drop: propose model, customer and name. Nothing is created. */
   intake: userProcedure

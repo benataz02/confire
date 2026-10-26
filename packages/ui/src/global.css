@@ -1,3 +1,9 @@
+/* The theme's page background where no shell or auth layout paints one (a boundary drawn in place of
+   a failed shell); UI5's own sapUiBody. */
+body {
+  background: var(--sapBackgroundColor);
+}
+
 /* Toolbar's :host border-bottom; a document rule beats it without touching the shadow DOM. */
 [ui5-toolbar] {
   border-bottom: none;

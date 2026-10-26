@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db, assistantFile, configModel, configProjectEvent, projectFile } from "@confire/db";
 import { assistantFileRoutes, copyToProject, type FileRef } from "../src/assistant/files.ts";
 import {
-  appendMessages, dehydrate, hydrate, lastDrop, newThread, ownThread, threadFor, withThread,
+  appendMessages, clearThread, dehydrate, hydrate, lastDrop, newThread, ownThread, threadFor, withThread,
 } from "../src/assistant/threads.ts";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
@@ -39,6 +39,26 @@ describe.skipIf(!process.env.DATABASE_URL)("threads", () => {
     expect((await threadFor(w.tenantId, w.a.userId, null)).id).toBe(g.id); // the latest general thread
     const fresh = await newThread(w.tenantId, w.a.userId);
     expect((await threadFor(w.tenantId, w.a.userId, null)).id).toBe(fresh.id);
+  });
+
+  test("a configuration's chat starts over: a new empty thread, never under a running answer", async () => {
+    const w = await world();
+    const t = await threadFor(w.tenantId, w.a.userId, w.projectId);
+    await appendMessages(t.id, [{ role: "user", content: "Make it 3 m" }]);
+    const other = await threadFor(w.tenantId, w.b.userId, w.projectId);
+    let inside!: () => void;
+    const entered = new Promise<void>((r) => (inside = r));
+    const run = withThread(t.id, async () => { inside(); await new Promise((r) => setTimeout(r, 50)); });
+    await entered;
+    expect(await codeOf(clearThread(w.tenantId, w.a.userId, w.projectId))).toBe("THREAD_BUSY");
+    await run;
+
+    const fresh = await clearThread(w.tenantId, w.a.userId, w.projectId);
+    expect(fresh.id).not.toBe(t.id);
+    expect(fresh.messages).toEqual([]);
+    expect((await threadFor(w.tenantId, w.a.userId, w.projectId)).id).toBe(fresh.id);
+    expect(await codeOf(ownThread(w.tenantId, w.a.userId, t.id))).toBe("NOT_FOUND");
+    expect((await threadFor(w.tenantId, w.b.userId, w.projectId)).id).toBe(other.id); // b's chat is b's
   });
 
   test("one run per thread", async () => {

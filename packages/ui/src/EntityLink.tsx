@@ -4,7 +4,7 @@ import { Link } from "@ui5/webcomponents-react";
 import { useUiSource } from "./source.tsx";
 import { canOpenRoute, entityPath } from "./navigation.ts";
 
-/** Whether this user may open a route — `/b1/*` is admin-only. */
+/** Whether this user may open a route — `/b1/*` is every staff member's, not a portal seat's. */
 export function useCanOpen(): (route: string) => boolean {
   const role = useUiSource().useRole();
   return useCallback((route: string) => canOpenRoute(route, role), [role]);

@@ -4,15 +4,15 @@
 
 **Goal:** A salesperson drops a drawing and pastes the client's email into a floating panel. Confire proposes model, customer and name, creates the configuration, reads every value it can with its source, asks the rest as one-click questions, and leads to the existing quote page. Every model call is metered against a monthly limit per workspace.
 
-**Architecture:** The server owns everything. Two fixed structured calls (`assistant.intake`: the cheap model/customer/name proposal; `assistant.extract`: the values) are plain oRPC procedures. A streaming chat route (`POST /api/assistant`) answers typed messages with the existing procedures as tools, called through their own builders with the request's headers. Threads are append-only `ModelMessage[]` in Postgres. Intake and extraction write their results into the thread as tool-call/result pairs, so the chat and the panel read one history. Provenance lives on the configuration (`config_project.sources`) and is written by `configs.calculate` in the same `UPDATE` as the patch.
+**Architecture:** The server owns everything. Two fixed structured calls (`assistant.intake`: the cheap model/customer/name proposal; `assistant.extract`: the values) are plain oRPC procedures. A streaming chat route (`POST /api/assistant`) answers typed messages with the existing procedures as tools, called through their own builders with the request's headers. Threads are append-only `ModelMessage[]` in Postgres. Intake and extraction write their results into the thread as tool-call/result pairs, so the chat and the panel read one history. Provenance lives on the configuration (`config_project.sources`) and is written by `configs.calculate` in the same `UPDATE` as the patch. The panel draws every tool result as a Joule-style UI5 card (object, list, table, KPI, timeline). The **tool's name** picks the card, never the model, and the card renders the tool's output, so its figures are the server's. A card's actions navigate or call a procedure directly, with no model call.
 
-**Tech Stack:** Bun, Hono, oRPC 2.0.0-beta.45, Drizzle/Postgres, `@tanstack/ai` + `@tanstack/ai-anthropic` 1.0.x (server), `@tanstack/ai-react` 1.0.x (app), UI5 Web Components for React 2.27, zod 4.
+**Tech Stack:** Bun, Hono, oRPC 2.0.0-beta.45, Drizzle/Postgres, `@tanstack/ai` + `@tanstack/ai-anthropic` 1.0.x (server), `@tanstack/ai-react` 1.0.x (app), UI5 Web Components for React 2.27 (+ `@ui5/webcomponents-react-charts`, already an app dependency), zod 4.
 
 **Spec:** `docs/superpowers/specs/2026-10-24-ai-assistant-design.md`. Phase 3 (MCP, spec §4.10) is **not** in this plan. It gets its own plan once this ships.
 
 ## Decisions taken while planning
 
-These answer the spec's §9 "left to the builder", plus four questions the user settled on 2026-10-24. Task 16 writes them back into the spec.
+These answer the spec's §9 "left to the builder", plus four questions the user settled on 2026-10-24 and the interactive-panel request of 2026-10-25. Task 17 writes them back into the spec.
 
 | Question | Decision |
 |---|---|
@@ -30,9 +30,43 @@ These answer the spec's §9 "left to the builder", plus four questions the user 
 | Proposal "chips" | A prefilled mini-form (model `Select`, customer value help, name `Input`) on a card. It is the Fiori control for confirm-or-change; value chips stay for the questions. |
 | Product name in UI | "Assistant" (`da` icon). "Joule" is SAP's trademark, so the ShellBar toggle's tooltip changes too. |
 | Model block coverage | Every non-readonly parameter, visible or not: a value read off the drawing can be what makes another field visible. |
+| Data in the chat (2026-10-25) | Cards, not prose. Each tool result is drawn by a card chosen by tool name (`cards/registry.tsx`). The model writes one or two sentences around it and never a table (Task 9's prompt rule). Joule's own rule: objects, statuses and tags don't go in text messages. |
+| Card shapes | Joule's in-chat set, mapped to UI5 (see "The look" below). No carousel: in a 26 rem panel it shows one card of several, and Joule sends related objects to a list card. |
+| List size | Joule's list card: 3 items, "Show more" adds 3, up to 20. List tools are capped at 20 rows server-side (Task 9), and past that the card's "Open all {n}" opens the app's list with the filters it can carry. |
+| Quick replies | Deterministic, from the page and the configuration's view (`replies.ts`): no model cost, and never a suggestion the state contradicts. `// ponytail:` model-written replies would cost a round trip per turn; add them if users ask for more than next steps. |
+| Joule colors | The theme's own `--sapAssistant_*` parameters (question/answer bubbles, assistant background), present in Horizon, Horizon Dark, HCB and Fiori 3. So the panel follows the user's theme with no hex anywhere. The gradient (`--sapAssistant_BackgroundGradient`, Joule's brand mark for welcome screens) is the panel's head: tall with the greeting while the chat is empty, shrinking to the bar on the first message (2026-10-25). The panel's surface is `--sapBackgroundColor`, a List Report's page background. AI on the page itself (✦, AI notice) stays SAP blue (`--sapBrandColor`), per Fiori's AI colors. |
+| Panel width | An expand toggle (Joule's full-screen mode): 26 rem ↔ `min(48rem, 60vw)`, because tables need the room. |
+| Explanations (XAI) | ✦ is level 1 (the indicator). Pressing it opens level 2, a popover with file, page and the exact quote. No level 3: a misread is checked against the drawing, not against the model. |
+| Not built | Feedback thumbs (nobody reads them yet; the eval script measures quality). Timestamps between groupings (Fiori asks for them in high-risk contexts only). |
+
+## The look: Joule, by the Fiori AI guidelines
+
+Researched 2026-10-25: the `sap-fiori-guidelines` skill (AI and Joule design, local AI notice, quick prompts, AI button, XAI) and Joule's component pages on sap.com (list card, object card, text messages, quick replies, layout, error handling, colors). The UI5 APIs below were checked with the UI5 MCP at 2.27.2. Tasks 12–16 build to this:
+
+- **Colors** come from the theme's assistant parameters only. User bubble: `--sapAssistant_Question_Background`/`_TextColor`. Assistant bubble: `--sapAssistant_Answer_Background`/`_TextColor`. The panel scopes `--sapButton_Emphasized_{Background,BorderColor,TextColor,Hover_Background,Hover_BorderColor}` to `--sapAssistant_{Background,BorderColor,TextColor,Hover_Background,Hover_BorderColor}`. Custom properties inherit into shadow DOM, so the panel's emphasized buttons (Send, a card's forward step) are the assistant's color and the page's stay blue. No CSS `::part` hacks.
+- **Layout** (Joule panel layout): 1 rem from the panel edge, 1.5 rem between groupings (a user turn, an assistant turn), 0.5 rem between the parts of one turn. User content sits right in a bubble at most 85 % wide. Assistant text sits left in its bubble. Cards take the full width, up to 40 rem.
+- **Text is for words, cards for data.** The model's text is one or two sentences, and the card under it carries the rows.
+- **In-chat components:**
+
+  | Joule | UI5 here (`cards/kit.tsx`) | Used for |
+  |---|---|---|
+  | Object card: one object; tapping it opens the object; at most 3 footer actions | `Card` + `CardHeader interactive` (`titleText`, `subtitleText`, `additionalText` = status) + a facts grid (`Label` / `Text` or `ObjectStatus`) + ≤ 3 `Button`s | a configuration, the proposal, a single SAP document |
+  | List card: 3 items, "Show more" adds 3, up to 20 | `Card` + `List growing="Button"` (`onLoadMore`, `growingButtonText`) + `ListItemStandard` (`description`, `additionalText` + `additionalTextState`, `type="Navigation"` when it opens something), then a `Link` "Open all {n}" | configurations, requests, SAP documents, business partners, similar quotes, values read or written |
+  | Table (Joule's UI5 integration cards) | `Card` + `Table overflowMode="Popin"`, ≤ 4 columns, `TableRow interactive` when a row opens something | candidates by quantity, quotation lines |
+  | Analytical card | `Card` + `AnalyticalCardHeader` (`value`, `scale`, `state`), `LineChart` as content | the home figures |
+  | Timeline | `ProjectTimeline` (`@confire/ui/timeline`), read-only | a configuration's history |
+  | Quick replies: ≤ 6, under 20 characters; choosing one sends it and hides them all | a wrapping row of `Button`s under the last answer | next steps (`replies.ts`), question chips |
+  | Illustrated message, only when a reply can't solve it | `IllustratedMessage` for the panel's states (off, limit). A failed turn gets an inline `MessageStrip` + Retry | errors |
+
+- **AI notice:** none in the chat (the footer's and the proposal card's were dropped on 2026-10-25, at the user's call). The configuration page carries the *interactive* variant once, at the head of Configure: a `Link` that opens a popover. A quotation is customer communication, which Fiori counts as high-stakes.
+- **Icons:** `ai` (sparkles) on every button that starts a model call, with no "AI" in its label ("Read files", not "Read with AI"); `da` for the shell toggle.
+- **Busy:** while a tool runs, one line (`BusyIndicator size="S"` + "Looking up quotations…", i18n `ASSISTANT_TOOL_<name>`). Streaming text replaces it. Send turns into Stop (the Fiori AI button's Generate → Stop).
+- **Errors:** a failed turn shows "Something went wrong. Please try again." (Fiori's wording) with Retry, right under the user's kept message (Task 10 keeps it).
 
 ## Global Constraints
 
+- Panel CSS uses theme parameters only (`--sapAssistant_*`, `--sap*`). No hex, no gradient.
+- A card never calls the model. Its actions navigate, scroll the page to a field, or call a procedure directly (as the chips do), and it renders the tool's output, never the model's text.
 - Bun only. Workspace packages and new dependencies are **direct** dependencies of the package that imports them.
 - New dependencies: `apps/server`: `@tanstack/ai`, `@tanstack/ai-anthropic` (1.0.x). `apps/app`: `@tanstack/ai-react` (1.0.x). Nothing else.
 - Every `@orpc/*` stays exactly `2.0.0-beta.45`.
@@ -60,6 +94,8 @@ The inputs most likely to bite a real salesperson. Each one has a test in the ta
 3. **Several large scans in one drop**, more than one request can carry (Claude's request cap is 32 MB; base64 inflates 4/3): refused before the call with a message naming the cap. → Task 5, `"attachments over the request cap are refused, unbilled"`.
 4. **Two tabs sending to one thread at once**: the second is refused (409, `THREAD_BUSY`) rather than interleaving history. → Task 7, `"one run per thread"`.
 5. **A DOCX, XLSX or HEIC dropped**: refused by its bytes, with a message saying PDF, PNG and JPEG are read. Nothing is stored. → Task 7, `"only PDF, PNG and JPEG, by their bytes"`.
+6. **"Show me all of ACME's quotations" for a customer with 340**: the tool answers 20 rows plus the total, the card says "20 of 340", and "Open all" opens the Quotations list filtered to ACME. → Task 9, `"list tools answer at most 20 rows and the total"`; Task 13, `"open all carries eq and in filters"`.
+7. **A non-admin asks about SAP documents**: the card lists them but links nowhere (`/b1/*` is admin-only), rather than leading to a page that refuses. → Task 13, `"document items link only where the reader may open them"`.
 
 ---
 
@@ -84,11 +120,12 @@ The inputs most likely to bite a real salesperson. Each one has a test in the ta
 | `apps/server/src/orpc/routers/assistant.ts` (new) | `status`, `thread`, `newThread`, `intake`, `start`, `extract`, `settings`, `saveSettings`, `usage` |
 | `apps/server/src/orpc/router.ts`, `apps/server/src/index.ts` | mount the router and the route (staff process only) |
 | `scripts/assistant-eval.ts` (new) | the hand-run eval (spends money; says so first) |
-| `apps/app/src/assistant/` (new) | `AssistantProvider.tsx`, `AssistantPanel.tsx`, `useAssistant.ts`, `routeContext.ts`, `cards/*.tsx`, `questions.ts`, `marks.ts` |
+| `apps/app/src/assistant/` (new) | `AssistantProvider.tsx`, `AssistantPanel.tsx`, `assistant.css`, `useAssistant.ts`, `routeContext.ts`, `replies.ts`, `questions.ts`, `marks.ts` |
+| `apps/app/src/assistant/cards/` (new) | `kit.tsx` (object, list and table cards over UI5), `data.ts` (pure: tool output → card data), `registry.tsx` (tool name → card, progress texts, the overview/configuration/history cards), and the flow cards `ProposalCard`, `ExtractionCard`, `QuestionCard`, `CandidatesCard`, `QuoteCard` |
 | `apps/app/src/components/AppShell.tsx` | toggle → panel; provider |
 | `apps/app/src/routes/$slug/settings.tsx`, `apps/app/src/components/settings/AssistantSettings.tsx` (new) | Settings → Assistant tab |
 | `apps/app/src/components/configurator/ConfigProcessPage.tsx` | marks, AI notice, publishes `dirty` |
-| `packages/ui/src/configurator/ConfiguratorForm.tsx` | optional `marks` prop |
+| `packages/ui/src/configurator/ConfiguratorForm.tsx` | optional `marks` + `onMarkPress` props |
 
 ---
 
@@ -453,11 +490,12 @@ test("configs.models carries each model's description", async () => {});
 
 **Interfaces:**
 - Produces (`tools.ts`):
-  - `procedureTool(path: string, p: AnyProcedure, ctx: { headers: Headers }, o?: { input?: ZodType; describe?: string; slim?: (out: unknown) => unknown }): ServerTool`. Name `path.replaceAll(".", "_")` (the name MCP will derive). Description from `getOpenAPIMeta(p)` (`description ?? summary`). Input is `o.input ?? p["~orpc"].inputSchemas.at(-1) ?? z.object({})`. Execute is `call(p, input, { context: ctx })`; an `ORPCError` becomes the tool's error text, so the model can correct itself.
+  - `procedureTool(path: string, p: AnyProcedure, ctx: { headers: Headers }, o?: { input?: ZodType; describe?: string; slim?: (out: unknown) => unknown; cap?: number }): ServerTool`. Name `path.replaceAll(".", "_")` (the name MCP will derive). Description from `getOpenAPIMeta(p)` (`description ?? summary`). Input is `o.input ?? p["~orpc"].inputSchemas.at(-1) ?? z.object({})`. Execute is `call(p, input, { context: ctx })`; an `ORPCError` becomes the tool's error text, so the model can correct itself.
+  - `LIST_CAP = 20` (Joule's list card maximum). `cap` sets `top = Math.min(input.top ?? LIST_CAP, LIST_CAP)` before the call, and the description gains "At most 20 rows; `total` says how many match." Set on `configs_rows`, `requests_rows`, `entities_rows` and `configs_queryPage`. The card shows the rows and the total, and the model reads no more than the user sees.
   - `sourcedCalculate(ctx)`: input is `configs.calculate`'s input with `sources` **required**. It refuses with `missingSources(input)`: every `set` key, `tables` key, `"batches"` and `"customer"` written without a source. Description: "A source is the exact text read from a file (with file and page) or the user's own words from this chat. Never write a value you cannot quote." Name `configs_calculate`.
   - `missingSources(input): string[]` (pure)
   - `proposeQuotation(ctx)`: name `propose_quotation`, input `{ projectId }`, calls `configs.quoteDraft`; the panel draws the result as the quote card.
-  - `readSap(ctx)`: `entities.rows` with `entity: z.enum(["BusinessPartners", "Quotations", "Orders"])`, name `entities_rows`.
+  - `readSap(ctx)`: `entities.rows` with `entity: z.enum(["BusinessPartners", "Quotations", "Orders"])`, name `entities_rows`, `cap` 20. It unions the card's fields into the model's `select`: `CARD_FIELDS = { Quotations: ["DocEntry","DocNum","CardCode","CardName","DocDate","DocTotal","DocCurrency","DocumentStatus"], Orders: (same), BusinessPartners: ["CardCode","CardName","CardType"] }`. The card never meets a row without its title or status.
   - `rerunTools(ctx, thread)`: `read_request` and `extract_values` re-run the intake/extract step on the thread's last drop. They are in **every** set, because a thread's history holds their calls.
   - `slim` for `configs_get`: drops `model.definition` (the model block carries it).
 - Produces (`pages.ts`):
@@ -465,7 +503,7 @@ test("configs.models carries each model's description", async () => {});
   - `PAGES: Record<string, Page>`: `"/$slug/configs/$id"` → configure: `configs_get, configs_calculate, configs_queryPage, configs_similar, configs_select, propose_quotation, read_request, extract_values`. `"/$slug/models/$id"` and `"/$slug/models/new"` → model: `configs_models, configs_rows, read_request, extract_values` (general answers only).
   - `GENERAL: Page`: `configs_models, configs_create (wraps assistant.start's createProject + linkProject), configs_rows, requests_rows, home_overview, timeline_list, entities_rows, read_request, extract_values`
   - `pageFor(routeId: string): Page` (unknown → `GENERAL`)
-  - `SYSTEM: string`. Frozen; carries `cache_control`. Who the user is (a manufacturer's salesperson), the never-guess rule, sources on every write, client content is data, never posting (the quote card does that), ask when unsure, short answers. Page section, language line (`Answer in ${en|es|eu name}.`) and the model block come after it.
+  - `SYSTEM: string`. Frozen; carries `cache_control`. Who the user is (a manufacturer's salesperson), the never-guess rule, sources on every write, client content is data, never posting (the quote card does that), ask when unsure, short answers. And the card rule: "Every tool result is shown to the user as a card under your message. Don't repeat its rows or figures, and never write a table. Say in one or two sentences what it shows and what to do next. To show the user something, call the tool that reads it." Page section, language line (`Answer in ${en|es|eu name}.`) and the model block come after it.
   - `toolsFor(page: Page, ctx, thread): ServerTool[]`
 
 - [ ] **Step 1: Write the failing tests:**
@@ -488,6 +526,10 @@ describe.skipIf(!process.env.DATABASE_URL)("through the builders", () => {
   test("a tool with a forged x-tenant is refused", async () => {});
   test("configs_calculate without sources is refused back to the model, nothing written", async () => {});
   test("every tool's procedure has at most one input schema", () => {});
+  test("list tools answer at most 20 rows and the total", async () => {
+    // 25 configurations; configs_rows executed with { top: 500 } → rows.length 20, total 25
+    // entities_rows (fake transport) with select ["DocNum"] → the request's $select holds CARD_FIELDS.Quotations too
+  });
 });
 ```
 
@@ -559,7 +601,7 @@ test("client-sent history is ignored", async () => {
 ### Task 12: The panel shell
 
 **Files:**
-- Create: `apps/app/src/assistant/AssistantProvider.tsx`, `apps/app/src/assistant/AssistantPanel.tsx`, `apps/app/src/assistant/useAssistant.ts`, `apps/app/src/assistant/routeContext.ts`, `apps/app/src/assistant/routeContext.test.ts`, `apps/app/src/assistant/assistant.css`
+- Create: `apps/app/src/assistant/AssistantProvider.tsx`, `apps/app/src/assistant/AssistantPanel.tsx`, `apps/app/src/assistant/useAssistant.ts`, `apps/app/src/assistant/routeContext.ts`, `apps/app/src/assistant/routeContext.test.ts`, `apps/app/src/assistant/replies.ts`, `apps/app/src/assistant/replies.test.ts`, `apps/app/src/assistant/assistant.css`
 - Modify: `apps/app/src/components/AppShell.tsx`; `apps/app/package.json` (`bun add --cwd apps/app @tanstack/ai-react@^1.0.0`); `apps/app/src/i18n/parts/assistant.*.properties`
 
 **Interfaces:**
@@ -567,24 +609,96 @@ test("client-sent history is ignored", async () => {
   - `routeContext(matches: { routeId: string; params: Record<string, string> }[]): { routeId: string; params: Record<string, string>; projectId: string | null }`: the deepest match; `projectId` only on `/$slug/configs/$id` (and `/$slug/configs/$id_/quote`).
   - `AssistantContext`: `{ open: boolean; toggle(): void; dirty: boolean; setDirty(b: boolean): void; questionKeys: Record<string, string[]>; setQuestionKeys(projectId: string, keys: string[]): void }`, provided by `AssistantProvider` around `NavigationLayout` in `AppShell`. Shell state, so the thread survives navigation.
   - `useAssistant(projectId: string | null)`: loads `orpc.assistant.thread({ projectId })`. Its `useChat({ connection: fetchServerSentEvents("/api/assistant", () => ({ headers: { [TENANT_HEADER]: currentSlug() } })), threadId: thread.id, initialMessages: thread.messages, forwardedProps: { route, dirty, language } })` is keyed by `thread.id`, so a new configuration remounts it. It returns `{ thread, chat, append(ui: UIMessage[]), newChat() }`; `append` uses `setMessagesManually`. `onFinish` and every direct write invalidate `orpc.configs.get.key()`, `orpc.configs.rows.key()` and `orpc.assistant.thread.key()`.
-  - `AssistantPanel`: rendered when `open`, as a `position: fixed` container right of the content (`inset-block: <shellbar height> 0.5rem; inset-inline-end: 0.5rem; inline-size: min(26rem, 100vw - 1rem)`), with `--sapContent_Shadow2`, `--sapGroup_ContentBackground` and the element corner radius. It floats over the page without pushing it, and covers the insights rail.
-    - **Header:** a `Bar` with `Title` "Assistant" and a subtitle (the configuration's name, or "General"); end buttons `add` ("New chat", general threads only) and `decline` ("Close").
-    - **Body:** a scrolling list; it scrolls to the end on a new part, unless the user has scrolled up. User text is right-aligned in a bubble (`--sapList_SelectionBackgroundColor`). Assistant text uses `TextPart` from `@tanstack/ai-react/ui` (markdown). File parts are `Tag`s with `pdf-attachment`/`attachment-photo` and the name. Tool parts go to Task 13's cards by name; any other tool shows one muted line ("Read the configuration"). Thinking parts are not shown.
-    - **Empty state:** `IllustratedMessage` ("Drop a drawing and paste the email" in general; "Ask about this configuration" on a configure page), plus 2–3 quick-prompt `Button`s per page kind that send their text ("What's still missing?", "Why is an option unavailable?"; general: "Which configurations are waiting on me?").
+  - `AssistantPanel`: rendered when `open`, as a `position: fixed` container right of the content (`inset-block: <shellbar height> 0.5rem; inset-inline-end: 0.5rem; inline-size: min(var(--cf-assistant-w), 100vw - 1rem)` with `--cf-assistant-w` at `26rem`, or `min(48rem, 60vw)` when expanded), with `--sapContent_Shadow2`, `--sapGroup_ContentBackground` and the element corner radius. It floats over the page without pushing it, and covers the insights rail. Its root class scopes the emphasized-button parameters to `--sapAssistant_*` ("The look").
+    - **Header:** a `Bar` with `Title` "Assistant" and a subtitle (the configuration's name, or "General"); end buttons `add` ("New chat", general threads only), `full-screen`/`exit-full-screen` ("Expand"/"Collapse"; a `useState`, not persisted) and `decline` ("Close").
+    - **Body:** a scrolling list of turns, spaced as in "The look"; it scrolls to the end on a new part unless the user has scrolled up. User text is right-aligned in a `--sapAssistant_Question_*` bubble. Assistant text is in a `--sapAssistant_Answer_*` bubble via `TextPart` from `@tanstack/ai-react/ui` (markdown). File parts are `Tag`s with `pdf-attachment`/`attachment-photo` and the name. A tool-call part is paired with its tool-result part by `toolCallId` and handed to `cards/registry.tsx` (Task 13). Until its result arrives it is the busy line ("The look"). Thinking parts are not shown.
+    - **Welcome (empty thread):** Joule's welcome, not an illustration. A `Title level="H4"` "Hi {first name}" (`meQuery`, as the home greeting does), one `Text` with what it does here ("Drop a drawing and paste the email, and I'll start the configuration" in general; "Ask about this configuration, or drop the client's drawing" on a configure page), then the quick prompts as `Button icon="ai"`s that send their text ("What's still missing?", "Why is an option unavailable?"; general: "Which configurations are waiting on me?", "How is my month going?").
+    - **Quick replies:** under the last assistant turn, when idle, `nextReplies(...)` as a wrapping row of `Button`s. Choosing one sends its text; any send hides them.
     - **States from `assistant.status`:** off → `IllustratedMessage` "The assistant is off for this workspace", plus a Settings link for admins; limit → `MessageStrip` "This workspace has used its assistant budget for this month". The composer is disabled in both.
-    - **Footer:** the Fiori AI notice `Label` "Created with AI. Verify before use."; the pending attachments as removable `Token`s; a growing `TextArea` (`growingMaxRows 8`; Enter sends, Shift+Enter breaks the line); `Button icon="attachment"` (a hidden `input type=file multiple accept="application/pdf,image/png,image/jpeg"`); `Button icon="paper-plane" design="Emphasized"`, which becomes `icon="stop"` while streaming. The whole panel is a drop zone (dashed outline on `dragover`). Over 10 MB per file is refused in the browser with `CONFIG_FILE_MAX`.
-    - **Send routing:** text only → `chat.sendMessage(text)`; with attachments → Task 13's intake/extract.
-    - **A11y:** `role="complementary"` with `aria-label="Assistant"`; focus moves to the TextArea on open; Escape closes; the toggle's `pressed` and `aria-expanded` follow `open`.
+    - **A failed turn** (`chat.error`, or a coded refusal from the route): a `MessageStrip design="Negative"` under the user's kept message, with "Something went wrong. Please try again." (or the code's i18n text) and a `Retry` button that resends that text.
+    - **Footer:** the pending attachments as `Token`s in a `Tokenizer` (its delete removes one); a growing `TextArea` (`growingMaxRows 8`; Enter sends, Shift+Enter breaks the line); `Button icon="attachment"` (a hidden `input type=file multiple accept="application/pdf,image/png,image/jpeg"`); an icon-only AI `Button` (`design="Emphasized"`, the assistant's color via the scoped parameters) with two `ButtonState`s, `send` (paper-plane) and `generating` (stop): send turns into stop while streaming, and sends a drop without text. Under them the AI notice `Label` "Created with AI. Verify before use.". Layout inside the panel is `FlexBox`; `assistant.css` keeps only the floating panel and the bubbles. The whole panel is a drop zone (dashed outline on `dragover`). Over 10 MB per file is refused in the browser with `CONFIG_FILE_MAX`.
+    - **Send routing:** text only → `chat.sendMessage(text)`; with attachments → Task 14's intake/extract.
+    - **A11y:** `role="complementary"` with `aria-label="Assistant"`; focus moves to the TextArea on open; Escape closes; the toggle's `pressed` and `aria-expanded` follow `open`. The busy line is `aria-live="polite"`.
+  - `nextReplies(a: { kind: "configure" | "general" | "model"; view?: Pick<ConfigView, "missing" | "candidates" | "selection" | "project"> }, t: (key: string) => string): string[]` (pure, `replies.ts`, at most 4). On a configure page: `missing` non-empty → "What's still missing?"; `candidates.rows` and no `selection.picks` → "Show the candidates"; picks and not quoted → "Prepare the quotation"; always "Find similar quotes". In general: "What's waiting on me?", "Show my drafts". The view is the page's own `orpc.configs.get` cache entry, so the replies follow the page.
   - `AppShell`: `assistant={<ToggleButton icon="da" pressed={open} tooltip={t("ASSISTANT_TITLE")} onClick={toggle} />}`.
 
-- [ ] **Step 1: Write the failing test** (`routeContext.test.ts`): the deepest match wins; `projectId` is set for `/$slug/configs/$id` and `/$slug/configs/$id_/quote`, and null for `/$slug/configs` and `/$slug/models/$id`.
+- [ ] **Step 1: Write the failing tests.** `routeContext.test.ts`: the deepest match wins; `projectId` is set for `/$slug/configs/$id` and `/$slug/configs/$id_/quote`, and null for `/$slug/configs` and `/$slug/models/$id`. `replies.test.ts`: missing fields → "What's still missing?" first; candidates with no selection → "Show the candidates"; a quoted configuration never offers "Prepare the quotation"; never more than 4.
 - [ ] **Step 2:** Run `bun run test:app`. Expected: FAIL.
-- [ ] **Step 3:** Implement `routeContext`, the provider, `useAssistant` and the panel (Task 13's cards are stubs that print the tool name).
+- [ ] **Step 3:** Implement `routeContext`, `replies`, the provider, `useAssistant`, `assistant.css` and the panel (the registry is a stub that prints the tool name until Task 13).
 - [ ] **Step 4:** Run `bun run test:app` (expect PASS). Then run `bunx tsc -p apps/app/tsconfig.json --noEmit` and `bun --cwd apps/app build`.
-- [ ] **Step 5: Verify in the app** with the switch on and a real key in `.env`: open the panel on home, ask "Which configurations are waiting on me?", and see a streamed answer. Navigate to a configuration: it is a different, empty thread. Navigate back: the general thread is still there. Reload: the history comes back from the server.
+- [ ] **Step 5: Verify in the app** with the switch on and a real key in `.env`. Open the panel on home: the welcome greets by first name. Ask "Which configurations are waiting on me?": the busy line names the tool, then a streamed answer. Expand and collapse. Switch the theme to Horizon Dark and then HCB: the bubbles and the Send button follow, and no color stays light-theme. Navigate to a configuration: it is a different, empty thread whose quick replies match the page. Navigate back: the general thread is still there. Reload: the history comes back from the server.
 - [ ] **Step 6:** Commit `feat(app): assistant panel`.
 
-### Task 13: Intake and extraction in the panel
+### Task 13: The card kit and the data cards
+
+**Files:**
+- Create: `apps/app/src/assistant/cards/kit.tsx`, `apps/app/src/assistant/cards/data.ts`, `apps/app/src/assistant/cards/data.test.ts`, `apps/app/src/assistant/cards/registry.tsx`
+- Modify: `AssistantPanel.tsx` (stub → registry); `apps/app/src/i18n/parts/assistant.*.properties`
+
+**Interfaces:**
+- Consumes: the tool outputs of Task 9 (`{ rows, total, nextSkip }` for the list tools, `ConfigView` for `configs_get`/`configs_calculate`/`configs_select`, the `home.overview` figures, `timeline.list` events); `PROJECT_STATUS`/`projectStatusLabel` (`@confire/ui/timeline/projectStatus.ts`); `statusState`/`documentStatusText` (`@confire/ui/documentStatus.ts`); `money` (`@confire/ui/money.ts`); `useEntityNav`/`useCanOpen` (`@confire/ui/EntityLink.tsx`); `ProjectTimeline`; the list routes' URL filter format (`decodeFilters` in `@confire/ui/views.ts`: `?field=a,b`).
+- Produces (`kit.tsx`). The three Joule shapes, and nothing app-specific:
+  - `ObjectCard({ title, subtitle?, status?: { text: string; state: ValueState }, onOpen?, facts: { label: string; value: ReactNode }[], actions?: ReactNode })`: `CardHeader interactive={!!onOpen}` with `additionalText` = status, the facts as a two-column grid, and at most 3 actions in a footer row.
+  - `ListCard({ title, subtitle?, items: CardItem[], total?: number, openAll?: () => void, noData: string })` with `CardItem = { id: string; title: string; description?: string; info?: string; infoState?: ValueState; icon?: string; onOpen?: () => void }`. It shows 3, and `List growing="Button"` adds 3 per press up to `items.length` (≤ 20). When `total > items.length`, a footer `Link` "Open all {total}" calls `openAll`. An item with `onOpen` is `type="Navigation"`; `onItemClick` calls it.
+  - `TableCard({ title, subtitle?, columns: { key: string; label: string; end?: boolean }[], rows: { id: string; cells: Record<string, ReactNode>; onOpen?: () => void }[], footer?: ReactNode })`: `Table overflowMode="Popin"`, one `TableHeaderRow`, a `TableRow interactive` where `onOpen`, and `onRowClick` dispatches by `rowKey`.
+- Produces (`data.ts`, pure; every label through `t`):
+  - `type CardLink = { to: string; search?: Record<string, string> }` (a route under `/$slug`)
+  - `type ListCardData = { items: (Omit<CardItem, "onOpen"> & { link?: CardLink })[]; total: number; openAll: CardLink | null }`
+  - `configItems(out, t)` → title `name`, description `customerName · modelName`, info = status text, infoState = `PROJECT_STATUS[status].state`, link `/configs/$id`.
+  - `requestItems(out, t)`: the same, linked where the Requests list opens a row.
+  - `documentItems(entity, out, canOpen, t)`. Quotations/Orders: title `DocNum`, description `CardName · DocDate` (locale date), info `money(DocTotal, DocCurrency)`, infoState `statusState(DocumentStatus)`, link `/b1/$entity/$DocEntry`. BusinessPartners: title `CardName`, description `CardCode`, link `/b1/BusinessPartners/$CardCode`. **Only where `canOpen(link)`**, so a non-admin sees the rows, unlinked.
+  - `openAllOf(route: string, query: ListQuery): CardLink`: carries each `eq`/`in` condition as `field: values.join(",")` and `query.search` as `search`, the format `decodeFilters` reads (it ignores keys that aren't filter fields). Other operators are dropped, and the list's filter bar shows what applied (`// ponytail: eq/in/search only; ranges when a card needs them`).
+- Produces (`registry.tsx`):
+  - `renderTool(part: { name: string; input: unknown; output: unknown; error?: string }, ctx: { projectId: string | null }): ReactNode`. An error → one muted `Text` with the error (the model says what it does next). An unknown name → one muted line, `ASSISTANT_TOOL_<name>` in the past tense ("Read the configuration"). Otherwise the card:
+
+    | Tool | Card |
+    |---|---|
+    | `configs_rows`, `requests_rows` | `ListCard` (`configItems`/`requestItems`), "Open all" → `/configs` or `/requests` + `openAllOf` |
+    | `entities_rows` | one row → `ObjectCard` (facts: date, total, status); more → `ListCard` (`documentItems`), "Open all" → `/b1/$entity` when `canOpen` |
+    | `configs_get`, `configs_select` | **configuration card**: `ObjectCard` with name; customer · model; status. Facts: "Missing" (`ObjectStatus state="Critical"` with the count, or "None"), the lowest unit price per batch quantity, the picks' total. Actions: "Open" (when not on that page), "Review and post" (picks, not quoted) |
+    | `configs_calculate` | **written values**: `ListCard` "Changed" of the keys in `input.set`/`tables`/`batches`. Label and display value come from the answered `form` (`formatValue`), the description is the source (`p.1 · "W 200"` / `You said: "…"`), and pressing an item scrolls the page to `[data-param="<key>"]` and focuses it |
+    | `configs_queryPage`, `configs_similar`, `configs_models` | `ListCard`, read-only |
+    | `home_overview` | **overview card**: a `Card` of `AnalyticalCardHeader`s: My drafts, My in review, Quoted this month (`value` compact, `scale` = currency), New requests (`state="Critical"` when > 0). Each `onClick` navigates with the same `search` the home tile uses |
+    | `timeline_list` | **history card**: `ProjectTimeline` read-only (`canComment={false}`, the last 5 events, no documents), then a `Link` "Open the configuration" |
+    | `read_request`, `extract_values`, `propose_quotation` | Tasks 14 and 15 register theirs here |
+
+  - `progressText(name, t)`: `ASSISTANT_TOOL_<name>_RUNNING` ("Looking up configurations…"), falling back to "Working…".
+  - `scrollToField(key)`: `document.querySelector(\`[data-param="${CSS.escape(key)}"]\`)?.scrollIntoView({ block: "center" })`, then focuses its first focusable. The anchor is the one `configMessages.ts` already jumps to. On another page it navigates to the configuration first.
+
+- [ ] **Step 1: Write the failing tests** (`data.test.ts`):
+
+```ts
+test("configuration rows: status text and state, link, total", () => {
+  const d = configItems({ rows: [row({ status: "in_review" })], total: 40, nextSkip: 20 }, t);
+  expect(d.items[0]).toMatchObject({ infoState: PROJECT_STATUS.in_review.state, link: { to: "/configs/p1" } });
+  expect(d.total).toBe(40);
+});
+test("document items link only where the reader may open them", () => {
+  const out = { rows: [{ DocEntry: 7, DocNum: 1007, CardName: "ACME", DocTotal: 1200, DocCurrency: "EUR", DocumentStatus: "bost_Open" }], total: 1, nextSkip: undefined };
+  expect(documentItems("Quotations", out, () => true, t).items[0]!.link).toEqual({ to: "/b1/Quotations/7" });
+  expect(documentItems("Quotations", out, () => false, t).items[0]!.link).toBeUndefined();
+});
+test("open all carries eq and in filters", () => {
+  expect(openAllOf("/b1/Quotations", { filter: [
+    { field: "CardCode", op: "eq", value: "C1" }, { field: "DocumentStatus", op: "in", value: ["bost_Open"] },
+    { field: "CardName", op: "contains", value: "AC" },
+  ], orderby: [], select: [] })).toEqual({ to: "/b1/Quotations", search: { CardCode: "C1", DocumentStatus: "bost_Open" } });
+});
+```
+
+- [ ] **Step 2:** Run `bun run test:app`. Expected: FAIL.
+- [ ] **Step 3:** Implement `kit.tsx`, `data.ts` and `registry.tsx`, and route the panel's tool parts through `renderTool`. Add `ASSISTANT_TOOL_*` and the card texts in en, es and eu.
+- [ ] **Step 4:** Run `bun run test:app` (expect PASS), then `bunx tsc -p apps/app/tsconfig.json --noEmit` and `bun --cwd apps/app build`.
+- [ ] **Step 5: Verify in the app:**
+  - "Which configurations are waiting on me?" → a list card with 3 rows and "Show more"; a row opens its page.
+  - "How is my month going?" → the overview card; a figure opens its list.
+  - As admin, "Show ACME's open quotations" → a list card with status colors; "Open all" opens Quotations filtered to ACME.
+  - As a member, the same answer has no links.
+  - On a configuration, "set width to 200" → the "Changed" card; pressing the row scrolls to Width.
+  - The model's text never repeats the rows.
+- [ ] **Step 6:** Commit `feat(app): assistant cards for data`.
+
+### Task 14: Intake and extraction in the panel
 
 **Files:**
 - Create: `apps/app/src/assistant/cards/ProposalCard.tsx`, `apps/app/src/assistant/cards/ExtractionCard.tsx`, `apps/app/src/assistant/intake.ts`
@@ -594,16 +708,16 @@ test("client-sent history is ignored", async () => {
 - Consumes: `orpc.assistant.intake/start/extract`; `uploadFile` (`@confire/ui/files.ts`); a new `uploadAssistantFile(threadId, file)` beside it (`POST /files/<slug>/assistant/<threadId>`); `cfl.customers` + `CflField`; `orpc.configs.models`.
 - Produces:
   - `sendDrop({ projectId, threadId, files, text })`. On a configure page it runs `uploadFile` (project refs), then `assistant.extract({ threadId, projectId, text, refs })`. Elsewhere it runs `uploadAssistantFile`, then `assistant.intake`. It shows a busy line ("Reading RFQ_ACME.pdf…") during the call and `append`s the returned messages. Coded errors map to i18n texts.
-  - The panel also offers "Read the files already on this configuration" when a configure page's project has `project_file` rows that the thread hasn't read: `orpc.timeline.list` file events minus the refs in the thread. It calls `assistant.extract` with those project refs.
-  - `ProposalCard` (tool `read_request`; it reads the tool result JSON): `Card` with `CardHeader` "Start a configuration" and subtitle `why`. A `Form`: Model `Select` (the proposed one preselected; others from `configs.models`), Customer as one `Button` per candidate (pressed = chosen) plus a `CflField` with `cfl.customers` for another, and Name `Input`. Footer: `Button design="Emphasized"` "Create" and `Button design="Transparent"` "Dismiss". Create → `assistant.start`, then `navigate({ to: "/$slug/configs/$id" })`, then `assistant.extract({ threadId, projectId })` (no refs: the last drop). After that the card is read-only ("Created ACME – Bracket WB-200").
-  - `ExtractionCard` (tool `extract_values`): header "Read from {files}". A `List` of the applied values (`label`: value, with the description `p.1 · "W 200"` or `You said: …`); `notes` as a bulleted `Text`; the questions are Task 14's.
+  - The panel also offers the files already on this configuration when a configure page's project has `project_file` rows that the thread hasn't read (`orpc.timeline.list` file events minus the refs in the thread). It appears as a `Button icon="ai"` "Read files ({n})" above the composer, which calls `assistant.extract` with those project refs.
+  - `ProposalCard` (tool `read_request`, from the tool result JSON; registered in `registry.tsx`). It is `kit`'s `ObjectCard` shape with a form for facts: title "Start a configuration", subtitle `why`, and the Fiori AI notice under the header (the proposal is AI content). The form has the Model `Select` (the proposed one preselected; others from `configs.models`), the Customer as quick-reply `Button`s, one per candidate (pressed = chosen), plus a `CflField` with `cfl.customers` for another, and the Name `Input`. Actions: `Button design="Emphasized" icon="ai"` "Create and read" and `Button design="Transparent"` "Dismiss". Create → `assistant.start`, then `navigate({ to: "/$slug/configs/$id" })`, then `assistant.extract({ threadId, projectId })` (no refs: the last drop). After that the card is read-only ("Created ACME – Bracket WB-200", the header interactive and opening it). A `customerError` shows as a `MessageStrip design="Critical"` inside the card, and the value help still works.
+  - `ExtractionCard` (tool `extract_values`) is `kit`'s `ListCard`: title "Read from {files}", one item per applied value (title `label: value`, description `p.1 · "W 200"` or `You said: …`, `icon="ai"`). Pressing an item scrolls the page to that field (`scrollToField`). The counts sit in the subtitle ("8 filled · 3 to answer"), and `notes` follow as a bulleted `Text`. The questions are Task 15's.
 
 - [ ] **Step 1:** Implement the upload helper, `sendDrop` and the two cards. Add their i18n keys in en, es and eu.
 - [ ] **Step 2:** Run `bunx tsc -p apps/app/tsconfig.json --noEmit` and `bun --cwd apps/app build`. Expected: both pass.
-- [ ] **Step 3: Verify in the app** with a sample PDF (the dev drawings of Task 6): on home, drop the PDF and paste "ACME, 50 and 200 pcs". The proposal card shows model, customer and name → Create → the page opens. "Reading…" → the extraction card lists the values with their quotes, and the page shows them without a reload. The timeline API holds `created` (`via: "assistant"`) and a `file` event. A DOCX drop → "The assistant reads PDF, PNG and JPEG files".
+- [ ] **Step 3: Verify in the app** with a sample PDF (the dev drawings of Task 6): on home, drop the PDF and paste "ACME, 50 and 200 pcs". The proposal card shows model, customer and name → Create and read → the page opens. The busy line reads "Reading RFQ_ACME.pdf…", then the extraction card lists the values with their quotes, and the page shows them without a reload. Pressing a value scrolls the page to its field. The timeline API holds `created` (`via: "assistant"`) and a `file` event. A DOCX drop → "The assistant reads PDF, PNG and JPEG files".
 - [ ] **Step 4:** Commit `feat(app): drop, propose, create and read from the panel`.
 
-### Task 14: Questions, candidates and the quotation card
+### Task 15: Questions, candidates and the quotation card
 
 **Files:**
 - Create: `apps/app/src/assistant/questions.ts`, `apps/app/src/assistant/questions.test.ts`, `apps/app/src/assistant/cards/QuestionCard.tsx`, `apps/app/src/assistant/cards/CandidatesCard.tsx`, `apps/app/src/assistant/cards/QuoteCard.tsx`
@@ -613,9 +727,9 @@ test("client-sent history is ignored", async () => {
 - Consumes: the configuration's view from the shared `orpc.configs.get` cache (the same query the page holds); `client.configs.calculate/select/similar`.
 - Produces:
   - `openQuestions(view: Pick<ConfigView, "missing" | "form" | "project">, extracts: ExtractResult[]): Q[]`, with `Q = { key: string; label: string; why: string; options: FieldOption[]; read?: Val; kind: "options" | "query" | "free" }`. It holds every `missing` parameter plus every extraction question whose key is still empty or still differs. `differs` questions offer the read value against the current one. Keys now answered drop out. Model order. Pure; it reads the live view, so a page edit answers a question too.
-  - `QuestionCard`: one `Card` holding the open questions. Each row has the label, the `why` (`ASSISTANT_WHY_*`) and **chips**, one `Button` per option. An option with `unavailable` is `disabled` with the rule message as its tooltip and a muted "Ruled out: {rule}" line, which is how the rules teach. A `differs` row has two chips: "Keep {current}" and "Use {read}". "Other…" opens an inline `Input` (number/text by type; the server's refusal shows as its `valueState`). A query-backed field gets a `CflField` with `cfl.masterdataQuery` instead of chips. A chip calls `client.configs.calculate({ id, set: { [key]: value } })` directly, with **no source** (a human picked it, so no ✦), and patches the `configs.get` cache with the answer. It publishes the open keys through `setQuestionKeys(projectId, keys)`.
-  - `CandidatesCard`: shown while `missing` is empty and candidates exist. Per batch quantity, the lowest unit price and total (`lowest` rows) with a "Pick" `Button` (`configs.select` direct, all batch quantities of that candidate). "Similar past quotes": the top 3 of `configs.similar`, collapsed in a `Panel`. "Review and post" (`design="Emphasized"`) is enabled once there are picks and navigates to `/$slug/configs/$id/quote`.
-  - `QuoteCard` (tool `propose_quotation`): the draft's lines (item, quantity, price) and total, with "Review and post", which navigates to the quote page exactly as the footer does. Nothing in the panel posts.
+  - `QuestionCard`: one `Card` holding the open questions, its subtitle "{n} to answer". Each row has the label (pressing it scrolls the page to the field), the `why` (`ASSISTANT_WHY_*`) and **chips** in Joule's quick-reply style: one `Button` per option in a wrapping row (`--sapAssistant_Question_*` when pressed). More than 8 options become a `Select` instead. An option with `unavailable` is `disabled` with the rule message as its tooltip and a muted "Ruled out: {rule}" line, which is how the rules teach. A `differs` row has two chips: "Keep {current}" and "Use {read}". "Other…" opens an inline `Input` (number/text by type; the server's refusal shows as its `valueState`). A query-backed field gets a `CflField` with `cfl.masterdataQuery` instead of chips. A chip calls `client.configs.calculate({ id, set: { [key]: value } })` directly, with **no source** (a human picked it, so no ✦), and patches the `configs.get` cache with the answer. It publishes the open keys through `setQuestionKeys(projectId, keys)`.
+  - `CandidatesCard`: shown while `missing` is empty and candidates exist. `kit`'s `TableCard` with one row per batch quantity, the view's `lowest` candidate there (Qty, Lowest unit price, Total); no chart, the page has it. A row is selected while picked (`TableSelectionMulti`: tick to pick, untick to unpick, the header for all); a change calls `configs.select` directly, merged by the page grid's `mergeSelection`, so a pick of another candidate made on the page stays. "Similar past quotes", the top 3 of `configs.similar`, sit collapsed in a `Panel` as a `ListCard`. "Review and post" (`design="Emphasized"`) is enabled once there are picks and navigates to `/$slug/configs/$id/quote`.
+  - `QuoteCard` (tool `propose_quotation`) is `kit`'s `TableCard`: the draft's lines (item, quantity, unit price, line total, Popin below 30 rem), with the total in the footer and "Review and post", which navigates to the quote page exactly as the footer does. Nothing in the panel posts.
 
 - [ ] **Step 1: Write the failing tests** (`questions.test.ts`):
 
@@ -628,10 +742,10 @@ test("unavailable options are kept (disabled) so the rule can be shown", () => {
 - [ ] **Step 2:** Run `bun run test:app`. Expected: FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run `bun run test:app` (expect PASS), then type-check and `bun --cwd apps/app build`.
-- [ ] **Step 5: Verify in the app:** after a read, answer a question by chip. The page field fills, the question disappears, and nothing is marked ✦. A ruled-out option shows its rule. Once `missing` is empty: candidates → Pick → Review and post opens the quote page with the picks. Ask in the chat "prepare the quotation" → the quote card → the same page.
+- [ ] **Step 5: Verify in the app:** after a read, answer a question by chip. The page field fills, the question disappears, and nothing is marked ✦. A ruled-out option shows its rule. Once `missing` is empty: the candidates card shows the table → tick a row → that row (and only it) is picked, untick → unpicked and the page's selection follows → Review and post opens the quote page with the picks. Ask in the chat "prepare the quotation" → the quote card → the same page.
 - [ ] **Step 6:** Commit `feat(app): question chips, candidates and the quotation card`.
 
-### Task 15: Markers on the page
+### Task 16: Markers on the page
 
 **Files:**
 - Create: `apps/app/src/assistant/marks.ts`, `apps/app/src/assistant/marks.test.ts`
@@ -639,21 +753,24 @@ test("unavailable options are kept (disabled) so the rule can be shown", () => {
 
 **Interfaces:**
 - Produces:
-  - `ConfiguratorForm` prop `marks?: Record<string, FieldMark>`, where `FieldMark = { kind: "assistant"; tip: string } | { kind: "question" }`. It is drawn beside the existing `UI_AUTO` status: assistant → `Icon name="ai"` (`accessibleName` and `title` = tip, `--sapInformativeColor`); question → `Icon name="discussion"` (`UI_MARK_QUESTION`: "Waiting on a question in the assistant"). The portal and the preview never pass it.
+  - `ConfiguratorForm` props `marks?: Record<string, FieldMark>` and `onMarkPress?: (key: string, opener: HTMLElement) => void`, where `FieldMark = { kind: "assistant"; tip: string } | { kind: "question" }`. A mark is drawn beside the existing `UI_AUTO` status as an **interactive** `Icon` (`mode="Interactive"`, `accessibleName` and `title` = tip, Enter/Space press it). Assistant → `name="ai"` in `--sapBrandColor` (XAI level 1). Question → `name="discussion"` (`UI_MARK_QUESTION`: "Waiting on a question in the assistant"). The portal and the preview never pass either prop.
   - `fieldMarks(entries: Entries, sources: ProjectSources, questionKeys: string[], tip: (s: ValueSource) => string): Record<string, FieldMark>`: ✦ only while `entries[k]` deep-equals `sources[k].value` (canonical JSON); 💬 for open question keys, and 💬 wins.
-  - `ConfigProcessPage`: computes `marks` from `project.sources` and `questionKeys[id]`; calls `setDirty(queue.busy)` in an effect. When any ✦ is present, the Configure section starts with the Fiori local AI notice: `Label` "Created with AI. Verify before use.", one per screen.
+  - `ConfigProcessPage`: computes `marks` from `project.sources` and `questionKeys[id]`; calls `setDirty(queue.busy)` in an effect. It owns one `ResponsivePopover` for `onMarkPress`:
+    - ✦ (**XAI level 2**): title "Read by the assistant"; the file and page (`RFQ_ACME.pdf · p.1`) or "You said in the chat"; the exact quote in a `Text`; the value it read when it differs in format from the field's display (e.g. "200 mm" → `200`). No "why" prose: the quote is the explanation.
+    - 💬: opens the panel (`toggle()` when closed) with the questions card in view.
+  - When any ✦ is present, the Configure section starts with the **interactive** local AI notice: a subtle `Link` "Created with AI. Verify before use." that opens a `Popover` with the long text: "Fields marked ✦ were read by the assistant from the client's files and still hold the value it read. Press a mark to see the quote. Check them against the drawing before you quote." One per screen.
 
 - [ ] **Step 1: Write the failing tests** (`marks.test.ts`): a sourced key whose entry still equals the value → assistant mark with the tip `RFQ.pdf p.1: "W 200"`; the entry changed → no mark; a question key → question mark; `{ chat }` source → tip `You said: "…"`.
 - [ ] **Step 2:** Run `bun run test:app`. Expected: FAIL.
 - [ ] **Step 3:** Implement. Add the `UI_MARK_*` keys in en, es and eu.
 - [ ] **Step 4:** Run `bun run test:app`, `bun run test:ui`, and the type-checks for `packages/ui` and `apps/app`, then `bun --cwd apps/app build`. Expected: all pass.
-- [ ] **Step 5: Verify in the app:** after a read, the fields show ✦ with the quote on hover, and the AI notice heads Configure. Edit one ✦ field by hand → its ✦ is gone. An open question shows 💬 until answered. A defaulted field still shows "Auto" (⚙).
+- [ ] **Step 5: Verify in the app:** after a read, the fields show ✦. Hover shows the quote; a click (or Tab + Enter) opens the source popover. The AI notice link heads Configure and opens its long text. Edit one ✦ field by hand → its ✦ is gone. An open question shows 💬 until answered, and pressing it opens the panel. A defaulted field still shows "Auto" (⚙).
 - [ ] **Step 6:** Commit `feat(app): provenance markers on the configuration page`.
 
-### Task 16: Docs
+### Task 17: Docs
 
 **Files:**
-- Modify: `CLAUDE.md` (a section "The assistant": the two calls, the route, tools through builders, append-only threads with the lease, provenance in `calculate`, the meter and the limit, `ASSISTANT_*` env); `DEPLOY.md` (`ANTHROPIC_API_KEY`, `ASSISTANT_MODEL`, `ASSISTANT_MONTHLY_LIMIT_USD`; operator SQL `select tenant_id, sum(cost) from ai_usage where at >= date_trunc('month', now()) group by 1`); `docs/superpowers/specs/2026-10-24-ai-assistant-design.md` (§9 answered with this plan's decision table; §4.7: no `mcp` switch until phase 3; status line "phases 1–2 built")
+- Modify: `CLAUDE.md` (a section "The assistant": the two calls, the route, tools through builders, append-only threads with the lease, provenance in `calculate`, the meter and the limit, `ASSISTANT_*` env, and the panel's rule: tool name → card in `cards/registry.tsx`, cards render the tool's output and never call the model, colors only from `--sapAssistant_*`); `DEPLOY.md` (`ANTHROPIC_API_KEY`, `ASSISTANT_MODEL`, `ASSISTANT_MONTHLY_LIMIT_USD`; operator SQL `select tenant_id, sum(cost) from ai_usage where at >= date_trunc('month', now()) group by 1`); `docs/superpowers/specs/2026-10-24-ai-assistant-design.md` (§9 answered with this plan's decision table; §4.7: no `mcp` switch until phase 3; status line "phases 1–2 built")
 
 - [ ] **Step 1:** Write the three edits.
 - [ ] **Step 2:** Run every gate: `bunx tsc` for `apps/server`, `apps/app`, `packages/ui`, `packages/db`; `bun --cwd apps/app build`; `bun run test:server`, `bun run test:app`, `bun run test:ui`. Expected: all green.

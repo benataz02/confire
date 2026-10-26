@@ -230,8 +230,8 @@ First tool set (by page, §4.3):
   `configs.select`, `configs.quoteDraft` (plus `propose_quotation`, §4.6)
 - starting: `configs.models`, `configs.create`, `entities.rows` on BusinessPartners (customer match)
 - answering: `configs.rows`, `requests.rows`, `home.overview`, the timeline, `entities.rows` for SAP
-  documents (quotations, orders: past documents for a customer). `entities.one` stays admin-only, as
-  in the app.
+  documents (quotations, orders: past documents for a customer). Opening one is the page's own read
+  (`entities.one`), which every staff member may call; the assistant does not.
 
 Two things the assistant does **without** a model call:
 
@@ -267,9 +267,11 @@ New schema, shipped with its migration (`db:generate`) and re-exported from `sch
   - tenant, user, `projectId` (nullable until a configuration exists), title, `messages` jsonb
   - **One thread per (user, configuration).** Opening the panel on a configuration's page resumes that
     user's thread for it, or starts one; navigating to another configuration switches to that one's
-    thread. Elsewhere the panel shows the user's last general thread, with a **New chat** button. A
-    general thread that creates a configuration becomes that configuration's thread. There is no thread
-    list in this build.
+    thread. Elsewhere the panel shows the user's last general thread. **New chat** is on every page:
+    elsewhere it starts a general thread; on a configuration it starts that configuration's thread over —
+    the old one is deleted (after a confirm, never mid-answer), and what it filled stays on the
+    configuration. A general thread that creates a configuration becomes that configuration's thread.
+    There is no thread list in this build.
   - Server-owned history: the server loads the messages by thread id rather than trusting the client's
     copy. `@tanstack/ai-persistence`'s message store over this one table if it fits; no run/interrupt
     stores.
@@ -444,7 +446,7 @@ New dependencies are listed as direct dependencies wherever they are imported:
 - Extraction fills empty fields only; a disagreement with an existing value is a question.
 - Provenance on the configuration (`config_project.sources`, an optional `calculate` input); the
   chat must give a source for every value it sets.
-- One thread per user and configuration, plus one general thread with New chat.
+- One thread per user and configuration, plus one general thread; New chat on both (a configuration's is deleted).
 - The admin's Assistant tab shows the month's usage against the limit; SQL for the operator.
 - Sonnet 5.5 first, Haiku 5.5 tested against it; one model setting.
 - Chips and the post button bypass the model (cheaper, faster, and the human click is the write).

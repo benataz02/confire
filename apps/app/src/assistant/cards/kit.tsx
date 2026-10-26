@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import {
-  Card, CardHeader, Label, Link, List, ListItemStandard, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Text,
+  Card, CardHeader, Label, Link, List, ListItemStandard, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow,
+  TableSelectionMulti, Text,
 } from "@ui5/webcomponents-react";
 import type { ValueState } from "@confire/ui/types.ts";
 
@@ -79,17 +80,23 @@ export function ListCard({ title, subtitle, items, total, openAll, openAllText, 
   );
 }
 
-export function TableCard({ title, subtitle, columns, rows, footer, label }: {
+export function TableCard({ title, subtitle, columns, rows, footer, label, selected, onSelect }: {
   title: string;
   subtitle?: string;
   columns: { key: string; label: string; end?: boolean }[];
   rows: { id: string; cells: Record<string, ReactNode>; onOpen?: () => void }[];
   footer?: ReactNode;
   label?: string;
+  /** With `onSelect`, rows are selectable (UI5's own selector column): the ids of the selected rows. */
+  selected?: string[];
+  onSelect?: (ids: string[]) => void;
 }) {
   return (
     <Card header={<CardHeader titleText={title} subtitleText={subtitle} />}>
       <Table overflowMode="Popin" accessibleName={label ?? title}
+        features={onSelect ? (
+          <TableSelectionMulti selected={(selected ?? []).join(" ")} onChange={(e) => onSelect([...e.target.getSelectedAsSet()])} />
+        ) : undefined}
         onRowClick={(e) => rows.find((r) => r.id === (e.detail.row as unknown as { rowKey: string }).rowKey)?.onOpen?.()}
         headerRow={
           <TableHeaderRow>

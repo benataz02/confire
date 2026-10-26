@@ -42,7 +42,8 @@ export function showLink(o: {
   return { route, action: cfg.action, target };
 }
 
-/** `/b1/*` is admin/owner only (the staff app's `_admin` route), so a link into it is hidden for everyone else
- *  rather than drawn and bounced. */
+/** `/b1/*` belongs to staff (owner, admin, member). Buyer and viewer are portal seats and have no
+ *  such pages. An unknown role hides the link until the role loads. */
+const B1_ROLES = new Set(["owner", "admin", "member"]);
 export const canOpenRoute = (route: string, role: string | undefined): boolean =>
-  !route.startsWith("/b1") || role === "admin" || role === "owner";
+  !route.startsWith("/b1") || B1_ROLES.has(role ?? "");

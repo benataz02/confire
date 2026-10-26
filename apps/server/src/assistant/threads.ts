@@ -44,6 +44,16 @@ export async function newThread(tenantId: string, userId: string): Promise<Threa
   return asThread(t!);
 }
 
+/** A configuration's chat starts over (the panel's New chat there): its thread is deleted, under the
+ *  lease so never mid-answer, and a new empty one takes its place. Deleted, not kept: the unique index
+ *  allows one per (user, configuration) and there is no thread list to reach an old one from. What the
+ *  chat filled stays on the configuration (`sources`); `ai_usage` rows keep their thread id. */
+export async function clearThread(tenantId: string, userId: string, projectId: string): Promise<Thread> {
+  const t = await threadFor(tenantId, userId, projectId);
+  await withThread(t.id, () => db.delete(assistantThread).where(eq(assistantThread.id, t.id)));
+  return threadFor(tenantId, userId, projectId);
+}
+
 /** A thread of this user in this workspace, or NOT_FOUND. */
 export async function ownThread(tenantId: string, userId: string, threadId: string): Promise<Thread> {
   const [t] = await db.select(cols).from(assistantThread).where(and(
@@ -61,7 +71,7 @@ export async function takeLease(threadId: string): Promise<void> {
     .set({ busyUntil: sql`now() + interval '5 minutes'` })
     .where(and(eq(assistantThread.id, threadId), or(isNull(assistantThread.busyUntil), lt(assistantThread.busyUntil, sql`now()`))))
     .returning({ id: assistantThread.id });
-  if (!taken.length) throw new ORPCError("THREAD_BUSY", { message: "This chat is answering in another tab — wait for it to finish" });
+  if (!taken.length) throw new ORPCError("THREAD_BUSY", { message: "This chat is still answering — wait for it to finish" });
 }
 
 export async function releaseLease(threadId: string): Promise<void> {

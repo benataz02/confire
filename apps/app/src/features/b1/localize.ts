@@ -1,4 +1,8 @@
+import { useMemo } from "react";
+import { useQueries } from "@tanstack/react-query";
+import type { EntityConstraints } from "@confire/ui/metadata.ts";
 import type { EntityFeature, Facet } from "@confire/ui/types.ts";
+import { orpc } from "../../orpc.ts";
 import { B1_FEATURES } from "./index.ts";
 
 /** `i18n.getText` bound so `this` stays the bundle. */
@@ -82,4 +86,38 @@ export function localizedB1Feature(entity: string, t: AdminText): EntityFeature 
       })),
     },
   };
+}
+
+const dataOf = <T>(results: { data?: T }[]) => results.map((r) => r.data);
+
+/**
+ * The feature's `codeNames` laid over its metadata as Options. The grid (cells, group rows, the
+ * export), the filter, the form and the header all draw an option's label, so each shows the name;
+ * until the read lands, or if it fails, they show the code as before. Typed `enum`, so a name is
+ * not end-aligned like a number.
+ * ponytail: one page of the code table (B1_PAGE_SIZE, 100); a code past it shows as itself —
+ * follow nextCursor if a tenant has more groups than that.
+ */
+export function useCodeNames(feature: EntityFeature, c: EntityConstraints | undefined): EntityConstraints | undefined {
+  const names = Object.entries(feature.codeNames ?? {});
+  const data = useQueries({
+    queries: names.map(([, n]) => ({
+      ...orpc.entities.rows.queryOptions({
+        input: { entity: n.entitySet, query: { select: [n.value, n.label], filter: [], orderby: [{ field: n.label, dir: "asc" as const }] } },
+      }),
+      staleTime: 5 * 60_000,
+    })),
+    combine: dataOf,
+  });
+  return useMemo(() => {
+    if (!c) return c;
+    let fields = c.fields;
+    names.forEach(([key, n], i) => {
+      const rows = data[i]?.rows;
+      if (!rows || !fields[key]) return;
+      const Options = rows.map((r) => ({ value: String(r[n.value]), label: String(r[n.label] ?? r[n.value]) }));
+      fields = { ...fields, [key]: { ...fields[key], Type: "enum", Options } };
+    });
+    return fields === c.fields ? c : { ...c, fields };
+  }, [c, data, feature]);
 }

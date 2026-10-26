@@ -100,9 +100,11 @@ export function NotificationsPopover({ api, opener, open, onClose, getText, onNa
 
   return (
     <ResponsivePopover open={open} opener={opener ?? undefined} onClose={onClose} placement="Bottom" horizontalAlign="End"
-      accessibleName={ui.getText("UI_NOTIF_TITLE")} style={{ width: "26rem", maxWidth: "100%" }}
-      header={
-        <Bar startContent={<Title level="H5">{ui.getText("UI_NOTIF_TITLE")}</Title>}
+      headerText={ui.getText("UI_NOTIF_TITLE")} style={{ width: "26rem", maxWidth: "100%" }}
+      // headerText, not a header slot: a slotted header replaces the popover's own (on a phone, the
+      // dialog's close button with it), so the actions live in the footer, as in PageMessages.
+      footer={
+        <Bar design="Footer"
           endContent={<>
             <Button design="Transparent" disabled={!rows.some((n) => !n.read)} onClick={() => markRead.mutate(undefined)}>
               {ui.getText("UI_NOTIF_MARK_ALL")}</Button>

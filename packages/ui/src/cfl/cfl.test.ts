@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { cfl, keyFieldOf, keysToTokens, tokensToKeys } from "./cfl-configs.ts";
 import { exists, findRow, probeRequest } from "./existence.ts";
-import { entityPath, showLink } from "../navigation.ts";
+import { canOpenRoute, entityPath, showLink } from "../navigation.ts";
 import type { CflFieldConfig } from "../types.ts";
 import type { UiSource } from "../source.tsx";
 
@@ -61,9 +61,19 @@ test("the link shows only with somewhere to go, a value, and not for a key known
   expect(showLink({ ...base, dialogRoute: undefined })).toBeNull(); // link: true needs a route
   expect(showLink({ ...base, value: "  " })).toBeNull();
   expect(showLink({ ...base, missingValue: "A1" })).toBeNull();
-  expect(showLink({ ...base, canOpen: () => false })).toBeNull(); // /b1 is admin-only
+  expect(showLink({ ...base, canOpen: () => false })).toBeNull(); // a route this reader may not open
   expect(showLink({ link: { route: "/r", idField: "Id" }, value: "x", row: { Id: " 7 " } })?.target).toBe("7");
   expect(showLink({ link: undefined, value: "A1" })).toBeNull();
+});
+
+test("staff may open /b1; a portal buyer or viewer may not", () => {
+  expect(canOpenRoute("/b1/Quotations", "member")).toBe(true);
+  expect(canOpenRoute("/b1/Quotations", "admin")).toBe(true);
+  expect(canOpenRoute("/b1/Quotations", "owner")).toBe(true);
+  expect(canOpenRoute("/b1/Quotations", "buyer")).toBe(false);
+  expect(canOpenRoute("/b1/Quotations", "viewer")).toBe(false);
+  expect(canOpenRoute("/b1/Quotations", undefined)).toBe(false);
+  expect(canOpenRoute("/configs", "buyer")).toBe(true);
 });
 
 test("entityPath: <route>/<key>, trimmed; a composite key as JSON", () => {

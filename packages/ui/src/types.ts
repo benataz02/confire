@@ -231,6 +231,9 @@ export type EntityFeature = {
   keyField: string;
   list: ListFeature;
   detail: DetailFeature;
+  /** Codes people know by name (ItemsGroupCode → ItemGroups.GroupName): the app reads the code
+   *  table and lays its names over the field's metadata as options. */
+  codeNames?: Record<string, { entitySet: string; value: string; label: string }>;
 };
 
 /** Template hooks (§5). Each gets the form and `content`, the default rendering it replaces. */

@@ -32,6 +32,9 @@ const tableStyle: CSSProperties = {
   overflow: "hidden",
   borderRadius: "var(--sapElement_BorderCornerRadius)",
 };
+// AutoWithEmptyRows rounds the row count down, so up to a row of the slot is left over: the frame
+// takes it inside its own background, or it reads as a deeper bottom margin than the sides'.
+const fillTableStyle: CSSProperties = { ...tableStyle, height: "100%", background: "var(--sapList_Background)" };
 
 // Full screen is the page, not the browser's. AutoWithEmptyRows counts rows from the table's
 // parentElement, so the parent is ours: on the page it passes the slot's height through, full page
@@ -187,6 +190,15 @@ export function Grid({
     [state.columns, byKey],
   );
 
+  // A width the table reported (useOnColumnResize below) comes back through `state`, but the table
+  // already shows it, so it must not rebuild the columns: that remounts every cell, and a rebuilt
+  // column the user did not resize falls back to react-table's 150px, because the table skips its
+  // own layout while it holds a manual width. Only widths from elsewhere (a view applied, a saved
+  // layout arriving) rebuild; any rebuild reads the latest ones.
+  const reported = useRef<GridState["columnWidths"]>(undefined);
+  const outsideWidths = useRef(state.columnWidths);
+  if (state.columnWidths !== reported.current) outsideWidths.current = state.columnWidths;
+
   // One Cell component per column, built once per column set: a fresh function per render would be
   // a new component type to React and remount every cell on every keystroke elsewhere on the page.
   const tableColumns = useMemo<AnalyticalTableColumnDefinition[]>(
@@ -232,7 +244,8 @@ export function Grid({
           Aggregated: () => null,
         };
       }),
-    [visible, state.columnWidths, cellTemplates, canOpen],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- widths: outsideWidths, above
+    [visible, outsideWidths.current, cellTemplates, canOpen],
   );
 
   // Sort and group are the view's, not the table's: the controlled state shows the view's rules in
@@ -242,7 +255,10 @@ export function Grid({
   const reactTableOptions = useMemo(
     () => ({
       autoResetSortBy: false, autoResetFilters: false, autoResetSelectedRows: false,
-      autoResetPage: false, autoResetHiddenColumns: false, autoResetResize: false, autoResetGroupBy: false,
+      // autoResetResize stays on: a new column set drops the table's manual widths and lays out
+      // again from the view's (which hold every resize). Kept, a rebuilt column the user never
+      // resized fell back to react-table's 150px, since the table skips its layout while it holds one.
+      autoResetPage: false, autoResetHiddenColumns: false, autoResetGroupBy: false,
       // a page appended under a grouped view must not collapse the groups the user opened
       autoResetExpanded: false,
       manualSortBy: true, manualFilters: true, manualGlobalFilter: true,
@@ -257,8 +273,8 @@ export function Grid({
   // Widths are committed when a resize ends (useOnColumnResize watches state.columnResizing), not
   // on every pixel. The plugin captures its callback once, so it reads the latest through a ref.
   // The commit must be a no-op when the width is already ours: the plugin (ui5 2.26) never clears
-  // its last-resized column, so after one resize it re-fires on every `columns` change — and a
-  // commit rebuilds `columns`, which was "Maximum update depth exceeded".
+  // its last-resized column, so after one resize it re-fires on every `columns` change — and when a
+  // commit still rebuilt `columns`, that was "Maximum update depth exceeded".
   const latest = useRef({ onStateChange, widths: state.columnWidths });
   latest.current = { onStateChange, widths: state.columnWidths };
 
@@ -272,8 +288,10 @@ export function Grid({
       AnalyticalTableHooks.useOnColumnResize(({ columnWidth, header }) => {
         const { onStateChange: change, widths } = latest.current;
         const width = Math.round(columnWidth);
-        if (header?.id && Number.isFinite(width) && widths?.[header.id] !== width)
-          change?.({ columnWidths: { ...widths, [header.id]: width } });
+        if (header?.id && Number.isFinite(width) && widths?.[header.id] !== width) {
+          reported.current = { ...widths, [header.id]: width };
+          change?.({ columnWidths: reported.current });
+        }
       }),
       // Fixed for a grid's lifetime, so the plugin list (and react-table's hook order) never changes.
       ...(expandGroups ? [useExpandGroups] : []),
@@ -379,7 +397,11 @@ export function Grid({
           data={rows}
           reactTableOptions={reactTableOptions}
           tableHooks={tableHooks}
-          style={tableStyle}
+          // A reported width never rebuilds the columns (outsideWidths), so they lag the view until
+          // the next rebuild: without this, a container resize (full screen) lays out from them and
+          // undoes the user's resize.
+          retainColumnWidth
+          style={fill || maximized ? fillTableStyle : tableStyle}
           extension={toolbar}
           loading={loading}
           minRows={1}
