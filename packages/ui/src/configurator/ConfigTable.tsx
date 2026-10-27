@@ -42,7 +42,7 @@ const header = (c: TableColumn) => c.label + (c.unit ? ` (${c.unit})` : "");
  * ConfiguratorForm.control()'s branch order so a column and a parameter of the same type look and
  * behave the same.
  */
-export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, readOnly, querySource, money, formulaOverride }: {
+export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, readOnly, querySource, money, formulaOverride, actions }: {
   def: TableDef;
   /** the stored rows — what the user typed, a pending edit included */
   rows: Row[];
@@ -60,6 +60,8 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
   money?: { batchQty: number; rows: (RowMoney | null)[] } | null;
   /** a formula cell can be typed over (a salesperson's override); off, it is read-only (a client) */
   formulaOverride?: boolean;
+  /** toolbar controls before Add/Delete, kept when read-only: the items grid's batch picker */
+  actions?: ReactNode;
 }) {
   // Off `me`, not off a prop: the currency is the tenant's, identical for every table on the page,
   // so threading it down from the model was carrying a constant through four components.
@@ -236,8 +238,9 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
         noDataText={i18n.getText("UI_NO_ROWS")}
         // Delete works on the selection — the Grid idiom — so a read-only grid has none to make.
         selectionMode={editable ? "Multiple" : "None"}
-        toolbarActions={readOnly ? undefined : (sel) => (
+        toolbarActions={readOnly && !actions ? undefined : (sel) => readOnly ? actions : (
           <>
+            {actions}
             <Button icon="add" design="Transparent" disabled={disabled || atMax}
               onClick={() => onChange(addRow(rows))}>{i18n.getText("UI_ADD_ROW")}</Button>
             {/* Copies land at the end, like a new row: positions above stay put, so the selection

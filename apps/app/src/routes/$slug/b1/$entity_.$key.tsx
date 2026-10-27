@@ -26,7 +26,7 @@ function EntityRecord() {
     () => localizedB1Feature(entity, (k, ...args) => i18n.getText(k, ...args))!,
     [entity, i18n],
   );
-  const d = useDetailView({ entity, routeKey: key, route: `/b1/${entity}` });
+  const d = useDetailView({ entity, routeKey: key, route: `/b1/${entity}`, recordNavigation: true });
   const constraints = useCodeNames(feature, d.constraints);
 
   if (d.loading) return <ObjectPageSkeleton />;

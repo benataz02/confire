@@ -1,6 +1,6 @@
 import { describe, expect, it, test } from "bun:test";
 import { bomItemCodes, checkModel, referencedTables, syncTables } from "../src/check";
-import type { ModelDef } from "../src/model";
+import { itemsTable, type ModelDef } from "../src/model";
 import { fieldGroup, model } from "./fixture";
 
 // The model's namespace: the manual price table it LOOKUPs, and the `Items` query its BOM is
@@ -131,6 +131,26 @@ describe("checkModel", () => {
     expect(issues.some((i) => i.path === "history.mappings[1]" && i.message.includes("closeness"))).toBe(true);
     expect(issues.some((i) => i.path === "history.mappings[2]" && i.message.includes("missing"))).toBe(true);
     expect(issues.some((i) => i.path === "history.display[0]")).toBe(true);
+  });
+
+  test("history: an items-grid column maps by table, but not a formula one", () => {
+    const m = structuredClone(model);
+    const items = itemsTable();
+    items.columns.push({ key: "area", label: "Area", type: "number", cell: { kind: "formula", expr: "1" } });
+    m.tables = [items];
+    m.history = {
+      table: "past",
+      mappings: [
+        { table: "items", param: "quantity", column: "qty", match: "closeness", weight: 1 },
+        { table: "items", param: "area", column: "qty", match: "exact", weight: 1 },
+        { table: "items", param: "itemname", column: "qty", match: "closeness", weight: 1 },
+      ],
+      display: [],
+    };
+    const issues = checkModel(m, [...PRICES, { name: "past", columns: ["qty"] }]).filter((i) => i.path.startsWith("history"));
+    expect(issues.map((i) => i.path)).toEqual(["history.mappings[1]", "history.mappings[2]"]);
+    expect(issues[0]!.message).toContain("items.area");
+    expect(issues[1]!.message).toContain("closeness");
   });
 
   test("history: mappings without a query flagged", () => {

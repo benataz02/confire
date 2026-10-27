@@ -1,8 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ModelBuilderPage } from "../../../components/model-builder/ModelBuilderPage.tsx";
-import { sectionSearch } from "../../../lib/sectionParam.ts";
+import { ModelDraftScope } from "../../../components/model-builder/draftScope.tsx";
 
 export const Route = createFileRoute("/$slug/models/new")({
-  validateSearch: sectionSearch,
-  component: () => <ModelBuilderPage />,
+  component: () => <ModelDraftScope />,
 });

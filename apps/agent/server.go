@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -80,13 +79,14 @@ func fail(w http.ResponseWriter, httpStatus int, e *SAPError) {
 }
 
 // sapFail relays a SAP-side failure: the real status is in the envelope; the HTTP status says only
-// "the agent is fine, SAP is not", so an agent-auth 401 is never confused with a SAP 401.
+// "the agent is fine, SAP is not", so an agent-auth 401 is never confused with a SAP 401. Not 502:
+// Cloudflare's edge swaps an origin's 502/504 for its own HTML page, and the envelope is lost.
 func sapFail(w http.ResponseWriter, err error) {
 	var e *SAPError
 	if !errors.As(err, &e) {
 		e = &SAPError{Status: 502, Message: err.Error()}
 	}
-	fail(w, http.StatusBadGateway, e)
+	fail(w, http.StatusFailedDependency, e)
 }
 
 func reply(w http.ResponseWriter, v any) {
@@ -172,7 +172,9 @@ func (a *Agent) request(s *Session, what string) http.HandlerFunc {
 			return
 		}
 		if res.Status >= 300 {
-			sapFail(w, parseSAPError(res.Status, res.Body))
+			e := parseSAPError(res.Status, res.Body)
+			e.Call = in.Method + " " + ok.URL.Redacted()
+			sapFail(w, e)
 			return
 		}
 		// data: the parsed JSON, or the text of a non-JSON answer ($metadata's EDMX), or null.
@@ -184,7 +186,7 @@ func (a *Agent) request(s *Session, what string) http.HandlerFunc {
 		default:
 			data, _ = json.Marshal(string(res.Body))
 		}
-		reply(w, map[string]any{"status": res.Status, "data": data})
+		reply(w, map[string]any{"status": res.Status, "data": data, "call": in.Method + " " + ok.URL.Redacted()})
 	}
 }
 
@@ -255,6 +257,3 @@ func serve(ctx context.Context, cfg *Config, lg *log.Logger, tunnel func(context
 	a.logout()
 	return nil
 }
-
-// discard is a logger for the wizard's tests of a service.
-var discard = log.New(io.Discard, "", 0)

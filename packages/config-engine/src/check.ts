@@ -1,5 +1,5 @@
 import { type Ast, DslError, parse } from "./dsl";
-import { aggregateKey, derivedKey, type ModelDef, type TableDef, derivedColumns, refKeyCols, isTableGroup, COST_COL, PRICE_COL, QTY_COL } from "./model";
+import { aggregateKey, derivedKey, historyFields, historyKey, type ModelDef, type TableDef, derivedColumns, refKeyCols, isTableGroup, COST_COL, PRICE_COL, QTY_COL } from "./model";
 
 export type Issue = { path: string; message: string; from?: number; to?: number };
 
@@ -316,17 +316,17 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   // columns ⊆ that table. The query itself lives in masterdata, not on the model.
   if (model.history) {
     const h = model.history;
-    const paramOf = (k: string) => model.parameters.find((p) => p.key === k);
+    const fields = historyFields(model);
     if (h.mappings.length && !h.table)
       issues.push({ path: "history.table", message: "similarity mappings need a history query" });
     if (h.table && !tableCols.has(h.table))
       issues.push({ path: "history.table", message: `unknown table '${h.table}'` });
     const qCols = (h.table && tableCols.get(h.table)) ?? [];
     h.mappings.forEach((m, i) => {
-      const p = paramOf(m.param);
-      if (!p) issues.push({ path: `history.mappings[${i}]`, message: `unknown parameter '${m.param}'` });
-      else if (m.match === "closeness" && p.type !== "number")
-        issues.push({ path: `history.mappings[${i}]`, message: `closeness needs a number parameter ('${m.param}' is ${p.type})` });
+      const key = historyKey(m), f = fields.get(key);
+      if (!f) issues.push({ path: `history.mappings[${i}]`, message: `unknown parameter '${key}'` });
+      else if (m.match === "closeness" && f.type !== "number")
+        issues.push({ path: `history.mappings[${i}]`, message: `closeness needs a number parameter ('${key}' is ${f.type})` });
       if (qCols.length && !qCols.includes(m.column))
         issues.push({ path: `history.mappings[${i}]`, message: `query has no column '${m.column}'` });
     });

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"maps"
 	"net/http"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/term"
@@ -31,6 +33,11 @@ type wizard struct {
 	tty    bool   // stdout is a console: the spinner draws
 	color  bool   // …that renders ANSI styles
 	spin   []rune // the spinner's frames
+
+	mu    sync.Mutex // the spinner and a test's trace lines share the console
+	width int        // columns the spinner has drawn: what a backspace counts, unlike bytes or escape codes
+	lines bool       // the busy step has printed a trace line
+	start time.Time  // when the busy step began
 }
 
 // printable is what Confire may print (entity-profiles.ts PRINTABLE), in the order asked.
@@ -48,7 +55,23 @@ func newWizard(path, server string) *wizard {
 	if w.color && (runtime.GOOS != "windows" || os.Getenv("WT_SESSION") != "") {
 		w.spin = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 	}
+	if tty && !vt {
+		w.out = legacyConsole{os.Stdout}
+	}
 	return w
+}
+
+// legacyConsole is a console without VT, i.e. before Windows 10 (Server 2012 R2): its raster font has
+// none of the wizard's symbols, so they print as ASCII. SAP's own text (ñ, á) goes through as is.
+type legacyConsole struct{ io.Writer }
+
+var asciiSymbols = strings.NewReplacer("✓", "OK", "✗", "X", "●", "*", "…", "...", "—", "-")
+
+func (c legacyConsole) Write(p []byte) (int, error) {
+	if _, err := asciiSymbols.WriteString(c.Writer, string(p)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 func setup(path, server string) error {
@@ -196,26 +219,53 @@ func (w *wizard) password(label, current, fallback string) string {
 // server's tunnel setup takes long enough that a still window reads as hung — and the Enter
 // pressed to wake it answered the next questions. Not on a pipe, where backspaces are just noise.
 func (w *wizard) busy(fn func() error) error {
+	w.mu.Lock()
+	w.start, w.lines = time.Now(), false
+	w.mu.Unlock()
 	done := make(chan error, 1)
 	go func() { done <- fn() }()
-	if !w.tty {
-		return <-done
-	}
-	width := 0 // columns drawn: what a backspace counts, unlike bytes or escape codes
-	start := time.Now()
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
 	for i := 0; ; i++ {
 		select {
 		case err := <-done:
-			fmt.Fprint(w.out, strings.Repeat("\b", width)+strings.Repeat(" ", width)+strings.Repeat("\b", width))
+			w.mu.Lock()
+			w.erase()
+			if w.lines { // the outcome goes under the trace, on the line it left fresh
+				fmt.Fprint(w.out, "  ")
+			}
+			w.mu.Unlock()
 			return err
 		case <-tick.C:
-			secs := fmt.Sprintf(" %ds", int(time.Since(start).Seconds()))
-			fmt.Fprint(w.out, strings.Repeat("\b", width)+w.sgr("36", string(w.spin[i%len(w.spin)]))+w.dim(secs))
-			width = 1 + len(secs)
+			if !w.tty {
+				continue
+			}
+			w.mu.Lock()
+			secs := fmt.Sprintf(" %ds", int(time.Since(w.start).Seconds()))
+			fmt.Fprint(w.out, strings.Repeat("\b", w.width)+w.sgr("36", string(w.spin[i%len(w.spin)]))+w.dim(secs))
+			w.width = 1 + len(secs)
+			w.mu.Unlock()
 		}
 	}
+}
+
+func (w *wizard) erase() {
+	fmt.Fprint(w.out, strings.Repeat("\b", w.width)+strings.Repeat(" ", w.width)+strings.Repeat("\b", w.width))
+	w.width = 0
+}
+
+// Write prints a test session's log line under its step, timed from the step's start. The lines
+// stay: a run that stops says after which step, and a slow one where it spent the time.
+func (w *wizard) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.erase()
+	if !w.lines {
+		fmt.Fprintln(w.out)
+	}
+	fmt.Fprintln(w.out, w.dim(fmt.Sprintf("    %5.1fs  %s", time.Since(w.start).Seconds(), strings.TrimSpace(string(p)))))
+	w.lines = true
+	return len(p), nil
 }
 
 func (w *wizard) test(ok string, fn func() error) bool {
@@ -239,12 +289,13 @@ func or(v, def string) string {
 
 // testLogin signs in to a service the way the agent will, then gives the licence slot back. A
 // basic-auth service has no login, so it is one read of its root instead.
-func testLogin(name string, svc Service, defaultPath, loginPath, logoutPath, company string) error {
+func (w *wizard) testLogin(name string, svc Service, defaultPath, loginPath, logoutPath, company string) error {
 	base, err := svc.base(defaultPath)
 	if err != nil {
 		return err
 	}
-	s := newSession(name, base, loginPath, logoutPath, svc.Auth, company, svc.User, svc.Pass, discard)
+	s := newSession(name, base, loginPath, logoutPath, svc.Auth, company, svc.User, svc.Pass, log.New(w, "", 0))
+	s.verbose = true
 	if svc.Auth == "basic" {
 		r, err := s.Do("GET", base, map[string]string{"Accept": "application/json"}, nil)
 		if err == nil && r.Status >= 300 {
@@ -259,14 +310,14 @@ func testLogin(name string, svc Service, defaultPath, loginPath, logoutPath, com
 	return nil
 }
 
-func testB1(cfg *Config) error {
-	return testLogin("SAP B1", cfg.B1, b1BasePath, "Login", "Logout", cfg.CompanyDb)
+func (w *wizard) testB1(cfg *Config) error {
+	return w.testLogin("SAP B1", cfg.B1, b1BasePath, "Login", "Logout", cfg.CompanyDb)
 }
-func testBeas(cfg *Config) error {
-	return testLogin("Beas", *cfg.Beas, "/", "Login", "Logout", cfg.CompanyDb)
+func (w *wizard) testBeas(cfg *Config) error {
+	return w.testLogin("Beas", *cfg.Beas, "/", "Login", "Logout", cfg.CompanyDb)
 }
-func testPrint(cfg *Config) error {
-	return testLogin("API Gateway", Service{URL: cfg.Print.URL, User: cfg.Print.User, Pass: cfg.Print.Pass}, "/", "login", "", cfg.CompanyDb)
+func (w *wizard) testPrint(cfg *Config) error {
+	return w.testLogin("API Gateway", Service{URL: cfg.Print.URL, User: cfg.Print.User, Pass: cfg.Print.Pass}, "/", "login", "", cfg.CompanyDb)
 }
 
 // b1 asks SAP B1's section until a login works. The company is asked here only on a first install:
@@ -281,7 +332,7 @@ func (w *wizard) b1(cfg *Config, askCompany bool) {
 		}
 		next.B1.User = w.must("User", or(next.B1.User, "manager"))
 		next.B1.Pass = w.password("Password", next.B1.Pass, "")
-		if w.test("logged in to "+next.CompanyDb, func() error { return testB1(&next) }) {
+		if w.test("logged in to "+next.CompanyDb, func() error { return w.testB1(&next) }) {
 			cfg.B1, cfg.CompanyDb = next.B1, next.CompanyDb
 			return
 		}
@@ -292,7 +343,7 @@ func (w *wizard) beas(cfg *Config) *Service {
 	fmt.Fprintln(w.out, w.heading("Beas"))
 	next := *cfg
 	if next.Beas == nil {
-		next.Beas = &Service{Auth: "session"}
+		next.Beas = &Service{Auth: "bearer"}
 	} else {
 		b := *next.Beas
 		next.Beas = &b
@@ -300,10 +351,10 @@ func (w *wizard) beas(cfg *Config) *Service {
 	s := next.Beas
 	for {
 		s.URL = w.must("URL, with its path", s.URL)
-		s.Auth = w.choice("Sign-in, session or basic", or(s.Auth, "session"), "session", "basic")
+		s.Auth = w.choice("Sign-in, bearer or basic", or(s.Auth, "bearer"), "bearer", "basic")
 		s.User = w.must("User", or(s.User, cfg.B1.User))
 		s.Pass = w.password("Password", s.Pass, cfg.B1.Pass)
-		if w.test("signed in", func() error { return testBeas(&next) }) {
+		if w.test("signed in", func() error { return w.testBeas(&next) }) {
 			return s
 		}
 	}
@@ -340,7 +391,7 @@ func (w *wizard) print(cfg *Config) *Print {
 				p.Layouts[e] = v
 			}
 		}
-		if w.test("signed in", func() error { return testPrint(&next) }) {
+		if w.test("signed in", func() error { return w.testPrint(&next) }) {
 			return p
 		}
 	}
@@ -517,13 +568,13 @@ func (w *wizard) changeCompany(cfg *Config) error {
 	fmt.Fprintln(w.out, "Portal clients will see the documents of their CardCode in the new company.")
 	cfg.CompanyDb = w.must("New company database", "")
 	fmt.Fprintln(w.out)
-	if !w.test("SAP B1 logged in to "+cfg.CompanyDb, func() error { return testB1(cfg) }) {
+	if !w.test("SAP B1 logged in to "+cfg.CompanyDb, func() error { return w.testB1(cfg) }) {
 		w.b1(cfg, false)
 	}
-	if cfg.Beas != nil && !w.test("Beas signed in", func() error { return testBeas(cfg) }) {
+	if cfg.Beas != nil && !w.test("Beas signed in", func() error { return w.testBeas(cfg) }) {
 		cfg.Beas = w.beas(cfg)
 	}
-	if cfg.Print != nil && !w.test("API Gateway signed in", func() error { return testPrint(cfg) }) {
+	if cfg.Print != nil && !w.test("API Gateway signed in", func() error { return w.testPrint(cfg) }) {
 		cfg.Print = w.print(cfg)
 	}
 	return w.apply(cfg)

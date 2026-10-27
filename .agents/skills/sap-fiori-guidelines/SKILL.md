@@ -1,6 +1,7 @@
 ---
 name: sap-fiori-guidelines
 description: SAP Fiori design guidelines for building enterprise applications. Use this skill when designing, building, or reviewing SAP Fiori applications, implementing SAPUI5 or UI5 Web Components, working with SAP enterprise UX patterns, or needing guidance on buttons, forms, tables, object pages, list reports, navigation, messaging, colors, typography, accessibility, AI/Joule integration, or any SAP Fiori UI element. Triggers on mentions of Fiori, SAPUI5, UI5, SAP UX, SAP design system, or enterprise application design following SAP standards.
+disable-model-invocation: true
 ---
 
 # SAP Fiori Design Guidelines

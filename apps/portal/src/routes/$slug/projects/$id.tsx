@@ -1,11 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Bar, BusyIndicator, Button, Form, FormGroup, FormItem, Input, Label, MessageStrip, MultiInput, ObjectPage, ObjectPageSection,
-  ObjectPageTitle, Panel, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Text, Title, Token, Toolbar, ToolbarButton,
+  Bar, BusyIndicator, Button, Form, FormGroup, FormItem, Input, Label, MessageStrip, ObjectPage, ObjectPageSection,
+  ObjectPageTitle, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Text, Title, Toolbar, ToolbarButton,
 } from "@ui5/webcomponents-react";
-import { ConfiguratorForm, ConsistencyStatus } from "@confire/ui/configurator/ConfiguratorForm.tsx";
-import { addBatch } from "@confire/ui/configurator/formHelpers.ts";
+import { BatchField, configuratorSections, ConsistencyStatus } from "@confire/ui/configurator/ConfiguratorForm.tsx";
+import { GENERAL_SECTION } from "@confire/ui/configurator/formHelpers.ts";
 import { overlayForm, usePatchQueue, type InputPatch } from "@confire/ui/configurator/patch.ts";
 import { ProjectTimeline } from "@confire/ui/timeline/ProjectTimeline.tsx";
 import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
@@ -34,8 +34,6 @@ function Page() {
 
 type Payload = Awaited<ReturnType<typeof client.projects.get>>;
 
-/** The batch field's message key — the server's `batches_required` key. */
-const BATCHES = "__batches";
 const NONE: never[] = [];
 
 function ProjectPage({ id }: { id: string }) {
@@ -168,7 +166,8 @@ function ProjectPage({ id }: { id: string }) {
   const pricesShown = p.prices.kind !== "request";
 
   return (
-    <ObjectPage mode="IconTabBar" hidePinButton
+    // One scrolling page, like the staff side's: General, the model's sections, then prices and timeline.
+    <ObjectPage hidePinButton
       titleArea={
         <ObjectPageTitle header={<Title>{p.project.name}</Title>} subHeader={<Text>{p.model.name}</Text>}
           breadcrumbs={<PageBreadcrumbs items={[{ text: i18n.getText("PORTAL_PROJECTS"), to: "/projects" }]} current={p.project.name} />}
@@ -190,83 +189,66 @@ function ProjectPage({ id }: { id: string }) {
         </ObjectPageTitle>
       }
       footerArea={footer ?? undefined}>
-      <ObjectPageSection id="configuration" titleText={i18n.getText("PORTAL_CONFIGURATION")}>
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem", paddingBlockEnd: "1rem" }}>
-          {error ? (
-            <MessageStrip design="Negative" hideCloseButton>
-              {error.message}
-              {/* An edit that never reached the server is kept; this sends it again. */}
-              {queue.error && !queue.error.refused ? (
-                <Button design="Transparent" icon="refresh" onClick={queue.retry}>{i18n.getText("PORTAL_RETRY")}</Button>
-              ) : null}
-            </MessageStrip>
-          ) : null}
-          {p.calcError ? <MessageStrip design="Negative" hideCloseButton>{p.calcError}</MessageStrip> : null}
-          {STATUS_NOTE[status] ? <MessageStrip design="Information" hideCloseButton>{STATUS_NOTE[status]}</MessageStrip> : null}
-          <Panel accessibleRole="Region" headerText={i18n.getText("PORTAL_GENERAL")} headerLevel="H5">
-          <Form accessibleName={i18n.getText("PORTAL_GENERAL")} labelSpan="S12 M12 L12 XL12" layout="S1 M2 L3 XL3"
-            accessibleMode={editable ? "Edit" : "Display"} itemSpacing={editable ? "Normal" : "Large"}>
-            <FormGroup>
-              <FormItem labelContent={<Label for={editable ? "project-name" : undefined} required>{i18n.getText("PORTAL_NAME")}</Label>}>
-                {editable ? (
-                  <Input id="project-name" value={p.project.name} style={{ width: "100%" }} maxlength={200} disabled={rename.isPending}
-                    onChange={(e) => {
-                      const v = (e.target.value ?? "").trim();
-                      if (v && v !== p.project.name) rename.mutate({ id, name: v });
-                    }} />
-                ) : <Text>{p.project.name}</Text>}
-              </FormItem>
-              <FormItem labelContent={<Label>{i18n.getText("PORTAL_PRODUCT")}</Label>}>
-                <Text>{p.model.name}</Text>
-              </FormItem>
-              <FormItem labelContent={<Label required>{i18n.getText("PORTAL_BATCHES")}</Label>}>
-                {editable ? (
-                  // Same field as the internal page: Enter (or blur) turns the typed quantity into a token.
-                  <MultiInput type="Number" data-param={BATCHES} style={{ width: "100%" }}
-                    placeholder={i18n.getText("PORTAL_BATCH_PLACEHOLDER")} accessibleName={i18n.getText("PORTAL_BATCHES")}
-                    valueState={batches.length ? "None" : "Negative"}
-                    valueStateMessage={<div>{i18n.getText("PORTAL_BATCH_REQUIRED")}</div>}
-                    tokens={batches.map((b) => <Token key={b} text={String(b)} />)}
-                    onChange={(e) => {
-                      const next = addBatch(batches, e.target.value ?? "");
-                      if (next !== batches) edit({ batches: next });
-                      e.target.value = "";
-                    }}
-                    onTokenDelete={(e) => {
-                      const gone = new Set(e.detail.tokens.map((t) => Number((t as HTMLElement).getAttribute("text"))));
-                      const left = batches.filter((b) => !gone.has(b));
-                      // Deleting the last quantity falls back to 1 rather than leaving nothing to price.
-                      edit({ batches: left.length ? left : [1] });
-                    }} />
-                ) : <Text>{batches.join(", ")}</Text>}
-              </FormItem>
-            </FormGroup>
-          </Form>
-          </Panel>
-          <ConfiguratorForm model={p.model.definition} form={form} tables={p.lookups.tables}
-            readOnly={!editable} querySource={{ modelId: p.project.modelId }}
-            onChange={(key, v) => edit(v === undefined ? { unset: [key] } : { set: { [key]: v } })}
-            rows={tables} onRowsChange={editable ? (key, rows) => edit({ tables: { [key]: rows } }) : undefined}
-            batches={batches} />
-        </div>
-      </ObjectPageSection>
-      {pricesShown && (
-        <ObjectPageSection id="prices" titleText={i18n.getText("PORTAL_PRICES")}>
-          <Prices prices={p.prices} quotation={quotation.data ?? null} quotationError={quotation.error as Error | null}
-            quotationLoading={quotation.isPending && quotation.fetchStatus !== "idle"} currency={currency} supplier={supplier} />
-        </ObjectPageSection>
-      )}
-      <ObjectPageSection id="timeline" titleText={i18n.getText("PORTAL_TIMELINE")}>
-        <ProjectTimeline side="external" currency={currency} canComment
-          events={timeline.data?.events} labels={timeline.data?.labels ?? {}}
-          loading={timeline.isPending} error={timeline.error as Error | null}
-          documents={documents.data} documentsError={documents.error as Error | null}
-          onComment={(note) => comment.mutateAsync({ projectId: id, note })}
-          // Buyers and owners attach files; viewers read and comment (§4.2).
-          onUpload={buyer ? (file) => uploadFile(id, file).then(() => qc.invalidateQueries({ queryKey: timelineKey })) : undefined}
-          onOpenDocument={(entity, key) => void navigate({ to: "/$slug/docs/$entity/$key", params: { entity, key: String(key) } })}
-          canPreview />
-      </ObjectPageSection>
+      {/* One flat array: ObjectPage reads sections (or booleans) off its children, one level deep. */}
+      {[
+        <ObjectPageSection key={GENERAL_SECTION} id={GENERAL_SECTION} titleText={i18n.getText("PORTAL_GENERAL")}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            {error ? (
+              <MessageStrip design="Negative" hideCloseButton>
+                {error.message}
+                {/* An edit that never reached the server is kept; this sends it again. */}
+                {queue.error && !queue.error.refused ? (
+                  <Button design="Transparent" icon="refresh" onClick={queue.retry}>{i18n.getText("PORTAL_RETRY")}</Button>
+                ) : null}
+              </MessageStrip>
+            ) : null}
+            {p.calcError ? <MessageStrip design="Negative" hideCloseButton>{p.calcError}</MessageStrip> : null}
+            {STATUS_NOTE[status] ? <MessageStrip design="Information" hideCloseButton>{STATUS_NOTE[status]}</MessageStrip> : null}
+            <Form accessibleName={i18n.getText("PORTAL_GENERAL")} labelSpan="S12 M12 L12 XL12" layout="S1 M2 L3 XL3"
+              accessibleMode={editable ? "Edit" : "Display"} itemSpacing={editable ? "Normal" : "Large"}>
+              <FormGroup>
+                <FormItem labelContent={<Label for={editable ? "project-name" : undefined} required>{i18n.getText("PORTAL_NAME")}</Label>}>
+                  {editable ? (
+                    <Input id="project-name" value={p.project.name} style={{ width: "100%" }} maxlength={200} disabled={rename.isPending}
+                      onChange={(e) => {
+                        const v = (e.target.value ?? "").trim();
+                        if (v && v !== p.project.name) rename.mutate({ id, name: v });
+                      }} />
+                  ) : <Text>{p.project.name}</Text>}
+                </FormItem>
+                <FormItem labelContent={<Label>{i18n.getText("PORTAL_PRODUCT")}</Label>}>
+                  <Text>{p.model.name}</Text>
+                </FormItem>
+                <BatchField batches={batches} onChange={editable ? (next) => edit({ batches: next }) : undefined} />
+              </FormGroup>
+            </Form>
+          </div>
+        </ObjectPageSection>,
+        ...configuratorSections({
+          model: p.model.definition, form, tables: p.lookups.tables,
+          readOnly: !editable, querySource: { modelId: p.project.modelId },
+          onChange: (key, v) => edit(v === undefined ? { unset: [key] } : { set: { [key]: v } }),
+          rows: tables, onRowsChange: editable ? (key, rows) => edit({ tables: { [key]: rows } }) : undefined,
+          batches,
+        }),
+        pricesShown && (
+          <ObjectPageSection key="prices" id="prices" titleText={i18n.getText("PORTAL_PRICES")}>
+            <Prices prices={p.prices} quotation={quotation.data ?? null} quotationError={quotation.error as Error | null}
+              quotationLoading={quotation.isPending && quotation.fetchStatus !== "idle"} currency={currency} supplier={supplier} />
+          </ObjectPageSection>
+        ),
+        <ObjectPageSection key="timeline" id="timeline" titleText={i18n.getText("PORTAL_TIMELINE")}>
+          <ProjectTimeline side="external" currency={currency} canComment
+            events={timeline.data?.events} labels={timeline.data?.labels ?? {}}
+            loading={timeline.isPending} error={timeline.error as Error | null}
+            documents={documents.data} documentsError={documents.error as Error | null}
+            onComment={(note) => comment.mutateAsync({ projectId: id, note })}
+            // Buyers and owners attach files; viewers read and comment (§4.2).
+            onUpload={buyer ? (file) => uploadFile(id, file).then(() => qc.invalidateQueries({ queryKey: timelineKey })) : undefined}
+            onOpenDocument={(entity, key) => void navigate({ to: "/$slug/docs/$entity/$key", params: { entity, key: String(key) } })}
+            canPreview />
+        </ObjectPageSection>,
+      ]}
     </ObjectPage>
   );
 }

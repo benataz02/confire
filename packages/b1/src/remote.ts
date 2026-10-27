@@ -24,7 +24,7 @@ export type AgentTarget = {
 export const COMPANY_CHANGED = "COMPANY_CHANGED";
 
 /** Wire shape of the agent's reply. */
-type WireError = { status: number; code: string | number | null; message: string; companyDb?: string };
+type WireError = { status: number; code: string | number | null; message: string; companyDb?: string; call?: string; body?: string };
 type Wire = { error: WireError } | Record<string, unknown>;
 
 /**
@@ -35,6 +35,18 @@ type Wire = { error: WireError } | Record<string, unknown>;
  * apart from a SAP rejection.
  */
 export async function agentPost(o: AgentTarget, route: string, body?: unknown): Promise<unknown> {
+  // One server-log entry per call — `[agent] /beas/request GET https://sap:8080/beas/Items?$top=1 →
+  // 200 84ms`, then SAP's whole answer on a failure — so what reached SAP, and what it said, is
+  // readable without the agent's own log. That call is the agent's (it alone knows SAP's base, and a
+  // failed login is a POST to Login, not the request); an older agent sends none, and the path
+  // stands in. /health is polled during pairing, so it is logged only when it fails.
+  const started = Date.now();
+  const r = body as { method?: string; path?: string } | undefined;
+  const log = (status: number | string, call?: string, error?: string) => {
+    if (body === undefined && !error) return;
+    const what = call ?? (r?.method ? `${r.method} ${r.path}` : body === undefined ? "" : JSON.stringify(body));
+    console.log(`[agent] ${route} ${what} → ${status} ${Date.now() - started}ms${error ? `\n${error}` : ""}`);
+  };
   let res: Response;
   try {
     res = await fetch(`${o.agentUrl.replace(/\/+$/, "")}${route}`, {
@@ -52,7 +64,9 @@ export async function agentPost(o: AgentTarget, route: string, body?: unknown): 
     });
   } catch (e) {
     // Unreachable agent, DNS, TLS, or our own timeout — never a B1 status.
-    throw new B1Error(503, null, `Agent unreachable at ${o.agentUrl}: ${e instanceof Error ? e.message : String(e)}`);
+    const msg = `Agent unreachable at ${o.agentUrl}: ${e instanceof Error ? e.message : String(e)}`;
+    log("unreachable", undefined, msg);
+    throw new B1Error(503, null, msg);
   }
 
   const text = await res.text();
@@ -60,13 +74,21 @@ export async function agentPost(o: AgentTarget, route: string, body?: unknown): 
   try { wire = text ? (JSON.parse(text) as Wire) : null; } catch { /* fall through */ }
   if (wire && "error" in wire) {
     const err = wire.error as WireError;
+    log(err.status, err.call, err.body || err.message);
     if (err.code === COMPANY_CHANGED && err.companyDb) {
       await o.onCompanyChanged?.(err.companyDb);
       throw new B1Error(409, COMPANY_CHANGED, `SAP company changed to ${err.companyDb} — try again.`);
     }
     throw new B1Error(err.status, err.code, err.message);
   }
-  if (!res.ok || !wire) throw new B1Error(res.status, null, `Agent error ${res.status}: ${text.slice(0, 500)}`);
+  if (!res.ok || !wire) {
+    // Not the agent's answer — Cloudflare's or cloudflared's HTML page: its <title> says which.
+    const msg = `Agent error ${res.status}: ${/<title>([^<]*)<\/title>/i.exec(text)?.[1]?.trim() ?? text.slice(0, 500)}`;
+    log(res.status, undefined, text || msg);
+    throw new B1Error(res.status, null, msg);
+  }
+  const ok = wire as { status?: number; call?: string };
+  log(ok.status ?? res.status, ok.call);
   return wire;
 }
 

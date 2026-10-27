@@ -28,3 +28,11 @@ export function addBatch(batches: number[], raw: string): number[] {
   if (!Number.isInteger(n) || n < 1 || batches.includes(n)) return batches;
   return [...batches, n].sort((a, b) => a - b);
 }
+
+/** The pages' own General section, drawn before the model's: `__`, like UNPLACED_TABLES_SECTION, so
+ *  a model section named "general" keeps its anchor. */
+export const GENERAL_SECTION = "__general";
+
+/** The batch field's message anchor — the server's `batches_required` key. `__`: data-param shares
+ *  its namespace with parameter keys. */
+export const BATCHES_PARAM = "__batches";

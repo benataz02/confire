@@ -1,11 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
-  Bar, Button, CheckBox, Dialog, FlexBox, Form, FormGroup, FormItem, Icon, Input, Label,
+  Button, CheckBox, FlexBox, Form, FormGroup, FormItem, Icon, Input, Label,
   MessageStrip, MultiComboBox, MultiComboBoxItem, Option, Select, StepInput, Text, TextArea,
 } from "@ui5/webcomponents-react";
 import { checkModel, derivedColumns, displayColumns } from "@confire/config-engine";
 import type { LookupRef, ModelDef, Param } from "@confire/config-engine";
-import { Grid, GridForm } from "@confire/ui/list-report/Grid.tsx";
+import { Grid, TABLE_ITEM } from "@confire/ui/list-report/Grid.tsx";
 import type { ListColumn } from "@confire/ui/types.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import { masterdataRef, modelWithParam, sourceBadge, type TableCols } from "./exprHelpers.ts";
@@ -17,20 +17,21 @@ import type { Translate } from "./builderMessages.ts";
 type Tables = TableCols[];
 
 // labelSpan 12 = labels on top, the shape ConfiguratorForm uses, so a field looks identical here
-// and on the real form. A group flows its items across the columns its form spans, so PAIRS puts
-// two fields per row and TRIPLE three — one Form per group is what makes that hold, because a
-// Form with more groups than columns gives every group a single column instead.
-// FormItem's own `columnSpan` is not the way out: a documented no-op since UI5 2.23. A section
-// worth one field is not a section: put that field in a neighbouring group instead.
-//
-// The fill is column-major — items 1,2,3 go down the first column, then 4,5,6 down the second —
-// so neighbours in the source are stacked, not side by side. Order items by column, not by row.
+// and on the real form. A group fills its columns top to bottom (CSS column-count), so neighbours
+// in the source are stacked: order a column's fields together.
+// The block headings are ObjectPageSections on the page, so a form here has no headerText.
+// Value domain is one form. A form hands each group one column when it has as many groups as
+// columns, so every group sets colSpan to the width it keeps: kind and exclude share two, a
+// masterdata source shares two, and min/max/step take three — the form widens to three so that
+// range stays one row. colSpan is per breakpoint; columnSpan is a single number and would stay
+// wide on a phone. FormItem's columnSpan is a documented no-op since UI5 2.23.
 export const PAIRS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2", headerLevel: "H5" } as const;
-const TRIPLE = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M3 L3 XL3", headerLevel: "H5" } as const;
+const SPAN2 = PAIRS.layout;
+// Three columns from M up so min, max and step stay one row. Two columns would stack the step.
+const SPAN3 = "S1 M3 L3 XL3";
 export const W = { width: "100%" } as const;
 const ICON = { marginInlineStart: "0.375rem", cursor: "help", color: "var(--sapContent_NonInteractiveIconColor)" } as const;
 const HINT = { color: "var(--sapContent_LabelColor)" } as const;
-const PAD = { display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1rem" } as const;
 
 /** Select hands back the option element; `value` is the string we put on it. Option's own
  *  `selected` prop is deprecated since 2.20 — the parent's `value` is the whole selection API. */
@@ -93,23 +94,25 @@ function controlIssue(p: Param, t: Translate): string | undefined {
   return undefined;
 }
 
-export function ParamDialog({ draft, tables, initial, isNew, onOk, onCancel }: {
-  draft: ModelDef; tables: Tables; initial: Param; isNew: boolean;
-  onOk: (p: Param) => void; onCancel: () => void;
+const keyOk = (key: string) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key);
+
+/** Save stays enabled until the first click. These are the problems that click reveals instead of writing. */
+export function paramBlocked(p: Param, draft: ModelDef, isNew: boolean, t: Translate): boolean {
+  const taken = isNew && draft.parameters.some((x) => x.key === p.key);
+  return !keyOk(p.key) || taken || !p.label || !!domainIssue(p, t);
+}
+
+export function useParamFields({ draft, tables, p, set, tried, isNew }: {
+  draft: ModelDef; tables: Tables; p: Param; isNew: boolean; tried: boolean;
+  set: (patch: Partial<Param>) => void;
 }) {
   const i18n = useI18n();
   const t: Translate = (key, ...params) => i18n.getText(key, ...params);
-  const [p, setP] = useState<Param>(initial);
-  // Like TableDialog: Save stays enabled and the first click on an invalid parameter reveals the
-  // errors instead of saving, so the button never greys out without saying why.
-  const [tried, setTried] = useState(false);
-  const set = (patch: Partial<Param>) => setP((x) => ({ ...x, ...patch }));
 
-  const keyOk = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(p.key);
+  const ok = keyOk(p.key);
   const keyTaken = isNew && draft.parameters.some((x) => x.key === p.key);
   const dIssue = domainIssue(p, t);
   const cIssue = controlIssue(p, t);
-  const blocked = !keyOk || keyTaken || !p.label || !!dIssue;
 
   // The draft with this parameter's own derived keys in scope — both the expression suggestions
   // and checkModel are read against it, so an unsaved rename resolves the way it will once saved.
@@ -122,7 +125,7 @@ export function ParamDialog({ draft, tables, initial, isNew, onOk, onCancel }: {
 
   const errors = tried
     ? [...new Set([
-        ...(keyOk ? [] : [t("MODEL_KEY_INVALID")]),
+        ...(ok ? [] : [t("MODEL_KEY_INVALID")]),
         ...(keyTaken ? [t("MODEL_KEY_TAKEN")] : []),
         ...(p.label ? [] : [t("MODEL_LABEL_REQUIRED")]),
         ...(dIssue ? [dIssue] : []),
@@ -133,166 +136,174 @@ export function ParamDialog({ draft, tables, initial, isNew, onOk, onCancel }: {
   const ref = p.domain?.kind === "options" ? p.domain.ref : null;
   const manualRef = ref?.source === "manual" ? ref : null;
   const sourceRef = ref && ref.source !== "manual" ? ref : null;
+  const rangeDomain = p.domain?.kind === "range" ? p.domain : undefined;
 
+  return {
+    tables, p, set, tried, isNew, t, ok, keyTaken, cIssue, scope, at, exprIssue, errors,
+    manualRef, sourceRef, rangeDomain,
+  };
+}
+
+type Fields = ReturnType<typeof useParamFields>;
+
+const FORM = { accessibleMode: "Edit" as const, labelSpan: PAIRS.labelSpan };
+
+export function ParamDefinition({ f }: { f: Fields }) {
+  const { t, p, set, tried, isNew, ok, keyTaken, errors, cIssue } = f;
   return (
-    <Dialog open onClose={onCancel} className="confire-pd"
-      headerText={isNew ? t("MODEL_NEW_PARAM") : t("MODEL_PARAM_HEAD", initial.label || initial.key)}
-      accessibleName={isNew ? t("MODEL_ADD_PARAM_A11Y") : t("MODEL_EDIT_PARAM", initial.key)}
-      style={{ width: "min(76rem, 96vw)" }}
-      footer={
-        <Bar design="Footer" endContent={
-          <>
-            <Button design="Emphasized"
-              onClick={() => (blocked ? setTried(true) : onOk(p))}>{t("MODEL_SAVE")}</Button>
-            <Button onClick={onCancel}>{t("MODEL_CANCEL")}</Button>
-          </>
-        } />
-      }
-    >
-      <div style={PAD}>
-        {errors.length ? (
-          <MessageStrip design="Negative" hideCloseButton>{errors.join(" · ")}</MessageStrip>
-        ) : null}
-        {cIssue ? <MessageStrip design="Critical" hideCloseButton>{cIssue}</MessageStrip> : null}
+    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      {errors.length ? (
+        <MessageStrip design="Negative" hideCloseButton>{errors.join(" · ")}</MessageStrip>
+      ) : null}
+      {cIssue ? <MessageStrip design="Critical" hideCloseButton>{cIssue}</MessageStrip> : null}
 
-        <Form {...PAIRS} accessibleMode="Edit" headerText={t("MODEL_DEFINITION")}>
-          <FormGroup accessibleName={t("MODEL_DEFINITION")}>
-            <FormItem labelContent={lbl(t("MODEL_KEY"), t("MODEL_PARAM_KEY_HELP"), true)}>
-              {/* An untouched new dialog isn't an error yet — only complain once Save is pressed. */}
-              <Input value={p.key} disabled={!isNew} style={W}
-                valueState={!tried || (keyOk && !keyTaken) ? "None" : "Negative"}
-                valueStateMessage={<div>{keyTaken ? t("MODEL_KEY_TAKEN") : t("MODEL_KEY_RULE")}</div>}
-                onInput={(e) => set({ key: e.target.value })} />
-            </FormItem>
+      <Form {...FORM} accessibleName={t("MODEL_DEFINITION")} layout={SPAN2}>
+        <FormGroup accessibleName={t("MODEL_DEFINITION")}>
+          <FormItem labelContent={lbl(t("MODEL_KEY"), t("MODEL_PARAM_KEY_HELP"), true)}>
+            {/* An untouched new parameter isn't an error yet — only complain once Save is pressed. */}
+            <Input value={p.key} disabled={!isNew} style={W}
+              valueState={!tried || (ok && !keyTaken) ? "None" : "Negative"}
+              valueStateMessage={<div>{keyTaken ? t("MODEL_KEY_TAKEN") : t("MODEL_KEY_RULE")}</div>}
+              onInput={(e) => set({ key: e.target.value })} />
+          </FormItem>
 
-            <FormItem labelContent={lbl(t("MODEL_COL_LABEL"), t("MODEL_LABEL_HELP"), true)}>
-              <Input value={p.label} style={W} valueState={!tried || p.label ? "None" : "Negative"}
-                valueStateMessage={<div>{t("MODEL_LABEL_ERR")}</div>}
-                onInput={(e) => set({ label: e.target.value })} />
-            </FormItem>
+          <FormItem labelContent={lbl(t("MODEL_COL_LABEL"), t("MODEL_LABEL_HELP"), true)}>
+            <Input value={p.label} style={W} valueState={!tried || p.label ? "None" : "Negative"}
+              valueStateMessage={<div>{t("MODEL_LABEL_ERR")}</div>}
+              onInput={(e) => set({ label: e.target.value })} />
+          </FormItem>
 
-            {/* The help text annotates the label, so it closes the first column rather than sitting
-                in the second: this column is everything the salesperson reads. */}
-            <FormItem labelContent={lbl(t("MODEL_HELP"), t("MODEL_HELP_HELP"))}>
-              <TextArea rows={3} value={p.help ?? ""} style={W}
-                onInput={(e) => set({ help: e.target.value || undefined })} />
-            </FormItem>
+          {/* The help text annotates the label, so it closes the first column rather than sitting
+              in the second: this column is everything the salesperson reads. */}
+          <FormItem labelContent={lbl(t("MODEL_HELP"), t("MODEL_HELP_HELP"))}>
+            <TextArea rows={3} value={p.help ?? ""} style={W}
+              onInput={(e) => set({ help: e.target.value || undefined })} />
+          </FormItem>
 
-            {/* Second column starts here: what the field holds and how it is asked. Type leads it
-                because it decides which controls are legal — see controlIssue. */}
-            <FormItem labelContent={lbl(t("MODEL_TYPE"), t("MODEL_TYPE_HELP"))}>
-              <Select value={p.type} style={W}
-                onChange={(e) => set({ type: optValue(e) as Param["type"] })}>
-                {(["string", "number", "boolean"] as const).map((t) => <Option key={t} value={t}>{t}</Option>)}
+          {/* Second column starts here: what the field holds and how it is asked. Type leads it
+              because it decides which controls are legal — see controlIssue. */}
+          <FormItem labelContent={lbl(t("MODEL_TYPE"), t("MODEL_TYPE_HELP"))}>
+            <Select value={p.type} style={W}
+              onChange={(e) => set({ type: optValue(e) as Param["type"] })}>
+              {(["string", "number", "boolean"] as const).map((type) => <Option key={type} value={type}>{type}</Option>)}
+            </Select>
+          </FormItem>
+
+          <FormItem labelContent={lbl(t("MODEL_UNIT"), t("MODEL_UNIT_HELP"))}>
+            <Input value={p.unit ?? ""} placeholder={t("MODEL_UNIT_PH")} style={W}
+              onInput={(e) => set({ unit: e.target.value || undefined })} />
+          </FormItem>
+
+          <FormItem labelContent={lbl(t("MODEL_CONTROL"), t("MODEL_CONTROL_HELP"))}>
+            {/* Six controls is past what a segmented button should carry, and the hint belongs
+                under the field rather than in six tooltips nobody hovers. */}
+            <FlexBox direction="Column" gap="0.25rem" style={W}>
+              <Select accessibleName={t("MODEL_CONTROL")} value={p.ui} style={W}
+                onChange={(e) => set({ ui: optValue(e) as Param["ui"] })}>
+                {(Object.keys(UI_META) as Param["ui"][]).map((u) => (
+                  <Option key={u} value={u} icon={UI_META[u].icon}>{t(UI_META[u].text)}</Option>
+                ))}
               </Select>
-            </FormItem>
+              <Text style={HINT}>{t(UI_META[p.ui].hint)}</Text>
+            </FlexBox>
+          </FormItem>
+        </FormGroup>
+      </Form>
+    </div>
+  );
+}
 
-            <FormItem labelContent={lbl(t("MODEL_UNIT"), t("MODEL_UNIT_HELP"))}>
-              <Input value={p.unit ?? ""} placeholder={t("MODEL_UNIT_PH")} style={W}
-                onInput={(e) => set({ unit: e.target.value || undefined })} />
-            </FormItem>
+export function ParamDomain({ f }: { f: Fields }) {
+  const { t, p, set, tried, tables, manualRef, sourceRef, rangeDomain } = f;
+  return (
+    <Form {...FORM} accessibleName={t("MODEL_DOMAIN")} layout={rangeDomain ? SPAN3 : SPAN2}>
+      <FormGroup accessibleName={t("MODEL_DOMAIN")} colSpan={SPAN2}>
+        <FormItem labelContent={lbl(t("MODEL_DOMAIN_FROM"), t("MODEL_DOMAIN_HELP"))}>
+          <Select accessibleName={t("MODEL_DOMAIN")} value={domainKind(p.domain)} style={W}
+            onChange={(e) => set({ domain: newDomain(optValue(e), tables) })}>
+            {DOMAIN_KINDS.map(([v, l]) => <Option key={v} value={v}>{t(l)}</Option>)}
+          </Select>
+        </FormItem>
 
-            <FormItem labelContent={lbl(t("MODEL_CONTROL"), t("MODEL_CONTROL_HELP"))}>
-              {/* Six controls is past what a segmented button should carry, and the hint belongs
-                  under the field rather than in six tooltips nobody hovers. */}
-              <FlexBox direction="Column" gap="0.25rem" style={W}>
-                <Select accessibleName={t("MODEL_CONTROL")} value={p.ui} style={W}
-                  onChange={(e) => set({ ui: optValue(e) as Param["ui"] })}>
-                  {(Object.keys(UI_META) as Param["ui"][]).map((u) => (
-                    <Option key={u} value={u} icon={UI_META[u].icon}>{t(UI_META[u].text)}</Option>
-                  ))}
-                </Select>
-                <Text style={HINT}>{t(UI_META[p.ui].hint)}</Text>
-              </FlexBox>
-            </FormItem>
-          </FormGroup>
-        </Form>
+        {/* Second column: the same subject seen from the other side — this one is about the
+            domains of the *other* parameters, so it belongs here rather than among the flags. */}
+        <FormItem labelContent={lbl(t("MODEL_EXCLUDE"), t("MODEL_EXCLUDE_HELP"))}>
+          <CheckBox text={t("MODEL_EXCLUDE_TEXT")} checked={!!p.excludeFromDomains}
+            onChange={(e) => set({ excludeFromDomains: e.target.checked || undefined })} />
+        </FormItem>
+      </FormGroup>
 
-        <Form {...PAIRS} accessibleMode="Edit" headerText={t("MODEL_DOMAIN")}>
-          <FormGroup accessibleName={t("MODEL_DOMAIN")}>
-            <FormItem labelContent={lbl(t("MODEL_DOMAIN_FROM"), t("MODEL_DOMAIN_HELP"))}>
-              <Select accessibleName={t("MODEL_DOMAIN")} value={domainKind(p.domain)} style={W}
-                onChange={(e) => set({ domain: newDomain(optValue(e), tables) })}>
-                {DOMAIN_KINDS.map(([v, l]) => <Option key={v} value={v}>{t(l)}</Option>)}
-              </Select>
-            </FormItem>
+      {rangeDomain ? (
+        <FormGroup accessibleName={t("MODEL_DOMAIN_RANGE")} colSpan={SPAN3}>
+          <RangeEditor value={rangeDomain} onChange={(domain) => set({ domain })} />
+        </FormGroup>
+      ) : null}
 
-            {/* Second column: the same subject seen from the other side — this one is about the
-                domains of the *other* parameters, so it belongs here rather than among the flags. */}
-            <FormItem labelContent={lbl(t("MODEL_EXCLUDE"), t("MODEL_EXCLUDE_HELP"))}>
-              <CheckBox text={t("MODEL_EXCLUDE_TEXT")} checked={!!p.excludeFromDomains}
-                onChange={(e) => set({ excludeFromDomains: e.target.checked || undefined })} />
-            </FormItem>
-          </FormGroup>
-        </Form>
+      {sourceRef ? (
+        <FormGroup accessibleName={t("MODEL_SOURCE")} colSpan={SPAN2}>
+          <SourceRefEditor ref_={sourceRef} tried={tried} tables={tables}
+            onChange={(ref) => set({ domain: { kind: "options", ref } })} />
+        </FormGroup>
+      ) : null}
 
-        {/* Min/max/step is one row of three: reading a range down a column hides the pairing. */}
-        {p.domain?.kind === "range" ? (
-          <Form {...TRIPLE} accessibleMode="Edit">
-            <FormGroup accessibleName={t("MODEL_DOMAIN_RANGE")}>
-              <RangeEditor value={p.domain} onChange={(domain) => set({ domain })} />
-            </FormGroup>
-          </Form>
-        ) : null}
+      {/* A list of records is a table. TABLE_ITEM spans the group's columns and hides the label
+          slot, so the grid's toolbar is the only heading and the row still lives in this form. */}
+      {manualRef ? (
+        <FormGroup accessibleName={t("MODEL_OPTIONS")} colSpan={SPAN2}>
+          <FormItem className={TABLE_ITEM}>
+            <ManualOptions ref_={manualRef} onChange={(ref) => set({ domain: { kind: "options", ref } })} />
+          </FormItem>
+        </FormGroup>
+      ) : null}
+    </Form>
+  );
+}
 
-        {sourceRef ? (
-          <Form {...PAIRS} accessibleMode="Edit">
-            <FormGroup accessibleName={t("MODEL_SOURCE")}>
-              <SourceRefEditor ref_={sourceRef} tried={tried} tables={tables}
-                onChange={(ref) => set({ domain: { kind: "options", ref } })} />
-            </FormGroup>
-          </Form>
-        ) : null}
+export function ParamBehavior({ f }: { f: Fields }) {
+  const { t, p, set, tables, scope, at, exprIssue } = f;
+  return (
+    // Four editors of the same height, two per column, each beside the flag that answers the
+    // same question without a formula.
+    <Form {...FORM} accessibleName={t("MODEL_BEHAVIOR")} layout={SPAN2}>
+      <FormGroup accessibleName={t("MODEL_BEHAVIOR")}>
+        {/* First column: what the field is worth. Read-only sits under the default that owns it. */}
+        <FormItem labelContent={lbl(t("MODEL_DEFAULT"), t("MODEL_DEFAULT_HELP"))}>
+          <ExprInput optional rows={3} value={p.defaultExpr} model={scope} tables={tables}
+            fieldId={`expr-parameters[${at}].defaultExpr`} issue={exprIssue("defaultExpr")}
+            onChange={(v) => set({ defaultExpr: v })} />
+        </FormItem>
 
-        {/* A Form of its own (GridForm): a list of records is a table, and a table is not a form field. */}
-        {manualRef ? (
-          <ManualOptions ref_={manualRef} onChange={(ref) => set({ domain: { kind: "options", ref } })} />
-        ) : null}
+        <FormItem labelContent={lbl(t("MODEL_READONLY"), t("MODEL_READONLY_HELP"))}>
+          <CheckBox text={t("MODEL_READONLY_TEXT")} checked={!!p.readonly}
+            onChange={(e) => set({ readonly: e.target.checked || undefined })} />
+        </FormItem>
 
-        {/* Every formula the parameter owns, in one place: four editors of the same height, two per
-            column, each beside the flag that answers the same question without a formula. */}
-        <Form {...PAIRS} accessibleMode="Edit" headerText={t("MODEL_BEHAVIOR")}>
-          <FormGroup accessibleName={t("MODEL_BEHAVIOR")}>
-            {/* First column: what the field is worth. Read-only sits under the default that owns it. */}
-            <FormItem labelContent={lbl(t("MODEL_DEFAULT"), t("MODEL_DEFAULT_HELP"))}>
-              <ExprInput optional rows={3} value={p.defaultExpr} model={scope} tables={tables}
-                fieldId={`expr-parameters[${at}].defaultExpr`} issue={exprIssue("defaultExpr")}
-                onChange={(v) => set({ defaultExpr: v })} />
-            </FormItem>
+        <FormItem labelContent={lbl(t("MODEL_PRICE_FORMULA"), t("MODEL_PRICE_FORMULA_HELP"))}>
+          <ExprInput optional rows={3} value={p.priceExpr} model={scope} tables={tables}
+            fieldId={`expr-parameters[${at}].priceExpr`} issue={exprIssue("priceExpr")}
+            onChange={(v) => set({ priceExpr: v })} />
+        </FormItem>
 
-            <FormItem labelContent={lbl(t("MODEL_READONLY"), t("MODEL_READONLY_HELP"))}>
-              <CheckBox text={t("MODEL_READONLY_TEXT")} checked={!!p.readonly}
-                onChange={(e) => set({ readonly: e.target.checked || undefined })} />
-            </FormItem>
+        {/* Second column: when the field applies. The always-on flag sits directly above the
+            conditional version of the same question, so an author reads one then the other. */}
+        <FormItem labelContent={lbl(t("MODEL_VISIBLE_WHEN"), t("MODEL_VISIBLE_HELP"))}>
+          <ExprInput optional rows={3} placeholder={t("MODEL_VISIBLE_PH")} value={p.visibleWhen} model={scope}
+            tables={tables} fieldId={`expr-parameters[${at}].visibleWhen`} issue={exprIssue("visibleWhen")}
+            onChange={(v) => set({ visibleWhen: v })} />
+        </FormItem>
 
-            <FormItem labelContent={lbl(t("MODEL_PRICE_FORMULA"), t("MODEL_PRICE_FORMULA_HELP"))}>
-              <ExprInput optional rows={3} value={p.priceExpr} model={scope} tables={tables}
-                fieldId={`expr-parameters[${at}].priceExpr`} issue={exprIssue("priceExpr")}
-                onChange={(v) => set({ priceExpr: v })} />
-            </FormItem>
+        <FormItem labelContent={lbl(t("MODEL_MANDATORY"), t("MODEL_MANDATORY_HELP"))}>
+          <CheckBox text={t("MODEL_MANDATORY_TEXT")} checked={!!p.mandatory}
+            onChange={(e) => set({ mandatory: e.target.checked || undefined })} />
+        </FormItem>
 
-            {/* Second column: when the field applies. The always-on flag sits directly above the
-                conditional version of the same question, so an author reads one then the other. */}
-            <FormItem labelContent={lbl(t("MODEL_VISIBLE_WHEN"), t("MODEL_VISIBLE_HELP"))}>
-              <ExprInput optional rows={3} placeholder={t("MODEL_VISIBLE_PH")} value={p.visibleWhen} model={scope}
-                tables={tables} fieldId={`expr-parameters[${at}].visibleWhen`} issue={exprIssue("visibleWhen")}
-                onChange={(v) => set({ visibleWhen: v })} />
-            </FormItem>
-
-            <FormItem labelContent={lbl(t("MODEL_MANDATORY"), t("MODEL_MANDATORY_HELP"))}>
-              <CheckBox text={t("MODEL_MANDATORY_TEXT")} checked={!!p.mandatory}
-                onChange={(e) => set({ mandatory: e.target.checked || undefined })} />
-            </FormItem>
-
-            <FormItem labelContent={lbl(t("MODEL_REQUIRED_WHEN"), t("MODEL_REQUIRED_HELP"))}>
-              <ExprInput optional rows={3} placeholder={t("MODEL_REQUIRED_PH")} value={p.requiredWhen} model={scope}
-                tables={tables} fieldId={`expr-parameters[${at}].requiredWhen`} issue={exprIssue("requiredWhen")}
-                onChange={(v) => set({ requiredWhen: v })} />
-            </FormItem>
-          </FormGroup>
-        </Form>
-      </div>
-    </Dialog>
+        <FormItem labelContent={lbl(t("MODEL_REQUIRED_WHEN"), t("MODEL_REQUIRED_HELP"))}>
+          <ExprInput optional rows={3} placeholder={t("MODEL_REQUIRED_PH")} value={p.requiredWhen} model={scope}
+            tables={tables} fieldId={`expr-parameters[${at}].requiredWhen`} issue={exprIssue("requiredWhen")}
+            onChange={(v) => set({ requiredWhen: v })} />
+        </FormItem>
+      </FormGroup>
+    </Form>
   );
 }
 
@@ -416,15 +427,13 @@ function ManualOptions({ ref_, onChange }: {
   });
 
   return (
-    <GridForm headerText={t("MODEL_OPTIONS")}>
-      <Grid {...grid} title={t("MODEL_OPTIONS")} fill={false} selectionMode="Multiple"
-        toolbarActions={(sel) => (
-          <>
-            <Button icon="add" design="Transparent"
-              onClick={() => onChange({ ...ref_, options: [...ref_.options, { value: "" }] })}>{t("MODEL_ADD_OPTION")}</Button>
-            <DeleteRows sel={sel} onDelete={(gone) => onChange({ ...ref_, options: ref_.options.filter((_, j) => !gone.has(j)) })} />
-          </>
-        )} />
-    </GridForm>
+    <Grid {...grid} title={t("MODEL_OPTIONS")} fill={false} selectionMode="Multiple"
+      toolbarActions={(sel) => (
+        <>
+          <Button icon="add" design="Transparent"
+            onClick={() => onChange({ ...ref_, options: [...ref_.options, { value: "" }] })}>{t("MODEL_ADD_OPTION")}</Button>
+          <DeleteRows sel={sel} onDelete={(gone) => onChange({ ...ref_, options: ref_.options.filter((_, j) => !gone.has(j)) })} />
+        </>
+      )} />
   );
 }

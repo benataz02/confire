@@ -75,11 +75,11 @@ func ensureAdmin() (bool, error) {
 	return true, nil
 }
 
-// initConsole switches the console to UTF-8, so ✓ and … do not print as mojibake, and turns on
-// VT processing, which the wizard's colours need; false on a console without it (pre-Windows 10).
+// initConsole turns on VT processing, which the wizard's colours need; false on a console without it
+// (pre-Windows 10). The code page stays as it is: Go reads and writes a console in UTF-16 either way,
+// and on Server 2012 R2 with code page 65001 set, WriteConsoleW failed every non-ASCII write ("A
+// device attached to the system is not functioning"): each line with a ✓ or an — vanished.
 func initConsole() bool {
-	windows.SetConsoleOutputCP(65001)
-	windows.SetConsoleCP(65001)
 	out := windows.Handle(os.Stdout.Fd())
 	var mode uint32
 	return windows.GetConsoleMode(out, &mode) == nil &&

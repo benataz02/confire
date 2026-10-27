@@ -20,7 +20,7 @@ export type UiSource = {
     configs: Pick<Client["configs"], "queryPage">;
   };
   orpc: {
-    entities: Pick<Utils["entities"], "metadata" | "one" | "create" | "update">;
+    entities: Pick<Utils["entities"], "metadata" | "one" | "create" | "update" | "neighbor">;
     views: Pick<Utils["views"], "list" | "setActive" | "create" | "update" | "remove" | "getState" | "setState">;
   };
   /** This user's role on the tenant, undefined until known. A hook: called during render. */

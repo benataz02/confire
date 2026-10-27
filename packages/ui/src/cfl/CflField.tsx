@@ -26,7 +26,7 @@ const isBlank = (v: unknown) => v === undefined || v === null || (typeof v === "
 const trimmed = (v: unknown) => (typeof v === "string" ? v.trim() : v);
 export function CflField({
   config, value, onValueChange, onRowSelect, onExistenceError, onCheckStarted,
-  editable = true, disabled, placeholder, maxLength, error, required, link, formData, mustExist: mustExistProp,
+  editable = true, disabled, placeholder, maxLength, error, required, requiredState, link, formData, mustExist: mustExistProp,
   accessibleName, commitOnly,
 }: {
   config: CflFieldConfig;
@@ -45,6 +45,8 @@ export function CflField({
   error?: string | null;
   /** show the empty state as an error right away (pages without a save-time validation) */
   required?: boolean;
+  /** empty required: Critical, with no value-state message. Default is Negative plus the pick-a-value message. */
+  requiredState?: "Negative" | "Critical";
   link?: true | LinkConfig;
   /** the record — `link.idField` reads from it */
   formData?: Row;
@@ -233,7 +235,9 @@ export function CflField({
     ) : <Text>{shownText}</Text>;
   }
 
-  const err = error ?? ownError ?? (required && (multi ? !tokens.length : isBlank(value)) ? i18n.getText("UI_PICK_VALUE") : null);
+  const requiredBlank = !!required && (multi ? !tokens.length : isBlank(value));
+  const blankCritical = requiredBlank && requiredState === "Critical" && !error && !ownError;
+  const err = error ?? ownError ?? (requiredBlank && !blankCritical ? i18n.getText("UI_PICK_VALUE") : null);
   const inputValue = multi ? (typed ?? "") : labelMode ? (focused ? (typed ?? "") : shownText) : (typed ?? raw);
 
   return (
@@ -253,7 +257,7 @@ export function CflField({
         noTypeahead
         showValueHelpIcon
         showClearIcon={!multi}
-        valueState={err ? "Negative" : "None"}
+        valueState={err ? "Negative" : blankCritical ? "Critical" : "None"}
         valueStateMessage={err ? <div>{err}</div> : undefined}
         tokens={multi ? tokens.map((t) => (
           <Token key={String(t[key])} text={tokenLabel(t, d)} data-k={String(t[key] ?? "")} />

@@ -1,4 +1,5 @@
 import type { FormState, ModelDef, Notice } from "@confire/config-engine";
+import { GENERAL_SECTION } from "@confire/ui/configurator/formHelpers.ts";
 import type { PageMessage } from "../PageMessages.tsx";
 
 /** `(key, ...params)` — the caller's `i18n.getText`, so this stays pure and testable. */
@@ -62,7 +63,8 @@ export function configMessages(a: {
 }): PageMessage[] {
   const out: PageMessage[] = [];
   const t = a.t;
-  const configure = { section: "configure", group: t("CONFIG_SECTION_CONFIGURE") };
+  // A configuration message without a field of its own lands at the top of the page.
+  const configure = { section: GENERAL_SECTION, group: t("CONFIG_SECTION_CONFIGURE") };
   const candidates = { section: "candidates", group: t("CONFIG_SECTION_CANDIDATES") };
 
   const lock = !a.locked ? undefined

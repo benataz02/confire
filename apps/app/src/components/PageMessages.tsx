@@ -80,9 +80,10 @@ export function PageMessages({ messages, okText, onSection }: {
             endContent={<Button design="Transparent" onClick={() => setOpen(false)}>{i18n.getText("SHELL_CLOSE")}</Button>} />
         }>
         {/* MessageView lays its two panes out at height:100%, so the popover cannot size itself to
-            the list. ponytail: one row per message with a cap; tune the 3rem if the rows grow. */}
+            the list. A grouped row with a subtitle is ~4rem; the cap keeps a long list on screen.
+            ponytail: one row per message with a cap; tune the 4rem if the rows grow. */}
         <MessageView groupItems showDetailsPageHeader={false}
-          style={{ width: "26rem", height: `${Math.min(3 + messages.length * 3, 27)}rem` }}>
+          style={{ width: "26rem", height: `${Math.min(4 + messages.length * 4, 42)}rem` }}>
           {messages.length === 0 ? (
             <MessageItem type="Positive" titleText={okText} />
           ) : (

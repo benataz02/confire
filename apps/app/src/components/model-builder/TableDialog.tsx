@@ -8,7 +8,7 @@ import { Grid, GridForm } from "@confire/ui/list-report/Grid.tsx";
 import { useFieldConstraints, type EntityConstraints } from "@confire/ui/metadata.ts";
 import type { ListColumn } from "@confire/ui/types.ts";
 import { ExprInput } from "./ExprInput.tsx";
-import { NONE, PAIRS, W, lbl, optValue } from "./ParamDialog.tsx";
+import { NONE, PAIRS, W, lbl, optValue } from "./ParamForm.tsx";
 import { masterdataRef, modelWithTable, rowVars, sourceBadge, type TableCols } from "./exprHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
 import { positions, useEditGrid } from "./useEditGrid.tsx";
@@ -58,7 +58,7 @@ export const newCalcTable = (taken: string[], t: Translate): TableDef => ({
   columns: [{ key: "value", label: copy(t, "MODEL_COL_VALUE", "Value"), type: "number", cell: { kind: "input" } }],
 });
 
-// Buffer-and-commit, like ParamDialog: edits land on a local copy so a half-renamed key never runs
+// Buffer-and-commit, like the parameter page: edits land on a local copy so a half-renamed key never runs
 // through the draft's checkModel. Placement is not here — that is the structure tree's job.
 export function TableDialog({ draft, tables, initial, onCancel, onOk }: {
   draft: ModelDef;

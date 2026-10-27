@@ -1,23 +1,13 @@
-import { Bar, BusyIndicator, Button, Text } from "@ui5/webcomponents-react";
-import type { FormState } from "@confire/config-engine";
-import { ConsistencyStatus } from "@confire/ui/configurator/ConfiguratorForm.tsx";
-import { money } from "@confire/ui/money.ts";
-import { useCurrency } from "../../orpc.ts";
+import { Bar, Button } from "@ui5/webcomponents-react";
 import { useI18n } from "../../i18n.ts";
 
-/** The process page's floating footer: the finalizing action (Create quote, the only Emphasized
- *  one on the page — the Fiori rule) and a request's decisions, beside the consistency, the busy
- *  marker and the picks' total. */
-export function ProcessFooter({ shown, onGone, form, busy, selectedTotal, quote, decide }: {
+/** The process page's floating footer: Create quote (the only Emphasized action) and a request's
+ *  decisions. It is mounted only once quoting is on, and rises in / drops out (global.css). */
+export function ProcessFooter({ shown, onGone, quote, decide }: {
   /** confire-footer-in/-out (global.css): rises in while shown, drops out — then `onGone` unmounts it */
   shown: boolean;
   onGone: () => void;
-  form?: Pick<FormState, "conflicts" | "open">;
-  /** a call is out or a commit is pending: the figures are the last answer's */
-  busy: boolean;
-  /** what the picked cells price at; null with nothing picked */
-  selectedTotal: number | null;
-  quote: null | { text: string; disabled: boolean; tooltip?: string; onClick: () => void };
+  quote: null | { text: string; pending: boolean; onClick: () => void };
   /** a request's decisions; null on an internal configuration */
   decide: null | {
     canAccept: boolean; disabled: boolean; unsaved: boolean;
@@ -26,22 +16,17 @@ export function ProcessFooter({ shown, onGone, form, busy, selectedTotal, quote,
 }) {
   const i18n = useI18n();
   const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
-  const currency = useCurrency();
+  // One control is not a toolbar (Bar's own rule); several decisions are.
+  const controls = (quote ? 1 : 0) + (decide ? 2 + (decide.canAccept ? 1 : 0) : 0);
   return (
-    <Bar design="FloatingFooter" className={shown ? "confire-footer-in" : "confire-footer-out"}
+    <Bar design="FloatingFooter" accessibleRole={controls > 1 ? "Toolbar" : "None"}
+      className={shown ? "confire-footer-in" : "confire-footer-out"}
       onAnimationEnd={(e) => { if (e.animationName === "confire-footer-out") onGone(); }}
-      startContent={
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          {form ? <ConsistencyStatus form={form} /> : null}
-          {busy ? <BusyIndicator active delay={0} size="S" /> : null}
-          {selectedTotal !== null ? <Text>{t("CONFIG_SELECTED", money(selectedTotal, currency))}</Text> : null}
-        </div>
-      }
       endContent={
         <>
           {/* A request takes it once accepted (in review); until then Accept is the positive action. */}
           {quote ? (
-            <Button design="Emphasized" disabled={quote.disabled} tooltip={quote.tooltip} onClick={quote.onClick}>{quote.text}</Button>
+            <Button design="Emphasized" disabled={quote.pending} onClick={quote.onClick}>{quote.text}</Button>
           ) : null}
           {decide?.canAccept ? (
             <Button design="Positive" disabled={decide.disabled} onClick={decide.onAccept}>{t("CONFIG_ACCEPT")}</Button>

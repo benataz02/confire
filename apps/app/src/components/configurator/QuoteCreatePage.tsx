@@ -40,11 +40,11 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
   const meta = useFieldConstraints("Quotations");
   const draft = useQuery({ ...orpc.configs.quoteDraft.queryOptions({ input: { projectId } }), retry: false });
   const backToConfig = () => navigate({ to: "/$slug/configs/$id", params: { id: projectId } });
-  // The lines' only editor: the configuration's items grid, on the Configure tab.
+  // The lines' only editor: the configuration's items grid.
   const tableActions = {
     lines: () => (
       <Button icon="edit" design="Transparent"
-        onClick={() => navigate({ to: "/$slug/configs/$id", params: { id: projectId }, search: { section: "configure" } })}>
+        onClick={backToConfig}>
         {t("CONFIG_EDIT_IN_CONFIG")}
       </Button>
     ),

@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "go run . run --config agent.json",
-    "test": "go test ./..."
+    "test": "go test ./...",
+    "build": "GOTOOLCHAIN=go1.26.8 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags \"-s -w -X main.version=dev -X main.defaultServer=${CONFIRE_SERVER:-http://localhost:3000}\" -o dist/confire-agent.exe . && objdump -p dist/confire-agent.exe | grep -qP '^MajorSubsystemVersion\\t6$' || { echo 'dist/confire-agent.exe requires Windows 10: Server 2012 R2 cannot load it (see apps/server/Dockerfile)'; exit 1; }"
   }
 }

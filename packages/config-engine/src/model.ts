@@ -119,11 +119,27 @@ export const OperationZ = z.object({
 
 export const HistoryMappingZ = z.object({
   param: KeyZ,
+  /** Set: `param` is a column of this table — the items grid — matched against every row; the best one counts. */
+  table: KeyZ.optional(),
   column: z.string().min(1),
   match: z.enum(["exact", "closeness", "contains"]),
   weight: z.number().positive().default(1),
 });
 export type HistoryMapping = z.infer<typeof HistoryMappingZ>;
+
+/** A mapping's key in `configs.similar`'s entries and values: the parameter's own, or
+ *  `<table>.<column>` — a dot no KeyZ holds, so the two never collide. */
+export const historyKey = (m: { param: string; table?: string }) => (m.table ? `${m.table}.${m.param}` : m.param);
+
+/** What a mapping may name, by historyKey: every parameter and the items grid's typed columns. A
+ *  formula column is left out — its value is computed per read, never in the row a match reads. */
+export function historyFields(model: ModelDef): Map<string, { type: Param["type"]; label: string }> {
+  const out = new Map(model.parameters.map((p) => [p.key, { type: p.type, label: p.label }]));
+  const items = model.tables?.find((t) => t.role === "items");
+  for (const c of items?.columns ?? [])
+    if (c.cell.kind !== "formula") out.set(historyKey({ table: items!.key, param: c.key }), { type: c.type, label: c.label });
+  return out;
+}
 
 /** One column of a config table. `cell` is what the salesperson sees: a plain field, a picker
  *  over the same LookupRef params use, or a value the model computes per row. */
@@ -248,8 +264,6 @@ export const ModelDefZ = z.object({
       z.object({
         key: KeyZ,
         title: z.string(),
-        /** SAP icon name drawn before the title in the section's Form header. */
-        icon: z.string().optional(),
         groups: z.array(GroupZ),
       }),
     ),

@@ -1,13 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ModelBuilderPage } from "../../../components/model-builder/ModelBuilderPage.tsx";
-import { sectionSearch } from "../../../lib/sectionParam.ts";
+import { ModelDraftScope } from "../../../components/model-builder/draftScope.tsx";
 
 export const Route = createFileRoute("/$slug/models/$id")({
-  validateSearch: sectionSearch,
-  component: Builder,
+  component: Layout,
 });
 
-function Builder() {
+function Layout() {
   const { id } = Route.useParams();
-  return <ModelBuilderPage key={id} id={id} />;
+  // The route component is reused when the id changes, and useDraftModel does not reset.
+  return <ModelDraftScope key={id} id={id} />;
 }

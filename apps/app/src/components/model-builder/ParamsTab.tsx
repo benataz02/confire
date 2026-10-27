@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
-  Bar, Button, BusyIndicator, IllustratedMessage, Input,
+  Bar, Button, BusyIndicator, IllustratedMessage, Input, ObjectPage,
   SplitterElement, SplitterLayout, Table, TableCell, TableHeaderCell,
   TableHeaderRow, TableRow, TableRowAction, Text, Title,
   type TableHeaderRowDomRef,
@@ -10,15 +11,15 @@ import { formState, isTableGroup, itemsTable, propagate, type Entries, type Reso
 import type { Issue, ModelDef, Param, TableDef } from "@confire/config-engine";
 import { confirm } from "@confire/ui/confirm.ts";
 import { ExprInput } from "./ExprInput.tsx";
-import { ParamDialog } from "./ParamDialog.tsx";
+import type { ParamSearch } from "./paramRoute.ts";
 import { TableDialog, newCalcTable } from "./TableDialog.tsx";
 import { localizeItems } from "./starterModel.ts";
-import { TitleDialog, type TitleIcon } from "./TitleDialog.tsx";
+import { TitleDialog } from "./TitleDialog.tsx";
 import type { TableCols } from "./exprHelpers.ts";
-import { ConfiguratorForm } from "@confire/ui/configurator/ConfiguratorForm.tsx";
+import { configuratorSections } from "@confire/ui/configurator/ConfiguratorForm.tsx";
 import { setEntry } from "@confire/ui/configurator/formHelpers.ts";
 import { issueFor } from "./useDraftModel.ts";
-import { applyMove, canDrop, deleteNode, duplicateParam, parseRowKey, placeParam, placeTable, rowKeyOf, tableKeyAt, type Placement, type RowRef } from "./structureOps.ts";
+import { applyMove, canDrop, deleteNode, duplicateParam, parseRowKey, placeTable, rowKeyOf, tableKeyAt, type Placement, type RowRef } from "./structureOps.ts";
 import { useI18n } from "../../i18n.ts";
 import { copy, type Translate } from "./builderMessages.ts";
 
@@ -34,9 +35,6 @@ function paramDetail(p: Param, t: Translate): string {
   if (p.excludeFromDomains) bits.push(t("MODEL_EXCLUDED"));
   return bits.join(" · ");
 }
-
-// mandatory by default: an unanswered field is the usual mistake, and unticking it is one click.
-const emptyParam = (): Param => ({ key: "", label: "", type: "string", ui: "select", mandatory: true });
 
 // UI5 cozy icon-button min width — reserved so leaf labels indent past group labels.
 const TOGGLE = "2.25rem";
@@ -100,22 +98,28 @@ function revealActionsHeader(el: TableHeaderRowDomRef | null, label: string) {
 export type PreviewAt = "left" | "top" | "bottom" | "right" | "hidden";
 
 export function ParamsTab({ modelId, draft, update, issues, tables, lookups, lookupsFailed, onRetryLookups, previewAt }: {
-  modelId: string; draft: ModelDef; update: Update; issues: Issue[]; tables: Tables;
+  /** absent while the model itself is still unsaved — the parameter page lives under `/models/new` */
+  modelId?: string;
+  draft: ModelDef; update: Update; issues: Issue[]; tables: Tables;
   lookups?: ResolvedLookups; lookupsFailed?: boolean; onRetryLookups: () => void; previewAt: PreviewAt;
 }) {
   const i18n = useI18n();
   const t: Translate = (key, ...params) => i18n.getText(key, ...params);
+  const navigate = useNavigate({ from: "/$slug" });
+  const openParam = (search: ParamSearch) => {
+    if (modelId) void navigate({ to: "/$slug/models/$id/parameter", params: { id: modelId }, search });
+    else void navigate({ to: "/$slug/models/new/parameter", search });
+  };
   const onHeader = useCallback((el: TableHeaderRowDomRef | null) => {
     revealActionsHeader(el, t("MODEL_ACTIONS"));
   }, [i18n]);
-  const [editing, setEditing] = useState<{ param: Param; isNew: boolean; place?: { s: number; g: number } } | null>(null);
   // Table being edited in the dialog, by key — the dialog buffers its own copy.
   const [tableEdit, setTableEdit] = useState<string | null>(null);
   // Formula row switched to its live editors; every other row shows read-only text, which is the
   // whole reason the rows are the same height.
   const [fEdit, setFEdit] = useState<number | null>(null);
   // Section/group whose heading is open in TitleDialog, with the values it opens on.
-  const [titleEdit, setTitleEdit] = useState<{ ref: RowRef; initial: TitleIcon } | null>(null);
+  const [titleEdit, setTitleEdit] = useState<{ ref: RowRef; initial: string } | null>(null);
   // Keyed by stable section/group/param key (not row index) so collapse survives drag-reordering.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
@@ -174,16 +178,6 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   // Only reachable with no parameter placed anywhere — there is no row to hang them under.
   if (!lastParam) for (const i of formulas) rows.push({ kind: "formula", key: `c:${i}`, idx: i });
 
-  const saveParam = (p: Param, isNew: boolean, place?: { s: number; g: number }) =>
-    update((d) => {
-      const parameters = isNew
-        ? [...d.parameters, p]
-        : d.parameters.map((x) => (x.key === editing!.param.key || x.key === p.key ? p : x));
-      let out = { ...d, parameters };
-      if (isNew && place) out = placeParam(out, p.key, place.s, place.g);
-      return out;
-    });
-
   // Confirm only when a delete is destructive: a section/group with children (cascades), or a
   // parameter (drops its whole definition). Empty sections/groups delete without a prompt.
   const confirmDelete = async (ref: RowRef) => {
@@ -215,12 +209,12 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       update((d) => deleteNode(d, ref));
   };
 
-  const saveTitle = (ref: RowRef, { title, icon }: TitleIcon) =>
+  const saveTitle = (ref: RowRef, title: string) =>
     update((d) => ({
       ...d,
       structure: {
         sections: d.structure.sections.map((s, si) => {
-          if (ref.kind === "section") return si === ref.s ? { ...s, title, icon } : s;
+          if (ref.kind === "section") return si === ref.s ? { ...s, title } : s;
           if (ref.kind === "group") return si === ref.s ? { ...s, groups: s.groups.map((g, gi) => (gi === ref.g && !isTableGroup(g) ? { ...g, title } : g)) } : s;
           return s;
         }),
@@ -296,7 +290,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   // stops short of the edge until a drag rewrites it. Two percentages always add up to the width.
   const preview = (
     <SplitterElement key="preview" size="50%" minSize={280}>
-      <PreviewPane modelId={modelId} draft={draft} issues={issues} lookups={lookups}
+      <PreviewPane modelId={modelId ?? ""} draft={draft} issues={issues} lookups={lookups}
         lookupsFailed={lookupsFailed} onRetryLookups={onRetryLookups} />
     </SplitterElement>
   );
@@ -370,7 +364,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
           else if (act === "calc" || act === "items") { if (ref.kind === "section") addTable(act, ref.s); }
           else if (act === "dup" && ref.kind === "param") update((d) => duplicateParam(d, ref.key));
           else if (ref.kind === "section") addGroup(ref.s);
-          else if (ref.kind === "group") setEditing({ param: emptyParam(), isNew: true, place: { s: ref.s, g: ref.g } });
+          else if (ref.kind === "group") openParam({ s: ref.s, g: ref.g });
           else if (ref.kind === "param") addFormula();
         }}
         onRowClick={(e) => {
@@ -381,14 +375,13 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
             setTableEdit(tableKeyAt(draft, ref.s, ref.g) ?? null);
           } else if (ref.kind === "param") {
             const p = draft.parameters.find((x) => x.key === ref.key);
-            if (p) setEditing({ param: structuredClone(p), isNew: false });
+            if (p) openParam({ key: p.key });
           } else {
             const sec = draft.structure.sections[ref.s];
             const grp = ref.kind === "group" ? sec?.groups[ref.g] : undefined;
             setTitleEdit({
               ref,
-              initial: ref.kind === "section" ? { title: sec?.title ?? "", icon: sec?.icon }
-                : { title: grp && !isTableGroup(grp) ? grp.title : "" },
+              initial: ref.kind === "section" ? sec?.title ?? "" : grp && !isTableGroup(grp) ? grp.title : "",
             });
           }
         }}
@@ -472,18 +465,11 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       ) : null}
 
       {titleEdit ? (
-        <TitleDialog initial={titleEdit.initial} withIcon={titleEdit.ref.kind === "section"}
+        <TitleDialog initial={titleEdit.initial} section={titleEdit.ref.kind === "section"}
           onCancel={() => setTitleEdit(null)}
           onOk={(v) => { saveTitle(titleEdit.ref, v); setTitleEdit(null); }} />
       ) : null}
 
-      {editing ? (
-        <ParamDialog
-          draft={draft} tables={tables} initial={editing.param} isNew={editing.isNew}
-          onCancel={() => setEditing(null)}
-          onOk={(p) => { saveParam(p, editing.isNew, editing.place); setEditing(null); }}
-        />
-      ) : null}
     </div>
       </SplitterElement>
       {previewFirst || previewAt === "hidden" ? null : preview}
@@ -518,14 +504,17 @@ function PreviewPane({ modelId, draft, issues, lookups, lookupsFailed, onRetryLo
           <Button icon="refresh" onClick={onRetryLookups}>{i18n.getText("MODEL_RETRY_OPTIONS")}</Button>
         </div>
       ) : null}
-      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-        {lookups && form ? (
-          <ConfiguratorForm model={previewModel} form={form} tables={lookups.tables} formulaOverride
-            onChange={(key, v) => setEntries((e) => setEntry(e, key, v))}
-            querySource={{ modelId }}
-            rows={tables} onRowsChange={(key, rows) => setTables((cur) => ({ ...cur, [key]: rows }))} />
-        ) : lookupsFailed ? null : <BusyIndicator active delay={0} />}
-      </div>
+      {/* The configuration page's sections and anchor bar, in a title-less ObjectPage that scrolls itself. */}
+      {lookups && form ? (
+        <ObjectPage hidePinButton style={{ flex: 1, minHeight: 0 }}>
+          {configuratorSections({
+            model: previewModel, form, tables: lookups.tables, formulaOverride: true,
+            onChange: (key, v) => setEntries((e) => setEntry(e, key, v)),
+            querySource: { modelId },
+            rows: tables, onRowsChange: (key, rows) => setTables((cur) => ({ ...cur, [key]: rows })),
+          })}
+        </ObjectPage>
+      ) : lookupsFailed ? null : <BusyIndicator active delay={0} />}
     </div>
   );
 }

@@ -41,7 +41,7 @@ export function useDraftModel(id?: string) {
   const [serverIssues, setServerIssues] = useState<Issue[]>([]);
   // A brand-new model is empty by definition, so painting its mandatory fields red — and listing
   // them in the message popover — before the author has touched anything is noise. Like
-  // ParamDialog's `tried`, the first Save reveals them.
+  // the parameter page's `tried`, the first Save reveals them.
   // A *saved* model starts validated: it passed checkModel to get into the database, so anything
   // wrong with it is something this session just introduced, and saying so at once is the point.
   const [tried, setTried] = useState(!!id);
@@ -62,7 +62,7 @@ export function useDraftModel(id?: string) {
     })),
     [tables],
   );
-  // Commit model: dialogs (ParamDialog, ComboTableDialog) buffer edits and commit on OK; inline
+  // Commit model: the parameter page and the table dialog buffer edits and commit on OK; inline
   // editors (RulesTab, SettingsTab) mutate this draft directly per keystroke. Validation
   // runs against a deferred draft so checkModel lags fast typing instead of blocking every keystroke.
   const deferredDraft = useDeferredValue(draft);
@@ -107,7 +107,7 @@ export function useDraftModel(id?: string) {
     /** Clear the unsaved-changes blocker before navigating away deliberately (Delete). */
     setDirty,
     // Save stays enabled and the first click on an invalid model reveals the errors instead of
-    // saving, so the button never greys out without saying why (same deal as ParamDialog).
+    // saving, so the button never greys out without saying why (same deal as the parameter page).
     save: () => {
       if (!draft) return;
       setTried(true);

@@ -28,8 +28,9 @@ import (
 // something. A local build says dev.
 var version = "dev"
 
-// defaultServer is the only deployment that hands out the agent (spec A17); --server is for dev.
-const defaultServer = "https://app.confire.ai"
+// defaultServer is the only deployment that hands out the agent (spec A17). The dev build (`bun run
+// build`) sets it to dev's: -X main.defaultServer=$CONFIRE_SERVER, else http://localhost:3000.
+var defaultServer = "https://app.confire.ai"
 
 func main() {
 	if isWindowsService() {

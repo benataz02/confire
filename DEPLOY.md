@@ -324,7 +324,7 @@ or later; on 2012 R2 the Universal C Runtime, KB2999226, which cloudflared needs
    anyway*.
 2. Answer its questions. Each section is tested with a real login before it is kept:
    - **SAP B1 Service Layer**: URL (`https://localhost:50000`), company database, user, password.
-   - **Beas**: optional. Its URL including its path, session or basic sign-in, user, password.
+   - **Beas**: optional. Its URL including its path, bearer (its own `Login`, the default) or basic sign-in, user, password.
    - **Printing** (SAP API Gateway): optional. URL (`https://<SL host>:60020`), user, password, and the
      Crystal layout code per document type. A blank layout means that type is not printable.
    - **The pairing code**, last, so a long SAP section cannot use up its hour.

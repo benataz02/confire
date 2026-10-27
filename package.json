@@ -27,7 +27,7 @@
     "db:generate": "bun --cwd packages/db drizzle-kit generate",
     "db:studio": "bun --env-file=../../.env --cwd packages/db drizzle-kit studio",
     "auth:generate": "bun --cwd apps/server better-auth-generate",
-    "dev": "bun run --parallel dev:server dev:app dev:agent dev:portal-server dev:portal",
+    "dev": "bun run --parallel dev:server dev:app dev:portal-server dev:portal",
     "dev:server": "bun run --hot --preload ./apps/server/src/instrument.ts apps/server/src/index.ts",
     "dev:app": "bun --cwd apps/app dev",
     "dev:portal-server": "bun run --hot --preload ./apps/server/src/instrument.ts apps/server/src/portal/index.ts",

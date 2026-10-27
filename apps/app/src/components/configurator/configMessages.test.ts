@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import type { FormState, ModelDef } from "@confire/config-engine";
+import { GENERAL_SECTION } from "@confire/ui/configurator/formHelpers.ts";
 import { configMessages } from "./configMessages.ts";
 
 /** English sentences, not the properties file — `{n}` is filled in order. */
@@ -67,7 +68,7 @@ const formOf = (conflicts: FormState["conflicts"], visible: Record<string, boole
 test("General's fields are messages with a field to jump to, in the page's words", () => {
   const msgs = configMessages({ ...base, missing: [notice("name_required", [], "__name"), notice("customer_required", [], "__customer")] });
   expect(msgs.map((m) => m.text)).toEqual(["Enter a name", "Pick a business partner"]);
-  expect(msgs.every((m) => m.type === "Critical" && m.section === "configure")).toBe(true);
+  expect(msgs.every((m) => m.type === "Critical" && m.section === GENERAL_SECTION)).toBe(true);
   expect(msgs.map((m) => m.anchor)).toEqual(["#cfg-name", "#cfg-customer"]);
 });
 
@@ -101,7 +102,7 @@ test("a rule conflict reads by the parameters it involves and jumps to the first
 test("a rule over computed values only has no field, so only the section", () => {
   const [msg] = configMessages({ ...base, form: formOf([{ message: "Too heavy", params: [] }], {}) });
   expect(msg!.anchor).toBeUndefined();
-  expect(msg!.section).toBe("configure");
+  expect(msg!.section).toBe(GENERAL_SECTION);
 });
 
 test("the enumeration cap is a Candidates warning naming the widest parameter", () => {

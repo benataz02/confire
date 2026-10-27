@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BusyIndicator, Button, DynamicSideContent, IllustratedMessage, ListItemStandard, MessageStrip,
+  BusyIndicator, Button, IllustratedMessage, ListItemStandard, MessageStrip,
   Link, ObjectPage, ObjectPageSection, ObjectPageTitle, Panel, Popover, ResponsivePopover, SelectDialog, Tag, Text, Title,
   ToggleButton, Toolbar,
   ToolbarButton, ToolbarItem,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
-import { itemsTableOf, type Val } from "@confire/config-engine";
+import { historyKey, itemsTableOf, type Val } from "@confire/config-engine";
 import { orpc, useCurrency } from "../../orpc.ts";
 import { money as formatMoney } from "@confire/ui/money.ts";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
@@ -16,7 +17,8 @@ import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import { ProjectTimeline } from "@confire/ui/timeline/ProjectTimeline.tsx";
 import { FILE_MAX_MB, uploadFile } from "@confire/ui/files.ts";
 import { toast } from "@confire/ui/toast.ts";
-import { ConfiguratorForm } from "@confire/ui/configurator/ConfiguratorForm.tsx";
+import { configuratorSections } from "@confire/ui/configurator/ConfiguratorForm.tsx";
+import { GENERAL_SECTION } from "@confire/ui/configurator/formHelpers.ts";
 import { useI18n } from "../../i18n.ts";
 import { projectStatusText } from "./runView.ts";
 import { PriceAnalysis } from "./PriceAnalysis.tsx";
@@ -28,7 +30,6 @@ import { ProcessFooter } from "./ProcessFooter.tsx";
 import { useConfigProcess } from "./useConfigProcess.ts";
 import { PageMessages } from "../PageMessages.tsx";
 import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
-import { useSectionParam } from "../../lib/sectionParam.ts";
 import { useAssistantShell } from "../../assistant/AssistantProvider.tsx";
 import { fieldMarks, sourceTip, type Sources } from "../../assistant/marks.ts";
 import type { Source } from "../../assistant/cards/registry.tsx";
@@ -41,8 +42,9 @@ const GENERAL = new Set(["name_required", "customer_required", "batches_required
 /** One insights panel's content column. */
 const PANEL_BODY = { display: "flex", flexDirection: "column", gap: "0.75rem", padding: "0 0.25rem 0.5rem" } as const;
 
-// Two tabs, Configure and Candidates, and one finalizing action in the footer once everything the
-// quote needs is filled. The server computes everything on the page (configs.get's view); this
+// One scrolling page — General, the model's sections, Candidates and a request's Timeline — with
+// the insights rail beside every section, and one finalizing action in the footer once everything
+// the quote needs is filled. The server computes everything on the page (configs.get's view); this
 // draws it, sends what the user changed, and waits for the answer.
 // `new` (/configs/new) is the General form alone: there is no id yet, and nothing that reads one
 // runs before the configuration exists.
@@ -53,7 +55,8 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const qc = useQueryClient();
   const navigate = useNavigate({ from: "/$slug" });
   const currency = useCurrency();
-  const sectionParam = useSectionParam();
+  // The ObjectPage's root: the scroller the rail sticks in, and what a section jump scrolls.
+  const [page, setPage] = useState<HTMLElement | null>(null);
   const proc = useConfigProcess(id, isNew, {
     left: (to, msg) => {
       if (msg) toast(t(msg));
@@ -143,11 +146,14 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   // a client's request only while it is in review (spec §7). The page goes read-only rather than
   // letting every edit walk into that error.
   const locked = request ? project?.status !== "in_review" : project?.status === "quoted";
-  // Only the Model select reads the list; read-only, the payload's own model names itself.
-  const models = useQuery({ ...orpc.configs.models.queryOptions(), enabled: isNew || (!!project && !locked && !request) });
   // Anything a model switch would throw away, the pending edit included, so the field locks on the
   // first change rather than when its answer lands.
   const modelLocked = Object.keys(entries).length > 0 || Object.values(tables).some((rows) => rows.length > 0) || queue.busy;
+  // Only the Model select reads the list; once it is read-only, the payload's own model names itself.
+  const models = useQuery({
+    ...orpc.configs.models.queryOptions(),
+    enabled: !modelLocked && (isNew || (!!project && !locked && !request)),
+  });
   // The assistant (spec §4.1): the page tells the panel when an edit is still on its way, and draws
   // which values the assistant wrote and which wait on a question in the panel.
   const assistant = useAssistantShell();
@@ -157,7 +163,8 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const [noticeOpener, setNoticeOpener] = useState<HTMLElement | null>(null);
 
   const general = (
-    <GeneralForm locked={locked} request={!!request} isNew={isNew} head={head} batches={batches}
+    <GeneralForm locked={locked} request={!!request} head={head}
+      batches={isNew ? undefined : batches}
       modelName={model?.name} models={models.data ?? []}
       saving={proc.update.isPending || proc.create.isPending} modelLocked={modelLocked}
       onSave={save} onModel={switchModel} onBatches={(next) => proc.commit({ batches: next })} />
@@ -169,7 +176,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
         <ObjectPageTitle header={<Title>{t("CONFIG_NEW")}</Title>}
           breadcrumbs={<PageBreadcrumbs items={[{ text: t("NAV_CONFIGS"), to: "/configs" }]} current={t("CONFIG_NEW")} />} />
       }>
-        <ObjectPageSection id="configure" titleText={t("CONFIG_SECTION_CONFIGURE")}>
+        <ObjectPageSection id={GENERAL_SECTION} titleText={t("CONFIG_GENERAL")}>
           {proc.create.error ? <MessageStrip design="Negative" hideCloseButton>{proc.create.error.message}</MessageStrip> : null}
           {general}
         </ObjectPageSection>
@@ -195,10 +202,8 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const candidates = view.candidates;
   // The configurator waits for General: the server lists what it still needs.
   const headReady = !view.missing.some((m) => GENERAL.has(m.code));
-  // Nothing missing: the quote can go once a calculation is current. The footer holds that action,
-  // so it exists only then. It stays while an edit is out: dropping it per change would flicker.
+  // Nothing missing, and not locked. The quote itself waits for a current calculation (below).
   const ready = !locked && view.missing.length === 0;
-  const conflicted = form.conflicts.length > 0;
   // A request's decisions by status (§7). They finalize, so they live in the footer (Fiori), next
   // to Create quote — never in the header toolbar.
   const canDecide = !!request && (project.status === "submitted" || project.status === "in_review");
@@ -215,35 +220,49 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const cost = view.costs.find((c) => c.batchQty === itemQty) ?? view.costs[0];
   const itemRows: Record<string, Val>[] = itemsDef ? form.tables[itemsDef.key] ?? [] : [];
 
-  // Under Candidates the bar waits for a ticked line: there, picking is the step in progress, and
-  // the bar is what finishes it.
-  const showFooter = canDecide || (ready && (sectionParam.props.selectedSectionId !== "candidates" || selection.length > 0));
+  // Which row to quote is chosen in the Candidates section. A single candidate leaves nothing to
+  // pick, so Create quote selects every batch quantity of it on the way out. The bar stays down
+  // until that quote can actually be created — messages already say why it can't — then slides in.
+  // An edit in flight does not drop it: the button waits, the bar does not bounce.
+  const needsPick = candidates.rows.length > 1 && !view.selection.picks.length;
+  const quoting = ready && view.calculation.state === "current" && candidates.rows.length > 0 && !needsPick && !queue.error;
+  const showFooter = canDecide || quoting;
   if (showFooter && !footerUp) setFooterUp(true);
-  // Several candidates: which to quote is the user's pick, made under Candidates. One leaves nothing
-  // to pick, so Create quote picks every batch quantity of it on the way out. configs.quoteDraft
-  // builds from the *saved* selection, hence `busy` while a pick or an edit is still out.
-  const mustPick = candidates.rows.length > 1 && !view.selection.picks.length;
-  const busy = queue.busy || proc.pickNow.isPending || view.calculation.state !== "current" || !candidates.rows.length;
+  // Focus first: focus entering the content is what sets the ObjectPage's scroll padding (the sticky
+  // title and anchor bar), so the section lands below them rather than under.
+  const goSection = (section: string) => {
+    const el = page?.querySelector<HTMLElement>(`[id="ObjectPageSection-${section}"]`);
+    el?.focus({ preventScroll: true });
+    el?.scrollIntoView({ block: "start" });
+  };
   const toQuote = () => void navigate({ to: "/$slug/configs/$id/quote", params: { id } });
   const finalize = () =>
-    mustPick ? sectionParam.go("candidates")
-    : view.selection.picks.length ? toQuote()
+    view.selection.picks.length ? toQuote()
     : proc.pickNow.mutate(
         { projectId: id, selection: candidates.rows[0]!.perBatch.map((b) => ({ candidateIdx: 0, batchQty: b.batchQty })) },
         { onSuccess: toQuote },
       );
 
-  // Fills only empty params, and never a read-only one; the server takes it from there. Nothing to
-  // fill is not an edit.
-  const copyValues = (values: Record<string, Val>) => {
+  // Fills only empty params, never a read-only one, and an items-grid column (`<table>.<column>`)
+  // in the grid row the past row matched (the first, or a new one, when none did); the server takes
+  // it from there. Nothing to fill is not an edit.
+  const copyValues = (values: Record<string, Val>, item: number | null) => {
+    const empty = (v: unknown) => v === undefined || v === null || v === "";
     const set: Record<string, Val> = {};
-    for (const [k, v] of Object.entries(values)) {
-      const cur = entries[k];
-      const writable = model.definition.parameters.some((p) => p.key === k && !p.readonly);
-      if (writable && (cur === undefined || cur === null || cur === "") && v !== null && v !== undefined) set[k] = v;
+    const rows = itemsDef ? tables[itemsDef.key] ?? [] : [];
+    // A row deleted since the answer came back: the first, as before there was an index.
+    const at = item !== null && item < rows.length ? item : 0;
+    const row = { ...rows[at] };
+    let cells = 0;
+    for (const m of model.definition.history?.mappings ?? []) {
+      const v = values[historyKey(m)];
+      if (v === null || v === undefined) continue;
+      if (m.table) {
+        if (m.table === itemsDef?.key && empty(row[m.param])) { row[m.param] = v; cells++; }
+      } else if (empty(entries[m.param]) && model.definition.parameters.some((p) => p.key === m.param && !p.readonly)) set[m.param] = v;
     }
-    const n = Object.keys(set).length;
-    if (n) proc.commit({ set });
+    const n = Object.keys(set).length + cells;
+    if (n) proc.commit({ set, ...(cells ? { tables: { [itemsDef!.key]: rows.length ? rows.with(at, row) : [row] } } : {}) });
     toast(n === 0 ? t("CONFIG_TOAST_FILLED_NONE") : n === 1 ? t("CONFIG_TOAST_FILLED_ONE") : t("CONFIG_TOAST_FILLED_MANY", String(n)));
   };
 
@@ -262,15 +281,71 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
     locked: locked && { request: !!request, status: project.status, quoteResponse: project.quoteResponse },
   });
 
+  // Beside every section, sticky under the title and anchor bar. ObjectPage has no slot for side
+  // content (each child becomes an anchor), so the rail is portaled into its content area and
+  // global.css reserves a quarter of that area for it. The content's offset is where the sticky bars
+  // end. While an edit is out the figures are the last answer's: dimmed, not hidden.
+  // ponytail: no fall-down below the sections on a narrow screen; the toggle hides the rail.
+  const content = page?.querySelector<HTMLElement>('[data-component-name="ObjectPageContent"]');
+  const rail = railShown && page && content ? createPortal(
+    <aside className="confire-rail" aria-label={t("CONFIG_INSIGHTS")}>
+    <div style={{ top: content.offsetTop, maxHeight: `calc(${page.clientHeight - content.offsetTop}px - ${footerUp ? "4.5rem" : "1rem"})` }}>
+      {/* The total rides in headerText rather than a `header` slot: a custom header is only
+          toggled by its arrow, this one by the whole bar — and the figure survives collapsing. */}
+      <Panel accessibleRole="Form" headerLevel="H5" style={queue.busy ? { opacity: 0.6 } : undefined}
+        headerText={cost ? t("CONFIG_COST_ELEMENTS_TOTAL", formatMoney(cost.cost, currency)) : t("CONFIG_COST_ELEMENTS")}>
+        <div style={PANEL_BODY}>
+          {cost ? (
+            <CostBody rows={itemRows} cost={cost} cur={currency} />
+          ) : (
+            <IllustratedMessage name="NoData" design="ExtraSmall" titleText={t("CONFIG_NO_COSTS")}
+              subtitleText={t("CONFIG_NO_COSTS_SUB")} />
+          )}
+          {view.optionPrices.rows.length ? <OptionPrices rows={view.optionPrices.rows} total={view.optionPrices.total} cur={currency} /> : null}
+        </div>
+      </Panel>
+      {/* No mappings means the History tab was never filled in — an empty "not set up"
+          panel is just noise in the rail. Copy is an edit, so it waits for General too. */}
+      {headReady && model.definition.history?.mappings.length ? (
+        <Panel accessibleRole="Form" headerLevel="H5" headerText={t("CONFIG_SIMILAR")} collapsed>
+          <div style={PANEL_BODY}>
+            <SimilarConfigs projectId={id} model={model.definition} entries={entries} tables={tables} onCopy={copyValues} />
+          </div>
+        </Panel>
+      ) : null}
+    </div>
+    </aside>,
+    content,
+  ) : null;
+
+  // Read-only has no edit to lose, so a locked page shows its configuration regardless.
+  const configurable = (headReady || locked) && !!proc.lookups.data;
+  const generalSection = (
+    <ObjectPageSection key={GENERAL_SECTION} id={GENERAL_SECTION} titleText={t("CONFIG_GENERAL")}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        {/* The local AI notice, interactive (Fiori: a quotation is high-stakes): once, while
+            any value the assistant read is still on the page. */}
+        {anyRead ? (
+          <Link design="Subtle" onClick={(e) => setNoticeOpener(e.currentTarget as HTMLElement)}>{t("ASSISTANT_NOTICE")}</Link>
+        ) : null}
+        {general}
+        {configurable ? null : !headReady && !locked ? (
+          <IllustratedMessage name="NoData" design="Small" titleText={t("CONFIG_COMPLETE_GENERAL")}
+            subtitleText={t("CONFIG_COMPLETE_GENERAL_SUB")} />
+        ) : proc.lookups.error ? (
+          /* Why the options are missing is a page message; the retry it needs is not something
+             a message can carry, so the button stays here. */
+          <Button icon="refresh" style={{ alignSelf: "start" }} onClick={() => void proc.lookups.refetch()}>{t("CONFIG_RETRY_OPTIONS")}</Button>
+        ) : <BusyIndicator active delay={0} />}
+      </div>
+    </ObjectPageSection>
+  );
+
   const footer = (
-    <ProcessFooter shown={showFooter} onGone={() => setFooterUp(false)} form={form}
-      busy={queue.sending || proc.pickNow.isPending}
-      selectedTotal={view.selection.picks.length ? view.selection.total : null}
-      quote={ready ? {
-        text: mustPick ? t("CONFIG_SELECT_CANDIDATE") : quotationHere ? t("CONFIG_UPDATE_QUOTE") : t("CONFIG_CREATE_QUOTE"),
-        disabled: conflicted || busy || deciding,
-        tooltip: conflicted || queue.error || view.calculation.state === "failed" ? t("CONFIG_RESOLVE_FIRST")
-          : busy ? t("CONFIG_CALCULATING") : undefined,
+    <ProcessFooter shown={showFooter} onGone={() => setFooterUp(false)}
+      quote={quoting ? {
+        text: quotationHere ? t("CONFIG_UPDATE_QUOTE") : t("CONFIG_CREATE_QUOTE"),
+        pending: queue.busy || proc.pickNow.isPending || deciding,
         onClick: finalize,
       } : null}
       decide={canDecide ? {
@@ -282,9 +357,8 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   return (
     <>
     <ObjectPage
-      mode="IconTabBar"
+      ref={setPage}
       hidePinButton
-      {...sectionParam.props}
       titleArea={
         <ObjectPageTitle
           breadcrumbs={<PageBreadcrumbs items={[request
@@ -300,7 +374,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
                   controls are wrapped, everything else is a ToolbarButton. */}
               <ToolbarItem overflowPriority="NeverOverflow">
                 <PageMessages messages={messages} okText={t("CONFIG_OK")}
-                  onSection={sectionParam.go} />
+                  onSection={goSection} />
               </ToolbarItem>
               {/* An edit that never reached the server is kept; this sends it again. */}
               {queue.error && !queue.error.refused ? (
@@ -372,105 +446,56 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
       }
       footerArea={footerUp ? footer : undefined}
     >
-      <ObjectPageSection id="configure" titleText={t("CONFIG_SECTION_CONFIGURE")} >
-        <DynamicSideContent style={{ flex: 1, minHeight: 0 }} sideContentVisibility="AlwaysShow"
-          hideSideContent={!railShown} accessibilityAttributes={{ sideContent: { ariaLabel: t("CONFIG_INSIGHTS") } }}
-          sideContent={
-            // No padding on top: the rail's first panel lines up with the General panel.
-            // The form column has none, and both are Panel headers.
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", paddingInline: "0.5rem", paddingBlockEnd: "0.5rem" }}>
-              {/* The total rides in headerText rather than a `header` slot: a custom header is only
-                  toggled by its arrow, this one by the whole bar — and the figure survives collapsing.
-                  While an edit is out the figures are the last answer's: dimmed, not hidden. */}
-              <Panel accessibleRole="Form" headerLevel="H5" style={queue.busy ? { opacity: 0.6 } : undefined}
-                headerText={cost ? t("CONFIG_COST_ELEMENTS_TOTAL", formatMoney(cost.cost, currency)) : t("CONFIG_COST_ELEMENTS")}>
-                <div style={PANEL_BODY}>
-                  {cost ? (
-                    <CostBody rows={itemRows} cost={cost} cur={currency} />
-                  ) : (
-                    <IllustratedMessage name="NoData" design="ExtraSmall" titleText={t("CONFIG_NO_COSTS")}
-                      subtitleText={t("CONFIG_NO_COSTS_SUB")} />
-                  )}
-                  {view.optionPrices.rows.length ? <OptionPrices rows={view.optionPrices.rows} total={view.optionPrices.total} cur={currency} /> : null}
-                </div>
-              </Panel>
-              {/* No mappings means the History tab was never filled in — an empty "not set up"
-                  panel is just noise in the rail. Copy is an edit, so it waits for General too. */}
-              {headReady && model.definition.history?.mappings.length ? (
-                <Panel accessibleRole="Form" headerLevel="H5" headerText={t("CONFIG_SIMILAR")} collapsed>
-                  <div style={PANEL_BODY}>
-                    <SimilarConfigs projectId={id} model={model.definition} entries={entries} onCopy={copyValues} />
-                  </div>
-                </Panel>
-              ) : null}
-            </div>
-          }>
-          {/* The main pane scrolls itself. The section's inline padding sits outside that
-              pane, so without this the form meets the scrollbar. */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "1rem", paddingBlockEnd: "1rem", paddingInlineEnd: "0.5rem" }}>
-            {/* The local AI notice, interactive (Fiori: a quotation is high-stakes): once, while
-                any value the assistant read is still on the page. */}
-            {anyRead ? (
-              <Link design="Subtle" onClick={(e) => setNoticeOpener(e.currentTarget as HTMLElement)}>{t("ASSISTANT_NOTICE")}</Link>
-            ) : null}
-            {general}
-            {/* Read-only has no edit to lose, so a locked page shows its configuration regardless. */}
-            {!headReady && !locked ? (
-              <IllustratedMessage name="NoData" design="Small" titleText={t("CONFIG_COMPLETE_GENERAL")}
-                subtitleText={t("CONFIG_COMPLETE_GENERAL_SUB")} />
-            ) : proc.lookups.data ? (
-              <ConfiguratorForm model={model.definition} form={form} tables={proc.lookups.data.tables}
-                marks={marks} onMarkPress={pressMark}
-                rows={tables} readOnly={locked} querySource={{ modelId: project.modelId }} formulaOverride
-                onChange={(key, v) => proc.commit(v === undefined ? { unset: [key] } : { set: { [key]: v } })}
-                onRowsChange={(key, rows) => proc.commit({ tables: { [key]: rows } })}
-                itemMoney={cost && itemQty !== undefined ? { batchQty: cost.batchQty, rows: cost.items } : null}
-                batches={batches} itemBatch={itemQty} onItemBatchChange={setViewQty} />
-            ) : proc.lookups.error ? (
-              /* Why the options are missing is a page message; the retry it needs is not something
-                 a message can carry, so the button stays here. */
-              <Button icon="refresh" onClick={() => void proc.lookups.refetch()}>{t("CONFIG_RETRY_OPTIONS")}</Button>
-            ) : <BusyIndicator active delay={0} />}
-          </div>
-        </DynamicSideContent>
-        <ResponsivePopover open={!!markOpen && !!markSource} opener={markOpen?.opener} headerText={t("ASSISTANT_MARK_TITLE")}
-          onClose={() => setMarkOpen(null)}>
-          {markSource ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", maxWidth: "22rem" }}>
-              <Text style={{ color: "var(--sapContent_LabelColor)" }}>
-                {"chat" in markSource ? t("ASSISTANT_MARK_CHAT")
-                  : markSource.page === null ? markSource.file : t("ASSISTANT_MARK_PAGE", markSource.file, String(markSource.page))}
-              </Text>
-              <Text style={{ fontStyle: "italic" }}>“{"chat" in markSource ? markSource.chat : markSource.quote}”</Text>
-              {"quote" in markSource && String(marked!.value) !== markSource.quote.trim()
-                ? <Text>{t("ASSISTANT_MARK_READ", Array.isArray(marked!.value) ? marked!.value.join(", ") : String(marked!.value))}</Text> : null}
-            </div>
-          ) : null}
-        </ResponsivePopover>
-        <Popover open={!!noticeOpener} opener={noticeOpener ?? undefined} onClose={() => setNoticeOpener(null)}>
-          <Text style={{ maxWidth: "22rem", display: "block" }}>{t("ASSISTANT_NOTICE_LONG")}</Text>
-        </Popover>
-      </ObjectPageSection>
-      {/* The count rides in the tab, like the model builder's issue counts — the Fiori anchor-bar
-          counter. */}
-      <ObjectPageSection id="candidates" titleText={candidates.rows.length ? t("CONFIG_CANDIDATES_COUNT", String(candidates.rows.length)) : t("CONFIG_SECTION_CANDIDATES")}>
-        {/* The prices are the calculation's own, so they render with the agent off. A pending edit
-            is about to replace these candidates, so they stop taking picks. */}
-        {candidates.rows.length > 0 ? (
-          <PriceAnalysis model={model.definition} candidates={candidates} selection={selection}
-            onSelect={proc.pick} disabled={locked || queue.editing} />
-        ) : (
-          <IllustratedMessage name="NoData" design="Medium" titleText={t("CONFIG_NO_CANDIDATES")}
-            subtitleText={t("CONFIG_NO_CANDIDATES_SUB")} />
-        )}
-      </ObjectPageSection>
-      {/* ObjectPage's children are sections or booleans — not null. */}
-      {!!request && (
-        <ObjectPageSection id="timeline" titleText={t("CONFIG_SECTION_TIMELINE")}>
-          <RequestTimeline id={id} />
-        </ObjectPageSection>
-      )}
+      {/* One flat array: ObjectPage reads sections (or booleans) off its children, one level deep. */}
+      {[
+        generalSection,
+        ...(configurable ? configuratorSections({
+          model: model.definition, form, tables: proc.lookups.data!.tables,
+          marks, onMarkPress: pressMark,
+          rows: tables, readOnly: locked, querySource: { modelId: project.modelId }, formulaOverride: true,
+          onChange: (key, v) => proc.commit(v === undefined ? { unset: [key] } : { set: { [key]: v } }),
+          onRowsChange: (key, rows) => proc.commit({ tables: { [key]: rows } }),
+          itemMoney: cost && itemQty !== undefined ? { batchQty: cost.batchQty, rows: cost.items } : null,
+          batches, itemBatch: itemQty, onItemBatchChange: setViewQty,
+        }) : []),
+        // The count rides in the anchor, like the model builder's issue counts — the Fiori
+        // anchor-bar counter.
+        <ObjectPageSection key="candidates" id="candidates" titleText={candidates.rows.length ? t("CONFIG_CANDIDATES_COUNT", String(candidates.rows.length)) : t("CONFIG_SECTION_CANDIDATES")}>
+          {/* The prices are the calculation's own, so they render with the agent off. A pending edit
+              is about to replace these candidates, so they stop taking picks. */}
+          {candidates.rows.length > 0 ? (
+            <PriceAnalysis model={model.definition} candidates={candidates} selection={selection}
+              onSelect={proc.pick} disabled={locked || queue.editing} />
+          ) : (
+            <IllustratedMessage name="NoData" design="Medium" titleText={t("CONFIG_NO_CANDIDATES")}
+              subtitleText={t("CONFIG_NO_CANDIDATES_SUB")} />
+          )}
+        </ObjectPageSection>,
+        !!request && (
+          <ObjectPageSection key="timeline" id="timeline" titleText={t("CONFIG_SECTION_TIMELINE")}>
+            <RequestTimeline id={id} />
+          </ObjectPageSection>
+        ),
+      ]}
     </ObjectPage>
+    {rail}
+    <ResponsivePopover open={!!markOpen && !!markSource} opener={markOpen?.opener} headerText={t("ASSISTANT_MARK_TITLE")}
+      onClose={() => setMarkOpen(null)}>
+      {markSource ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", maxWidth: "22rem" }}>
+          <Text style={{ color: "var(--sapContent_LabelColor)" }}>
+            {"chat" in markSource ? t("ASSISTANT_MARK_CHAT")
+              : markSource.page === null ? markSource.file : t("ASSISTANT_MARK_PAGE", markSource.file, String(markSource.page))}
+          </Text>
+          <Text style={{ fontStyle: "italic" }}>“{"chat" in markSource ? markSource.chat : markSource.quote}”</Text>
+          {"quote" in markSource && String(marked!.value) !== markSource.quote.trim()
+            ? <Text>{t("ASSISTANT_MARK_READ", Array.isArray(marked!.value) ? marked!.value.join(", ") : String(marked!.value))}</Text> : null}
+        </div>
+      ) : null}
+    </ResponsivePopover>
+    <Popover open={!!noticeOpener} opener={noticeOpener ?? undefined} onClose={() => setNoticeOpener(null)}>
+      <Text style={{ maxWidth: "22rem", display: "block" }}>{t("ASSISTANT_NOTICE_LONG")}</Text>
+    </Popover>
     {request ? (
       <SelectDialog open={reassigning} headerText={t("CONFIG_REASSIGN_TITLE")} searchPlaceholder={t("CONFIG_REASSIGN_SEARCH")}
         onSearchInput={(e) => setStaffSearch(e.detail.value)} onSearchReset={() => setStaffSearch("")}

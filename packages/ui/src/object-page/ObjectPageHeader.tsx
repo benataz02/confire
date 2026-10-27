@@ -14,7 +14,11 @@ import type { Facet, HeaderActionContext, HeaderConfig, Row } from "../types.ts"
 // the record. Functions returning the UI5 elements, not components: ObjectPage clones its
 // titleArea/headerArea and expects to find ObjectPageTitle/ObjectPageHeader there.
 
-export type RecordNavigation = { first: () => void; prev: () => void; next: () => void; last: () => void; busy?: boolean };
+export type RecordNavigation = {
+  first: () => void; prev: () => void; next: () => void; last: () => void; busy?: boolean;
+  /** known to be on the first/last record: First+Previous / Next+Last are off */
+  atFirst?: boolean; atLast?: boolean;
+};
 
 const formatField = (formData: Row, fields: Record<string, FieldConstraint> | undefined, key: string) => {
   const m = fields?.[key];
@@ -62,13 +66,13 @@ export function objectPageTitle(o: {
           {/* Same overflowGroup: the four moves stay together. A bar that cannot fit all of them
               puts every one in the overflow menu, rather than leaving First visible and Last hidden. */}
           <ToolbarButton overflowGroup="record" design="Transparent" icon="media-rewind" tooltip={o.t("UI_FIRST")} accessibleName={o.t("UI_FIRST")}
-            disabled={o.navigation.busy} onClick={o.navigation.first} />
+            disabled={o.navigation.busy || o.navigation.atFirst} onClick={o.navigation.first} />
           <ToolbarButton overflowGroup="record" design="Transparent" icon="navigation-left-arrow" tooltip={o.t("UI_PREVIOUS")} accessibleName={o.t("UI_PREVIOUS")}
-            disabled={o.navigation.busy} onClick={o.navigation.prev} />
+            disabled={o.navigation.busy || o.navigation.atFirst} onClick={o.navigation.prev} />
           <ToolbarButton overflowGroup="record" design="Transparent" icon="navigation-right-arrow" tooltip={o.t("UI_NEXT")} accessibleName={o.t("UI_NEXT")}
-            disabled={o.navigation.busy} onClick={o.navigation.next} />
+            disabled={o.navigation.busy || o.navigation.atLast} onClick={o.navigation.next} />
           <ToolbarButton overflowGroup="record" design="Transparent" icon="media-forward" tooltip={o.t("UI_LAST")} accessibleName={o.t("UI_LAST")}
-            disabled={o.navigation.busy} onClick={o.navigation.last} />
+            disabled={o.navigation.busy || o.navigation.atLast} onClick={o.navigation.last} />
         </Toolbar>
       ) : undefined}
       actionsBar={

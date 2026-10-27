@@ -42,7 +42,11 @@ bun --cwd apps/portal build             # same, for the portal's route tree
 
 Note `apps/server/tsconfig.json` also includes `../../scripts`, so the seed/migration/e2e scripts
 are checked there rather than in a project of their own. The agent is Go: in `apps/agent`,
-`go test ./...` and `GOOS=windows go vet ./...` (the Windows half only compiles there).
+`go test ./...` and `GOOS=windows go vet ./...` (the Windows half only compiles there). Build the exe
+dev serves with `bun --cwd apps/agent build`, never a bare `go build`: it must be Go 1.26 (Go 1.27's
+exe will not load on Windows Server 2012 R2 — see `apps/server/Dockerfile`). That build pairs with
+`http://localhost:3000`, or with `CONFIRE_SERVER` when set (the `dev:pair` URL, for a remote box);
+only the Dockerfile's build pairs with `app.confire.ai`.
 
 ## The processes
 
@@ -512,7 +516,8 @@ generates a page.
   (`QuoteCreatePage` seeding `entities.one`) still land. `global.css` (UI5 quirks the shells need) lives
   there too. `bun run test:ui` runs its tests. The portal provides its own (`apps/portal/src/main.tsx`):
   value help over `projects.queryPage`, personal views only.
-- **Shared beyond the shells:** `configurator/` (`ConfiguratorForm`, `ConfigTable`: both draw a server
+- **Shared beyond the shells:** `configurator/` (`configuratorSections` — the model's sections as
+  `ObjectPageSection`s for the caller's one scrolling `ObjectPage` — and `ConfigTable`: both draw a server
   form state — the preview's is built locally — and report each change; `patch.ts`, the patch merge and
   the one-in-flight queue both SPAs send through), `money.ts`,
   `timeline/` (`ProjectTimeline`, `PROJECT_STATUS`) and `confirm.ts`'s `promptNote`.

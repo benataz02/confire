@@ -30,7 +30,8 @@ type Service struct {
 	URL string `json:"url"`
 	// BasePath under URL: B1's /b1s/v2/ when empty; the wizard writes Beas' whole URL instead.
 	BasePath string `json:"basePath,omitempty"`
-	// Auth is "session" (POST Login, the default) or "basic" (an Authorization header per call).
+	// Auth is "session" (B1's POST Login, the default), "bearer" (Beas' POST Login, its session id
+	// as a bearer token) or "basic" (an Authorization header per call).
 	Auth string `json:"auth,omitempty"`
 	User string `json:"user"`
 	Pass string `json:"pass"`

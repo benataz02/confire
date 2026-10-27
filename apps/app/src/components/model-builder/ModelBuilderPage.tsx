@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { useBlocker, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Bar, Button, BusyIndicator, Icon, Label, MessageStrip,
+  Bar, Button, Icon, Label,
   ObjectPage, ObjectPageSection, ObjectPageTitle, SegmentedButton, SegmentedButtonItem,
   Text, Title, Toolbar, ToolbarItem,
 } from "@ui5/webcomponents-react";
-import type { Issue, ModelDef } from "@confire/config-engine";
+import type { Issue } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
-import { useDraftModel } from "./useDraftModel.ts";
+import { useModelDraft } from "./draftScope.tsx";
 import { useSectionParam } from "../../lib/sectionParam.ts";
 import { useI18n } from "../../i18n.ts";
 import { PageMessages } from "../PageMessages.tsx";
@@ -23,13 +23,6 @@ import { ItemStructureTab } from "./ItemStructureTabs.tsx";
 import { HistoryTab } from "./HistoryTab.tsx";
 import { usePreviewLookups } from "./usePreviewLookups.ts";
 
-// Stable placeholder so usePreviewLookups runs unconditionally (rules of hooks) before the
-// draft has loaded; enabled:false until then, so it never hits the agent.
-const EMPTY_MODEL: ModelDef = {
-  name: "", parameters: [], structure: { sections: [] }, computed: [], constraints: [],
-  bom: [], routing: [], pricing: { priceExpr: "0", quoteItemCode: "X" }, batchDefaults: [1],
-};
-
 const PREVIEW_AT: { key: PreviewAt; icon: string; tip: string }[] = [
   { key: "left", icon: "arrow-left", tip: "MODEL_PREVIEW_LEFT" },
   { key: "top", icon: "arrow-top", tip: "MODEL_PREVIEW_ABOVE" },
@@ -42,7 +35,7 @@ const PREVIEW_AT_KEY = "modelBuilder.previewAt";
 export function ModelBuilderPage({ id }: { id?: string }) {
   const i18n = useI18n();
   const t: Translate = (key, ...params) => i18n.getText(key, ...params);
-  const m = useDraftModel(id);
+  const m = useModelDraft();
   const navigate = useNavigate({ from: "/$slug" });
   const qc = useQueryClient();
   const sectionParam = useSectionParam();
@@ -64,31 +57,10 @@ export function ModelBuilderPage({ id }: { id?: string }) {
     onSuccess: () => { m.setDirty(false); invalidateLists(); toast(t("MODEL_TOAST_DELETED")); void navigate({ to: "/$slug/models" }); },
   }));
 
-  // Guard against losing an unsaved draft: intercept in-app navigation (including switching models,
-  // which remounts via key={id}) and confirm; enableBeforeUnload covers hard reload / tab close.
-  useBlocker({
-    shouldBlockFn: async ({ current, next }) => {
-      if (current.pathname === next.pathname) return false;
-      if (!m.dirty || m.saving) return false;
-      return !(await confirm({
-        title: t("MODEL_DISCARD_TITLE"),
-        message: t("MODEL_DISCARD_MSG"),
-        actionText: t("MODEL_DISCARD"),
-        destructive: true,
-      }));
-    },
-    enableBeforeUnload: () => m.dirty,
-  });
-
   // Same lookups feed the params preview and RulesTab's combo-table cells. Query definitions are
   // tenant masterdata, so nothing about the unsaved draft affects them.
-  const lookups = usePreviewLookups(m.draft ?? EMPTY_MODEL, { enabled: !!m.draft });
+  const lookups = usePreviewLookups(m.draft, { enabled: true });
   const allIssues: Issue[] = [...m.issues, ...m.serverIssues];
-  if (m.loading || !m.draft) {
-    return m.loadError
-      ? <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{m.loadError.message}</MessageStrip>
-      : <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
-  }
   const draft = m.draft;
 
   // One list drives the title's message popover AND the per-section counts, so a tab can never
@@ -200,7 +172,7 @@ export function ModelBuilderPage({ id }: { id?: string }) {
         {/* fitContent: the section fills what the title and tab bar leave instead of growing with the
             tree, which is the only way the splitter's panes get a height to split and scroll. */}
         <ObjectPageSection id="params" titleText={secTitle("params")} fitContent>
-          <ParamsTab modelId={id ?? ""} draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
+          <ParamsTab modelId={id} draft={draft} update={m.update} issues={allIssues} tables={m.tableCols}
             lookups={lookups.data} lookupsFailed={!!lookups.error} onRetryLookups={() => void lookups.refetch()}
             previewAt={previewAt} />
         </ObjectPageSection>

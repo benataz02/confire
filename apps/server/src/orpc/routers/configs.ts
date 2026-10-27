@@ -3,7 +3,7 @@ import { openapi } from "@orpc/openapi";
 import { z } from "zod";
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db, configModel, configProject, portalCompany, user } from "@confire/db";
-import { EntriesZ, syncTables, type Entries, type Val } from "@confire/config-engine";
+import { EntriesZ, historyFields, historyKey, syncTables, type Entries, type Val } from "@confire/config-engine";
 import { userProcedure } from "../base.ts";
 import { tenantCompany } from "../../b1.ts";
 import { queryRowOf } from "../../lookups.ts";
@@ -35,7 +35,7 @@ const visible = (tenantId: string, id: string) =>
 
 // Similarity help: rank cached historic rows against the live (unsaved) entries. `values` are
 // the row's mapped param values, coerced to each param's type — what the Copy button applies.
-export async function searchSimilarRows(tenantId: string, projectId: string, entries: Entries) {
+export async function searchSimilarRows(tenantId: string, projectId: string, entries: Entries, items?: Entries[]) {
   const [project] = await db
     .select({ modelId: configProject.modelId })
     .from(configProject)
@@ -52,18 +52,20 @@ export async function searchSimilarRows(tenantId: string, projectId: string, ent
   if (!source) return { results: [] };
   ensureFresh(tenantId, [source]);
   const rows = (await rowCache(tenantId)(source.id)) as Record<string, Val>[];
-  const typeOf = new Map(model.definition.parameters.map((p) => [p.key, p.type]));
-  const coerce = (param: string, v: Val): Val =>
+  const fields = historyFields(model.definition);
+  const coerce = (key: string, v: Val): Val =>
     v === null ? null
-    : typeOf.get(param) === "number" ? (Number.isFinite(Number(v)) ? Number(v) : null)
-    : typeOf.get(param) === "boolean" ? (typeof v === "boolean" ? v : String(v).toLowerCase() === "true")
+    : fields.get(key)?.type === "number" ? (Number.isFinite(Number(v)) ? Number(v) : null)
+    : fields.get(key)?.type === "boolean" ? (typeof v === "boolean" ? v : String(v).toLowerCase() === "true")
     : String(v);
   return {
-    results: scoreRows(h, entries, rows).map((s) => ({
+    // One probe per items-grid row, each the parameters plus that row's cells.
+    results: scoreRows(h, items?.length ? items.map((r) => ({ ...entries, ...r })) : [entries], rows).map((s) => ({
       score: s.score,
+      item: items?.length ? s.probe : null,
       matches: s.matches,
       display: Object.fromEntries(h.display.map((c) => [c, s.row[c] ?? null])),
-      values: Object.fromEntries(h.mappings.map((m) => [m.param, coerce(m.param, s.row[m.column] ?? null)])),
+      values: Object.fromEntries(h.mappings.map((m) => [historyKey(m), coerce(historyKey(m), s.row[m.column] ?? null)])),
     })),
   };
 }
@@ -371,10 +373,15 @@ export const configsRouter = {
   similar: userProcedure
     .meta(openapi({
       summary: "Find similar past documents",
-      description: "Rank the model's history rows against the given parameter values, best first. Each result's `values` can be written back with `configs.calculate`'s `set`.",
+      description: "Rank the model's history rows against the given parameter values, best first. An items-grid column is keyed `<table>.<column>`; `items` holds one entry per grid row, in order, and a past row matches the parameters together with whichever grid row it fits best — its index is the result's `item`. Each result's `values` uses the same keys: a parameter's can be written back with `configs.calculate`'s `set`, a column's into grid row `item`.",
     }))
-    .input(z.object({ id: z.uuid().describe("The configuration's id"), entries: EntriesZ.describe("The parameter values to match, by key") }))
-    .handler(({ input, context }) => searchSimilarRows(context.tenantId, input.id, input.entries)),
+    .input(z.object({
+      id: z.uuid().describe("The configuration's id"),
+      entries: EntriesZ.describe("The parameter values to match, by key"),
+      // Capped: every history row is scored against every grid row.
+      items: z.array(EntriesZ).max(500).optional().describe("The items grid's rows, in order, each by `<table>.<column>`"),
+    }))
+    .handler(({ input, context }) => searchSimilarRows(context.tenantId, input.id, input.entries, input.items)),
 
   // One edit is one call: write what changed and answer the view it produced. The page sends a
   // commit at once (a field's change, a pick, a row), one call in flight; there is no timer.

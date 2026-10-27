@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"sync"
@@ -21,6 +22,10 @@ type SAPError struct {
 	Status  int    `json:"status"`
 	Code    any    `json:"code"`
 	Message string `json:"message"`
+	// Call is the request SAP answered (`POST https://…/Login`) and Body its answer verbatim, for
+	// Confire's server log: the UI shows Message alone.
+	Call string `json:"call,omitempty"`
+	Body string `json:"body,omitempty"`
 }
 
 func (e *SAPError) Error() string { return e.Message }
@@ -58,7 +63,7 @@ func parseSAPError(status int, payload []byte) *SAPError {
 	if msg = strings.TrimSpace(msg); msg == "" {
 		msg = fmt.Sprintf("SAP returned %d with no message.", status)
 	}
-	return &SAPError{Status: status, Code: code, Message: msg}
+	return &SAPError{Status: status, Code: code, Message: msg, Body: string(payload)}
 }
 
 // Stock installs ship self-signed certificates on all three services, and the hop is the SAP
@@ -83,9 +88,11 @@ type Session struct {
 	loginPath  string // "Login" (Service Layer) or "login" (API Gateway)
 	logoutPath string // "" = no logout call
 	basic      bool
+	bearer     bool // Beas: { User, Pwd } in, its beas-sessionid back as a bearer token
 	company    string
 	user, pass string
 	log        *log.Logger
+	verbose    bool // every call's steps logged, not only a login's: the wizard's tests
 
 	mu       sync.Mutex
 	client   *http.Client // replaced by every login: a new jar is a new session
@@ -103,7 +110,7 @@ type loginCall struct {
 func newSession(name string, base *url.URL, loginPath, logoutPath, auth, company, user, pass string, lg *log.Logger) *Session {
 	return &Session{
 		Name: name, Base: base, loginPath: loginPath, logoutPath: logoutPath, basic: auth == "basic",
-		company: company, user: user, pass: pass, log: lg,
+		bearer: auth == "bearer", company: company, user: user, pass: pass, log: lg,
 	}
 }
 
@@ -157,19 +164,29 @@ func (s *Session) expire(gen int) {
 	s.mu.Unlock()
 }
 
-func (s *Session) login() (*http.Client, error) {
+func (s *Session) login() (_ *http.Client, err error) {
 	client := newClient()
 	if s.basic {
 		return client, nil
 	}
-	body, _ := json.Marshal(map[string]string{"CompanyDB": s.company, "UserName": s.user, "Password": s.pass})
-	req, err := http.NewRequest("POST", s.Base.ResolveReference(&url.URL{Path: s.loginPath}).String(), bytes.NewReader(body))
+	at := s.Base.ResolveReference(&url.URL{Path: s.loginPath})
+	defer func() { // every failure below names the login URL
+		if e, ok := err.(*SAPError); ok {
+			e.Call = "POST " + at.Redacted()
+		}
+	}()
+	creds := map[string]string{"CompanyDB": s.company, "UserName": s.user, "Password": s.pass}
+	if s.bearer {
+		creds = map[string]string{"User": s.user, "Pwd": s.pass}
+	}
+	body, _ := json.Marshal(creds)
+	req, err := http.NewRequest("POST", at.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	res, err := client.Do(req)
+	res, err := client.Do(s.traced(req, "login", client))
 	if err != nil {
 		return nil, &SAPError{Status: 503, Message: fmt.Sprintf("%s is unreachable at %s: %v", s.Name, s.Base, err)}
 	}
@@ -180,8 +197,19 @@ func (s *Session) login() (*http.Client, error) {
 		s.log.Printf("%s login to %s failed (%d): %s", s.Name, s.company, e.Status, e.Message)
 		return nil, e
 	}
-	// A Service Layer that answers with a SessionId but no cookie: the cookie it would have set.
-	if len(client.Jar.Cookies(s.Base)) == 0 {
+	if s.bearer {
+		// { ret_code: 0, ret_text: "login ok", beas-sessionid }. The token rides on this client's
+		// transport, so every call and the logout carry it, and the next login's client replaces it.
+		var b struct {
+			ID   string `json:"beas-sessionid"`
+			Text string `json:"ret_text"`
+		}
+		if json.Unmarshal(payload, &b) != nil || b.ID == "" {
+			return nil, &SAPError{Status: 502, Message: s.Name + " login failed: " + or(b.Text, "no beas-sessionid in its answer"), Body: string(payload)}
+		}
+		client.Transport = bearerTransport{sapTransport, "Bearer " + b.ID}
+	} else if len(client.Jar.Cookies(s.Base)) == 0 {
+		// A Service Layer that answers with a SessionId but no cookie: the cookie it would have set.
 		var b struct{ SessionId string }
 		if json.Unmarshal(payload, &b) != nil || b.SessionId == "" {
 			return nil, &SAPError{Status: res.StatusCode, Message: s.Name + " login succeeded but returned neither cookies nor a SessionId"}
@@ -190,6 +218,34 @@ func (s *Session) login() (*http.Client, error) {
 	}
 	s.log.Printf("%s logged in to %s", s.Name, s.company)
 	return client, nil
+}
+
+// traced logs a request's steps, so one that hangs says where: a host that never answers stops at
+// "connecting", a service that accepts but does not answer at "waiting".
+func (s *Session) traced(req *http.Request, what string, client *http.Client) *http.Request {
+	step := func(f string, a ...any) { s.log.Printf(s.Name+" "+what+": "+f, a...) }
+	return req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+		ConnectStart: func(_, addr string) { step("connecting to %s", addr) },
+		ConnectDone: func(_, addr string, err error) {
+			if err == nil {
+				step("connected to %s", addr)
+			}
+		},
+		WroteRequest: func(httptrace.WroteRequestInfo) {
+			step("sent, waiting for SAP (gives up at %ds)", int(client.Timeout.Seconds()))
+		},
+	}))
+}
+
+type bearerTransport struct {
+	http.RoundTripper
+	auth string
+}
+
+func (b bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context()) // a RoundTripper must not modify the caller's request
+	r.Header.Set("Authorization", b.auth)
+	return b.RoundTripper.RoundTrip(r)
 }
 
 // Logout gives the licence slot back. Best effort: the service is stopping either way.
@@ -204,8 +260,9 @@ func (s *Session) Logout() {
 	req, _ := http.NewRequest("POST", s.Base.ResolveReference(&url.URL{Path: s.logoutPath}).String(), nil)
 	c := *client
 	c.Timeout = 10 * time.Second
-	if res, err := c.Do(req); err == nil {
+	if res, err := c.Do(s.traced(req, "logout", &c)); err == nil {
 		res.Body.Close()
+		s.log.Printf("%s logged out (%d)", s.Name, res.StatusCode)
 	}
 }
 
@@ -244,15 +301,18 @@ func (s *Session) Do(method string, u *url.URL, headers map[string]string, body 
 		if s.basic {
 			req.SetBasicAuth(s.user, s.pass)
 		}
+		if s.verbose {
+			req = s.traced(req, method, client)
+		}
 		started := time.Now()
 		res, err := client.Do(req)
 		if err != nil {
-			return nil, &SAPError{Status: 503, Message: fmt.Sprintf("%s did not answer: %v", s.Name, err)}
+			return nil, &SAPError{Status: 503, Message: fmt.Sprintf("%s did not answer: %v", s.Name, err), Call: method + " " + u.Redacted()}
 		}
 		payload, err := io.ReadAll(io.LimitReader(res.Body, 64<<20))
 		res.Body.Close()
 		if err != nil {
-			return nil, &SAPError{Status: 502, Message: fmt.Sprintf("%s answer cut off: %v", s.Name, err)}
+			return nil, &SAPError{Status: 502, Message: fmt.Sprintf("%s answer cut off: %v", s.Name, err), Call: method + " " + u.Redacted()}
 		}
 		rel := strings.TrimPrefix(u.RequestURI(), s.Base.Path)
 		if len(rel) > 300 {

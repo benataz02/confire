@@ -16,6 +16,34 @@ body {
   margin-inline: 1rem;
 }
 
+/* A pane beside every ObjectPageSection (the configuration page's insights rail). ObjectPage has no
+   slot for one, so the page portals it into the content area: the content makes room, the pane
+   spans the content's whole height, and its box sticks under the title and anchor bar (the page
+   sets `top`) as the sections scroll past.
+   The pane is mounted only while it is open. It is then a quarter of this content box — the padding
+   and the pane are the same 25%, because the pane is positioned against that box — and the sections
+   keep the other three quarters. Hiding it unmounts the pane, and the padding goes with the :has().
+   ponytail: styles UI5's internal ObjectPageContent node; recheck on a webcomponents-react upgrade. */
+[data-component-name="ObjectPageContent"]:has(> .confire-rail) {
+  padding-inline-end: 25%;
+}
+.confire-rail {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 25%;
+  box-sizing: border-box;
+  padding-inline-end: 0.5rem;
+}
+.confire-rail > div {
+  position: sticky;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-block: 0.5rem;
+}
+
 /* SplitterLayout's bar calls focus() on mousedown and styles :focus, not :focus-visible, so every
    drag leaves it outlined as if selected. Re-pointing its focus variables at the resting look keeps
    the highlight for keyboard focus (arrow keys resize) and per-theme borders (HC draws a resting one).
@@ -116,6 +144,18 @@ body {
    web client. `.ui5-link-text` keeps its own ellipsis (overflow hidden ⇒ min-width 0 in flex). */
 .confire-entity-link::part(root) { display: flex; align-items: center; gap: 0.25rem }
 .confire-entity-link::part(icon) { margin: 0; width: 0.875rem; height: 0.875rem; color: #5cb85c }
+/* A read-only value beside an input. The input centres its text in the element height and
+   adds a 0.25rem block margin (`--_ui5_input_margin_top_bottom`, on the host, so a sibling
+   Text or Link does not inherit it). Without both, the value sits above the fields.
+   Compact keeps that margin and only shortens the height. */
+.confire-form-value {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: var(--sapElement_Height);
+  margin-block: 0.25rem;
+}
+.ui5-content-density-compact .confire-form-value { min-height: var(--sapElement_Compact_Height) }
 /* …and what is not the table gets that padding back: the dialog's own (PopupsCommon.css), per the
    media range it reflects on its host, so a filter bar lines up with the header title.
    ponytail: private theme vars, as in ListReport's titleStyle — revisit if they get renamed. */

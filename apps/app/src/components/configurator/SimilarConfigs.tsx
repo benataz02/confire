@@ -3,7 +3,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { BusyIndicator, Button, IllustratedMessage, List, ListItemCustom, MessageStrip, Tag } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/BeforeSearch.js";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoEntries.js";
-import type { Entries, ModelDef, Val } from "@confire/config-engine";
+import { historyFields, historyKey, type Entries, type ModelDef, type TableRows, type Val } from "@confire/config-engine";
 import { money } from "@confire/ui/money.ts";
 import { useI18n } from "../../i18n.ts";
 import { orpc } from "../../orpc.ts";
@@ -49,11 +49,12 @@ const empty = (name: string, title: string, subtitle: string) => (
   <IllustratedMessage name={name} design="ExtraSmall" titleText={title} subtitleText={subtitle} />
 );
 
-export function SimilarConfigs({ projectId, model, entries, onCopy }: {
+export function SimilarConfigs({ projectId, model, entries, tables, onCopy }: {
   projectId: string;
   model: ModelDef;
   entries: Entries;
-  onCopy: (v: Record<string, Val>) => void;
+  tables: TableRows;
+  onCopy: (v: Record<string, Val>, item: number | null) => void;
 }) {
   const i18n = useI18n();
   const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
@@ -61,18 +62,26 @@ export function SimilarConfigs({ projectId, model, entries, onCopy }: {
   // Debounce the page's own object (its identity only changes on an edit), then narrow: a subset
   // rebuilt every render would restart the timer on every render.
   const debounced = useDebounced(entries, 500);
-  // Only the mapped params go over the wire. They are all scoreRows reads, and the query key is
-  // hashed structurally, so an edit to any other field no longer re-ranks.
+  const rows = useDebounced(tables, 500);
+  // Only the mapped values go over the wire — the parameters, and each items-grid row's mapped
+  // cells keyed `<table>.<column>` (every row, empty ones too: the answer's `item` is a row index).
+  // They are all scoreRows reads, and the query key is hashed structurally, so an edit to any other
+  // field no longer re-ranks.
   const mapped: Entries = {};
-  for (const m of h?.mappings ?? []) if (filled(debounced[m.param])) mapped[m.param] = debounced[m.param]!;
-  const anyFilled = Object.keys(mapped).length > 0;
+  const cols = (h?.mappings ?? []).filter((m) => m.table);
+  for (const m of h?.mappings ?? []) if (!m.table && filled(debounced[m.param])) mapped[m.param] = debounced[m.param]!;
+  // historyFields allows the items grid alone, so every column mapping names the same table.
+  const items = cols.length ? (rows[cols[0]!.table!] ?? []).map((r) =>
+    Object.fromEntries(cols.filter((m) => filled(r[m.param])).map((m) => [historyKey(m), r[m.param]!]))) : [];
+  const anyFilled = Object.keys(mapped).length > 0 || items.some((r) => Object.keys(r).length > 0);
   const q = useQuery({
-    ...orpc.configs.similar.queryOptions({ input: { id: projectId, entries: mapped } }),
+    ...orpc.configs.similar.queryOptions({ input: { id: projectId, entries: mapped, ...(items.length ? { items } : {}) } }),
     enabled: anyFilled,
     placeholderData: keepPreviousData, // re-rank without flashing while typing
     staleTime: 30_000,
   });
-  const labelOf = (key: string) => model.parameters.find((p) => p.key === key)?.label ?? key;
+  const fields = historyFields(model);
+  const labelOf = (key: string) => fields.get(key)?.label ?? key;
 
   // The process page does not mount this when history has no mappings.
   if (!h?.mappings.length) return null;
@@ -104,7 +113,7 @@ export function SimilarConfigs({ projectId, model, entries, onCopy }: {
                   {/* Transparent, not Emphasized: up to 10 results render here (scoreRows caps at
                       top=10) and Fiori allows one emphasized button per page, not ten. */}
                   <Button design="Transparent" icon="copy" tooltip={t("CONFIG_USE_VALUES")}
-                    onClick={() => onCopy(r.values)} />
+                    onClick={() => onCopy(r.values, r.item)} />
                 </div>
                 <div style={CHIPS}>
                   {r.matches.map((m) => (
