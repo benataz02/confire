@@ -126,7 +126,6 @@ export const invitation = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     cardCode: text("card_code"),
-    registerDomain: boolean("register_domain").default(false),
     languageCode: integer("language_code"),
   },
   (table) => [

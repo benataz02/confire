@@ -30,6 +30,7 @@ import { ProcessFooter } from "./ProcessFooter.tsx";
 import { useConfigProcess } from "./useConfigProcess.ts";
 import { PageMessages } from "../PageMessages.tsx";
 import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
+import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import { useAssistantShell } from "../../assistant/AssistantProvider.tsx";
 import { fieldMarks, sourceTip, type Sources } from "../../assistant/marks.ts";
 import type { Source } from "../../assistant/cards/registry.tsx";
@@ -39,13 +40,10 @@ type Head = { name: string; modelId: string; customer: { cardCode: string; cardN
 // The General fields the configurator waits for: the form shows once none is missing.
 const GENERAL = new Set(["name_required", "customer_required", "batches_required"]);
 
-/** One insights panel's content column. */
-const PANEL_BODY = { display: "flex", flexDirection: "column", gap: "0.75rem", padding: "0 0.25rem 0.5rem" } as const;
-
-// One scrolling page — General, the model's sections, Candidates and a request's Timeline — with
-// the insights rail beside every section, and one finalizing action in the footer once everything
-// the quote needs is filled. The server computes everything on the page (configs.get's view); this
-// draws it, sends what the user changed, and waits for the answer.
+// One scrolling page — General, the model's sections, Similar configurations, Candidates and a
+// request's Timeline — with the cost rail beside every section, and one finalizing action in the
+// footer once everything the quote needs is filled. The server computes everything on the page
+// (configs.get's view); this draws it, sends what the user changed, and waits for the answer.
 // `new` (/configs/new) is the General form alone: there is no id yet, and nothing that reads one
 // runs before the configuration exists.
 export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string; new?: boolean }) {
@@ -104,7 +102,6 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
       toast(t("CONFIG_TOAST_REASSIGNED", r.assigneeName));
     },
   }));
-  const closeReassign = () => { setReassigning(false); setStaffSearch(""); };
   // The header's Attach: the timeline's upload, for the client to see — the internal-only toggle
   // stays on the timeline's own composer. The size check is here because the server's refusal of an
   // oversized body may reach the browser as a reset connection rather than its message.
@@ -172,7 +169,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
 
   if (isNew) {
     return (
-      <ObjectPage hidePinButton titleArea={
+      <ObjectPage titleArea={
         <ObjectPageTitle header={<Title>{t("CONFIG_NEW")}</Title>}
           breadcrumbs={<PageBreadcrumbs items={[{ text: t("NAV_CONFIGS"), to: "/configs" }]} current={t("CONFIG_NEW")} />} />
       }>
@@ -183,9 +180,8 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
       </ObjectPage>
     );
   }
-  if (q.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
-  if (q.error)
-    return <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{q.error.message}</MessageStrip>;
+  if (q.isPending) return <ObjectPageSkeleton />;
+  if (q.error) return <PageError error={q.error} />;
   if (!view || !project || !model || !form) return null;
 
   const sources = (view.project.sources ?? {}) as Sources;
@@ -291,10 +287,11 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
     <aside className="confire-rail" aria-label={t("CONFIG_INSIGHTS")}>
     <div style={{ top: content.offsetTop, maxHeight: `calc(${page.clientHeight - content.offsetTop}px - ${footerUp ? "4.5rem" : "1rem"})` }}>
       {/* The total rides in headerText rather than a `header` slot: a custom header is only
-          toggled by its arrow, this one by the whole bar — and the figure survives collapsing. */}
-      <Panel accessibleRole="Form" headerLevel="H5" style={queue.busy ? { opacity: 0.6 } : undefined}
+          toggled by its arrow, this one by the whole bar — and the figure survives collapsing.
+          Region, not the default Form: read-only figures, nothing to fill in. */}
+      <Panel accessibleRole="Region" headerLevel="H5" style={queue.busy ? { opacity: 0.6 } : undefined}
         headerText={cost ? t("CONFIG_COST_ELEMENTS_TOTAL", formatMoney(cost.cost, currency)) : t("CONFIG_COST_ELEMENTS")}>
-        <div style={PANEL_BODY}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", padding: "0 0.25rem 0.5rem" }}>
           {cost ? (
             <CostBody rows={itemRows} cost={cost} cur={currency} />
           ) : (
@@ -304,15 +301,6 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
           {view.optionPrices.rows.length ? <OptionPrices rows={view.optionPrices.rows} total={view.optionPrices.total} cur={currency} /> : null}
         </div>
       </Panel>
-      {/* No mappings means the History tab was never filled in — an empty "not set up"
-          panel is just noise in the rail. Copy is an edit, so it waits for General too. */}
-      {headReady && model.definition.history?.mappings.length ? (
-        <Panel accessibleRole="Form" headerLevel="H5" headerText={t("CONFIG_SIMILAR")} collapsed>
-          <div style={PANEL_BODY}>
-            <SimilarConfigs projectId={id} model={model.definition} entries={entries} tables={tables} onCopy={copyValues} />
-          </div>
-        </Panel>
-      ) : null}
     </div>
     </aside>,
     content,
@@ -326,7 +314,8 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
         {/* The local AI notice, interactive (Fiori: a quotation is high-stakes): once, while
             any value the assistant read is still on the page. */}
         {anyRead ? (
-          <Link design="Subtle" onClick={(e) => setNoticeOpener(e.currentTarget as HTMLElement)}>{t("ASSISTANT_NOTICE")}</Link>
+          <Link design="Subtle" accessibilityAttributes={{ hasPopup: "dialog" }}
+            onClick={(e) => setNoticeOpener(e.currentTarget as HTMLElement)}>{t("ASSISTANT_NOTICE")}</Link>
         ) : null}
         {general}
         {configurable ? null : !headReady && !locked ? (
@@ -358,7 +347,6 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
     <>
     <ObjectPage
       ref={setPage}
-      hidePinButton
       titleArea={
         <ObjectPageTitle
           breadcrumbs={<PageBreadcrumbs items={[request
@@ -458,6 +446,13 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
           itemMoney: cost && itemQty !== undefined ? { batchQty: cost.batchQty, rows: cost.items } : null,
           batches, itemBatch: itemQty, onItemBatchChange: setViewQty,
         }) : []),
+        // No mappings means the History tab was never filled in — an empty "not set up" section is
+        // just noise. Copy is an edit, so it waits for General and is gone once the page is locked.
+        headReady && !locked && !!model.definition.history?.mappings.length && (
+          <ObjectPageSection key="similar" id="similar" titleText={t("CONFIG_SIMILAR")}>
+            <SimilarConfigs projectId={id} model={model.definition} entries={entries} tables={tables} onCopy={copyValues} />
+          </ObjectPageSection>
+        ),
         // The count rides in the anchor, like the model builder's issue counts — the Fiori
         // anchor-bar counter.
         <ObjectPageSection key="candidates" id="candidates" titleText={candidates.rows.length ? t("CONFIG_CANDIDATES_COUNT", String(candidates.rows.length)) : t("CONFIG_SECTION_CANDIDATES")}>
@@ -498,11 +493,12 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
     </Popover>
     {request ? (
       <SelectDialog open={reassigning} headerText={t("CONFIG_REASSIGN_TITLE")} searchPlaceholder={t("CONFIG_REASSIGN_SEARCH")}
+        // The dialog closes itself on confirm and cancel, fires onClose after either, and resets its
+        // search on close (onSearchReset).
         onSearchInput={(e) => setStaffSearch(e.detail.value)} onSearchReset={() => setStaffSearch("")}
-        onCancel={closeReassign} onClose={closeReassign}
+        onClose={() => setReassigning(false)}
         onConfirm={(e) => {
           const userId = (e.detail.selectedItems[0] as HTMLElement | undefined)?.dataset.id;
-          closeReassign();
           if (userId && userId !== project.assigneeId) reassign.mutate({ projectId: id, userId });
         }}>
         {(assignable.data ?? [])

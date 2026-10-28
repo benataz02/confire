@@ -1,18 +1,21 @@
 import { z } from "zod";
 import * as Sentry from "@sentry/bun";
+import { and, eq } from "drizzle-orm";
 import { call, ORPCError, type AnyProcedure } from "@orpc/server";
 import { getOpenAPIMeta } from "@orpc/openapi";
 import { toolDefinition, type AnyServerTool } from "@tanstack/ai";
-import { ListQueryZ } from "@confire/db";
+import { configProject, ListQueryZ } from "@confire/db";
 import { SourcesZ } from "../config-patch.ts";
+import { configView } from "../config-view.ts";
+import { internalVisible } from "../project-lifecycle.ts";
 import { configsRouter } from "../orpc/routers/configs.ts";
 import { entitiesRouter } from "../orpc/routers/entities.ts";
 import { homeRouter } from "../orpc/routers/home.ts";
 import { requestsRouter, timelineRouter } from "../orpc/routers/requests.ts";
 import { startFromThread } from "../orpc/routers/assistant.ts";
-import { extractInto } from "./extract.ts";
+import { extractInto, modelBlock } from "./extract.ts";
 import { fileParts } from "./files.ts";
-import { readRequest } from "./intake.ts";
+import { CUSTOMERS_ONLY, readRequest } from "./intake.ts";
 import { lastDrop, type Thread } from "./threads.ts";
 import type { Meter } from "./usage.ts";
 
@@ -112,18 +115,20 @@ export const CARD_FIELDS = {
 } as const;
 type SapEntity = keyof typeof CARD_FIELDS;
 
-/** SAP reads for the chat: three entity sets, the card's fields always in, the total asked for. */
+/** SAP reads for the chat: three entity sets, the card's fields always in, the total asked for.
+ *  Business partners are customers only: the chat looks them up to be a configuration's customer. */
 export const readSap = (ctx: ToolCtx): AnyServerTool =>
   procedureTool("entities.rows", entitiesRouter.rows as AnyProcedure, ctx, {
     cap: true,
     input: z.object({
-      entity: z.enum(Object.keys(CARD_FIELDS) as [SapEntity, ...SapEntity[]]).describe("Which SAP records"),
+      entity: z.enum(Object.keys(CARD_FIELDS) as [SapEntity, ...SapEntity[]]).describe("Which SAP records. BusinessPartners are customers only (CardType cCustomer), whatever the filter says"),
       query: ListQueryZ.describe("Fields, filters, sort and search, with SAP's field names"),
     }),
     prepare: (i) => {
       const entity = i.entity as SapEntity;
       const q = i.query as z.infer<typeof ListQueryZ>;
-      return { entity, query: { ...q, select: [...new Set([...q.select, ...CARD_FIELDS[entity]])] }, count: true };
+      const filter = entity === "BusinessPartners" ? [...q.filter, CUSTOMERS_ONLY] : q.filter;
+      return { entity, query: { ...q, filter, select: [...new Set([...q.select, ...CARD_FIELDS[entity]])] }, count: true };
     },
   });
 
@@ -157,6 +162,24 @@ function rerunTools(ctx: ToolCtx): Record<string, AnyServerTool> {
   };
 }
 
+/** The tool's name, which the route's loop strategy stops on. */
+export const ASK_USER = "ask_user";
+
+/** A choice for the user, drawn as buttons (the panel's ChoiceCard). The run ends after it: the
+ *  pick comes back as the user's next message, so a value written from it has the user's words as
+ *  its source. */
+const askUser: AnyServerTool = toolDefinition({
+  name: ASK_USER,
+  description: "Ask the user to choose between known options: which customer, which option of a field, which of two readings, which model. The panel shows the options as buttons and the user may also type an answer. Your turn ends after this call; the answer comes as the user's next message. One question at a time.",
+  inputSchema: z.object({
+    question: z.string().describe("One short question, in the user's language"),
+    options: z.array(z.object({
+      label: z.string().describe("The answer as the user would say it, e.g. 'ACME S.L. (C0001)'"),
+      description: z.string().optional().describe("Why it may be the one: where it was read, a rule, a past quote"),
+    })).min(2).max(6),
+  }),
+}).server(async () => ({ asked: true, note: "The user answers in their next message." })) as AnyServerTool;
+
 /** The model definition is the model block's, already in the prompt. */
 const slimGet = (out: unknown) => {
   const o = out as { model?: { definition?: unknown } };
@@ -178,18 +201,23 @@ function allTools(ctx: ToolCtx): Record<string, AnyServerTool> {
     configs_rows: t("configs.rows", configsRouter.rows, { cap: true }),
     configs_create: toolDefinition({
       name: "configs_create",
-      description: `${getOpenAPIMeta(configsRouter.create)?.description ?? ""} The chat becomes the new configuration's chat, and the files dropped here become its files.`,
+      description: `${getOpenAPIMeta(configsRouter.create)?.description ?? ""} The chat becomes the new configuration's chat, and the files dropped here become its files. The answer carries its model (parameters, options, rules) and what is still missing, so you can go on with it at once: write what the user already told you with configs_calculate.`,
       inputSchema: configsRouter.create["~orpc"].inputSchemas!.at(-1) as unknown as z.ZodType<{ modelId: string; name: string; customer?: { cardCode: string; cardName: string } | null }>,
     }).server(async (input) => run(async () => {
       const r = await startFromThread(ctx, ctx.thread, input as never);
       ctx.meter.projectId = r.id;
-      return r;
+      // The run goes on with this configuration, as its page's chat would: its model block and what is
+      // missing. A view that cannot be built yet leaves the run a configs_get away from it.
+      const where = and(eq(configProject.id, r.id), eq(configProject.tenantId, ctx.tenantId), internalVisible)!;
+      const v = await configView(ctx.tenantId, where).catch(() => null);
+      return v ? { ...r, model: modelBlock(v.live.model.definition, v.view.form), missing: v.view.missing.map((m) => m.message) } : r;
     })) as AnyServerTool,
     requests_rows: t("requests.rows", requestsRouter.rows, { cap: true }),
     home_overview: t("home.overview", homeRouter.overview),
     timeline_list: t("timeline.list", timelineRouter.list),
     entities_rows: readSap(ctx),
     propose_quotation: proposeQuotation(ctx),
+    [ASK_USER]: askUser,
     ...rerunTools(ctx),
   };
 }

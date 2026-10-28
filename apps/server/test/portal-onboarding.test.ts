@@ -54,10 +54,10 @@ async function setup() {
 }
 
 /** A new-client invitation and its invitee, signed in on the portal. */
-async function invited(registerDomain = false) {
+async function invited() {
   const s = await setup();
   const email = `n${uid()}@neu${uid()}.de`;
-  const { id } = await call(router.portalInvitations.inviteNew, { email, registerDomain }, s.as);
+  const { id } = await call(router.portalInvitations.inviteNew, { email }, s.as);
   const invitee = await makePortalUser(email);
   const on = { context: { headers: tenantHeaders(s.slug, invitee.cookie) } };
   return { ...s, id, email, invitee, on };
@@ -69,9 +69,9 @@ describe("portalInvitations.inviteNew", () => {
   test("a pending owner invitation with no company, listed without a CardCode, mailed as a new client", async () => {
     const { as, slug } = await setup();
     const email = `n${uid()}@neu.de`;
-    const { id } = await call(router.portalInvitations.inviteNew, { email, registerDomain: true }, as);
+    const { id } = await call(router.portalInvitations.inviteNew, { email }, as);
     const [inv] = await db.select().from(invitation).where(eq(invitation.id, id));
-    expect(inv).toMatchObject({ cardCode: null, role: "portal_owner", status: "pending", registerDomain: true });
+    expect(inv).toMatchObject({ cardCode: null, role: "portal_owner", status: "pending" });
     const page = await call(router.portalInvitations.rows, { query: { ...NO_QUERY, filter: [{ field: "email", op: "eq", value: email }] }, top: 10 }, as);
     expect(page.rows[0]).toMatchObject({ email, cardCode: null });
     let mail;
@@ -87,18 +87,18 @@ describe("portalInvitations.inviteNew", () => {
     const { tenantId, as } = await setup();
     const client = await makePortalUser(`c${uid()}@kunde.de`);
     const company = await makePortalSeat(tenantId, client.userId, "buyer");
-    const taken = call(router.portalInvitations.inviteNew, { email: client.email.toUpperCase(), registerDomain: false }, as);
+    const taken = call(router.portalInvitations.inviteNew, { email: client.email.toUpperCase() }, as);
     expect(await messageOf(taken)).toContain(company.cardCode);
     const email = `n${uid()}@neu.de`;
-    await call(router.portalInvitations.inviteNew, { email, registerDomain: false }, as);
-    expect(await codeOf(call(router.portalInvitations.inviteNew, { email, registerDomain: false }, as))).toBe("CONFLICT");
+    await call(router.portalInvitations.inviteNew, { email }, as);
+    expect(await codeOf(call(router.portalInvitations.inviteNew, { email }, as))).toBe("CONFLICT");
   });
 
   test("refused for the supplier's staff; admins only", async () => {
     const { tenantId, slug, as } = await setup();
     const staff = await makeUser("member", tenantId);
-    expect(await codeOf(call(router.portalInvitations.inviteNew, { email: staff.email, registerDomain: false }, as))).toBe("FORBIDDEN");
-    expect(await codeOf(call(router.portalInvitations.inviteNew, { email: `x${uid()}@neu.de`, registerDomain: false },
+    expect(await codeOf(call(router.portalInvitations.inviteNew, { email: staff.email }, as))).toBe("FORBIDDEN");
+    expect(await codeOf(call(router.portalInvitations.inviteNew, { email: `x${uid()}@neu.de` },
       { context: { headers: tenantHeaders(slug, staff.cookie) } }))).toBe("FORBIDDEN");
   });
 });
@@ -131,7 +131,7 @@ describe("onboarding.formSchema", () => {
     const cardCode = `C${uid()}`;
     agent.store.BusinessPartners!.push({ CardCode: cardCode, CardName: "Kunde AG", CardType: "cCustomer" });
     const email = `e${uid()}@kunde.de`;
-    const { id } = await call(router.portalInvitations.inviteExisting, { cardCode, email, role: "buyer", registerDomain: false }, as);
+    const { id } = await call(router.portalInvitations.inviteExisting, { cardCode, email, role: "buyer" }, as);
     const u = await makePortalUser(email);
     expect(await codeOf(call(portalRouter.onboarding.formSchema, { id }, { context: { headers: tenantHeaders(slug, u.cookie) } }))).toBe("BAD_REQUEST");
   });
@@ -139,7 +139,7 @@ describe("onboarding.formSchema", () => {
 
 describe("onboarding.submit", () => {
   test("creates the lead in B1, then its company, the seat as owner, the invitation accepted and the domain", async () => {
-    const { tenantId, id, email, on, as, admin } = await invited(true);
+    const { tenantId, id, email, on, as, admin } = await invited();
     await call(router.portalSettings.save, { extraFields: [{ key: "Website", required: false }], leadSeries: 77 }, as);
     const before = agent.calls.length;
     const res = await call(portalRouter.onboarding.submit, {

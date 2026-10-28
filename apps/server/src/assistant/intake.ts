@@ -11,6 +11,11 @@ import { meter, type Meter } from "./usage.ts";
 // sees the drop and the workspace's models by name and description; the customer is then looked up
 // in SAP by what the model read. Nothing is created here: the panel shows a card to confirm first.
 
+/** A configuration's customer is an SAP customer, as the page's customer value help reads them
+ *  (cfl-configs.ts `customers`): never a supplier or a lead. Every assistant read of business partners
+ *  carries it. */
+export const CUSTOMERS_ONLY = { field: "CardType", op: "eq", value: "cCustomer" } as const;
+
 export type Proposal = {
   model: { id: string; name: string } | null;
   why: string;
@@ -71,7 +76,7 @@ export async function readRequest(
         entity: "BusinessPartners",
         query: {
           select: ["CardCode", "CardName"],
-          filter: [{ field: "CardType", op: "ne", value: "cSupplier" }],
+          filter: [CUSTOMERS_ONLY],
           orderby: [],
           search,
           searchFields: out.customer.name?.trim() ? ["CardName"] : ["EmailAddress"],

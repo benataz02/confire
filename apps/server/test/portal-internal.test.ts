@@ -41,12 +41,12 @@ describe("portalInvitations.inviteExisting", () => {
   test("re-reads the BP from SAP, creates its company and a pending invitation, and mails the link", async () => {
     const { tenantId, slug, as } = await setup();
     const email = `k${uid()}@kunde.de`;
-    const { id } = await call(router.portalInvitations.inviteExisting, { cardCode: "C1", email, role: "owner", registerDomain: true }, as);
+    const { id } = await call(router.portalInvitations.inviteExisting, { cardCode: "C1", email, role: "owner" }, as);
     expect(agent.calls.some((c) => c.route === "/entity" && c.body.entitySet === "BusinessPartners" && c.body.key === "C1")).toBe(true);
     const [company] = await db.select().from(portalCompany).where(eq(portalCompany.tenantId, tenantId));
     expect(company).toMatchObject({ cardCode: "C1", cardName: "Kunde AG", cardType: "cCustomer" });
     const [inv] = await db.select().from(invitation).where(eq(invitation.id, id));
-    expect(inv).toMatchObject({ cardCode: company!.cardCode, email, role: "portal_owner", status: "pending", registerDomain: true });
+    expect(inv).toMatchObject({ cardCode: company!.cardCode, email, role: "portal_owner", status: "pending" });
     let mail;
     for (let i = 0; i < 100 && !mail; i++) {
       mail = devOutbox.find((m) => m.to === email);
@@ -58,7 +58,7 @@ describe("portalInvitations.inviteExisting", () => {
   test("leads qualify, suppliers do not, and an unknown CardCode is NOT_FOUND", async () => {
     const { as } = await setup();
     const invite = (cardCode: string) =>
-      call(router.portalInvitations.inviteExisting, { cardCode, email: `x${uid()}@kunde.de`, role: "buyer", registerDomain: false }, as);
+      call(router.portalInvitations.inviteExisting, { cardCode, email: `x${uid()}@kunde.de`, role: "buyer" }, as);
     expect(await codeOf(invite("L1"))).toBe("OK");
     expect(await codeOf(invite("S1"))).toBe("BAD_REQUEST");
     expect(await codeOf(invite("NOPE"))).toBe("NOT_FOUND");
@@ -68,15 +68,15 @@ describe("portalInvitations.inviteExisting", () => {
     const { tenantId, slug } = await setup();
     const plain = await makeUser("member", tenantId);
     expect(await codeOf(call(router.portalInvitations.inviteExisting,
-      { cardCode: "C1", email: `x${uid()}@kunde.de`, role: "buyer", registerDomain: false }, ctx(slug, plain.cookie)))).toBe("FORBIDDEN");
+      { cardCode: "C1", email: `x${uid()}@kunde.de`, role: "buyer" }, ctx(slug, plain.cookie)))).toBe("FORBIDDEN");
   });
 });
 
 describe("portalInvitations.rows / cancel", () => {
   test("an expired pending invitation reads as `expired` and filters as one; cancel skips settled rows", async () => {
     const { tenantId, as } = await setup();
-    const live = await call(router.portalInvitations.inviteExisting, { cardCode: "C1", email: `l${uid()}@kunde.de`, role: "buyer", registerDomain: false }, as);
-    const old = await call(router.portalInvitations.inviteExisting, { cardCode: "C1", email: `o${uid()}@kunde.de`, role: "buyer", registerDomain: false }, as);
+    const live = await call(router.portalInvitations.inviteExisting, { cardCode: "C1", email: `l${uid()}@kunde.de`, role: "buyer" }, as);
+    const old = await call(router.portalInvitations.inviteExisting, { cardCode: "C1", email: `o${uid()}@kunde.de`, role: "buyer" }, as);
     await db.update(invitation).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(invitation.id, old.id));
 
     const all = await call(router.portalInvitations.rows, { query: NO_QUERY, top: 100 }, as);
@@ -103,7 +103,7 @@ describe("portalCompanies", () => {
     const { tenantId, as } = await setup();
     expect((await call(router.portalCompanies.get, { cardCode: "C1" }, as)).company).toBeNull();
     const email = `g${uid()}@kunde.de`;
-    await call(router.portalInvitations.inviteExisting, { cardCode: "C1", email, role: "buyer", registerDomain: false }, as);
+    await call(router.portalInvitations.inviteExisting, { cardCode: "C1", email, role: "buyer" }, as);
     const [company] = await db.select().from(portalCompany).where(eq(portalCompany.tenantId, tenantId));
     const u = await makePortalUser();
     await insertSeat(tenantId, company!.cardCode, u.userId, "owner");

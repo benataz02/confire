@@ -145,7 +145,7 @@ describe("schema", () => {
 test("modelBlock is stable and names help, rules and allowed values", () => {
   const b = modelBlock(DEF, FORM);
   expect(b).toBe(modelBlock(DEF, FORM));
-  for (const part of ["Welded steel brackets", "width", "Nominal size on the drawing", "No S in steel", "S (Small)", "10–500", "search", "itemcode"])
+  for (const part of ["Welded steel brackets", "width", "Nominal size on the drawing", "No S in steel", "S (Small)", "10–500", 'SAP list "items_q"', "itemcode", "1 if not given"])
     expect(b).toContain(part);
   expect(b).not.toContain("fixed");
   // a rule eliminating an option changes the form, not the block: it stays cacheable

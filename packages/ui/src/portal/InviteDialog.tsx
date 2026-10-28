@@ -1,17 +1,17 @@
 import { useState, type ReactNode } from "react";
-import { Bar, Button, CheckBox, Dialog, Input, Label, MessageStrip, Option, Select } from "@ui5/webcomponents-react";
+import { Bar, Button, Dialog, Input, Label, MessageStrip, Option, Select } from "@ui5/webcomponents-react";
 import type { PortalRole } from "@confire/db";
 import { useUiI18n } from "../i18n.ts";
 import { ROLE_HELP_KEY, ROLE_TEXT_KEY, ROLES } from "./CompanyPeople.tsx";
 
 // Invite someone into a customer company (spec §5.1). Shared: an internal admin invites from the BP
-// Object Page (and may register the address's domain), a company owner from the portal's company
-// page (never registering one, D24). Mount it only while open, so every opening starts empty.
+// Object Page, a company owner from the portal's company page (D24). Accepting always registers the
+// address's domain to the company (onboarding.accept). Mount it only while open, so every opening starts empty.
 
 // UX only — the server validates the address (z.email) and every rule about it.
 const looksLikeEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 
-export type InviteValues = { email: string; role: PortalRole; registerDomain: boolean };
+export type InviteValues = { email: string; role: PortalRole };
 
 export function InviteDialog(p: {
   headerText: string;
@@ -20,8 +20,6 @@ export function InviteDialog(p: {
   /** omitted: the role is not the sender's to choose (a new client's first user is its owner), so
    *  there is no Role select and `role` comes back as owner */
   defaultRole?: PortalRole;
-  /** the company name, to offer "let everyone on this domain join" — the internal side only */
-  registerDomainFor?: string;
   busy: boolean;
   error?: string | null;
   onSubmit: (v: InviteValues) => void;
@@ -30,10 +28,8 @@ export function InviteDialog(p: {
   const i18n = useUiI18n();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<PortalRole>(p.defaultRole ?? "owner");
-  const [registerDomain, setRegisterDomain] = useState(false);
-  const domain = email.includes("@") ? email.slice(email.lastIndexOf("@") + 1).trim().toLowerCase() : "";
   const ok = looksLikeEmail(email) && !p.busy;
-  const submit = () => ok && p.onSubmit({ email: email.trim(), role, registerDomain: !!p.registerDomainFor && registerDomain });
+  const submit = () => ok && p.onSubmit({ email: email.trim(), role });
 
   return (
     <Dialog open headerText={p.headerText} onClose={p.onClose} style={{ width: "min(32rem, 92vw)" }}
@@ -59,12 +55,6 @@ export function InviteDialog(p: {
               {ROLES.map((r) => <Option key={r} value={r} additionalText={i18n.getText(ROLE_HELP_KEY[r])}>{i18n.getText(ROLE_TEXT_KEY[r])}</Option>)}
             </Select>
           </>
-        ) : null}
-        {p.registerDomainFor ? (
-          <CheckBox checked={registerDomain} wrappingType="Normal" onChange={(e) => setRegisterDomain(e.target.checked)}
-            text={domain
-              ? i18n.getText("UI_DOMAIN_KNOWN", domain, p.registerDomainFor)
-              : i18n.getText("UI_DOMAIN_ANY", p.registerDomainFor)} />
         ) : null}
       </div>
     </Dialog>

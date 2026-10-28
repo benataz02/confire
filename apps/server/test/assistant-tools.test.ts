@@ -38,8 +38,8 @@ test("no tool posts, and no tool is admin-only", () => {
   expect(router.assistant.settings["~orpc"].orderedMiddlewares.some((m) => m.middleware === requireAdmin)).toBe(true);
 });
 
-test("every page re-runs the intake steps its history may hold", () => {
-  for (const page of [...Object.values(PAGES), GENERAL]) expect(page.tools).toEqual(expect.arrayContaining(["read_request", "extract_values"]));
+test("every page re-runs the intake steps and may ask: its history may hold their calls", () => {
+  for (const page of [...Object.values(PAGES), GENERAL]) expect(page.tools).toEqual(expect.arrayContaining(["read_request", "extract_values", "ask_user"]));
 });
 
 test("missingSources names every unsourced write", () => {
@@ -109,6 +109,18 @@ describe.skipIf(!process.env.DATABASE_URL)("through the builders", () => {
     expect(docs.rows).toHaveLength(1);
     const sent = agent.calls.filter((c) => c.route === "/entity-set").at(-1)!.body as { query: { select: string[] } };
     expect(sent.query.select).toEqual(expect.arrayContaining(CARD_FIELDS.Quotations));
+
+    // Business partners are a configuration's customers: suppliers never reach the chat, whatever it asks.
+    await db.insert(entityMeta).values({
+      tenantId: w.tenantId, entityName: "BusinessPartners",
+      json: {
+        name: "BusinessPartners", entityType: "BusinessPartner", table: "OCRD", label: "Business Partners", entityClass: "master" as never, keys: ["CardCode"],
+        fields: CARD_FIELDS.BusinessPartners.map((name) => ({ name, kind: "string", edmType: "Edm.String" })) as never,
+      },
+    });
+    await w.tool("entities_rows")({ entity: "BusinessPartners", query: { ...NO_QUERY, filter: [{ field: "CardName", op: "contains", value: "caf" }] } });
+    const bp = agent.calls.filter((c) => c.route === "/entity-set").at(-1)!.body as { query: { filter: string } };
+    expect(bp.query.filter).toContain("CardType eq 'cCustomer'");
   });
 
   test("configs_get leaves the model definition out", async () => {

@@ -14,7 +14,7 @@ import { copyName } from "../../copy-name.ts";
 import {
   cachedLookups, calculateProject, liveEngine, loadModel, masterdataRows, QueryPageZ, queryTablePage,
 } from "../../config-project.ts";
-import { PatchZ, SourcesZ, patchColumns, patchProblems, touchesEngine, writtenOf } from "../../config-patch.ts";
+import { PatchZ, SourcesZ, defaultQuantities, patchColumns, patchProblems, touchesEngine, writtenOf } from "../../config-patch.ts";
 import { configView } from "../../config-view.ts";
 import { applySelection, createQuote, quoteDraft, validateSelectionPairs } from "../../config-quote.ts";
 import { assertWritable, internalVisible, recordCreated, writableBy } from "../../project-lifecycle.ts";
@@ -415,8 +415,10 @@ export const configsRouter = {
       if (engine) {
         const [row] = await db.select({ modelId: configProject.modelId }).from(configProject)
           .where(and(eq(configProject.id, id), eq(configProject.tenantId, context.tenantId))).limit(1);
-        const problems = patchProblems((await loadModel(context.tenantId, row!.modelId)).definition, patch, "internal");
+        const def = (await loadModel(context.tenantId, row!.modelId)).definition;
+        const problems = patchProblems(def, patch, "internal");
         if (problems.length) throw new ORPCError("BAD_REQUEST", { message: `Not accepted: ${problems.join("; ")}` });
+        defaultQuantities(def, patch);
       }
       if (engine || name !== undefined || customer !== undefined || sources !== undefined) {
         // Inputs and candidates move in ONE statement: a reader sees the old inputs with their

@@ -11,8 +11,9 @@ const view = (p: Partial<{ missing: unknown[]; rows: unknown[]; picks: unknown[]
   project: { status: (p.status ?? "draft") as ReplyView["project"]["status"] },
 });
 
-test("missing fields put 'What's still missing?' first", () => {
-  expect(nextReplies({ kind: "configure", view: view({ missing: [{ code: "x" }] }) }, t)[0]).toBe("ASSISTANT_REPLY_MISSING");
+test("what is missing is the question card's while it asks; past it, a reply asks the model", () => {
+  expect(nextReplies({ kind: "configure", view: view({ missing: [{ code: "x" }] }), asking: true }, t)).not.toContain("ASSISTANT_REPLY_MISSING");
+  expect(nextReplies({ kind: "configure", view: view({ missing: [{ code: "table_empty" }] }) }, t)[0]).toBe("ASSISTANT_REPLY_MISSING");
 });
 
 test("candidates with no selection offer to show them; picks offer the quotation", () => {

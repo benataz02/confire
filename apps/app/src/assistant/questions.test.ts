@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { openQuestions, type QuestionView } from "./questions.ts";
+import { nextQuestion, openQuestions, type Q, type QuestionView } from "./questions.ts";
 import type { ExtractResult } from "./cards/ExtractionCard.tsx";
 
 // The open questions of a configuration, from its live view and every read in its chat (pure): what
@@ -62,4 +62,20 @@ test("unavailable options are kept (disabled) so the rule can be shown", () => {
 test("query-backed and free fields say how they are answered; a missing customer comes first", () => {
   const v = view({}, [{ key: "grade", code: "param_required" }, { key: "width", code: "param_required" }, { key: "__customer", code: "customer_required" }]);
   expect(openQuestions(v, []).map((q) => [q.key, q.kind])).toEqual([["__customer", "customer"], ["grade", "query"], ["width", "free"]]);
+});
+
+test("one question at a time: Skip sends it last, and skipping them all cycles", () => {
+  const qs = ["a", "b", "c"].map((key) => ({ key, label: key, why: "missing", options: [], kind: "free" }) as Q);
+  const skip = (s: string[], k: string) => [...s.filter((x) => x !== k), k];
+  let skipped: string[] = [];
+  expect(nextQuestion(qs, skipped)?.key).toBe("a");
+  skipped = skip(skipped, "a");
+  expect(nextQuestion(qs, skipped)?.key).toBe("b");
+  skipped = skip(skip(skipped, "b"), "c");
+  expect(nextQuestion(qs, skipped)?.key).toBe("a");
+  skipped = skip(skipped, "a");
+  expect(nextQuestion(qs, skipped)?.key).toBe("b");
+  // an answered question drops out of the list, skipped or not
+  expect(nextQuestion(qs.slice(2), skipped)?.key).toBe("c");
+  expect(nextQuestion([], skipped)).toBeUndefined();
 });

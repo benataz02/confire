@@ -161,7 +161,7 @@ Builders (`portal/orpc/base.ts`); every tenant-scoped one refuses the supplier's
 (`claimDomain`) and portal invitations (`sendInvitation`, `cancelInvitations`), and both processes
 import it. The internal router (`orpc/routers/portal.ts`: `portalInvitations`, `portalCompanies`)
 and the portal's (`onboarding`, `company`) therefore enforce one rule set. Invitations are Better Auth's own `invitation` rows with a `portal_*` role plus `cardCode` (null = a new
-client) and `registerDomain`; Better Auth's accept stays off (it inserts the member bare,
+client); accepting one (or its onboarding submit) always registers the invitee's domain to the company. Better Auth's accept stays off (it inserts the member bare,
 before a new client has a company, and never checks an existing membership), so accept and onboarding
 submit end in `addPortalMember` instead, with the organization and the company both known. The rules:
 - One open invitation per email: `sendInvitation` locks the organization row and checks (the generated schema cannot carry the partial unique index). An expired row stays `pending` and blocks nothing.
@@ -173,7 +173,9 @@ submit end in `addPortalMember` instead, with the organization and the company b
   (organizationId, userId) index, so the lock is what stops two concurrent joins both inserting.
 
 Ways in are an invitation (`/<slug>/accept/<id>`, existing-BP from the BP Object Page's *Invite to portal*)
-or auto-join (`onboarding.join`, a verified address on a domain registered to a company).
+or auto-join (`onboarding.join`, as viewer, on a domain registered to a company — only for a Google Workspace
+or Microsoft work account, `hasWorkAccount` in `auth.ts`, read off the stored ID token's `hd`/`tid`+`xms_edov`;
+a verified email alone or a personal Google/Microsoft account never auto-joins).
 Signed out, an invitation link goes to sign-up when the invited address has no account yet, else
 sign-in, the address filled in (`invitationGuard`): it asks `onboarding.invitee`, the portal's one
 procedure without a session — the link's random id is the credential.
@@ -310,7 +312,12 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   tool requires a source per written value (`missingSources`): no value from nowhere.
 - **Tools are the procedures** (`tools.ts`), run with `call(procedure, input, { context: { headers } })`
   under the chat request's own headers — the builders are the permission; the page registry
-  (`pages.ts`, route id → tools + prompt section) is a hint. Lists are capped at 20 rows (`LIST_CAP`,
+  (`pages.ts`, route id → tools + prompt section) is a hint, and **the thread outranks it**: a
+  configuration's thread gets that configuration's tools and model block on any page (the panel left
+  on the home page after the chat created one), and every set has the configuration tools, so a run
+  that calls `configs_create` goes straight on — its answer carries the model block and what is
+  missing. Business partners the chat reads are customers only (`CUSTOMERS_ONLY`, `intake.ts`, the
+  customer value help's rule), whatever filter the model sends. Lists are capped at 20 rows (`LIST_CAP`,
   Joule's list card). No tool posts to SAP: `propose_quotation` is `quoteDraft`, posting stays the
   quote page's.
 - **Threads** (`threads.ts`) are server-owned and append-only (Sonnet 5.5 refuses edited history): the
@@ -318,6 +325,10 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   (`takeLease`/`withThread`, `THREAD_BUSY`); one thread per (user, configuration) plus general ones.
   Stored file parts keep a reference (`metadata.file`), never bytes; `hydrate` refills them. File refs
   are fenced by tenant and by their own project or thread. Only PDF, PNG and JPEG, by their bytes.
+  Thinking is on and summarized (`reasoning: { level: "high", summary: true }`, the default effort); the
+  thread keeps it for the panel, but an earlier run's thinking is never sent back (`withoutThinking`):
+  it is signed against its run's prompts and tools, which change between runs (page section, tool set,
+  model block, a deploy), and a replayed block is a 400 "bound to a different conversation".
 - **Metered and capped**: `usage.ts` writes one `ai_usage` row per model call (`meter` middleware, cost
   from `PRICES`) and `assertAssistant` refuses when the workspace's switch (`assistant_settings`) is off
   (`ASSISTANT_OFF`, an admin's fix), the server has no `ANTHROPIC_API_KEY` (`ASSISTANT_UNAVAILABLE`, the
@@ -327,10 +338,26 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
 - **The panel** (`AssistantPanel.tsx`) is shell state (`AssistantProvider` around `AppShell`), floating
   over the page's right edge — or docked as the page itself on **AI configuration** (`/assistant`, then
   `/assistant/$id` once it started one; the home tile): the route renders an empty slot (`AssistantDock`)
-  the same panel lays itself over, so a move to the configuration's page keeps one live chat. **The tool's name picks the card** (`cards/registry.tsx`), never the
-  model, and a card renders the tool's output — its figures are the server's; a card's actions
-  navigate, scroll the page to a field, or call a procedure directly (the question chips, Pick), never
-  the model. Colours come only from the theme's `--sapAssistant_*` parameters (the panel scopes the
+  the same panel lays itself over, so a move to the configuration's page keeps one live chat. **Only a
+  decision is a card in the chat** (`steps.ts` `DECISION`: `read_request`, `ask_user`,
+  `propose_quotation`); everything else the agent does is a **step** — its thinking and each other tool
+  call one line in a fold (`Steps.tsx`), open while it works, `N steps` after, a run's turns merged into
+  one. **The tool's name picks the card** (`cards/registry.tsx`), never the model — in the chat for a
+  decision, behind its step's line otherwise — and a card renders the tool's output, so its figures are
+  the server's; a card's actions navigate, scroll the page to a field, or call a procedure directly
+  (the question chips, Pick), never the model, save the choice card's pick, which is sent as the user's
+  next message. **`ask_user`** is how the model asks between known options: its run ends on the result
+  (`untilAsked`, `route.ts`) and the pick is the user's words, the source of what it writes. **One
+  question on screen at a time:** an open ask hides the question card, which asks a configuration's
+  open fields one at a time (`nextQuestion`: Skip sends one last; "Not sure?" shows what similar past
+  quotes used for a field the model's history maps) and waits while the chat works. Its writes skip
+  the model; once only skipped questions are left, the answers go to the chat as the user's message
+  ("My answers, already saved: …"), so the model knows whose they are and goes on. The panel's
+  configuration is the route's, else the thread's. The prompt (`SYSTEM`, `pages.ts`) makes the model
+  lead in order until the candidates show: the panel's parameters and customer first (it waits), then
+  what the card does not ask (a table's rows, a broken rule), one per answer and never ending on
+  nothing while something is missing; then the user picks in the candidates card and "Review and
+  post" opens the quote page. The model selects or prepares the quotation only when asked. Colours come only from the theme's `--sapAssistant_*` parameters (the panel scopes the
   emphasized-button parameters to them). `scripts/assistant-eval.ts` is the hand-run eval (it spends
   money and says so first).
 

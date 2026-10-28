@@ -1,0 +1,1 @@
+ALTER TABLE "invitation" DROP COLUMN "register_domain";

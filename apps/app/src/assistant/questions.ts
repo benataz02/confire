@@ -71,3 +71,10 @@ export function openQuestions(view: QuestionView, extracts: ExtractResult[], kep
   const order = [CUSTOMER, ...params.map((p) => p.key), "batches"];
   return [...out.values()].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
 }
+
+/** The one question on screen: the first open one not skipped. Skipped ones come back once the rest
+ *  are, in the order they were skipped, so Skip cycles through them. */
+export function nextQuestion(questions: readonly Q[], skipped: readonly string[]): Q | undefined {
+  return questions.find((q) => !skipped.includes(q.key))
+    ?? skipped.map((k) => questions.find((q) => q.key === k)).find((q) => q !== undefined);
+}

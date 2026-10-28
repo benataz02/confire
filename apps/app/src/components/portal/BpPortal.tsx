@@ -55,7 +55,6 @@ export function InviteToPortal({ cardCode, cardName }: { cardCode: string; cardN
             ? i18n.getText("ADMIN_INVITE_FIRST", cardName)
             : i18n.getText("ADMIN_INVITE_JOIN", cardName)}</Text>}
           defaultRole={first ? "owner" : "buyer"}
-          registerDomainFor={cardName}
           busy={invite.isPending}
           error={invite.error?.message}
           onSubmit={(v) => invite.mutate({ cardCode, ...v })}
@@ -83,10 +82,9 @@ export function InviteNewClientDialog({ onClose }: { onClose: () => void }) {
     <InviteDialog
       headerText={i18n.getText("ADMIN_INVITE_NEW_CLIENT")}
       intro={<Text>{i18n.getText("ADMIN_INVITE_NEW_INTRO")}</Text>}
-      registerDomainFor={i18n.getText("ADMIN_THEIR_COMPANY")}
       busy={invite.isPending}
       error={invite.error?.message}
-      onSubmit={({ email, registerDomain }) => invite.mutate({ email, registerDomain, language })}
+      onSubmit={({ email }) => invite.mutate({ email, language })}
       onClose={onClose} />
   );
 }

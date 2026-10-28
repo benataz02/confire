@@ -105,6 +105,21 @@ export async function linkProject(threadId: string, projectId: string): Promise<
 const fileOf = (p: ContentPart): FileRef | null =>
   (p.type === "document" || p.type === "image") ? ((p.metadata as FileMeta | undefined)?.file ?? null) : null;
 
+/**
+ * An earlier run's message as the model is sent it: without its thinking. Thinking is signed against
+ * the conversation it was made in, prompts and tools included, and ours change between runs (the
+ * page's section and tools, the model block, a deploy): replayed, a block is refused — "Invalid
+ * `signature` in `thinking` block. The block is bound to a different conversation" (400, verified
+ * 2026-10-28). A run's own thinking still goes back within the run, where nothing changes. The stored
+ * message keeps it, so the panel still shows it.
+ */
+export function withoutThinking(m: ModelMessage): ModelMessage {
+  if (!m.thinking?.length) return m;
+  const { thinking: _t, blockOrder, ...rest } = m;
+  const order = blockOrder?.filter((b) => b.type !== "thinking");
+  return order?.length ? { ...rest, blockOrder: order } : rest;
+}
+
 /** A message as it is stored: every file part keeps its reference and drops its bytes. */
 export function dehydrate(m: ModelMessage): ModelMessage {
   if (!Array.isArray(m.content)) return m;

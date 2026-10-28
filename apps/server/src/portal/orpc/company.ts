@@ -66,7 +66,7 @@ export const companyRouter = {
           });
         }
         return sendInvitation({
-          tenantId: context.tenantId, cardCode: context.cardCode, email: input.email, role: input.role, registerDomain: false,
+          tenantId: context.tenantId, cardCode: context.cardCode, email: input.email, role: input.role,
           inviter: { id: context.user.id, name: context.user.name, email: context.user.email },
         });
       }),

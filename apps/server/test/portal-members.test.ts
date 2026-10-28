@@ -167,14 +167,14 @@ describe("sendInvitation", () => {
     const c = await company(tenantId, "Müller & Söhne GmbH");
     const inviter = await inviterOf();
     const email = `n${uid()}@kunde.de`;
-    const { id, expiresAt } = await sendInvitation({ tenantId, cardCode: c.cardCode, email, role: "buyer", registerDomain: true, inviter });
+    const { id, expiresAt } = await sendInvitation({ tenantId, cardCode: c.cardCode, email, role: "buyer", inviter });
     const days = (expiresAt.getTime() - Date.now()) / 86_400_000;
     expect(days).toBeGreaterThan(13.9);
     expect(days).toBeLessThan(14.1);
     const [row] = await db.select().from(invitation).where(eq(invitation.id, id));
     expect(row).toMatchObject({
       organizationId: tenantId, cardCode: c.cardCode, role: "portal_buyer", status: "pending",
-      registerDomain: true, inviterId: inviter.id,
+      inviterId: inviter.id,
     });
 
     const mail = await mailTo(email);
@@ -189,7 +189,7 @@ describe("sendInvitation", () => {
     const inviter = await inviterOf();
     const send = async (cardCode: string | null, languageCode?: number) => {
       const email = `l${uid()}@kunde.es`;
-      const { id } = await sendInvitation({ tenantId, cardCode, email, role: "owner", registerDomain: false, inviter, languageCode });
+      const { id } = await sendInvitation({ tenantId, cardCode, email, role: "owner", inviter, languageCode });
       const [row] = await db.select({ languageCode: invitation.languageCode }).from(invitation).where(eq(invitation.id, id));
       return { mail: await mailTo(email), stored: row!.languageCode };
     };
@@ -219,8 +219,8 @@ describe("sendInvitation", () => {
     const c = await company(tenantId);
     const inviter = await inviterOf();
     const local = `a${uid()}`;
-    await sendInvitation({ tenantId, cardCode: c.cardCode, email: `${local}@kunde.de`, role: "viewer", registerDomain: false, inviter });
-    expect(await codeOf(sendInvitation({ tenantId, cardCode: c.cardCode, email: `${local.toUpperCase()}@Kunde.DE`, role: "viewer", registerDomain: false, inviter })))
+    await sendInvitation({ tenantId, cardCode: c.cardCode, email: `${local}@kunde.de`, role: "viewer", inviter });
+    expect(await codeOf(sendInvitation({ tenantId, cardCode: c.cardCode, email: `${local.toUpperCase()}@Kunde.DE`, role: "viewer", inviter })))
       .toBe("CONFLICT");
   });
 
@@ -233,7 +233,7 @@ describe("sendInvitation", () => {
       id: crypto.randomUUID(), organizationId: tenantId, email, role: "portal_viewer", cardCode: c.cardCode,
       inviterId: inviter.id, expiresAt: new Date(Date.now() - 1000),
     }).returning();
-    const { id } = await sendInvitation({ tenantId, cardCode: c.cardCode, email, role: "buyer", registerDomain: false, inviter });
+    const { id } = await sendInvitation({ tenantId, cardCode: c.cardCode, email, role: "buyer", inviter });
     expect(id).not.toBe(old!.id);
   });
 
@@ -242,7 +242,7 @@ describe("sendInvitation", () => {
     const c = await company(tenantId);
     const other = await company(tenantId, "Andere GmbH");
     const inviter = await inviterOf();
-    const send = (email: string) => sendInvitation({ tenantId, cardCode: c.cardCode, email, role: "viewer", registerDomain: false, inviter });
+    const send = (email: string) => sendInvitation({ tenantId, cardCode: c.cardCode, email, role: "viewer", inviter });
 
     const staff = await makeUser("admin", tenantId);
     expect(await codeOf(send(staff.email.toUpperCase()))).toBe("FORBIDDEN");

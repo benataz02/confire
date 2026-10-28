@@ -4,7 +4,7 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import {
   chat, chatParamsFromRequestBody, maxIterations, toServerSentEventsResponse,
-  type ChatMiddleware, type ModelMessage, type UIMessage,
+  type AgentLoopStrategy, type ChatMiddleware, type ModelMessage, type UIMessage,
 } from "@tanstack/ai";
 import { and, eq } from "drizzle-orm";
 import { configProject } from "@confire/db";
@@ -16,9 +16,9 @@ import { errorStatus } from "../serve.ts";
 import { TENANT_HEADER } from "../tenant.ts";
 import { modelBlock } from "./extract.ts";
 import { modelOptions, textAdapter } from "./model.ts";
-import { GENERAL, languageLine, LANGUAGES, pageFor, SYSTEM } from "./pages.ts";
-import { appendMessages, dehydrate, hydrate, ownThread, releaseLease, takeLease } from "./threads.ts";
-import { toolsFor } from "./tools.ts";
+import { CONFIGURE_CHAT, GENERAL, languageLine, LANGUAGES, pageFor, SYSTEM } from "./pages.ts";
+import { appendMessages, dehydrate, hydrate, ownThread, releaseLease, takeLease, withoutThinking } from "./threads.ts";
+import { ASK_USER, toolsFor } from "./tools.ts";
 import { assertAssistant, meter, rateLimit, REFUSAL_STATUS, type Meter } from "./usage.ts";
 
 // POST /api/assistant (assistant spec §4.8): one chat turn, streamed as AG-UI events over SSE. The
@@ -34,6 +34,14 @@ const PropsZ = z.object({
   dirty: z.boolean(),
   language: z.enum(Object.keys(LANGUAGES) as [keyof typeof LANGUAGES, ...(keyof typeof LANGUAGES)[]]),
 });
+
+/** Up to 12 model turns, and none after the model asked the user: the engine consults this only once
+ *  a turn's tools have run, so the stored history ends on ask_user's result and the answer is the
+ *  user's next message. */
+const untilAsked: AgentLoopStrategy = (s) => {
+  const last = s.messages.findLast((m) => m.role === "assistant");
+  return maxIterations(12)(s) && !last?.toolCalls?.some((c) => c.function.name === ASK_USER);
+};
 
 /** A refusal as JSON with its code, so the panel can say why (off, over budget, busy…). */
 function refusal(c: Context, e: unknown) {
@@ -86,9 +94,12 @@ export function assistantRoutes(): Hono {
       return refusal(c, e);
     }
 
-    // The route is a hint: a configure page whose thread is no configuration's is a general page.
+    // The thread says what the chat is about, the route only whether its form is on screen: a
+    // configuration's chat works on it from any page (one the chat just created, the panel on another
+    // page), and a configure page whose thread is no configuration's is a general page.
     const hinted = pageFor(props.route.routeId);
-    const page = hinted.kind === "configure" && !thread.projectId ? GENERAL : hinted;
+    const page = thread.projectId ? (hinted.kind === "configure" ? hinted : CONFIGURE_CHAT)
+      : hinted.kind === "configure" ? GENERAL : hinted;
     const user: ModelMessage = { role: "user", content: text };
     let hydrated: ModelMessage[];
     let block: string | null = null;
@@ -130,7 +141,7 @@ export function assistantRoutes(): Hono {
     const stream = chat({
       adapter: textAdapter(),
       ...ids,
-      messages: [...hydrated, user],
+      messages: [...hydrated.map(withoutThinking), user],
       systemPrompts: [
         { content: SYSTEM, metadata: CACHE },
         ...(block ? [{ content: block, metadata: CACHE }] : []),
@@ -139,7 +150,9 @@ export function assistantRoutes(): Hono {
       ],
       tools: toolsFor(page, { headers, tenantId, userId, thread, meter: m }),
       modelOptions: modelOptions(),
-      agentLoopStrategy: maxIterations(12),
+      agentLoopStrategy: untilAsked,
+      // The model's default effort, with its thinking summarized so the panel can show it.
+      reasoning: { level: "high", summary: true },
       promptCache: "short",
       middleware: [meter(m), saver],
       abortController,

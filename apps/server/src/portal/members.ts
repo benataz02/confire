@@ -188,7 +188,7 @@ export const openInvitation = () => and(eq(invitation.status, "pending"), gt(inv
  * language; a new client has none yet, so it is `languageCode`, the inviter's (and its lead's, later).
  */
 export async function sendInvitation(i: {
-  tenantId: string; cardCode: string | null; email: string; role: PortalRole; registerDomain: boolean;
+  tenantId: string; cardCode: string | null; email: string; role: PortalRole;
   inviter: { id: string; name: string; email: string };
   /** a new client's SAP language (UserLanguages.Code); an existing company's own is read here */
   languageCode?: number;
@@ -217,7 +217,7 @@ export async function sendInvitation(i: {
     const id = crypto.randomUUID();
     await tx.insert(invitation).values({
       id, organizationId: i.tenantId, email, role: externalRole(i.role), status: "pending", expiresAt,
-      inviterId: i.inviter.id, cardCode: i.cardCode, registerDomain: i.registerDomain, languageCode,
+      inviterId: i.inviter.id, cardCode: i.cardCode, languageCode,
     });
     return id;
   });

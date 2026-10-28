@@ -114,3 +114,28 @@
   --_ui5_textarea_padding_top: var(--_ui5-compact-size, .125rem) var(--_ui5-cozy-size, .4375rem);
   --_ui5_textarea_padding_bottom: var(--_ui5-compact-size, .0625rem) var(--_ui5-cozy-size, .375rem);
 }
+
+/* The agent's steps (Steps.tsx): Claude Code's tool lines in the theme's small label text. One fold for
+ * the run, a rule down its left, each step a line; a step with a card unfolds to it. */
+.cf-steps { align-self: stretch; font-size: var(--sapFontSmallSize); color: var(--sapContent_LabelColor); }
+.cf-steps summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 0.375rem; min-height: 1.5rem; }
+.cf-steps summary::-webkit-details-marker { display: none; }
+.cf-steps summary:focus-visible { outline: var(--sapContent_FocusWidth) var(--sapContent_FocusStyle) var(--sapContent_FocusColor); }
+.cf-steps ui5-icon { inline-size: 0.875rem; block-size: 0.875rem; flex-shrink: 0; color: var(--sapContent_IconColor); }
+.cf-steps__chev { transition: transform 0.15s; }
+.cf-steps[open] > summary > .cf-steps__chev { transform: rotate(90deg); }
+.cf-steps__list {
+  display: flex; flex-direction: column; gap: 0.125rem;
+  margin: 0.25rem 0 0 0.4rem; padding-inline-start: 0.75rem; border-inline-start: 1px solid var(--sapGroup_TitleBorderColor);
+}
+.cf-step__line { display: flex; align-items: center; gap: 0.375rem; min-height: 1.5rem; }
+.cf-step > summary > span:nth-of-type(1), .cf-step__line > span:nth-of-type(1) { color: var(--sapTextColor); }
+.cf-step__found { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cf-step__found::before { content: "· "; }
+.cf-steps ui5-icon.cf-step__error, .cf-step__error { color: var(--sapNegativeTextColor); }
+.cf-step__thought {
+  margin: 0.125rem 0 0.375rem 1.25rem; max-block-size: 12rem; overflow-y: auto;
+  white-space: pre-wrap; font-style: italic; overflow-wrap: anywhere;
+}
+.cf-step__body { margin: 0.375rem 0 0.5rem; font-size: var(--sapFontSize); color: var(--sapTextColor); }
+@media (prefers-reduced-motion: reduce) { .cf-steps__chev { transition: none; } }

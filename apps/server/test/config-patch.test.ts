@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ModelDef } from "@confire/config-engine";
-import { patchColumns, patchProblems, touchesEngine } from "../src/config-patch.ts";
+import { defaultQuantities, patchColumns, patchProblems, touchesEngine } from "../src/config-patch.ts";
 
 // The patch validator, both sides (pure). The external rules are what acceptPortalInputs enforced.
 
@@ -74,6 +74,12 @@ describe("patchProblems", () => {
     expect(touchesEngine({ unset: ["width"] })).toBe(true);
     expect(touchesEngine({ batches: [1] })).toBe(true);
   });
+});
+
+test("an items row without a quantity gets 1; a typed one, 0 included, stays", () => {
+  const patch = { tables: { items: [{}, { itemcode: "A", quantity: null }, { quantity: 0 }, { quantity: 5 }] } };
+  defaultQuantities(model, patch);
+  expect(patch.tables.items.map((r) => r.quantity)).toEqual([1, 1, 0, 5]);
 });
 
 describe("patchColumns: sources", () => {

@@ -10,7 +10,7 @@ import { portalBuyerProcedure, portalMemberProcedure } from "./base.ts";
 import { quotationIn, tenantConnector, viaB1 } from "../../b1.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { liveProject, loadModel, QueryPageZ, queryTablePage } from "../../config-project.ts";
-import { PatchZ, patchColumns, patchProblems, touchesEngine } from "../../config-patch.ts";
+import { PatchZ, defaultQuantities, patchColumns, patchProblems, touchesEngine } from "../../config-patch.ts";
 import { assertWritable, inputsOf, recordCreated, transition, writableBy, type Action, type Actor } from "../../project-lifecycle.ts";
 import {
   toPortalForm, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalRows,
@@ -175,8 +175,10 @@ export const projectsRouter = {
       const { id, ...patch } = input;
       if (touchesEngine(patch)) {
         const stored = await ownProject(context, id);
-        const problems = patchProblems((await loadModel(context.tenantId, stored.modelId)).definition, patch, "external");
+        const def = (await loadModel(context.tenantId, stored.modelId)).definition;
+        const problems = patchProblems(def, patch, "external");
         if (problems.length) throw new ORPCError("BAD_REQUEST", { message: `Not editable here: ${problems.join("; ")}` });
+        defaultQuantities(def, patch);
         const written = await db.update(configProject)
           .set({ ...patchColumns(patch), candidates: [], selection: null, calculatedAt: null, updatedAt: new Date() })
           .where(and(eq(configProject.id, id), seatFence(context), writableBy("external")))

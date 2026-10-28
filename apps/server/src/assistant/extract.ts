@@ -2,7 +2,7 @@ import { z } from "zod";
 import { call, ORPCError } from "@orpc/server";
 import { chat, type ContentPart } from "@tanstack/ai";
 import { and, eq } from "drizzle-orm";
-import { refKeyCols, type Entries, type FieldOption, type FormState, type ModelDef, type Param, type TableDef, type TableRows, type Val } from "@confire/config-engine";
+import { QTY_COL, refKeyCols, type Entries, type FieldOption, type FormState, type LookupRef, type ModelDef, type Param, type TableColumn, type TableDef, type TableRows, type Val } from "@confire/config-engine";
 import { configProject, type ValueSource } from "@confire/db";
 import { queryTablePage } from "../config-project.ts";
 import { PatchZ, patchProblems } from "../config-patch.ts";
@@ -61,6 +61,17 @@ const inputColumns = (t: TableDef) => t.columns.filter((c) => c.cell.kind !== "f
 const canon = (v: unknown) => JSON.stringify(v);
 const TYPE = { string: "text", number: "number", boolean: "yes/no" } as const;
 const show = (v: Val) => (typeof v === "string" ? v : JSON.stringify(v));
+/** A list the model can look up by name (configs_queryPage's `table`): without the name it thinks
+ *  there is no list at all, and refuses to pick an item or a warehouse. */
+const namedList = (ref: Exclude<LookupRef, { source: "manual" }>) =>
+  `from the ${ref.source === "query" ? "SAP " : ""}list "${ref.table}" (the value is its ${ref.valueCol ? `${ref.valueCol} column` : "first column"})`;
+const columnFacts = (t: TableDef, c: TableColumn) => [
+  `${TYPE[c.type]}${c.unit ? `, ${c.unit}` : ""}`,
+  c.cell.kind !== "options" ? ""
+  : c.cell.ref.source === "manual" ? `one of ${c.cell.ref.options.map((o) => show(o.value)).join(", ")}`
+  : namedList(c.cell.ref),
+  t.role === "items" && c.key === QTY_COL ? "1 if not given" : "",
+].filter(Boolean).join("; ");
 
 /**
  * The model as the extraction reads it: description, every writable parameter (visible or not — a
@@ -79,7 +90,7 @@ export function modelBlock(def: ModelDef, form: FormState): string {
     if (p.visibleWhen) facts.push(`shown when ${p.visibleWhen}`);
     let allowed = "";
     if (p.domain?.kind === "range") allowed = ` Range ${p.domain.min}–${p.domain.max}${p.domain.step ? ` step ${p.domain.step}` : ""}.`;
-    else if (isQuery(p)) allowed = " One of a SAP list (search by text).";
+    else if (p.domain?.kind === "options" && p.domain.ref.source === "query") allowed = ` One ${namedList(p.domain.ref)}, searched by text.`;
     else if (p.domain?.kind === "options") {
       // ponytail: a manual or table list is hand-typed, so tens of values — listed whole even
       // past ENUM_MAX; a list long enough to hurt the cache belongs in a query table.
@@ -97,7 +108,7 @@ export function modelBlock(def: ModelDef, form: FormState): string {
   }
   for (const t of def.tables ?? []) {
     out.push("", `## ${t.role === "items" ? "Items grid" : "Table"} "${t.title}" (key ${t.key}), one row per line`);
-    out.push(`Columns: ${inputColumns(t).map((c) => `${c.key} — ${c.label} (${TYPE[c.type]}${c.unit ? `, ${c.unit}` : ""})`).join(", ")}`);
+    out.push("Columns:", ...inputColumns(t).map((c) => `- ${c.key} — ${c.label} (${columnFacts(t, c)})`));
   }
   return out.join("\n");
 }

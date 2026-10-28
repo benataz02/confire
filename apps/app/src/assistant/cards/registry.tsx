@@ -17,10 +17,12 @@ import { ListCard, ObjectCard, type CardItem } from "./kit.tsx";
 import { ProposalCard, type Proposal } from "./ProposalCard.tsx";
 import { ExtractionCard, type ExtractResult } from "./ExtractionCard.tsx";
 import { QuoteCard, type QuoteDraft } from "./QuoteCard.tsx";
+import { ChoiceCard, type Ask } from "./ChoiceCard.tsx";
 
 // Tool name → card (plan "The look"). The tool's name picks the card, never the model, and the card
-// draws the tool's output, so its figures are the server's. A card's actions navigate or scroll the
-// page; none calls the model.
+// draws the tool's output, so its figures are the server's. A decision tool's card (steps.ts DECISION)
+// is drawn in the chat; every other one is the body of its step, shown when the step is opened. A
+// card's actions navigate or scroll the page; only the choice card answers the model, as the user.
 
 export type ToolPart = { name: string; input: unknown; output: unknown; error?: string };
 
@@ -39,11 +41,24 @@ export type CardCtx = {
   /** the files of the last drop, by name */
   lastFiles: string[];
   errorText(e: unknown): string;
+  /** sends a message as the user typed it (a choice card's pick) */
+  send(text: string): void;
+  /** the chat is answering or a step runs: nothing new may be sent */
+  busy: boolean;
+  /** the user's next message after the card's own, once there is one */
+  answer?: string;
 };
 type Ctx = CardCtx;
 
 const MUTED = { color: "var(--sapContent_LabelColor)" } as const;
 const DOC_TITLE: Record<string, string> = { Quotations: "NAV_QUOTATIONS", Orders: "NAV_ORDERS", BusinessPartners: "NAV_BP" };
+
+/** The tools that have a card of their own (the switch below), opened from their step. */
+export const CARDS: ReadonlySet<string> = new Set([
+  "configs_rows", "requests_rows", "entities_rows", "configs_get", "configs_select", "configs_calculate",
+  "configs_queryPage", "configs_similar", "configs_models", "configs_create", "home_overview", "read_request",
+  "extract_values", "propose_quotation", "timeline_list", "ask_user",
+]);
 
 export function renderTool(part: ToolPart, ctx: Ctx): ReactNode {
   return <ToolCard part={part} ctx={ctx} />;
@@ -167,6 +182,8 @@ function ToolCard({ part, ctx }: { part: ToolPart; ctx: Ctx }) {
       return <ProposalCard p={out as Proposal} ctx={ctx} />;
     case "extract_values":
       return <ExtractionCard r={out as ExtractResult} ctx={ctx} />;
+    case "ask_user":
+      return <ChoiceCard ask={input as Ask} ctx={ctx} />;
     case "propose_quotation":
       return <QuoteCard projectId={String(input.projectId ?? "")} d={out as QuoteDraft} />;
     case "timeline_list":

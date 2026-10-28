@@ -19,6 +19,8 @@ import { nextReplies } from "./replies.ts";
 import { routeContext, type RouteContext } from "./routeContext.ts";
 import { useAssistantChat, useAssistantInvalidate, useAssistantThread, type Thread } from "./useAssistant.ts";
 import { progressText, renderTool, type CardCtx } from "./cards/registry.tsx";
+import { blocks, type ToolCall } from "./steps.ts";
+import { Steps, type StepResult } from "./Steps.tsx";
 import { READABLE, refuseFile, sendDrop } from "./intake.ts";
 import { openQuestions } from "./questions.ts";
 import { assistantToggle } from "./toggle.ts";
@@ -28,8 +30,9 @@ import type { ExtractResult } from "./cards/ExtractionCard.tsx";
 import "./assistant.css";
 
 // The assistant panel (assistant spec §4.2, plan "The look"): Joule's side panel, floating over the
-// page's right edge. Text is for words and cards for data: every tool result is a card from
-// cards/registry.tsx, chosen by the tool's name. Colours come from the theme's assistant parameters.
+// page's right edge. Text is for words, steps for the agent's work (its thinking and tool calls, each
+// tool's card behind its line), and a card in the chat only where the user decides (steps.ts DECISION).
+// One question on screen at a time. Colours come from the theme's assistant parameters.
 // Docked (the AI configuration page) it is the page: laid over the page's slot, with no form beside it.
 
 type Kind = "configure" | "general" | "model";
@@ -56,7 +59,9 @@ export function AssistantPanel() {
   const qc = useQueryClient();
   const route = useRoute();
   const thread = useAssistantThread(route.projectId);
-  const config = useQuery({ ...orpc.configs.get.queryOptions({ input: { id: route.projectId ?? "" } }), enabled: !!route.projectId });
+  // The chat's configuration: the page's, else the thread's (one the chat created, followed elsewhere).
+  const projectId = route.projectId ?? thread.data?.projectId ?? null;
+  const config = useQuery({ ...orpc.configs.get.queryOptions({ input: { id: projectId ?? "" } }), enabled: !!projectId });
   const [wide, setWide] = useState(false);
   const root = useRef<HTMLElement>(null);
   const navigate = useNavigate({ from: "/$slug" });
@@ -98,22 +103,22 @@ export function AssistantPanel() {
   // next configuration: a new general thread on the bare page, and nothing is deleted.
   const [newChatError, setNewChatError] = useState<unknown>(null);
   const newChat = async () => {
-    const projectId = docked ? null : route.projectId;
-    if (projectId && !(await confirm({
+    const cleared = docked ? null : route.projectId;
+    if (cleared && !(await confirm({
       message: i18n.getText("ASSISTANT_NEW_CHAT_CONFIRM"), actionText: i18n.getText("ASSISTANT_NEW_CHAT"), destructive: true,
     }))) return;
     setNewChatError(null);
-    const input = projectId ? { projectId } : {};
+    const input = cleared ? { projectId: cleared } : {};
     try {
       const { id } = await client.assistant.newThread(input);
-      qc.setQueryData(orpc.assistant.thread.queryKey({ input }), { id, projectId: projectId ?? null, messages: [] });
+      qc.setQueryData(orpc.assistant.thread.queryKey({ input }), { id, projectId: cleared ?? null, messages: [] });
       if (docked && route.projectId) void navigate({ to: "/$slug/assistant" });
     } catch (e) {
       setNewChatError(e);
     }
   };
-  const kind = kindOf(route);
-  const subtitle = route.projectId ? config.data?.project.name ?? "" : docked ? "" : i18n.getText("ASSISTANT_GENERAL");
+  const kind = projectId ? "configure" : kindOf(route);
+  const subtitle = projectId ? config.data?.project.name ?? "" : docked ? "" : i18n.getText("ASSISTANT_GENERAL");
   const me = useQuery(meQuery);
   const firstName = (me.data?.user?.name || me.data?.user?.email || "").split(/[ @]/)[0] ?? "";
   // To the configuration's page, the chat floating beside the form.
@@ -246,7 +251,6 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
   const formHere = docked ? null : route.projectId;
   const { language } = useLanguage();
   const status = useQuery(orpc.assistant.status.queryOptions());
-  const view = useQuery({ ...orpc.configs.get.queryOptions({ input: { id: route.projectId ?? "" } }), enabled: !!route.projectId });
   const { chat, refusal, clearRefusal } = useAssistantChat(thread);
   const invalidate = useAssistantInvalidate();
   const qc = useQueryClient();
@@ -256,6 +260,9 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
   const [pending, setPending] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [threadProjectId, setThreadProjectId] = useState(thread.projectId);
+  // What the chat works on: the page's configuration, else its own — the tools reach it from any page.
+  const projectId = route.projectId ?? threadProjectId;
+  const view = useQuery({ ...orpc.configs.get.queryOptions({ input: { id: projectId ?? "" } }), enabled: !!projectId });
   const [kept, setKept] = useState<ReadonlySet<string>>(new Set());
   const input = useRef<TextAreaDomRef>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -263,7 +270,7 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
   const stick = useRef(true);
   const latest = useRef(chat.messages);
   latest.current = chat.messages;
-  const timeline = useQuery({ ...orpc.timeline.list.queryOptions({ input: { projectId: route.projectId ?? "" } }), enabled: !!route.projectId });
+  const timeline = useQuery({ ...orpc.timeline.list.queryOptions({ input: { projectId: projectId ?? "" } }), enabled: !!projectId });
 
   const busy = chat.isLoading || !!pending;
   const off = status.data && !status.data.enabled;
@@ -286,7 +293,7 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
     setDropError(null);
     stick.current = true;
     try {
-      append(await sendDrop({ projectId: route.projectId, threadId: thread.id, files, text: msg }));
+      append(await sendDrop({ projectId, threadId: thread.id, files, text: msg }));
       setFiles([]);
       setText("");
     } catch (e) {
@@ -317,11 +324,20 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
   }, [chat.messages]);
 
   const results = useMemo(() => toolParts(chat.messages), [chat.messages]);
+  // One answer per run: its model turns are consecutive assistant messages, drawn as one so its steps
+  // fold together. Keyed by the first, so a run that grows never remounts what it already drew.
+  const turns = useMemo(() => chat.messages.reduce<{ key: string; m: UIMessage }[]>((out, m) => {
+    const prev = out.at(-1);
+    if (prev?.m.role === "assistant" && m.role === "assistant") prev.m = { ...m, parts: [...prev.m.parts, ...m.parts] };
+    else out.push({ key: m.id, m });
+    return out;
+  }, []), [chat.messages]);
   const last = chat.messages.at(-1);
+  // The model's question stays open until the user's next message: while it is, it is the one question
+  // on screen — no question card, no quick replies.
+  const asked = last?.role === "assistant" && last.parts.some((p) => p.type === "tool-call" && p.name === "ask_user");
   const lastUser = [...chat.messages].reverse().find((m) => m.role === "user");
   const failed = !busy && (!!chat.error || !!refusal) && last?.role === "user";
-  const replies = !busy && !failed && last?.role === "assistant"
-    ? nextReplies({ kind, view: view.data }, (k) => t(k)) : [];
 
   // The files on this configuration the chat has not read yet (a client's request comes with its
   // drawing on the timeline): offered as one "Read files" step.
@@ -331,7 +347,7 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
     const meta = p.metadata as { title?: string; file?: { id: string; name: string } } | undefined;
     return [meta?.file?.id, meta?.file?.name ?? meta?.title];
   })));
-  const unread = route.projectId ? (timeline.data?.events ?? []).flatMap((e) => {
+  const unread = projectId ? (timeline.data?.events ?? []).flatMap((e) => {
     const f = e.kind === "file" ? e.payload as { fileId: string; name: string } | null : null;
     const mime = f && (/\.pdf$/i.test(f.name) ? "application/pdf" : /\.png$/i.test(f.name) ? "image/png" : /\.jpe?g$/i.test(f.name) ? "image/jpeg" : null);
     return f && mime && !readRefs.has(f.fileId) && !readRefs.has(f.name) ? [{ kind: "project" as const, id: f.fileId, name: f.name, mime }] : [];
@@ -340,7 +356,7 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
     setPending(t("ASSISTANT_READING", unread.map((f) => f.name).join(", ")));
     setDropError(null);
     try {
-      append((await client.assistant.extract({ threadId: thread.id, projectId: route.projectId!, refs: unread })).messages as UIMessage[]);
+      append((await client.assistant.extract({ threadId: thread.id, projectId: projectId!, refs: unread })).messages as UIMessage[]);
     } catch (e) {
       setDropError(errorText(e));
     } finally {
@@ -352,53 +368,89 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
   const extracts = chat.messages.flatMap((m) => m.parts.flatMap((p) =>
     p.type === "tool-call" && p.name === "extract_values" ? [(p.output ?? parse(results.get(p.id)?.content)) as ExtractResult] : []))
     .filter((x) => x && Array.isArray(x.questions));
-  const live = route.projectId && view.data && chat.messages.length ? view.data : null;
+  const live = projectId && view.data && chat.messages.length ? view.data : null;
   const questions = live ? openQuestions(live, extracts, kept) : [];
+  const replies = !busy && !failed && last?.role === "assistant" && !asked
+    ? nextReplies({ kind, view: view.data, asking: questions.length > 0 }, (k) => t(k)) : [];
   const questionKeys = questions.map((q) => q.key);
   const { setQuestionKeys } = shell;
-  const projectKey = route.projectId;
+  const projectKey = projectId;
   useEffect(() => { if (projectKey) setQuestionKeys(projectKey, questionKeys); }, [projectKey, questionKeys.join("\u0000"), setQuestionKeys]);
+  // The question card writes without the model. Once the user has been through every question (none
+  // is left but what they skipped), the answers go to the chat as the user's message: the model knows
+  // they are the user's and goes on with what the card does not ask (a broken rule, a table, the
+  // candidates, what was skipped) instead of standing still.
+  const answered = useRef<string[]>([]);
+  const [skipped, setSkipped] = useState<string[]>([]);
+  useEffect(() => {
+    if (!live || !questions.every((q) => skipped.includes(q.key)) || !answered.current.length || busy || disabled) return;
+    const said = answered.current.join(" · ");
+    answered.current = [];
+    send(t("ASSISTANT_ANSWERED", said));
+  }, [live, questionKeys.join("\u0000"), skipped, busy]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // A started configuration's chat is its thread; docked, the page moves to it and stays the chat.
-  const onStarted = async (id: string) => {
+  // A started configuration's chat is this thread: the chat works on it from here, and its page (the
+  // configuration's, or docked the AI configuration's) opens this same chat.
+  const link = (id: string) => {
     setThreadProjectId(id);
-    // The configuration's thread is this one: the panel keeps this chat on its page.
     qc.setQueryData(orpc.assistant.thread.queryKey({ input: { projectId: id } }), { id: thread.id, projectId: id, messages: [...latest.current] });
+    qc.setQueryData(orpc.assistant.thread.queryKey({ input: {} }), (t: Thread | undefined) => (t?.id === thread.id ? { ...t, projectId: id } : t));
+  };
+  // The proposal card's Create opens the configuration: its form, or docked the chat's own page.
+  const onStarted = async (id: string) => {
+    link(id);
     await (docked
       ? navigate({ to: "/$slug/assistant/$id", params: { id } })
       : navigate({ to: "/$slug/configs/$id", params: { id } }));
   };
-  // A typed request has no proposal card: the chat creates the configuration itself (configs_create).
-  const typedStart = docked && !threadProjectId ? chat.messages.flatMap((m) => m.parts.flatMap((p) => {
+  // A typed request has no proposal card: the chat creates the configuration itself (configs_create)
+  // and goes on with it where the user is; docked, the page follows it.
+  const typedStart = !threadProjectId ? chat.messages.flatMap((m) => m.parts.flatMap((p) => {
     if (p.type !== "tool-call" || p.name !== "configs_create") return [];
     const out = (p.output ?? parse(results.get(p.id)?.content)) as { id?: unknown } | undefined;
     return typeof out?.id === "string" ? [out.id] : [];
   })).at(-1) : undefined;
-  useEffect(() => { if (typedStart) void onStarted(typedStart); }, [typedStart]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!typedStart) return;
+    if (docked) void onStarted(typedStart);
+    else link(typedStart);
+  }, [typedStart]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const lastDropMsg = [...chat.messages].reverse().find((m) => m.role === "user" && m.parts.some((p) => p.type === "document" || p.type === "image"));
   const cardCtx: CardCtx = {
     projectId: formHere, threadId: thread.id, threadProjectId, onStarted,
     append, setPending,
     lastFiles: (lastDropMsg?.parts ?? []).flatMap((p) => (p.type === "document" || p.type === "image") ? [String((p.metadata as { title?: string } | undefined)?.title ?? "")] : []),
-    errorText,
+    errorText, send, busy,
   };
 
-  const renderPart = (m: UIMessage, p: UIMessage["parts"][number], i: number): ReactNode => {
-    if (p.type === "text") {
-      if ((p as { metadata?: { fileLabel?: boolean } }).metadata?.fileLabel || !p.content.trim()) return null;
-      return m.role === "user"
-        ? <div key={i} className="cf-assistant__bubble cf-assistant__bubble--user">{p.content}</div>
-        : <div key={i} className="cf-assistant__bubble cf-assistant__bubble--answer"><AnswerText content={p.content} live={chat.isLoading && m.id === last?.id} /></div>;
-    }
-    if (p.type === "tool-call") {
-      const r = results.get(p.id);
-      const output = p.output ?? parse(r?.content);
-      const error = r?.error ?? (output && typeof output === "object" && "error" in output && Object.keys(output).length === 1 ? String((output as { error: unknown }).error) : undefined);
-      if (!r && p.output === undefined) return <Working key={i} text={progressText(p.name, (k) => t(k))} />;
-      return <Fragment key={i}>{renderTool({ name: p.name, input: p.input, output, error }, cardCtx)}</Fragment>;
-    }
-    return null;
+  /** A tool call's result, none while it runs. A lone `{ error }` output is the tool's refusal. */
+  const resultOf = (p: ToolCall): StepResult => {
+    const r = results.get(p.id);
+    if (!r && p.output === undefined) return undefined;
+    const output = p.output ?? parse(r?.content);
+    const error = r?.error ?? (output && typeof output === "object" && "error" in output && Object.keys(output).length === 1 ? String((output as { error: unknown }).error) : undefined);
+    return { output, error };
+  };
+  const renderMessage = (m: UIMessage, at: number): ReactNode[] => {
+    const bs = blocks(m.parts);
+    const answer = turns.slice(at + 1).find((x) => x.m.role === "user")?.m;
+    return bs.map((b, i) => {
+      if (b.kind === "text") {
+        return m.role === "user"
+          ? <div key={i} className="cf-assistant__bubble cf-assistant__bubble--user">{b.part.content}</div>
+          : <div key={i} className="cf-assistant__bubble cf-assistant__bubble--answer"><AnswerText content={b.part.content} live={chat.isLoading && m.id === last?.id} /></div>;
+      }
+      const live = chat.isLoading && m.id === last?.id && i === bs.length - 1;
+      if (b.kind === "steps") return <Steps key={i} steps={b.steps} live={live} resultOf={resultOf} ctx={cardCtx} />;
+      const r = resultOf(b.part);
+      if (!r) return live ? <Working key={i} text={progressText(b.part.name, (k) => t(k))} /> : null;
+      return (
+        <Fragment key={i}>
+          {renderTool({ name: b.part.name, input: b.part.input, output: r.output, error: r.error }, { ...cardCtx, ...(answer ? { answer: textOf(answer) } : {}) })}
+        </Fragment>
+      );
+    });
   };
 
   const attachedOf = (m: UIMessage) => m.parts.flatMap((p, i) => {
@@ -426,12 +478,12 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
               .map((k) => <AiAction key={k} text={t(k)} disabled={disabled} onClick={() => send(t(k))} />)}
           </FlexBox>
         ) : null}
-        {chat.messages.map((m) => {
-          const parts = m.parts.map((p, i) => renderPart(m, p, i)).filter(Boolean);
+        {turns.map(({ key, m }, at) => {
+          const parts = renderMessage(m, at).filter(Boolean);
           const attached = m.role === "user" ? attachedOf(m) : [];
           if (!parts.length && !attached.length) return null;
           return (
-            <FlexBox key={m.id} direction="Column" gap="0.5rem" alignItems={m.role === "user" ? "End" : undefined}>
+            <FlexBox key={key} direction="Column" gap="0.5rem" alignItems={m.role === "user" ? "End" : undefined}>
               {attached.length ? <FlexBox wrap="Wrap" gap="0.25rem" justifyContent="End">{attached}</FlexBox> : null}
               {parts.map((p, i) => <Fragment key={i}>{p}</Fragment>)}
             </FlexBox>
@@ -447,11 +499,13 @@ function ChatView({ thread, route, kind }: { thread: Thread; route: RouteContext
             {lastUser ? <Link onClick={() => send(textOf(lastUser))}>{t("ASSISTANT_RETRY")}</Link> : null}
           </MessageStrip>
         ) : null}
-        {live && questions.length ? (
-          <QuestionCard projectId={route.projectId!} view={live} questions={questions} here={!docked}
+        {live && questions.length && !asked && !busy ? (
+          <QuestionCard projectId={projectId!} view={live} questions={questions} here={formHere === projectId}
+            onAnswer={(said) => answered.current.push(said)}
+            skipped={skipped} onSkip={(k) => setSkipped((s) => [...s.filter((x) => x !== k), k])}
             onKeep={(k) => setKept((s) => new Set([...s, k]))} />
         ) : null}
-        {live && !live.missing.length && live.candidates.rows.length ? <CandidatesCard projectId={route.projectId!} view={live} /> : null}
+        {live && !live.missing.length && live.candidates.rows.length ? <CandidatesCard projectId={projectId!} view={live} /> : null}
         {replies.length ? (
           <FlexBox wrap="Wrap" gap="0.5rem">
             {replies.map((r) => <AiAction key={r} text={r} onClick={() => send(r)} />)}

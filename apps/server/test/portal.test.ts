@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { db, invitation, portalCompany, portalCompanyDomain, user } from "@confire/db";
-import { auth, microsoftEmailVerified } from "../src/auth.ts";
+import { account, db, invitation, portalCompany, portalCompanyDomain, user } from "@confire/db";
+import { auth, isWorkAccount, microsoftEmailVerified } from "../src/auth.ts";
 import { devOutbox, mailDomain } from "../src/mail/mailer.ts";
 import { router } from "../src/orpc/router.ts";
 import { portalBuyerProcedure, portalMemberProcedure, portalOwnerProcedure, portalSessionProcedure } from "../src/portal/orpc/base.ts";
@@ -69,6 +69,16 @@ describe("one sign-in for staff and customers", () => {
     expect(microsoftEmailVerified({ xms_edov: false })).toBe(false);
     expect(microsoftEmailVerified({ email_verified: true })).toBe(false); // not the claim we trust
     expect(microsoftEmailVerified({})).toBe(false);
+  });
+
+  test("a work account is Google Workspace or a Microsoft work tenant, never a personal one", () => {
+    expect(isWorkAccount("google", { hd: "kunde.de", email_verified: true })).toBe(true);
+    expect(isWorkAccount("google", { email_verified: true })).toBe(false); // a Google account on any address
+    expect(isWorkAccount("google", { hd: "kunde.de", email_verified: false })).toBe(false);
+    expect(isWorkAccount("microsoft", { tid: "a1b2c3", xms_edov: true })).toBe(true);
+    expect(isWorkAccount("microsoft", { tid: "9188040d-6c67-4c5b-b112-36a304b66dad", xms_edov: true })).toBe(false);
+    expect(isWorkAccount("microsoft", { tid: "a1b2c3" })).toBe(false); // the tenant never verified the domain
+    expect(isWorkAccount("credential", { hd: "kunde.de", email_verified: true })).toBe(false);
   });
 });
 
@@ -185,9 +195,9 @@ async function invitingTenant(cardName = "Kunde AG") {
   const [company] = await db.insert(portalCompany)
     .values({ tenantId: t.tenantId, cardCode: `C${uid()}`, cardName, cardType: "cCustomer" }).returning();
   const admin = await makeUser("admin", t.tenantId);
-  const invite = (email: string, role: "owner" | "buyer" | "viewer" = "buyer", registerDomain = false) =>
+  const invite = (email: string, role: "owner" | "buyer" | "viewer" = "buyer") =>
     sendInvitation({
-      tenantId: t.tenantId, cardCode: company!.cardCode, email, role, registerDomain,
+      tenantId: t.tenantId, cardCode: company!.cardCode, email, role,
       inviter: { id: admin.userId, name: "Ines Inviter", email: admin.email },
     });
   return { ...t, company: company!, admin, invite };
@@ -197,7 +207,7 @@ describe("onboarding.invitation / accept", () => {
   test("names the company, role and inviter; accept seats the user and registers the domain", async () => {
     const t = await invitingTenant("Müller AG");
     const invitee = await makePortalUser();
-    const { id } = await t.invite(invitee.email, "buyer", true);
+    const { id } = await t.invite(invitee.email, "buyer");
     expect(await call(portalRouter.onboarding.invitation, { id }, ctx(t.slug, invitee.cookie))).toMatchObject({
       // the inviter as the user table names them (the harness names users by their email)
       id, type: "existing", companyName: "Müller AG", role: "buyer", inviterName: t.admin.email, tenant: { slug: t.slug, name: t.slug },
@@ -273,10 +283,10 @@ describe("onboarding.invitation / accept", () => {
     expect(await seatsOf(u.userId)).toHaveLength(1);
   });
 
-  test("a free-mail invitation with registerDomain registers nothing", async () => {
+  test("a free-mail invitation registers nothing", async () => {
     const t = await invitingTenant();
     const u = await makePortalUser(`f${uid()}@gmail.com`);
-    const { id } = await t.invite(u.email, "owner", true);
+    const { id } = await t.invite(u.email, "owner");
     await call(portalRouter.onboarding.accept, { id }, ctx(t.slug, u.cookie));
     expect(await seatRole(t.company, u.userId)).toBe("owner");
     expect(await db.select().from(portalCompanyDomain).where(eq(portalCompanyDomain.cardCode, t.company.cardCode))).toHaveLength(0);
@@ -290,11 +300,35 @@ describe("onboarding.join (auto-join, spec §4.4)", () => {
     return t;
   };
 
-  test("a verified address on a registered domain joins as viewer", async () => {
+  /** The user also signs in with `providerId`: an account row with the ID token it would have sent. */
+  const signsInWith = (u: { userId: string; email: string }, providerId: string, claims: Record<string, unknown>) =>
+    db.insert(account).values({
+      id: crypto.randomUUID(), accountId: uid(), providerId, userId: u.userId, updatedAt: new Date(),
+      idToken: `e30.${Buffer.from(JSON.stringify({ email: u.email, ...claims })).toString("base64url")}.sig`,
+    });
+
+  test("a Google Workspace or Microsoft work account on a registered domain joins as viewer", async () => {
     const t = await registered();
     const u = await makePortalUser();
+    await signsInWith(u, "google", { hd: "test.local", email_verified: true });
     expect(await call(portalRouter.onboarding.join, undefined, ctx(t.slug, u.cookie))).toEqual({ cardName: "Domain AG" });
     expect((await call(portalRouter.me, undefined, ctx(t.slug, u.cookie))).company).toMatchObject({ role: "viewer" });
+    const m = await makePortalUser();
+    await signsInWith(m, "microsoft", { tid: "a1b2c3", xms_edov: true });
+    expect(await call(portalRouter.onboarding.join, undefined, ctx(t.slug, m.cookie))).toEqual({ cardName: "Domain AG" });
+  });
+
+  test("a verified address alone, or a personal Google/Microsoft account on the domain, does not join", async () => {
+    const t = await registered();
+    const password = await makePortalUser();
+    const google = await makePortalUser();
+    await signsInWith(google, "google", { email_verified: true });
+    const msa = await makePortalUser();
+    await signsInWith(msa, "microsoft", { tid: "9188040d-6c67-4c5b-b112-36a304b66dad", xms_edov: true });
+    for (const u of [password, google, msa]) {
+      expect(await call(portalRouter.onboarding.join, undefined, ctx(t.slug, u.cookie))).toBeNull();
+      expect(await seatsOf(u.userId)).toHaveLength(0);
+    }
   });
 
   test("free mail, an unverified address, or no registered domain: nobody joins", async () => {
@@ -304,11 +338,13 @@ describe("onboarding.join (auto-join, spec §4.4)", () => {
 
     const t = await registered();
     const u = await makePortalUser();
+    await signsInWith(u, "google", { hd: "test.local", email_verified: true });
     await db.update(user).set({ emailVerified: false }).where(eq(user.id, u.userId));
     expect(await call(portalRouter.onboarding.join, undefined, ctx(t.slug, u.cookie))).toBeNull();
 
     const none = await invitingTenant();
     const v = await makePortalUser();
+    await signsInWith(v, "google", { hd: "test.local", email_verified: true });
     expect(await call(portalRouter.onboarding.join, undefined, ctx(none.slug, v.cookie))).toBeNull();
     expect(await seatsOf(v.userId)).toHaveLength(0);
   });
@@ -316,6 +352,7 @@ describe("onboarding.join (auto-join, spec §4.4)", () => {
   test("an auto-joined viewer who then accepts a buyer invitation becomes buyer", async () => {
     const t = await registered();
     const u = await makePortalUser();
+    await signsInWith(u, "google", { hd: "test.local", email_verified: true });
     const { id } = await t.invite(u.email, "buyer");
     await call(portalRouter.onboarding.join, undefined, ctx(t.slug, u.cookie));
     expect(await seatRole(t.company, u.userId)).toBe("viewer");
@@ -351,7 +388,7 @@ describe("company (the owner's page, spec §9)", () => {
     const { id } = await call(portalRouter.company.members.invite, { email: inside, role: "viewer" }, c.as(c.owner));
     const [inv] = await db.select().from(invitation).where(eq(invitation.id, id));
     expect(inv).toMatchObject({
-      cardCode: c.company.cardCode, role: "portal_viewer", registerDomain: false, inviterId: c.owner.userId,
+      cardCode: c.company.cardCode, role: "portal_viewer", inviterId: c.owner.userId,
     });
     expect(await codeOf(call(portalRouter.company.members.invite, { email: `z${uid()}@${c.domain}`, role: "viewer" }, c.as(c.buyer))))
       .toBe("FORBIDDEN");

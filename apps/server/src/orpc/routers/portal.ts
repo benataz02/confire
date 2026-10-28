@@ -82,7 +82,7 @@ export const portalInvitationsRouter = {
   /** *Invite to portal* on the BP Object Page. The BP is re-read from SAP first: customers and leads
    *  qualify, and its company row is found or created with the name, type and language SAP has now. */
   inviteExisting: adminProcedure
-    .input(z.object({ cardCode: CardCodeZ, email: z.email(), role: RoleZ, registerDomain: z.boolean() }))
+    .input(z.object({ cardCode: CardCodeZ, email: z.email(), role: RoleZ }))
     .handler(async ({ input, context }) => {
       const { b1 } = await tenantConnector(context.tenantId);
       const { data } = await viaB1(() =>
@@ -97,7 +97,6 @@ export const portalInvitationsRouter = {
         .onConflictDoUpdate({ target: [portalCompany.tenantId, portalCompany.cardCode], set: fresh });
       return sendInvitation({
         tenantId: context.tenantId, cardCode: bp.CardCode, email: input.email, role: input.role,
-        registerDomain: input.registerDomain,
         inviter: { id: context.user.id, name: context.user.name, email: context.user.email },
       });
     }),
@@ -107,9 +106,9 @@ export const portalInvitationsRouter = {
    *  address already in a company here — the refusal names its CardCode — or with an open invitation.
    *  `language` is the sender's app language: with no BP yet, it is the new client's. */
   inviteNew: adminProcedure
-    .input(z.object({ email: z.email(), registerDomain: z.boolean(), language: z.string().max(16).optional() }))
+    .input(z.object({ email: z.email(), language: z.string().max(16).optional() }))
     .handler(({ input, context }) => sendInvitation({
-      tenantId: context.tenantId, cardCode: null, email: input.email, role: "owner", registerDomain: input.registerDomain,
+      tenantId: context.tenantId, cardCode: null, email: input.email, role: "owner",
       inviter: { id: context.user.id, name: context.user.name, email: context.user.email },
       languageCode: sapLanguage(input.language ?? "en"),
     })),

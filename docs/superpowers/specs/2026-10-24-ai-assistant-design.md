@@ -123,6 +123,16 @@ question shows its allowed values as chips. Beside the page, the panel floats pe
    the parameter's **allowed values from the form state** as chips. A chip click is a direct
    `configs.calculate` call from the panel, with no model round trip. "Other…" types a value the
    server validates. A ruled-out option is explained with the rule that removed it.
+   *(2026-10-28)* They are asked **one at a time** ("Question 2 of 5"; Skip sends one to the back).
+   On a field the model's history maps, "Not sure?" lists what the most similar past quotes used
+   (`configs.similar`), each taken in one click. When the model itself is unsure between known options
+   (which customer, which option, which reading), it calls **`ask_user`**: the options become a choice
+   card, the run ends there, and the pick is the user's next message. Only one question is on screen at
+   a time: an open ask hides the question card. Once only skipped questions are left, the card's answers
+   go to the chat as the user's message ("My answers, already saved: …") and the model goes on with
+   what the card does not ask (a broken rule, a table, the candidates). A configuration the chat
+   creates is worked on where the user is: the thread, not the page, decides the tools and the model
+   block, and business partners are read as customers only.
 5. **Complete.** Once `missing` is empty the server calculates candidates. The chat shows them (best
    prices per batch quantity) and similar past quotes (`configs.similar`), and the salesperson picks in
    the chat or on the page (`configs.select`).
@@ -147,6 +157,11 @@ collide, because the patch is merged in SQL (`entries || set - unset`).
 - Built with UI5 Web Components. Follow the Fiori AI/Joule guidance (the `sap-fiori-guidelines`
   skill). Use `@ui5/webcomponents-ai` where it fits.
 - `useChat` from `@tanstack/ai-react` over SSE to the server route (§4.8).
+- *(2026-10-28)* **Cards only where the user decides** (`read_request`'s proposal, `ask_user`'s choice,
+  `propose_quotation`'s quotation, plus the question and candidates cards). Everything else the agent
+  does is shown the way Claude Code shows it: one fold per run, open while it works and "N steps"
+  after, one line per tool call with what it found, the tool's card behind the line, and the model's
+  summarized thinking. Look-ups are answered in the text, a few rows named, the rest behind the step.
 - After a tool result that changed a configuration (`calculate`, `select`, `create`), the panel
   invalidates that configuration's `configs.get` (and the list) so the page redraws.
 - Texts go through the app's i18n bundles (en, es, eu). The assistant answers in the user's app

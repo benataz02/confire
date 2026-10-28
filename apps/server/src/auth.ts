@@ -4,7 +4,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins/organization";
 import { createAccessControl } from "better-auth/plugins/access";
 import { adminAc, defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
-import { and, eq, notInArray } from "drizzle-orm";
+import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "@confire/db/client";
 import * as schema from "@confire/db/schema";
 import { EXTERNAL_ROLES } from "@confire/db/schema";
@@ -25,6 +25,33 @@ const assertSlug = (slug: string | undefined) => {
  *  Spread after Better Auth's own value, so it can change emailVerified — never the `oid` identity. */
 export const microsoftEmailVerified = (profile: Record<string, unknown>): boolean =>
   profile.xms_edov === true || profile.xms_edov === "1" || profile.xms_edov === 1 || profile.xms_edov === "true";
+
+/** The tenant every personal Microsoft account (outlook.com, or any address made into one) signs in from. */
+const MSA_TENANT = "9188040d-6c67-4c5b-b112-36a304b66dad";
+
+/** An organisation vouches for this ID token's address: Google Workspace (`hd`), or a Microsoft work or
+ *  school tenant that verified the email's domain. A personal Google or Microsoft account can be made
+ *  on any address, so it never counts. */
+export const isWorkAccount = (providerId: string, claims: Record<string, unknown>): boolean =>
+  providerId === "google" ? typeof claims.hd === "string" && claims.email_verified === true
+  : providerId === "microsoft" ? typeof claims.tid === "string" && claims.tid !== MSA_TENANT && microsoftEmailVerified(claims)
+  : false;
+
+/** Whether the user signs in with a work account (isWorkAccount) on `email`. Read off the ID token
+ *  Better Auth stores as the provider sent it and replaces on every sign-in (updateAccountOnSignIn). */
+export async function hasWorkAccount(userId: string, email: string): Promise<boolean> {
+  const rows = await db.select({ providerId: schema.account.providerId, idToken: schema.account.idToken })
+    .from(schema.account)
+    .where(and(eq(schema.account.userId, userId), inArray(schema.account.providerId, ["google", "microsoft"])));
+  return rows.some((r) => {
+    try {
+      const claims = JSON.parse(Buffer.from(r.idToken!.split(".")[1]!, "base64url").toString("utf8"));
+      return String(claims.email).toLowerCase() === email.toLowerCase() && isWorkAccount(r.providerId, claims);
+    } catch {
+      return false;
+    }
+  });
+}
 
 const mail = authMail();
 
@@ -63,11 +90,11 @@ const orgPlugin = organization({
     // cardCode (null = a new client, set by its onboarding submit). It joins the supplier's
     // organization (organizationId) and never creates one. Better Auth's accept is off — it inserts
     // the member bare, before a new client has a company, and never checks an existing membership — so
-    // portal/members.ts writes and accepts these rows (addPortalMember).
+    // portal/members.ts writes and accepts these rows (addPortalMember). Accepting one always registers
+    // the invitee's domain to the company (claimDomain): who may then auto-join is onboarding.join's.
     invitation: {
       additionalFields: {
         cardCode: { type: "string", required: false, input: false },
-        registerDomain: { type: "boolean", required: false, defaultValue: false, input: false },
         // The SAP language (UserLanguages.Code) its mail went out in: the company's, or for a new
         // client the inviter's app language — which onboarding submit also gives the new lead.
         languageCode: { type: "number", required: false, input: false },

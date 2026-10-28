@@ -13,6 +13,7 @@ import { entitySchema, toConstraints } from "../../entity-meta.ts";
 import { bad } from "../../entity-read.ts";
 import { DEDUP_UDF } from "../../config-quote.ts";
 import { TENANT_HEADER } from "../../tenant.ts";
+import { hasWorkAccount } from "../../auth.ts";
 
 // The two ways into a company (spec §4.4, §5.2): an invitation, accepted on its link, and auto-join
 // by a registered email domain. Both run on the supplier's portal page — sign-in lives on the sign-in
@@ -30,7 +31,7 @@ async function openInvitationFor(tenantId: string, u: { email: string; emailVeri
     .select({
       id: invitation.id, cardCode: invitation.cardCode, email: invitation.email,
       role: portalRoleOf(invitation.role), status: invitation.status, expiresAt: invitation.expiresAt,
-      registerDomain: invitation.registerDomain, inviterId: invitation.inviterId, languageCode: invitation.languageCode,
+      inviterId: invitation.inviterId, languageCode: invitation.languageCode,
       companyName: portalCompany.cardName, inviterName: user.name,
     })
     .from(invitation)
@@ -117,7 +118,7 @@ export const onboardingRouter = {
   }),
 
   /** One transaction: the guarded pending → accepted (a double click loses here), the seat, and the
-   *  domain when the inviter asked for it — skipped for free mail or a domain another company has. */
+   *  invitee's domain — skipped for free mail or a domain another company has. */
   accept: portalSessionProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
     const inv = await openInvitationFor(context.tenantId, context.user, input.id);
     const cardCode = inv.cardCode;
@@ -128,9 +129,7 @@ export const onboardingRouter = {
         .returning({ id: invitation.id });
       if (!done.length) throw new ORPCError("CONFLICT", { message: "This invitation has just been accepted or cancelled" });
       await addPortalMember(tx, { tenantId: context.tenantId, cardCode, userId: context.user.id, role: inv.role });
-      if (inv.registerDomain) {
-        await claimDomain(tx, { tenantId: context.tenantId, cardCode, domain: emailDomain(inv.email), addedBy: inv.inviterId });
-      }
+      await claimDomain(tx, { tenantId: context.tenantId, cardCode, domain: emailDomain(inv.email), addedBy: inv.inviterId });
     });
   }),
 
@@ -212,9 +211,7 @@ export const onboardingRouter = {
           .returning({ id: invitation.id });
         if (!done.length) throw new ORPCError("CONFLICT", { message: "This invitation has just been used or cancelled" });
         await addPortalMember(tx, { tenantId: context.tenantId, cardCode, userId: context.user.id, role: "owner" });
-        if (inv.registerDomain) {
-          await claimDomain(tx, { tenantId: context.tenantId, cardCode, domain: emailDomain(inv.email), addedBy: inv.inviterId });
-        }
+        await claimDomain(tx, { tenantId: context.tenantId, cardCode, domain: emailDomain(inv.email), addedBy: inv.inviterId });
       });
       notifyOnboarded({
         tenantId: context.tenantId, invitationId: inv.id, inviterId: inv.inviterId,
@@ -223,8 +220,10 @@ export const onboardingRouter = {
       return { cardCode, cardName: fresh.cardName };
     }),
 
-  /** Auto-join (spec D5, §4.4): a verified address on a domain registered to a company here joins
-   *  it as `viewer`. null when nothing matches — the page then says to ask for an invitation.
+  /** Auto-join (spec D5, §4.4): a Google Workspace or Microsoft work account (hasWorkAccount) on a
+   *  domain registered to a company here joins it as `viewer` — a verified email alone does not, nor a
+   *  personal Google/Microsoft account on that domain. null when nothing matches — the page then says
+   *  to ask for an invitation.
    *  ponytail: no `joined` audit event until config_project_event lands (P4); the member row's createdAt
    *  is the record meanwhile. */
   join: portalSessionProcedure.handler(async ({ context }) => {
@@ -236,7 +235,7 @@ export const onboardingRouter = {
       .innerJoin(portalCompany, and(eq(portalCompany.tenantId, portalCompanyDomain.tenantId), eq(portalCompany.cardCode, portalCompanyDomain.cardCode)))
       .where(and(eq(portalCompanyDomain.tenantId, context.tenantId), eq(portalCompanyDomain.domain, domain)))
       .limit(1);
-    if (!hit) return null;
+    if (!hit || !(await hasWorkAccount(context.user.id, context.user.email))) return null;
     await db.transaction((tx) =>
       addPortalMember(tx, { tenantId: context.tenantId, cardCode: hit.cardCode, userId: context.user.id, role: "viewer" }));
     return { cardName: hit.cardName };

@@ -99,6 +99,60 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/assistant", () => {
     expect(JSON.stringify(t.messages[2])).toContain("ACME cable");
   });
 
+  test("ask_user ends the run on its result; the answer is the next turn", async () => {
+    const w = await world();
+    const ask = { question: "Which customer?", options: [{ label: "ACME S.L. (C0001)" }, { label: "ACME GmbH (C0002)" }] };
+    w.fake.setResponses([{ toolCalls: [{ name: "ask_user", input: ask }] }, { text: "never reached" }]);
+    await (await w.post({ text: "New request from ACME" })).text();
+    expect(w.fake.state.callCount).toBe(1);
+    const t = await w.stored();
+    expect(t.messages.map((m) => m.role)).toEqual(["user", "assistant", "tool"]);
+    expect(t.messages[1]!.toolCalls?.[0]?.function.name).toBe("ask_user");
+    w.fake.setResponses([{ text: "ACME S.L. it is." }]);
+    await (await w.post({ text: "ACME S.L. (C0001)" })).text();
+    expect((await w.stored()).messages.map((m) => m.role)).toEqual(["user", "assistant", "tool", "user", "assistant"]);
+  });
+
+  test("thinking goes back within its run, never to a later one; the thread keeps it", async () => {
+    const w = await world();
+    const thought = (ms: { thinking?: unknown[] }[]) => ms.filter((m) => m.thinking?.length).length;
+    let within = -1;
+    let later = -1;
+    w.fake.setResponses([
+      { thinking: "First the models.", toolCalls: [{ name: "configs_models", input: {} }] },
+      ({ request }) => { within = thought(request.messages); return { text: "None yet." }; },
+    ]);
+    await (await w.post({ text: "Which models are there?" })).text();
+    expect(within).toBe(1);
+    expect(thought((await w.stored()).messages)).toBe(1);
+    w.fake.setResponses([({ request }) => { later = thought(request.messages); return { text: "Still none." }; }]);
+    await (await w.post({ text: "And now?" })).text();
+    expect(later).toBe(0);
+  });
+
+  test("a configuration's chat works on it from any page; one the chat creates, in the same run", async () => {
+    const w = await world();
+    const [m] = await db.insert(configModel).values({ tenantId: w.tenantId, name: "Cable", definition: TEST_MODEL }).returning({ id: configModel.id });
+    let created = "";
+    let tools: string[] = [];
+    w.fake.setResponses([
+      ({ request }) => { tools = (request.tools ?? []).map((x) => x.name); return { toolCalls: [{ name: "configs_create", input: { modelId: m!.id, name: "ACME cable" } }] }; },
+      ({ request }) => { created = JSON.stringify(request.messages.at(-1)); return { text: "Created." }; },
+    ]);
+    await (await w.post({ text: "New cable for ACME" })).text();
+    expect(tools).toEqual(expect.arrayContaining(["configs_create", "configs_get", "configs_calculate"]));
+    expect(created).toContain("# Model: Cable"); // the create answers the model, so the run goes on with it
+    const t = await w.stored();
+    expect(t.projectId).not.toBeNull();
+    // the next turn from a general page (the panel stayed where it was): the configuration's tools and model
+    let system = "";
+    w.fake.setResponses([({ request }) => { system = JSON.stringify(request.systemPrompts); tools = (request.tools ?? []).map((x) => x.name); return { text: "ok" }; }]);
+    await (await w.post({ text: "What is missing?" })).text();
+    expect(system).toContain("# Model: Cable");
+    expect(tools).not.toContain("configs_create");
+    expect(tools).toContain("configs_calculate");
+  });
+
   test("an error mid-run keeps the user's message", async () => {
     const w = await world();
     w.fake.setResponses([{ error: "boom" }]);

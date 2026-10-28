@@ -2,7 +2,7 @@ import { z } from "zod";
 import { sql, type SQL } from "drizzle-orm";
 import { configProject, type ValueSource } from "@confire/db";
 import {
-  EntriesZ, PRICE_COL, TableRowsZ,
+  EntriesZ, PRICE_COL, QTY_COL, TableRowsZ,
   type Entries, type ModelDef, type Param, type TableDef, type TableRows, type Val,
 } from "@confire/config-engine";
 import type { Side } from "./project-lifecycle.ts";
@@ -100,6 +100,13 @@ export function patchProblems(model: ModelDef, patch: InputPatch, side: Side): s
       }
   }
   return out;
+}
+
+/** An items row's quantity is 1 until someone types another: a new line, a pasted one, one the
+ *  assistant writes without it. Fills the patch's rows in place, before the write. */
+export function defaultQuantities(model: ModelDef, patch: InputPatch): void {
+  for (const t of model.tables ?? [])
+    if (t.role === "items") for (const r of patch.tables?.[t.key] ?? []) r[QTY_COL] ??= 1;
 }
 
 /**
