@@ -2,7 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, eq, inArray } from "drizzle-orm";
 import { db, configModel, configProject } from "@confire/db";
-import { checkModel, ModelDefZ, syncTables } from "@confire/config-engine";
+import { applyModelPatch, checkModel, ModelDefZ, ModelPatchZ, syncTables, type KnownTable, type ModelDef } from "@confire/config-engine";
 import { adminProcedure } from "../base.ts";
 import { resolveLookups } from "../../lookups.ts";
 import { knownTables } from "./masterdata.ts";
@@ -13,6 +13,12 @@ import { copyName } from "../../copy-name.ts";
 
 // Admin-only configurator model builder API. save is the gate: a model that passes
 // ModelDefZ + checkModel here can never produce a parse/unknown-ref error at runtime.
+
+/** models.save/create reject an invalid definition with BAD_REQUEST + data.issues (span Issues). */
+function assertValid(definition: ModelDef, known: KnownTable[]) {
+  const issues = checkModel(definition, known);
+  if (issues.length) throw new ORPCError("BAD_REQUEST", { message: "Model has errors", data: { issues } });
+}
 
 const MODEL_FIELDS: SqlFields = {
   name: { col: configModel.name, kind: "string" },
@@ -54,33 +60,38 @@ export const modelsRouter = {
     return row;
   }),
 
-  save: adminProcedure
-    .input(z.object({
-      id: z.uuid().optional(),
-      definition: ModelDefZ,
-    }))
+  /** A model's first save: there is nothing stored to diff against yet. RETURNING the whole row so
+   *  the builder seeds models.get for the page it moves to instead of fetching it back. */
+  create: adminProcedure
+    .input(z.object({ definition: ModelDefZ }))
     .handler(async ({ input, context }) => {
-      const issues = checkModel(input.definition, knownTables(await masterdataRows(context.tenantId)));
-      if (issues.length) throw new ORPCError("BAD_REQUEST", { message: "Model has errors", data: { issues } });
-      const fields = {
-        name: input.definition.name, definition: input.definition, updatedAt: new Date(),
-      };
-      // RETURNING the whole row (not just the id) so the client can seed its models.get cache
-      // from the save response instead of refetching.
-      if (input.id) {
-        const [updated] = await db
-          .update(configModel)
-          .set(fields)
-          .where(and(eq(configModel.id, input.id), eq(configModel.tenantId, context.tenantId)))
-          .returning();
-        if (!updated) throw new ORPCError("NOT_FOUND");
-        return updated;
-      }
+      assertValid(input.definition, knownTables(await masterdataRows(context.tenantId)));
       const [ins] = await db
         .insert(configModel)
-        .values({ tenantId: context.tenantId, ...fields })
+        .values({ tenantId: context.tenantId, name: input.definition.name, definition: input.definition })
         .returning();
       return ins!;
+    }),
+
+  /** What changed since the builder's last save (`diffModel`), laid over the stored definition under
+   *  a row lock, so a concurrent save of other items is merged rather than overwritten. The gate
+   *  runs on the merged model: that is what is stored. */
+  save: adminProcedure
+    .input(z.object({ id: z.uuid(), patch: ModelPatchZ }))
+    .handler(async ({ input, context }) => {
+      const known = knownTables(await masterdataRows(context.tenantId));
+      return db.transaction(async (tx) => {
+        const fence = and(eq(configModel.id, input.id), eq(configModel.tenantId, context.tenantId));
+        const [row] = await tx.select({ definition: configModel.definition }).from(configModel).where(fence).for("update");
+        if (!row) throw new ORPCError("NOT_FOUND");
+        const definition = applyModelPatch(row.definition, input.patch);
+        assertValid(definition, known);
+        const [updated] = await tx.update(configModel)
+          .set({ name: definition.name, definition, updatedAt: new Date() })
+          .where(fence)
+          .returning({ updatedAt: configModel.updatedAt });
+        return updated!;
+      });
     }),
 
   /** Publish on the customer portal (spec D15, D21). Its own call, not part of `save`: these are

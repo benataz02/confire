@@ -1,7 +1,7 @@
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Form, FormGroup, FormItem, Input, Label, MessageStrip, Option, Select, Switch, Text } from "@ui5/webcomponents-react";
 import type { Issue, ModelDef } from "@confire/config-engine";
+import { BatchField } from "@confire/ui/configurator/ConfiguratorForm.tsx";
 import { CflField } from "@confire/ui/cfl/CflField.tsx";
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import { ExprInput } from "./ExprInput.tsx";
@@ -30,13 +30,6 @@ export function SettingsTab({ modelId, draft, update, issues, tables, tried }: {
 }) {
   const i18n = useI18n();
   const t: Translate = (key, ...params) => i18n.getText(key, ...params);
-  // Batches edited as CSV; parse on change, ignore junk. // ponytail: token editor if CSV annoys
-  const [batchText, setBatchText] = useState(draft.batchDefaults.join(", "));
-  const setBatches = (text: string) => {
-    setBatchText(text);
-    const nums = text.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0);
-    update((d) => ({ ...d, batchDefaults: nums }));
-  };
 
   // Every error state on this tab goes through these two, so "only after Save" is one rule in one
   // place rather than a `tried &&` scattered over eight fields.
@@ -57,11 +50,9 @@ export function SettingsTab({ modelId, draft, update, issues, tables, tried }: {
             <Input id="model-description" value={draft.description ?? ""} placeholder={t("MODEL_DESCRIPTION_PH")}
               onInput={(e) => update((d) => ({ ...d, description: e.target.value || undefined }))} />
           </FormItem>
-          <FormItem labelContent={<Label>{t("MODEL_BATCHES")}</Label>}>
-            <Input value={batchText} placeholder={t("MODEL_BATCHES_PH")} onInput={(e) => setBatches(e.target.value)}
-              valueState={bad(!draft.batchDefaults.length)}
-              valueStateMessage={<div>{t("MODEL_BATCHES_HINT")}</div>} />
-          </FormItem>
+          <BatchField batches={draft.batchDefaults} label={t("MODEL_BATCHES")}
+            valueState={bad(!draft.batchDefaults.length)}
+            onChange={(batchDefaults) => update((d) => ({ ...d, batchDefaults }))} />
         </FormGroup>
         <FormGroup headerText={t("MODEL_PRICING")}>
           {/* Mandatory: BOM lines carry no price of their own — this list is where every material's
@@ -103,10 +94,6 @@ export function SettingsTab({ modelId, draft, update, issues, tables, tried }: {
       </Form>
 
       <PortalSettings modelId={modelId} />
-
-      <MessageStrip design="Information" hideCloseButton>
-        {t("MODEL_MASTERDATA_NOTE")}
-      </MessageStrip>
     </div>
   );
 }

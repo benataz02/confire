@@ -16,11 +16,11 @@ import { money } from "../money.ts";
 import { useUiI18n } from "../i18n.ts";
 import { useUiSource } from "../source.tsx";
 
-// The one form the builder preview, the configuration page and the portal render: one
-// ObjectPageSection per model section, so the caller's anchor bar navigates the model. It draws a
-// form state (config-engine's formState: values, options, visibility, requiredness, badges, broken
-// rules) and reports each change; it computes nothing. The ObjectPage, its other sections, footers
-// and consistency stay with the caller.
+// The one form the builder preview, the configuration page and the portal render. The pages take
+// one ObjectPageSection per model section, so their anchor bar navigates the model; the builder
+// preview takes the forms alone. It draws a form state (config-engine's formState: values, options,
+// visibility, requiredness, badges, broken rules) and reports each change; it computes nothing.
+// The ObjectPage, its other sections, footers and consistency stay with the caller.
 
 /** The items grid's money at the quantity the section shows. */
 export type ItemMoney = { batchQty: number; rows: (RowMoney | null)[] };
@@ -70,7 +70,7 @@ const FORM_PROPS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2" } as 
 // (TABLE_ITEM). ConfigTable's Grid toolbar names the table, with its row count, and carries Add/Delete.
 
 /** A field's provenance mark: the assistant wrote it (with the source as its tip), or a question about
- *  it is open in the assistant. Drawn beside the rule's "Auto". */
+ *  it is open in the assistant. */
 export type FieldMark = { kind: "assistant"; tip: string } | { kind: "question" };
 
 export type ConfiguratorProps = {
@@ -116,18 +116,29 @@ export function configuratorSections(props: ConfiguratorProps) {
   ));
 }
 
-// One headerless Form per section. The ObjectPageSection is the container — the model section's
-// one title, and its anchor; the Form only lays out label/field pairs, and supports exactly one
-// level of grouping (Form > FormGroup), so section→ObjectPageSection+Form / group→FormGroup keeps
-// both titles. A section's only group drops its own header, which would just repeat the section's.
+/** The same sections as forms, with the section title on the form. The builder preview has no
+ *  anchor bar, so it has no ObjectPage to hang a section on. */
+export function configuratorForms(props: ConfiguratorProps) {
+  return formSections(props.model).map((sec) => (
+    <SectionForm key={sec.key} {...props} title={sec.title} groups={sec.groups} headerText={sec.title} />
+  ));
+}
+
+// One Form per section. On a page the ObjectPageSection is the section's title and its anchor, so
+// the Form stays headerless; the preview passes headerText because it has no section to hang it on.
+// Form supports exactly one level of grouping (Form > FormGroup), so section title / group→FormGroup
+// keeps both. A section's only group drops its own header, which would just repeat the section's.
 //
 // A section's groups are of two kinds: a table group renders as one full-width, headerless
-// FormGroup — the Grid's toolbar titles it from its TableDef (so a rename in TableDialog cannot
+// FormGroup — the Grid's toolbar titles it from its TableDef (so a rename on the table's page cannot
 // leave a stale heading), and a group header would only say it twice — a field group as the
 // ordinary label-and-field group.
-function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabled, readOnly, querySource, batches, itemMoney, itemBatch, onItemBatchChange, formulaOverride, marks, onMarkPress, title, groups }: ConfiguratorProps & {
+function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabled, readOnly, querySource, batches, itemMoney, itemBatch, onItemBatchChange, formulaOverride, marks, onMarkPress, title, groups, headerText }: ConfiguratorProps & {
   title: string;
   groups: Group[];
+  /** Set when this form is the section, not a child of one. A heading and an accessible name
+   *  would announce the title twice. */
+  headerText?: string;
 }) {
   const i18n = useUiI18n();
   const currency = useUiSource().useCurrency();
@@ -286,7 +297,7 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
   ) : undefined;
 
   return (
-    <Form accessibleName={title} {...FORM_PROPS} {...formMode}>
+    <Form headerText={headerText} accessibleName={headerText ? undefined : title} {...FORM_PROPS} {...formMode}>
       {groups.map((g, gi) => {
       if (isTableGroup(g)) {
         const def = defOf(g.table)!;
@@ -342,7 +353,6 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
                 <div data-param={k} style={{ display: "flex", flexDirection: "column", gap: "0.125rem", width: "100%" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
                     {control(k)}
-                    {f.defaulted ? <ObjectStatus state="Information">{i18n.getText("UI_AUTO")}</ObjectStatus> : null}
                     {marks?.[k] ? <MarkIcon mark={marks[k]!} label={i18n.getText("UI_MARK_QUESTION")}
                       onPress={(el) => onMarkPress?.(k, el)} /> : null}
                   </div>
@@ -366,16 +376,25 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
 }
 
 /** The batch quantities, as a FormItem in a page's General. Omit onChange to show them read-only. Type a quantity, Enter (or
- *  leaving the field) makes it a token; uncontrolled, so the typed text is cleared by hand. */
-export function BatchField({ batches, onChange }: { batches: number[]; onChange?: (batches: number[]) => void }) {
+ *  leaving the field) makes it a token; uncontrolled, so the typed text is cleared by hand.
+ *  `label` is for a caller whose field is not the configuration's own quantities — the model
+ *  builder's defaults. */
+export function BatchField({ batches, onChange, label, valueState }: {
+  batches: number[];
+  onChange?: (batches: number[]) => void;
+  label?: string;
+  /** The configuration page errors as soon as the list is empty. A caller that reveals errors
+   *  only after an explicit save (the model builder) passes its own. */
+  valueState?: "Negative" | "None";
+}) {
   const i18n = useUiI18n();
-  const label = i18n.getText("UI_BATCHES");
+  const text = label ?? i18n.getText("UI_BATCHES");
   return (
-    <FormItem labelContent={<Label required={!!onChange}>{label}</Label>}>
+    <FormItem labelContent={<Label required={!!onChange}>{text}</Label>}>
       {onChange ? (
         <MultiInput type="Number" data-param={BATCHES_PARAM} style={{ width: "100%" }}
-          placeholder={i18n.getText("UI_BATCHES_PLACEHOLDER")} accessibleName={label}
-          valueState={batches.length ? "None" : "Negative"}
+          placeholder={i18n.getText("UI_BATCHES_PLACEHOLDER")} accessibleName={text}
+          valueState={valueState ?? (batches.length ? "None" : "Negative")}
           valueStateMessage={<div>{i18n.getText("UI_BATCHES_HINT")}</div>}
           tokens={batches.map((b) => <Token key={b} text={String(b)} />)}
           onChange={(e) => {

@@ -21,9 +21,10 @@ test("registry: a configuration page configures; unknown routes get the general 
   expect(pageFor("/$slug/models/$id").kind).toBe("model");
   expect(pageFor("/$slug/whatever").kind).toBe("general");
   expect(pageFor("/$slug/whatever")).toBe(GENERAL);
-  // The AI configuration page: the general set to start one, the configure set once it exists.
+  // The AI page: the general set to start one, for the bare page and a chat alike (`$id` is the chat;
+  // the route makes a configuration's chat CONFIGURE_CHAT).
   expect(pageFor("/$slug/assistant/").tools).toContain("configs_create");
-  expect(pageFor("/$slug/assistant/$id").kind).toBe("configure");
+  expect(pageFor("/$slug/assistant/$id").kind).toBe("general");
 });
 
 test("no tool posts, and no tool is admin-only", () => {

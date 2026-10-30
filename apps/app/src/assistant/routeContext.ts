@@ -1,10 +1,11 @@
 // Where the panel is (assistant spec §4.3): the deepest route match, sent with every message so the
-// server picks the page's tools and prompt. Only a configuration's own pages carry it (its AI configuration page too).
+// server picks the page's tools and prompt. Only a configuration's own pages carry it; the AI page's `$id`
+// is a chat, which says its configuration itself.
 
 export type RouteContext = { routeId: string; params: Record<string, string>; projectId: string | null };
 
 /** The routes whose `$id` is a configuration. */
-const CONFIGURATION = new Set(["/$slug/configs/$id", "/$slug/configs/$id_/quote", "/$slug/assistant/$id"]);
+const CONFIGURATION = new Set(["/$slug/configs/$id", "/$slug/configs/$id_/quote"]);
 
 export function routeContext(matches: { routeId: string; params: Record<string, string> }[]): RouteContext {
   const deepest = matches.at(-1);

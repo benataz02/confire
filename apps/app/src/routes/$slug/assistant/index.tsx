@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { AssistantDock } from "../../../assistant/AssistantProvider.tsx";
+import { AssistantPage } from "../../../assistant/AssistantPage.tsx";
 
-// AI configuration: the chat alone, until it has started a configuration (then `/assistant/$id`).
-export const Route = createFileRoute("/$slug/assistant/")({ component: AssistantDock });
+// AI configuration: a new chat, which moves to its own address (`/assistant/$id`) once it has one.
+export const Route = createFileRoute("/$slug/assistant/")({ component: () => <AssistantPage threadId={null} /> });

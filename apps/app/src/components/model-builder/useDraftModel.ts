@@ -1,7 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { checkModel, type Issue, type ModelDef } from "@confire/config-engine";
+import { checkModel, diffModel, isEmptyPatch, type Issue, type ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
 import { useI18n } from "../../i18n.ts";
 import type { TableCols } from "./exprHelpers.ts";
@@ -46,8 +46,11 @@ export function useDraftModel(id?: string) {
   // wrong with it is something this session just introduced, and saying so at once is the point.
   const [tried, setTried] = useState(!!id);
 
+  // What the server holds as far as this page knows: the definition loaded, then each one saved.
+  // Save sends the draft's difference from it, never the whole model.
+  const [base, setBase] = useState<ModelDef | null>(null);
   useEffect(() => {
-    if (rec.data && draft === null) setDraft(rec.data.definition);
+    if (rec.data && draft === null) { setDraft(rec.data.definition); setBase(rec.data.definition); }
   }, [rec.data, draft]);
 
   const tables = tablesQ.data ?? [];
@@ -71,26 +74,27 @@ export function useDraftModel(id?: string) {
     [deferredDraft, tableCols],
   );
 
-  const saveMut = useMutation(
-    orpc.models.save.mutationOptions({
-      onSuccess: (row) => {
-        setDirty(false);
-        setServerIssues([]);
-        setTried(true); // it is a saved model now, errors introduced from here on are live
-        qc.invalidateQueries({ queryKey: orpc.models.list.queryOptions().queryKey });
-        qc.invalidateQueries({ queryKey: orpc.models.rows.key() });
-        // save RETURNs the saved row, so seed the cache with it instead of refetching models.get.
-        qc.setQueryData(orpc.models.get.queryOptions({ input: { id: row.id } }).queryKey, row);
-        toast(t("MODEL_TOAST_SAVED"));
-        if (!id) void navigate({ to: "/$slug/models/$id", params: { id: row.id }, replace: true });
-      },
-      onError: (e) => {
-        // models.save rejects invalid definitions with BAD_REQUEST + data.issues (span Issues).
-        const data = (e as { data?: { issues?: Issue[] } }).data;
-        setServerIssues(data?.issues ?? []);
-      },
-    }),
-  );
+  const saved = () => {
+    setDirty(false);
+    setServerIssues([]);
+    setTried(true); // it is a saved model now, errors introduced from here on are live
+    qc.invalidateQueries({ queryKey: orpc.models.list.queryOptions().queryKey });
+    qc.invalidateQueries({ queryKey: orpc.models.rows.key() });
+    toast(t("MODEL_TOAST_SAVED"));
+  };
+  // Both reject an invalid definition with BAD_REQUEST + data.issues (span Issues).
+  const refused = (e: unknown) => setServerIssues((e as { data?: { issues?: Issue[] } }).data?.issues ?? []);
+  const createMut = useMutation(orpc.models.create.mutationOptions({
+    onSuccess: (row) => {
+      saved();
+      // create RETURNs the row, so the page it moves to starts from the cache instead of refetching.
+      qc.setQueryData(orpc.models.get.queryOptions({ input: { id: row.id } }).queryKey, row);
+      // search kept: a save from the parameter page has already returned to the Parameters tab.
+      void navigate({ to: "/$slug/models/$id", params: { id: row.id }, search: true, replace: true });
+    },
+    onError: refused,
+  }));
+  const saveMut = useMutation(orpc.models.save.mutationOptions({ onError: refused }));
 
   return {
     draft,
@@ -108,14 +112,29 @@ export function useDraftModel(id?: string) {
     setDirty,
     // Save stays enabled and the first click on an invalid model reveals the errors instead of
     // saving, so the button never greys out without saying why (same deal as the parameter page).
-    save: () => {
-      if (!draft) return;
+    // `def` is for a caller that has just called `update`: `draft` is still the render's old one.
+    save: (def: ModelDef | null = draft) => {
+      if (!def) return;
       setTried(true);
-      if (modelIssues.length > 0 || !draft.name.trim()) return;
-      saveMut.mutate({ ...(id ? { id } : {}), definition: draft });
+      const issues = def === draft ? modelIssues : checkModel(def, tableCols);
+      if (issues.length > 0 || !def.name.trim()) return;
+      if (!id) return createMut.mutate({ definition: def });
+      if (!base) return;
+      const patch = diffModel(base, def);
+      // Edited and typed back: nothing to send.
+      if (isEmptyPatch(patch)) return setDirty(false);
+      saveMut.mutate({ id, patch }, {
+        onSuccess: ({ updatedAt }) => {
+          setBase(def);
+          saved();
+          // The answer is only the time, so the cached row is brought up to what was sent.
+          qc.setQueryData(orpc.models.get.queryOptions({ input: { id } }).queryKey,
+            (row) => row && { ...row, name: def.name, definition: def, updatedAt });
+        },
+      });
     },
-    saving: saveMut.isPending,
-    saveError: saveMut.error as Error | null,
+    saving: saveMut.isPending || createMut.isPending,
+    saveError: (saveMut.error ?? createMut.error) as Error | null,
     loading: !!id && rec.isPending,
     loadError: rec.error as Error | null,
     tableCols,

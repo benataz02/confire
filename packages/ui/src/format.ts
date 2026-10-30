@@ -65,3 +65,14 @@ export function formatValue(v: unknown, type?: FieldType, options?: Option[], in
 /** A person's avatar initials: the first letter of their first two words ("Ana María López" → "AM"). */
 export const initials = (name: string) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
+
+const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ["year", 31_536_000], ["month", 2_592_000], ["week", 604_800], ["day", 86_400], ["hour", 3_600], ["minute", 60],
+];
+/** "5 minutes ago", in the page's UI5 language. */
+export function ago(d: Date): string {
+  const s = (new Date(d).getTime() - Date.now()) / 1000;
+  const f = new Intl.RelativeTimeFormat(formatLocale(), { numeric: "auto" });
+  const unit = UNITS.find(([, n]) => Math.abs(s) >= n);
+  return unit ? f.format(Math.round(s / unit[1]), unit[0]) : f.format(0, "minute");
+}

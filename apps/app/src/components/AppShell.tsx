@@ -86,6 +86,7 @@ function Shell() {
   const assistantStatus = useQuery(orpc.assistant.status.queryOptions());
   const toggle = assistantToggle(assistantStatus.data, (k) => i18n.getText(k));
   const { open: assistantOpen, close: closeAssistant } = assistant;
+  const onAiPage = pathname === "/assistant" || pathname.startsWith("/assistant/");
   useEffect(() => { if (toggle.disabled && assistantOpen && assistantStatus.data) closeAssistant(); },
     [toggle.disabled, assistantOpen, assistantStatus.data, closeAssistant]);
 
@@ -200,8 +201,8 @@ function Shell() {
               setBellOpener((cur) => (cur ? null : target));
             }}
             // On the AI configuration page the chat is the page: the toggle shows it, and has nothing to switch.
-            assistant={<ToggleButton icon="da" pressed={assistant.open || !!assistant.dock} disabled={toggle.disabled || !!assistant.dock}
-              tooltip={toggle.tooltip} accessibleName={toggle.tooltip} accessibilityAttributes={{ expanded: assistant.open || !!assistant.dock }}
+            assistant={<ToggleButton icon="da" pressed={assistant.open || onAiPage} disabled={toggle.disabled || onAiPage}
+              tooltip={toggle.tooltip} accessibleName={toggle.tooltip} accessibilityAttributes={{ expanded: assistant.open || onAiPage }}
               onClick={assistant.toggle} />}
             accessibilityAttributes={{
               notifications: { expanded: bellOpener !== null, hasPopup: "dialog" },

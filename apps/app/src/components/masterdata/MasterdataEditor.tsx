@@ -1,22 +1,24 @@
-import { useEffect, useRef, useState } from "react";
-import { useBlocker, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Bar, BusyIndicator, Button, CheckBox, Form, FormGroup, FormItem, Icon, IllustratedMessage, Input,
-  Label, MessageStrip, ObjectPage, ObjectPageSection, ObjectPageTitle, Option, Panel, Select,
-  Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableRowAction, Text, TextArea,
-  Title, Toolbar, ToolbarButton,
+  Button, CheckBox, Form, FormGroup, FormItem, Icon, IllustratedMessage, Input, Label, MessageStrip,
+  Option, Select, Text, TextArea,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
-import type { PanelDomRef } from "@ui5/webcomponents-react";
 import type { ODataQuery, QuerySource, Val } from "@confire/config-engine";
-import { useI18n } from "../../i18n.ts";
-import { orpc } from "../../orpc.ts";
-import { colMinWidth } from "../configurator/tableWidths.ts";
 import { confirm } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { formatLocale } from "@confire/ui/format.ts";
-import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
+import { Grid, GridForm, type GridState } from "@confire/ui/list-report/Grid.tsx";
+import type { EntityConstraints } from "@confire/ui/metadata.ts";
+import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
+import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
+import type { FormContext, ListColumn, Row, Section } from "@confire/ui/types.ts";
+import { sameState } from "@confire/ui/views.ts";
+import { useI18n } from "../../i18n.ts";
+import { orpc } from "../../orpc.ts";
+import { DeleteRows, useEditGrid } from "../model-builder/useEditGrid.tsx";
 
 // One editor for both kinds. The kind is picked once, on create: a saved row keeps it, because
 // switching would throw away either the maintained rows or the query behind it.
@@ -25,6 +27,7 @@ type Col = { key: string; label: string; type: "string" | "number" | "boolean" }
 type Cell = Exclude<Val, string[]>;
 type QueryDef = QuerySource & { labels?: Record<string, string>; hidden?: string[]; syncMinutes?: number };
 type Draft = { name: string; kind: "table" | "query"; columns: Col[]; rows: Cell[][]; query: QueryDef };
+type Translate = (key: string, ...params: Array<string | number>) => string;
 
 const emptyDraft = (): Draft => ({
   name: "",
@@ -34,31 +37,25 @@ const emptyDraft = (): Draft => ({
   query: { target: "b1", query: { entitySet: "" }, columns: [] },
 });
 
-// Two columns once there is room: the short field groups sit side by side, the table groups get a
-// row of their own.
+// The draft is the record's one field, as in ParamPage: the shared ObjectPage's buffer, dirty mark,
+// discard guard and Save/Cancel cover it whole; every section is a template over it.
+const CONSTRAINTS: EntityConstraints = {
+  name: "Masterdata", label: "", keys: [], writable: true, printable: false, flows: [],
+  fields: { md: { Type: "string", EdmType: "", Editable: true } },
+};
+
+// Two columns once there is room.
 const FORM = {
   layout: "S1 M1 L2 XL2", labelSpan: "S12 M3 L3 XL3", emptySpan: "S0 M0 L0 XL1", accessibleMode: "Edit",
 } as const;
 
-// One CSS var drives both a group's column span *and* the `column-count` of its own content, so a
-// group spanning both columns would fragment its table down the middle. `column-span: all` puts the
-// content back into a single column across the full width — it needs a box to apply to, hence the
-// `display: block` overriding the `display: contents` the Form sets on slotted groups.
-const WIDE = { columnSpan: 2, style: { display: "block", columnSpan: "all" } } as const;
-
 // A preview is a shape check, not a data browse — five rows read as $top=5, server-side.
 const PREVIEW_TOP = 5;
 
-const CELL = { display: "flex", alignItems: "center", gap: "0.5rem" } as const;
-
-// Toolbar draws a border-bottom on its host and has no prop to turn it off; sitting on a table it
-// doubles up with the header row's own line. Inline beats the `:host` rule.
+const CELL = { display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" } as const;
 
 /** Keeps the text of a row that has no icon aligned with the text of the rows that do. */
 const iconSlot = <span style={{ width: "1rem", flex: "none" }} />;
-
-/** `col-3` / `row-12` -> 3 / 12. The row key is the index; there is nothing else to key on. */
-const rowIndex = (row: unknown) => Number((row as { rowKey: string }).rowKey.split("-")[1]);
 
 // Drop labels/hidden for keys the Select clause no longer names; omit empty bags so the row
 // stays sparse.
@@ -74,7 +71,7 @@ function pruneColUi(q: QueryDef): QueryDef {
 }
 
 /** The same rules masterdata.save enforces, in words a person can act on — the server's are zod's. */
-function issueOf(d: Draft, t: (key: string) => string): string | null {
+function issueOf(d: Draft, t: Translate): string | null {
   if (!d.name.trim()) return t("ADMIN_MD_NEED_NAME");
   if (d.kind === "query") return d.query.query.entitySet ? null : t("ADMIN_MD_NEED_ENTITY");
   if (!d.columns.length) return t("ADMIN_MD_NEED_COLUMN");
@@ -82,131 +79,313 @@ function issueOf(d: Draft, t: (key: string) => string): string | null {
   return null;
 }
 
+const typed = (col: Col, raw: string): Cell =>
+  col.type === "number" ? (raw === "" ? null : Number(raw)) : col.type === "boolean" ? raw === "true" : raw;
+
+type Part = {
+  d: Draft;
+  edit: (fn: (d: Draft) => Draft) => void;
+  /** Nothing is wrong until Save was tried: an empty key is a work in progress, not a mistake. */
+  tried: boolean;
+};
+
 export function MasterdataEditor({ id }: { id?: string }) {
   const i18n = useI18n();
-  const rowsText = (n: number) => i18n.getText(n === 1 ? "ADMIN_ROW_ONE" : "ADMIN_ROW_MANY", n);
+  const t: Translate = (key, ...params) => i18n.getText(key, ...params);
   const navigate = useNavigate({ from: "/$slug" });
   const qc = useQueryClient();
   const list = useQuery(orpc.masterdata.list.queryOptions());
-  const row = id ? list.data?.find((t) => t.id === id) : undefined;
+  const row = id ? list.data?.find((x) => x.id === id) : undefined;
 
-  const [draft, setDraft] = useState<Draft | null>(id ? null : emptyDraft());
-  const [dirty, setDirty] = useState(false);
+  // Taken once: a new object resets the page's form, so a background refetch must not hand it one.
+  const [data, setData] = useState<Row | null>(id ? null : { md: emptyDraft() });
+  const [tried, setTried] = useState(false);
   const [preview, setPreview] = useState<{ cols: string[]; rows: Cell[][] } | null>(null);
-  const edit = (fn: (d: Draft) => Draft) => { setDraft((d) => (d ? fn(d) : d)); setDirty(true); };
-  const panelRef = useRef<PanelDomRef>(null);
-  // Panel only animates from its own toggle handler — assigning `collapsed` from outside just
-  // re-renders it open. Clicking its toggle button is the interaction path; a frame later, so the
-  // result is in the DOM when slideDown measures the height it animates to.
-  // A dispatched MouseEvent rather than `.click()`: `.click()` arrives at x=0/y=0, which Panel
-  // reads as the keyboard path and answers with stopImmediatePropagation, so the click never
-  // reaches the header handler that toggles and the panel stays shut (2.26.0, verified headless).
-  // Coordinates make it the mouse path, which is the one that animates.
-  const expandPreview = () => requestAnimationFrame(() => {
-    if (!panelRef.current?.collapsed) return;
-    panelRef.current.shadowRoot?.querySelector(".ui5-panel-header-button")
-      ?.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 1, clientY: 1 }));
-  });
-  const testFetch = useMutation(orpc.masterdata.queryPage.mutationOptions({
-    onSuccess: (r) => {
-      edit((x) => ({ ...x, query: pruneColUi({ ...x.query, columns: r.columns }) }));
-      setPreview({ cols: r.columns, rows: r.rows as Cell[][] });
-      expandPreview();
-    },
-    onError: () => { setPreview(null); expandPreview(); },
-  }));
+  // The draft on screen, for a test fetch answering after the user typed on.
+  const latest = useRef<Draft | null>(null);
 
   useEffect(() => {
-    if (!row || draft) return;
-    setDraft({
-      name: row.name,
-      kind: row.kind,
-      columns: row.kind === "table" ? (row.columns as Col[]) : emptyDraft().columns,
-      rows: row.rows as Cell[][],
-      query: row.query ?? emptyDraft().query,
+    if (!row || data) return;
+    setData({
+      md: {
+        name: row.name,
+        kind: row.kind,
+        columns: row.kind === "table" ? (row.columns as Col[]) : emptyDraft().columns,
+        rows: row.rows as Cell[][],
+        query: row.query ?? emptyDraft().query,
+      } satisfies Draft,
     });
-  }, [row, draft]);
+  }, [row, data]);
 
   // Both keys: `list` is what this editor and useDraftModel read, `rows` is the list page's
   // display projection. A write invalidates both or the list shows a stale row.
-  const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: orpc.masterdata.list.queryOptions().queryKey });
-    void qc.invalidateQueries({ queryKey: orpc.masterdata.rows.key() });
-  };
+  const invalidate = () => Promise.all([
+    qc.invalidateQueries({ queryKey: orpc.masterdata.list.queryOptions().queryKey }),
+    qc.invalidateQueries({ queryKey: orpc.masterdata.rows.key() }),
+  ]);
+  const testFetch = useMutation(orpc.masterdata.queryPage.mutationOptions({
+    onSuccess: (r) => setPreview({ cols: r.columns, rows: r.rows as Cell[][] }),
+    onError: () => setPreview(null),
+  }));
   // Refill this table's cache now. Invalidates the same two keys a save does: `rowCount` and
   // `syncedAt` are on the row, so the list page is as stale as this editor after one.
   const sync = useMutation(orpc.masterdata.sync.mutationOptions({
-    onSuccess: (r) => { invalidate(); toast(i18n.getText(r.count === 1 ? "ADMIN_SYNCED_ONE" : "ADMIN_SYNCED_MANY", r.count)); },
+    onSuccess: (r) => { void invalidate(); toast(t(r.count === 1 ? "ADMIN_SYNCED_ONE" : "ADMIN_SYNCED_MANY", r.count)); },
   }));
-  const saveOpts = orpc.masterdata.save.mutationOptions({
-    onSuccess: (r) => {
-      setDirty(false);
-      invalidate();
-      toast(i18n.getText("ADMIN_MD_SAVED"));
-      if (!id) void navigate({ to: "/$slug/masterdata/$id", params: { id: r.id }, replace: true });
-    },
-  });
-  const save = useMutation({
-    ...saveOpts,
-    // The client rules run *as part of* the mutation rather than gating it, so a local problem and
-    // a server one land in the same place: `save.error`. That is also what makes the mutation's own
-    // state enough to say whether Save has been pressed — no second flag beside it. The test fetch
-    // a query kind runs first is a link in that same chain for the same reason: it opens the
-    // preview on its way through, and a query B1 refuses fails the save in that one place.
-    mutationFn: async (...args: Parameters<NonNullable<typeof saveOpts.mutationFn>>) => {
-      const i = issueOf(draft!, (key) => i18n.getText(key));
-      if (i) throw new Error(i);
-      const [input, ...rest] = args;
-      if (input.kind !== "query") return saveOpts.mutationFn!(...args);
-      // What gets stored is what the response returned, never what was typed — the rule Test fetch
-      // already followed, now on the only path that writes: a saved $select answered by B1 once.
-      const r = await testFetch.mutateAsync({
-        target: input.query.target, query: input.query.query, columns: input.query.columns, top: PREVIEW_TOP,
-      });
-      return saveOpts.mutationFn!({ ...input, query: pruneColUi({ ...input.query, columns: r.columns }) }, ...rest);
-    },
-  });
-  // `isError`, not `submittedAt`: a submit stamp outlives the save that succeeded, so clearing a
-  // field afterwards would light it up again — the very thing this was meant to stop.
-  const submitted = save.isError;
+  const save = useMutation(orpc.masterdata.save.mutationOptions());
+  // A Delete leaves past the discard guard: its own confirm already asked.
   const remove = useMutation(orpc.masterdata.remove.mutationOptions({
-    onSuccess: () => { setDirty(false); invalidate(); toast(i18n.getText("ADMIN_TABLE_DELETED")); void navigate({ to: "/$slug/masterdata" }); },
-  }));
-  // Copies the *persisted* row, which is why the button is disabled while dirty — see the toolbar.
-  const duplicate = useMutation(orpc.masterdata.duplicate.mutationOptions({
-    onSuccess: (r) => { invalidate(); toast(i18n.getText("ADMIN_TABLE_DUPLICATED")); void navigate({ to: "/$slug/masterdata/$id", params: { id: r.id } }); },
-  }));
-
-  useBlocker({
-    shouldBlockFn: async () => {
-      if (!dirty || save.isPending) return false;
-      return !(await confirm({
-        title: i18n.getText("ADMIN_DISCARD_TITLE"),
-        message: i18n.getText("ADMIN_DISCARD_MSG"),
-        actionText: i18n.getText("ADMIN_DISCARD"),
-        destructive: true,
-      }));
+    onSuccess: () => {
+      void invalidate();
+      toast(t("ADMIN_TABLE_DELETED"));
+      void navigate({ to: "/$slug/masterdata", ignoreBlocker: true });
     },
-    enableBeforeUnload: () => dirty,
-  });
+  }));
+  // Copies the *persisted* row, which is why the button is disabled while dirty — see the header.
+  const duplicate = useMutation(orpc.masterdata.duplicate.mutationOptions({
+    onSuccess: (r) => { void invalidate(); toast(t("ADMIN_TABLE_DUPLICATED")); void navigate({ to: "/$slug/masterdata/$id", params: { id: r.id } }); },
+  }));
 
-  if (!draft) {
-    if (list.error)
-      return <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{list.error.message}</MessageStrip>;
+  const sections = useMemo<Section[]>(() => {
+    const kind = (k: Draft["kind"]) => (fd: Row) => (fd.md as Draft).kind === k;
+    return [
+      { id: "general", label: t("ADMIN_SECTION_GENERAL") },
+      { id: "columns", label: t("ADMIN_COLUMNS"), visible: kind("table") },
+      { id: "rows", label: t("ADMIN_ROWS"), visible: kind("table") },
+      { id: "query", label: t("ADMIN_KIND_QUERY"), visible: kind("query") },
+      // A new table has nothing cached yet.
+      ...(id ? [{ id: "cache", label: t("ADMIN_CACHE"), visible: kind("query") }] : []),
+      { id: "preview", label: t("ADMIN_PREVIEW"), visible: kind("query") },
+      { id: "queryColumns", label: t("ADMIN_QUERY_COLUMNS"), visible: kind("query") },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [i18n, id]);
+
+  if (!data) {
+    if (list.error) return <PageError error={list.error} />;
     if (list.data && !row)
-      return <IllustratedMessage name="NoData" design="Auto" titleText={i18n.getText("ADMIN_TABLE_NOT_FOUND")} subtitleText={i18n.getText("ADMIN_TABLE_NOT_FOUND_SUB")} />;
-    return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
+      return <IllustratedMessage name="NoData" design="Auto" titleText={t("ADMIN_TABLE_NOT_FOUND")} subtitleText={t("ADMIN_TABLE_NOT_FOUND_SUB")} />;
+    return <ObjectPageSkeleton />;
   }
-  const d = draft;
-  const error = save.error ?? testFetch.error ?? remove.error ?? duplicate.error;
-  // Both title states: a delete the server refuses has to be readable without scrolling the
-  // header shut first.
-  const errorStrip = error
-    ? <MessageStrip design="Negative" hideCloseButton style={{ paddingBlockStart: "0.5rem" }}>{error.message}</MessageStrip>
-    : null;
+  const opened = data.md as Draft;
 
-  const typed = (col: Col, raw: string): Cell =>
-    col.type === "number" ? (raw === "" ? null : Number(raw)) : col.type === "boolean" ? raw === "true" : raw;
+  const part = (ctx: FormContext): Part => {
+    const d = ctx.formData.md as Draft;
+    latest.current = d;
+    return { d, edit: (fn) => ctx.updateField("md", fn(latest.current ?? d)), tried };
+  };
+  const fetchPreview = (p: Part) => testFetch.mutate(
+    { target: p.d.query.target, query: p.d.query.query, columns: p.d.query.columns, top: PREVIEW_TOP },
+    // What the response returned becomes the Select clause, never what was typed.
+    { onSuccess: (r) => p.edit((x) => ({ ...x, query: pruneColUi({ ...x.query, columns: r.columns }) })) },
+  );
+
+  const actionError = remove.error ?? duplicate.error;
+  const title = row?.name || (id ? t("ADMIN_UNTITLED") : t("ADMIN_NEW_TABLE"));
+  return (
+    <ObjectPage
+      isNew
+      entity="Masterdata"
+      constraints={CONSTRAINTS}
+      data={data}
+      sections={sections}
+      header={{
+        titleField: "md",
+        createTitle: title,
+        actions: id ? (ctx) => {
+          const d = ctx.formData.md as Draft;
+          const dirty = !sameState(d, opened);
+          return (
+            <>
+              {d.kind === "query" ? (
+                // Disabled while dirty for the same reason Duplicate is: the sync runs the SAVED
+                // query, so running it against edits still on screen would cache the wrong answer.
+                <Button design="Transparent" icon="synchronize" disabled={dirty || sync.isPending}
+                  tooltip={dirty ? t("ADMIN_SYNC_SAVE_FIRST") : t("ADMIN_SYNC_TOOLTIP")}
+                  onClick={() => sync.mutate({ id })}>
+                  {sync.isPending ? t("ADMIN_SYNCING") : t("ADMIN_SYNC_NOW")}
+                </Button>
+              ) : null}
+              {/* Disabled while dirty: duplicate copies what is stored, not what is on screen,
+                  and a clean copy also never trips the unsaved-changes guard on the way out. */}
+              <Button design="Transparent" icon="copy" disabled={dirty || duplicate.isPending}
+                tooltip={dirty ? t("ADMIN_SAVE_FIRST") : t("ADMIN_DUPLICATE_TABLE")}
+                onClick={() => duplicate.mutate({ id })}>
+                {t("ADMIN_DUPLICATE")}
+              </Button>
+              <Button design="Transparent" icon="delete" disabled={remove.isPending} tooltip={t("ADMIN_DELETE_TABLE")}
+                onClick={async () => {
+                  if (await confirm({
+                    title: t("ADMIN_DELETE_TABLE"),
+                    message: t("ADMIN_MD_DELETE_MSG", d.name),
+                    actionText: t("ADMIN_DELETE"), destructive: true,
+                  })) remove.mutate({ ids: [id] });
+                }}>
+                {t("ADMIN_DELETE")}
+              </Button>
+            </>
+          );
+        } : undefined,
+      }}
+      localViews
+      createLabel={t("ADMIN_SAVE")}
+      onCancelCreate={() => void navigate({ to: "/$slug/masterdata" })}
+      breadcrumbs={[{ text: t("NAV_MASTERDATA"), to: "/masterdata" }]}
+      notice={actionError ? <MessageStrip design="Negative" hideCloseButton>{actionError.message}</MessageStrip> : undefined}
+      sectionTemplates={{
+        general: (ctx) => <GeneralSection {...part(ctx)} saved={!!id} />,
+        columns: (ctx) => <ColumnsSection {...part(ctx)} />,
+        rows: (ctx) => <RowsSection {...part(ctx)} />,
+        query: (ctx) => <QuerySection {...part(ctx)} />,
+        cache: () => <CacheSection syncedAt={row?.syncedAt ?? null} rowCount={row?.rowCount ?? 0} syncError={row?.syncError ?? null} />,
+        preview: (ctx) => {
+          const p = part(ctx);
+          return <PreviewSection d={p.d} preview={preview} fetching={testFetch.isPending} error={testFetch.error}
+            onFetch={() => fetchPreview(p)} />;
+        },
+        queryColumns: (ctx) => <QueryColumnsSection {...part(ctx)} />,
+      }}
+      onSave={async (diff) => {
+        // Unchanged, the page sends no diff — Save still stores (and test-fetches) what is open.
+        const d = (diff.md ?? opened) as Draft;
+        const issue = issueOf(d, t);
+        if (issue) {
+          setTried(true);
+          throw new Error(issue);
+        }
+        let saved = d;
+        if (d.kind === "query") {
+          // What gets stored is what the response returned, never what was typed: a saved $select
+          // answered by B1 once. A query B1 refuses fails the save right here.
+          const r = await testFetch.mutateAsync({
+            target: d.query.target, query: d.query.query, columns: d.query.columns, top: PREVIEW_TOP,
+          });
+          saved = { ...d, query: pruneColUi({ ...d.query, columns: r.columns }) };
+        }
+        const r = await save.mutateAsync(
+          saved.kind === "table"
+            ? { id, name: saved.name.trim(), kind: "table", columns: saved.columns, rows: saved.rows }
+            : { id, name: saved.name.trim(), kind: "query", query: saved.query },
+        );
+        setTried(false);
+        // Awaited: the page a create moves to reads its row from this list.
+        await invalidate();
+        toast(t("ADMIN_MD_SAVED"));
+        if (!id) await navigate({ to: "/$slug/masterdata/$id", params: { id: r.id }, replace: true });
+        else setData({ md: saved });
+      }}
+    />
+  );
+}
+
+function GeneralSection({ d, edit, tried, saved }: Part & { saved: boolean }) {
+  const i18n = useI18n();
+  return (
+    <Form {...FORM}>
+      <FormGroup>
+        <FormItem labelContent={<Label required>{i18n.getText("ADMIN_NAME")}</Label>}>
+          <Input value={d.name} placeholder={i18n.getText("ADMIN_NAME_PLACEHOLDER")} required
+            valueState={tried && !d.name.trim() ? "Negative" : "None"}
+            valueStateMessage={<div>{i18n.getText("ADMIN_NAME_HINT")}</div>}
+            onInput={(e) => edit((x) => ({ ...x, name: e.target.value }))} />
+        </FormItem>
+        <FormItem labelContent={<Label required>{i18n.getText("ADMIN_KIND")}</Label>}>
+          {/* Fixed once saved: the two kinds store different things, and a flip would throw
+              away either the maintained rows or the query. Read-only rather than disabled —
+              the choice still has to be readable after saving. */}
+          <Select readonly={saved} required value={d.kind} accessibleName={i18n.getText("ADMIN_KIND")}
+            onChange={(e) => edit((x) => ({ ...x, kind: e.detail.selectedOption.value as Draft["kind"] }))}>
+            <Option value="table" additionalText={i18n.getText("ADMIN_MAINTAINED_HERE")}>{i18n.getText("ADMIN_KIND_TABLE")}</Option>
+            <Option value="query" additionalText={i18n.getText("ADMIN_READ_LIVE")}>{i18n.getText("ADMIN_KIND_QUERY")}</Option>
+          </Select>
+        </FormItem>
+      </FormGroup>
+    </Form>
+  );
+}
+
+function ColumnsSection({ d, edit, tried }: Part) {
+  const i18n = useI18n();
+  // Memoized: useEditGrid rebuilds its cell templates when the column set changes, and a rebuild
+  // remounts the input under the cursor.
+  const columns = useMemo<ListColumn[]>(() => [
+    { key: "key", label: i18n.getText("ADMIN_KEY"), width: 260 },
+    { key: "label", label: i18n.getText("ADMIN_LABEL") },
+    { key: "type", label: i18n.getText("ADMIN_TYPE"), width: 160 },
+  ], [i18n]);
+  const setCol = (i: number, patch: Partial<Col>) =>
+    edit((x) => ({ ...x, columns: x.columns.map((y, j) => (j === i ? { ...y, ...patch } : y)) }));
+  const grid = useEditGrid(d.columns, columns, {
+    key: (c, i) => (
+      <div style={CELL}>
+        {/* 1st column = key, 2nd = label (refKeyCols) — the same convention the query's
+            columns state, and what a model's lookup reads. */}
+        {i < 2
+          ? <Icon name={i === 0 ? "key" : "text"} design="Neutral" accessibleName={i18n.getText(i === 0 ? "ADMIN_LOOKUP_KEY" : "ADMIN_LABEL_COLUMN")} />
+          : iconSlot}
+        <Input placeholder={i18n.getText("ADMIN_KEY_PLACEHOLDER")} value={c.key} style={{ width: "100%" }}
+          valueState={tried && !c.key.trim() ? "Negative" : "None"}
+          valueStateMessage={<div>{i18n.getText("ADMIN_NEED_KEY")}</div>}
+          onInput={(e) => setCol(i, { key: e.target.value })} />
+      </div>
+    ),
+    label: (c, i) => (
+      <Input placeholder={c.key || i18n.getText("ADMIN_LABEL_PLACEHOLDER")} value={c.label} style={{ width: "100%" }}
+        onInput={(e) => setCol(i, { label: e.target.value })} />
+    ),
+    type: (c, i) => (
+      <Select style={{ width: "100%" }} value={c.type} accessibleName={i18n.getText("ADMIN_COLUMN_TYPE")}
+        onChange={(e) => setCol(i, { type: e.detail.selectedOption.value as Col["type"] })}>
+        {(["string", "number", "boolean"] as const).map((type) => (
+          <Option key={type} value={type}>{i18n.getText(type === "string" ? "ADMIN_TYPE_STRING" : type === "number" ? "ADMIN_TYPE_NUMBER" : "ADMIN_TYPE_BOOLEAN")}</Option>
+        ))}
+      </Select>
+    ),
+  });
+  return (
+    <GridForm name={i18n.getText("ADMIN_COLUMNS")}>
+      <Grid {...grid} title={i18n.getText("ADMIN_COLUMNS")} fill={false} selectionMode="Multiple"
+        noDataText={i18n.getText("ADMIN_MD_NEED_COLUMN")}
+        toolbarActions={(sel) => (
+          <>
+            <Button icon="add" design="Transparent" onClick={() => edit((x) => ({
+              ...x,
+              columns: [...x.columns, { key: "", label: "", type: "string" }],
+              rows: x.rows.map((r) => [...r, null]),
+            }))}>{i18n.getText("ADMIN_ADD_COLUMN")}</Button>
+            <DeleteRows sel={sel} onDelete={(gone) => edit((x) => ({
+              ...x,
+              columns: x.columns.filter((_, j) => !gone.has(j)),
+              rows: x.rows.map((r) => r.filter((_, j) => !gone.has(j))),
+            }))} />
+          </>
+        )} />
+    </GridForm>
+  );
+}
+
+function RowsSection({ d, edit }: Part) {
+  const i18n = useI18n();
+  // Keyed by position: a column's key may be empty or doubled while it is being typed. Rebuilt
+  // only when a column changes — `columns` keeps its identity through a cell edit.
+  const columns = useMemo<ListColumn[]>(
+    () => d.columns.map((c, i) => ({ key: `c${i}`, label: c.label || c.key })),
+    [d.columns],
+  );
+  const setCell = (ri: number, ci: number, v: Cell) =>
+    edit((x) => ({ ...x, rows: x.rows.map((y, j) => (j === ri ? y.map((cell, cj) => (cj === ci ? v : cell)) : y)) }));
+  const grid = useEditGrid(d.rows, columns, Object.fromEntries(d.columns.map((c, ci) => [`c${ci}`, (r: Cell[], ri: number) =>
+    // The column's own type rather than a text box for everything: a boolean reads as a
+    // checkbox, a number gets the numeric keypad.
+    c.type === "boolean" ? (
+      <CheckBox checked={r[ci] === true} accessibleName={c.label || c.key}
+        onChange={(e) => setCell(ri, ci, e.target.checked)} />
+    ) : (
+      <Input style={{ width: "100%" }} type={c.type === "number" ? "Number" : "Text"}
+        accessibleName={c.label || c.key} value={String(r[ci] ?? "")}
+        onInput={(e) => setCell(ri, ci, typed(c, e.target.value))} />
+    ),
+  ])));
 
   // Excel/Sheets clipboard = TSV. Types applied per column.
   const pasteRows = (text: string) => {
@@ -217,352 +396,187 @@ export function MasterdataEditor({ id }: { id?: string }) {
     toast(i18n.getText(parsed.length === 1 ? "ADMIN_ROWS_ADDED_ONE" : "ADMIN_ROWS_ADDED_MANY", parsed.length));
   };
 
+  return (
+    <div
+      onPaste={(e) => {
+        const text = e.clipboardData.getData("text");
+        // Only a grid becomes new rows; a single value belongs in the cell being pasted into.
+        if (!/[\t\n]/.test(text) || !d.columns.length) return;
+        e.preventDefault();
+        pasteRows(text);
+      }}>
+      <GridForm name={i18n.getText("ADMIN_ROWS")}>
+        <Grid {...grid} title={i18n.getText("ADMIN_ROWS")} fill={false} selectionMode="Multiple"
+          noDataText={i18n.getText("ADMIN_NO_ROWS_SUB")}
+          toolbarActions={(sel) => (
+            <>
+              <Button icon="add" design="Transparent" disabled={!d.columns.length}
+                onClick={() => edit((x) => ({ ...x, rows: [...x.rows, x.columns.map(() => null as Cell)] }))}>
+                {i18n.getText("ADMIN_ADD_ROW")}
+              </Button>
+              <DeleteRows sel={sel} onDelete={(gone) => edit((x) => ({ ...x, rows: x.rows.filter((_, j) => !gone.has(j)) }))} />
+            </>
+          )} />
+      </GridForm>
+    </div>
+  );
+}
+
+function QuerySection({ d, edit, tried }: Part) {
+  const i18n = useI18n();
   const setQuery = (patch: Partial<QueryDef>) => edit((x) => ({ ...x, query: pruneColUi({ ...x.query, ...patch }) }));
   const setOData = (patch: Partial<ODataQuery>) => edit((x) => ({ ...x, query: { ...x.query, query: { ...x.query.query, ...patch } } }));
-  const setCell = (ri: number, ci: number, v: Cell) =>
-    edit((x) => ({ ...x, rows: x.rows.map((y, j) => (j === ri ? y.map((cell, cj) => (cj === ci ? v : cell)) : y)) }));
-
-  const title = d.name || (id ? i18n.getText("ADMIN_UNTITLED") : i18n.getText("ADMIN_NEW_TABLE"));
   return (
-    <ObjectPage
-      titleArea={
-        <ObjectPageTitle
-          breadcrumbs={<PageBreadcrumbs items={[{ text: i18n.getText("NAV_MASTERDATA"), to: "/masterdata" }]} current={title} />}
-          header={
-              <Title level="H4">{title}</Title>
-          }
-          snappedContent={errorStrip}
-          expandedContent={errorStrip}
-          actionsBar={
-            <Toolbar design="Transparent" accessibleName={i18n.getText("ADMIN_TABLE_ACTIONS")}>
-              {id && d.kind === "query" ? (
-                // Disabled while dirty for the same reason Duplicate is: the sync runs the SAVED
-                // query, so running it against edits still on screen would cache the wrong answer.
-                <ToolbarButton design="Transparent" text={sync.isPending ? i18n.getText("ADMIN_SYNCING") : i18n.getText("ADMIN_SYNC_NOW")} icon="synchronize"
-                  accessibleName={i18n.getText("ADMIN_SYNC_NOW")} disabled={dirty || sync.isPending}
-                  tooltip={dirty ? i18n.getText("ADMIN_SYNC_SAVE_FIRST") : i18n.getText("ADMIN_SYNC_TOOLTIP")}
-                  onClick={() => sync.mutate({ id })} />
-              ) : null}
-              {id ? (
-                // Disabled while dirty: duplicate copies what is stored, not what is on screen,
-                // and a clean copy also never trips the unsaved-changes blocker on the way out.
-                <ToolbarButton design="Transparent" text={i18n.getText("ADMIN_DUPLICATE")} icon="copy" tooltip={dirty ? i18n.getText("ADMIN_SAVE_FIRST") : i18n.getText("ADMIN_DUPLICATE_TABLE")}
-                  accessibleName={i18n.getText("ADMIN_DUPLICATE_TABLE")} disabled={dirty || duplicate.isPending}
-                  onClick={() => duplicate.mutate({ id })} />
-              ) : null}
-              {id ? (
-                <ToolbarButton design="Transparent" text={i18n.getText("ADMIN_DELETE")} icon="delete" tooltip={i18n.getText("ADMIN_DELETE_TABLE")} accessibleName={i18n.getText("ADMIN_DELETE_TABLE")} disabled={remove.isPending}
-                  onClick={async () => {
-                    if (await confirm({
-                      title: i18n.getText("ADMIN_DELETE_TABLE"),
-                      message: i18n.getText("ADMIN_MD_DELETE_MSG", d.name),
-                      actionText: i18n.getText("ADMIN_DELETE"), destructive: true,
-                    })) remove.mutate({ ids: [id] });
-                  }} />
-              ) : null}
-            </Toolbar>
-          }
-        />
-      }
-      footerArea={
-        <Bar design="FloatingFooter" endContent={
-          <Button design="Emphasized" disabled={save.isPending || testFetch.isPending}
-            onClick={() => save.mutate(
-              d.kind === "table"
-                ? { id, name: d.name.trim(), kind: "table", columns: d.columns, rows: d.rows }
-                : { id, name: d.name.trim(), kind: "query", query: d.query },
-            )}>
-            {testFetch.isPending ? i18n.getText("ADMIN_TESTING") : save.isPending ? i18n.getText("ADMIN_SAVING") : i18n.getText("ADMIN_SAVE")}
-          </Button>
-        } />
-      }
-    >
-      <ObjectPageSection id="general" titleText={i18n.getText("ADMIN_SECTION_GENERAL")} hideTitleText>
-        <Form {...FORM}>
-          <FormGroup headerText={i18n.getText("ADMIN_DETAILS")}>
-            <FormItem labelContent={<Label required>{i18n.getText("ADMIN_NAME")}</Label>}>
-              <Input value={d.name} placeholder={i18n.getText("ADMIN_NAME_PLACEHOLDER")} required
-                valueState={submitted && !d.name.trim() ? "Negative" : "None"}
-                valueStateMessage={<div>{i18n.getText("ADMIN_NAME_HINT")}</div>}
-                onInput={(e) => edit((x) => ({ ...x, name: e.target.value }))} />
-            </FormItem>
-            <FormItem labelContent={<Label required>{i18n.getText("ADMIN_KIND")}</Label>}>
-              {/* Fixed once saved: the two kinds store different things, and a flip would throw
-                  away either the maintained rows or the query. Read-only rather than disabled —
-                  the choice still has to be readable after saving. */}
-              <Select readonly={!!id} required value={d.kind} accessibleName={i18n.getText("ADMIN_KIND")}
-                onChange={(e) => edit((x) => ({ ...x, kind: e.detail.selectedOption.value as Draft["kind"] }))}>
-                <Option value="table" additionalText={i18n.getText("ADMIN_MAINTAINED_HERE")}>{i18n.getText("ADMIN_KIND_TABLE")}</Option>
-                <Option value="query" additionalText={i18n.getText("ADMIN_READ_LIVE")}>{i18n.getText("ADMIN_KIND_QUERY")}</Option>
-              </Select>
-            </FormItem>
-          </FormGroup>
+    <Form {...FORM}>
+      <FormGroup>
+        <FormItem labelContent={<Label>{i18n.getText("ADMIN_SOURCE")}</Label>}>
+          <Select value={d.query.target} accessibleName={i18n.getText("ADMIN_SOURCE")}
+            onChange={(e) => setQuery({ target: e.detail.selectedOption.value as QueryDef["target"] })}>
+            <Option value="b1">B1</Option>
+            <Option value="beas">Beas</Option>
+          </Select>
+        </FormItem>
+        <FormItem labelContent={<Label required>{i18n.getText("ADMIN_ENTITY_SET")}</Label>}>
+          <Input value={d.query.query.entitySet} placeholder="Items" required
+            valueState={tried && !d.query.query.entitySet ? "Negative" : "None"}
+            valueStateMessage={<div>{i18n.getText("ADMIN_ENTITY_SET_HINT")}</div>}
+            onInput={(e) => setOData({ entitySet: e.target.value.trim() })} />
+        </FormItem>
+        <FormItem labelContent={<Label>{i18n.getText("ADMIN_SELECT")}</Label>}>
+          {/* Committed on change (Enter/focus-out), not on input: `columns` drives $select
+              *and* the label/visibility bags, which would be pruned mid-word on every keystroke. */}
+          <Input value={d.query.columns.join(", ")} placeholder="ItemCode, ItemName"
+            onChange={(e) => setQuery({ columns: [...new Set(e.target.value.split(/[,\s]+/).filter(Boolean))] })} />
+        </FormItem>
+        <FormItem labelContent={<Label>{i18n.getText("ADMIN_FILTER")}</Label>}>
+          <TextArea growing growingMaxRows={4} rows={1} value={d.query.query.filter ?? ""}
+            placeholder="ItemType eq 'itItems' and Frozen eq 'tNO'"
+            onInput={(e) => setOData({ filter: e.target.value || undefined })} />
+        </FormItem>
+        <FormItem labelContent={<Label>{i18n.getText("ADMIN_SORT")}</Label>}>
+          <Input value={d.query.query.orderby ?? ""} placeholder="ItemName"
+            onInput={(e) => setOData({ orderby: e.target.value || undefined })} />
+        </FormItem>
+        {/* Not a schedule — there is no job runner. It is how old the cache may get before a
+            read refreshes it in the background, so a table nobody opens never costs a call. */}
+        <FormItem labelContent={<Label>{i18n.getText("ADMIN_SYNC_EVERY")}</Label>}>
+          <Input type="Number" value={d.query.syncMinutes?.toString() ?? ""} placeholder={i18n.getText("ADMIN_MANUAL_ONLY")}
+            accessibleName={i18n.getText("ADMIN_SYNC_MINUTES_A11Y")}
+            onInput={(e) => {
+              const n = Number(e.target.value);
+              setQuery({ syncMinutes: Number.isInteger(n) && n > 0 ? n : undefined });
+            }} />
+          <Text style={{ opacity: 0.7, whiteSpace: "nowrap" }}>{i18n.getText("ADMIN_MINUTES")}</Text>
+        </FormItem>
+      </FormGroup>
+    </Form>
+  );
+}
 
-          {d.kind === "table" ? (
-            <>
-            <FormGroup headerText={i18n.getText("ADMIN_COLUMNS")} {...WIDE}>
-              <Toolbar design="Transparent" accessibleName={i18n.getText("ADMIN_COLUMN_ACTIONS")}>
-                <ToolbarButton icon="add" design="Transparent" text={i18n.getText("ADMIN_ADD_COLUMN")} onClick={() => edit((x) => ({
-                  ...x,
-                  columns: [...x.columns, { key: "", label: "", type: "string" }],
-                  rows: x.rows.map((r) => [...r, null]),
-                }))} />
-              </Toolbar>
-              {/* Popin rather than Scroll: three short columns that must stay readable when the
-                  window is narrow. */}
-              <Table
-                overflowMode="Popin"
-                rowActionCount={1}
-                onRowActionClick={(e) => {
-                  const i = rowIndex(e.detail.row);
-                  edit((x) => ({
-                    ...x,
-                    columns: x.columns.filter((_, j) => j !== i),
-                    rows: x.rows.map((r) => r.filter((_, j) => j !== i)),
-                  }));
-                }}
-                headerRow={
-                  <TableHeaderRow>
-                    <TableHeaderCell minWidth="12rem">{i18n.getText("ADMIN_KEY")}</TableHeaderCell>
-                    <TableHeaderCell minWidth="10rem">{i18n.getText("ADMIN_LABEL")}</TableHeaderCell>
-                    <TableHeaderCell width="9rem">{i18n.getText("ADMIN_TYPE")}</TableHeaderCell>
-                  </TableHeaderRow>
-                }>
-                {d.columns.map((c, i) => (
-                  <TableRow key={i} rowKey={`col-${i}`}
-                    actions={<TableRowAction icon="delete" text={i18n.getText("ADMIN_DELETE")} />}>
-                    <TableCell>
-                      <div style={{ ...CELL, width: "100%" }}>
-                        {/* 1st column = key, 2nd = label (refKeyCols) — the same convention the
-                            query panel below states, and what a model's lookup reads. */}
-                        {i < 2
-                          ? <Icon name={i === 0 ? "key" : "text"} design="Neutral" accessibleName={i === 0 ? i18n.getText("ADMIN_LOOKUP_KEY") : i18n.getText("ADMIN_LABEL_COLUMN")} />
-                          : iconSlot}
-                        <Input placeholder={i18n.getText("ADMIN_KEY_PLACEHOLDER")} value={c.key} style={{ width: "100%" }}
-                          valueState={submitted && !c.key.trim() ? "Negative" : "None"}
-                          valueStateMessage={<div>{i18n.getText("ADMIN_NEED_KEY")}</div>}
-                          onInput={(e) => edit((x) => ({ ...x, columns: x.columns.map((y, j) => (j === i ? { ...y, key: e.target.value } : y)) }))} />
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Input placeholder={c.key || i18n.getText("ADMIN_LABEL_PLACEHOLDER")} value={c.label} style={{ width: "100%" }}
-                        onInput={(e) => edit((x) => ({ ...x, columns: x.columns.map((y, j) => (j === i ? { ...y, label: e.target.value } : y)) }))} />
-                    </TableCell>
-                    <TableCell>
-                      <Select style={{ width: "100%" }} value={c.type} accessibleName={i18n.getText("ADMIN_COLUMN_TYPE")}
-                        onChange={(e) => edit((x) => ({ ...x, columns: x.columns.map((y, j) => (j === i ? { ...y, type: e.detail.selectedOption.value as Col["type"] } : y)) }))}>
-                        {(["string", "number", "boolean"] as const).map((type) => (
-                          <Option key={type} value={type}>{i18n.getText(type === "string" ? "ADMIN_TYPE_STRING" : type === "number" ? "ADMIN_TYPE_NUMBER" : "ADMIN_TYPE_BOOLEAN")}</Option>
-                        ))}
-                      </Select>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </Table>
-            </FormGroup>
+function CacheSection({ syncedAt, rowCount, syncError }: { syncedAt: Date | string | null; rowCount: number; syncError: string | null }) {
+  const i18n = useI18n();
+  return (
+    <Form {...FORM} accessibleMode="Display">
+      <FormGroup>
+        <FormItem labelContent={<Label>{i18n.getText("ADMIN_LAST_SYNCED")}</Label>}>
+          <Text>{syncedAt ? new Date(syncedAt).toLocaleString(formatLocale()) : i18n.getText("ADMIN_NEVER")}</Text>
+        </FormItem>
+        <FormItem labelContent={<Label>{i18n.getText("ADMIN_CACHED_ROWS")}</Label>}>
+          <Text>{i18n.getText(rowCount === 1 ? "ADMIN_ROW_ONE" : "ADMIN_ROW_MANY", rowCount)}</Text>
+        </FormItem>
+        {syncError ? (
+          <FormItem labelContent={<Label>{i18n.getText("ADMIN_LAST_ERROR")}</Label>}>
+            <MessageStrip design="Negative" hideCloseButton>{syncError}</MessageStrip>
+          </FormItem>
+        ) : null}
+      </FormGroup>
+    </Form>
+  );
+}
 
-            <FormGroup headerText={i18n.getText("ADMIN_ROWS")} {...WIDE}>
-              <Toolbar design="Transparent" accessibleName={i18n.getText("ADMIN_ROW_ACTIONS")}>
-                <ToolbarButton icon="add" design="Transparent" text={i18n.getText("ADMIN_ADD_ROW")} disabled={!d.columns.length}
-                  onClick={() => edit((x) => ({ ...x, rows: [...x.rows, x.columns.map(() => null as Cell)] }))} />
-              </Toolbar>
-              <div
-                onPaste={(e) => {
-                  const text = e.clipboardData.getData("text");
-                  // Only a grid becomes new rows; a single value belongs in the cell being pasted into.
-                  if (!/[\t\n]/.test(text) || !d.columns.length) return;
-                  e.preventDefault();
-                  pasteRows(text);
-                }}>
-                <Table
-                  noData={
-                    <IllustratedMessage name="NoData" design="Dot" titleText={i18n.getText("ADMIN_NO_ROWS")}
-                      subtitleText={i18n.getText("ADMIN_NO_ROWS_SUB")} />
-                  }
-                  rowActionCount={1}
-                  onRowActionClick={(e) => {
-                    const i = rowIndex(e.detail.row);
-                    edit((x) => ({ ...x, rows: x.rows.filter((_, j) => j !== i) }));
-                  }}
-                  headerRow={
-                    <TableHeaderRow>
-                      {d.columns.map((c, i) => (
-                        <TableHeaderCell key={i} minWidth={colMinWidth(c.label || c.key, d.rows, i)}>
-                          <span>{c.label || c.key}</span>
-                        </TableHeaderCell>
-                      ))}
-                    </TableHeaderRow>
-                  }>
-                  {d.rows.map((r, ri) => (
-                    <TableRow key={ri} rowKey={`row-${ri}`} actions={<TableRowAction icon="delete" text={i18n.getText("ADMIN_DELETE")} />}>
-                      {d.columns.map((c, ci) => (
-                        <TableCell key={ci}>
-                          {/* The column's own type rather than a text box for everything: a boolean
-                              reads as a checkbox, a number gets the numeric keypad. */}
-                          {c.type === "boolean" ? (
-                            <CheckBox checked={r[ci] === true} accessibleName={c.label || c.key}
-                              onChange={(e) => setCell(ri, ci, e.target.checked)} />
-                          ) : (
-                            <Input style={{ width: "100%" }} type={c.type === "number" ? "Number" : "Text"}
-                              accessibleName={c.label || c.key} value={String(r[ci] ?? "")}
-                              onInput={(e) => setCell(ri, ci, typed(c, e.target.value))} />
-                          )}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </Table>
-              </div>
-            </FormGroup>
-            </>
-          ) : (
-            <>
-            <FormGroup headerText={i18n.getText("ADMIN_CLAUSES")}>
-              <FormItem labelContent={<Label>{i18n.getText("ADMIN_SOURCE")}</Label>}>
-                <Select value={d.query.target} accessibleName={i18n.getText("ADMIN_SOURCE")}
-                  onChange={(e) => setQuery({ target: e.detail.selectedOption.value as QueryDef["target"] })}>
-                  <Option value="b1">B1</Option>
-                  <Option value="beas">Beas</Option>
-                </Select>
-              </FormItem>
-              <FormItem labelContent={<Label required>{i18n.getText("ADMIN_ENTITY_SET")}</Label>}>
-                <Input value={d.query.query.entitySet} placeholder="Items" required
-                  valueState={submitted && !d.query.query.entitySet ? "Negative" : "None"}
-                  valueStateMessage={<div>{i18n.getText("ADMIN_ENTITY_SET_HINT")}</div>}
-                  onInput={(e) => setOData({ entitySet: e.target.value.trim() })} />
-              </FormItem>
-              <FormItem labelContent={<Label>{i18n.getText("ADMIN_SELECT")}</Label>}>
-                {/* Committed on change (Enter/focus-out), not on input: `columns` drives $select
-                    *and* the label/visibility bags, which would be pruned mid-word on every keystroke. */}
-                <Input value={d.query.columns.join(", ")} placeholder="ItemCode, ItemName"
-                  onChange={(e) => setQuery({ columns: [...new Set(e.target.value.split(/[,\s]+/).filter(Boolean))] })} />
-              </FormItem>
-              <FormItem labelContent={<Label>{i18n.getText("ADMIN_FILTER")}</Label>}>
-                <TextArea growing growingMaxRows={4} rows={1} value={d.query.query.filter ?? ""}
-                  placeholder="ItemType eq 'itItems' and Frozen eq 'tNO'"
-                  onInput={(e) => setOData({ filter: e.target.value || undefined })} />
-              </FormItem>
-              <FormItem labelContent={<Label>{i18n.getText("ADMIN_SORT")}</Label>}>
-                <Input value={d.query.query.orderby ?? ""} placeholder="ItemName"
-                  onInput={(e) => setOData({ orderby: e.target.value || undefined })} />
-              </FormItem>
-              {/* Not a schedule — there is no job runner. It is how old the cache may get before a
-                  read refreshes it in the background, so a table nobody opens never costs a call. */}
-              <FormItem labelContent={<Label>{i18n.getText("ADMIN_SYNC_EVERY")}</Label>}>
-                <Input type="Number" value={d.query.syncMinutes?.toString() ?? ""} placeholder={i18n.getText("ADMIN_MANUAL_ONLY")}
-                  accessibleName={i18n.getText("ADMIN_SYNC_MINUTES_A11Y")}
-                  onInput={(e) => {
-                    const n = Number(e.target.value);
-                    setQuery({ syncMinutes: Number.isInteger(n) && n > 0 ? n : undefined });
-                  }} />
-                <Text style={{ opacity: 0.7, whiteSpace: "nowrap" }}>{i18n.getText("ADMIN_MINUTES")}</Text>
-              </FormItem>
-            </FormGroup>
-            <FormGroup headerText={i18n.getText("ADMIN_CACHE")}>
-              <FormItem labelContent={<Label>{i18n.getText("ADMIN_LAST_SYNCED")}</Label>}>
-                <Text>{row?.syncedAt ? new Date(row.syncedAt).toLocaleString(formatLocale()) : id ? i18n.getText("ADMIN_NEVER") : "—"}</Text>
-              </FormItem>
-              <FormItem labelContent={<Label>{i18n.getText("ADMIN_CACHED_ROWS")}</Label>}>
-                <Text>{id ? rowsText(row?.rowCount ?? 0) : "—"}</Text>
-              </FormItem>
-              {row?.syncError ? (
-                <FormItem labelContent={<Label>{i18n.getText("ADMIN_LAST_ERROR")}</Label>}>
-                  <MessageStrip design="Negative" hideCloseButton>{row.syncError}</MessageStrip>
-                </FormItem>
-              ) : null}
-            </FormGroup>
-            <FormGroup accessibleName={i18n.getText("ADMIN_PREVIEW")} {...WIDE}>
-              <Panel ref={panelRef} accessibleRole="Region" accessibleName={i18n.getText("ADMIN_PREVIEW")} collapsed
-                header={
-                  <div style={{ ...CELL, flex: 1, justifyContent: "space-between", minWidth: 0 }}>
-                    <Title level="H5" size="H6">{i18n.getText("ADMIN_PREVIEW")}</Title>
-                    <Button design="Transparent" icon="refresh"
-                      disabled={testFetch.isPending || !d.query.query.entitySet}
-                      onClick={() => testFetch.mutate({
-                        target: d.query.target,
-                        query: d.query.query,
-                        columns: d.query.columns,
-                        top: PREVIEW_TOP,
-                      })}>
-                      {testFetch.isPending ? i18n.getText("ADMIN_LOADING") : i18n.getText("ADMIN_TEST_FETCH")}
-                    </Button>
-                  </div>
-                }>
-              {preview ? (
-                <Table noDataText={i18n.getText("ADMIN_NO_ROWS_RETURNED")}
-                  headerRow={
-                    <TableHeaderRow>
-                      {preview.cols.map((c) => (
-                        <TableHeaderCell key={c} minWidth="8rem"><span>{d.query.labels?.[c] || c}</span></TableHeaderCell>
-                      ))}
-                    </TableHeaderRow>
-                  }>
-                  {preview.rows.map((r, ri) => (
-                    <TableRow key={ri} rowKey={`q-${ri}`}>
-                      {r.map((cell, ci) => (
-                        <TableCell key={ci}>
-                          <Text maxLines={1} title={String(cell ?? "")}>{String(cell ?? "")}</Text>
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </Table>
-              ) : (
-                <IllustratedMessage name="NoData" design="Dot" titleText={i18n.getText("ADMIN_NO_PREVIEW")}
-                  subtitleText={i18n.getText("ADMIN_NO_PREVIEW_SUB", PREVIEW_TOP, i18n.getText("ADMIN_TEST_FETCH"))} />
-              )}
-              </Panel>
-            </FormGroup>
+function PreviewSection({ d, preview, fetching, error, onFetch }: {
+  d: Draft;
+  preview: { cols: string[]; rows: Cell[][] } | null;
+  fetching: boolean;
+  error: Error | null;
+  onFetch: () => void;
+}) {
+  const i18n = useI18n();
+  const columns = useMemo<ListColumn[]>(
+    () => (preview?.cols ?? []).map((c) => ({ key: c, label: d.query.labels?.[c] || c, sortable: false })),
+    [preview, d.query.labels],
+  );
+  const state = useMemo<GridState>(() => ({ columns: preview?.cols ?? [], sortBy: [], groupBy: [] }), [preview]);
+  const rows = useMemo(
+    () => (preview?.rows ?? []).map((r): Row => Object.fromEntries((preview?.cols ?? []).map((c, i) => [c, r[i]]))),
+    [preview],
+  );
+  const fetch = (
+    <Button design="Transparent" icon="refresh" disabled={fetching || !d.query.query.entitySet} onClick={onFetch}>
+      {fetching ? i18n.getText("ADMIN_LOADING") : i18n.getText("ADMIN_TEST_FETCH")}
+    </Button>
+  );
+  return (
+    <>
+      {error ? <MessageStrip design="Negative" hideCloseButton style={{ marginBlockEnd: "0.5rem" }}>{error.message}</MessageStrip> : null}
+      {preview ? (
+        <GridForm name={i18n.getText("ADMIN_PREVIEW")}>
+          <Grid title={i18n.getText("ADMIN_PREVIEW")} columns={columns} state={state} rows={rows} fill={false}
+            showSettings={false} noDataText={i18n.getText("ADMIN_NO_ROWS_RETURNED")} toolbarActions={() => fetch} />
+        </GridForm>
+      ) : (
+        <IllustratedMessage name="NoData" design="Dot" titleText={i18n.getText("ADMIN_NO_PREVIEW")}
+          subtitleText={i18n.getText("ADMIN_NO_PREVIEW_SUB", PREVIEW_TOP, i18n.getText("ADMIN_TEST_FETCH"))}>
+          {fetch}
+        </IllustratedMessage>
+      )}
+    </>
+  );
+}
 
-            <FormGroup headerText={i18n.getText("ADMIN_QUERY_COLUMNS")} {...WIDE}>
-              <MessageStrip design="Information" style={{ marginBlockEnd: "0.5rem" }}>
-                {i18n.getText("ADMIN_QUERY_COLUMNS_NOTE")}
-              </MessageStrip>
-              <Table
-                noData={
-                  <IllustratedMessage name="NoData" design="Dot" titleText={i18n.getText("ADMIN_NO_COLUMNS")}
-                    subtitleText={i18n.getText("ADMIN_NO_COLUMNS_SUB", i18n.getText("ADMIN_TEST_FETCH"))} />
-                }
-                headerRow={
-                  <TableHeaderRow>
-                    <TableHeaderCell minWidth="10rem"><span>{i18n.getText("ADMIN_KEY")}</span></TableHeaderCell>
-                    <TableHeaderCell minWidth="12rem"><span>{i18n.getText("ADMIN_LABEL")}</span></TableHeaderCell>
-                    <TableHeaderCell width="7rem"><span>{i18n.getText("ADMIN_VALUE_HELP")}</span></TableHeaderCell>
-                  </TableHeaderRow>
-                }>
-                {/* The first two columns of the Select clause are the key and the label by
-                    convention (refKeyCols) — the icons say so instead of a line of prose. */}
-                {d.query.columns.map((c, i) => (
-                  <TableRow key={c} rowKey={c}>
-                    <TableCell>
-                      <div style={CELL}>
-                        {i < 2
-                          ? <Icon name={i === 0 ? "key" : "text"} design="Neutral" accessibleName={i === 0 ? i18n.getText("ADMIN_KEY_COLUMN") : i18n.getText("ADMIN_LABEL_COLUMN")} />
-                          : iconSlot}
-                        <Text>{c}</Text>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Input placeholder={c} value={d.query.labels?.[c] ?? ""} style={{ width: "100%" }}
-                        accessibleName={i18n.getText("ADMIN_LABEL_FOR", c)}
-                        onInput={(e) => setQuery({ labels: { ...d.query.labels, [c]: e.target.value } })} />
-                    </TableCell>
-                    <TableCell>
-                      <CheckBox checked={!d.query.hidden?.includes(c)} accessibleName={i18n.getText("ADMIN_SHOW_IN_VH")}
-                        onChange={(e) => setQuery({
-                          hidden: e.target.checked
-                            ? (d.query.hidden ?? []).filter((k) => k !== c)
-                            : [...(d.query.hidden ?? []), c],
-                        })} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </Table>
-            </FormGroup>
-            </>
-          )}
-        </Form>
-      </ObjectPageSection>
-    </ObjectPage>
+function QueryColumnsSection({ d, edit }: Part) {
+  const i18n = useI18n();
+  const setQuery = (patch: Partial<QueryDef>) => edit((x) => ({ ...x, query: pruneColUi({ ...x.query, ...patch }) }));
+  const columns = useMemo<ListColumn[]>(() => [
+    { key: "key", label: i18n.getText("ADMIN_KEY"), width: 260 },
+    { key: "label", label: i18n.getText("ADMIN_LABEL") },
+    { key: "shown", label: i18n.getText("ADMIN_VALUE_HELP"), width: 128 },
+  ], [i18n]);
+  // One item per Select column, carrying its label and visibility so an edit of either is a new
+  // item and the grid draws it.
+  const items = useMemo(
+    () => d.query.columns.map((key) => ({ key, label: d.query.labels?.[key] ?? "", shown: !d.query.hidden?.includes(key) })),
+    [d.query],
+  );
+  const grid = useEditGrid(items, columns, {
+    // The first two columns of the Select clause are the key and the label by convention
+    // (refKeyCols) — the icons say so instead of a line of prose.
+    key: (c, i) => (
+      <div style={CELL}>
+        {i < 2
+          ? <Icon name={i === 0 ? "key" : "text"} design="Neutral" accessibleName={i18n.getText(i === 0 ? "ADMIN_KEY_COLUMN" : "ADMIN_LABEL_COLUMN")} />
+          : iconSlot}
+        <Text>{c.key}</Text>
+      </div>
+    ),
+    label: (c) => (
+      <Input placeholder={c.key} value={c.label} style={{ width: "100%" }}
+        accessibleName={i18n.getText("ADMIN_LABEL_FOR", c.key)}
+        onInput={(e) => setQuery({ labels: { ...d.query.labels, [c.key]: e.target.value } })} />
+    ),
+    shown: (c) => (
+      <CheckBox checked={c.shown} accessibleName={i18n.getText("ADMIN_SHOW_IN_VH")}
+        onChange={(e) => setQuery({
+          hidden: e.target.checked
+            ? (d.query.hidden ?? []).filter((k) => k !== c.key)
+            : [...(d.query.hidden ?? []), c.key],
+        })} />
+    ),
+  });
+  return (
+    <GridForm name={i18n.getText("ADMIN_QUERY_COLUMNS")}>
+      <Grid {...grid} title={i18n.getText("ADMIN_QUERY_COLUMNS")} fill={false}
+        noDataText={i18n.getText("ADMIN_NO_COLUMNS_SUB", i18n.getText("ADMIN_TEST_FETCH"))} />
+    </GridForm>
   );
 }

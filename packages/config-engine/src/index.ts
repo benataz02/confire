@@ -8,6 +8,8 @@ export { checkModel, FUNCS, RESERVED_LINE_FIELDS, aggregateKeysOf, bomItemCodes,
 export type { Issue, KnownTable } from "./check";
 export { bindings, domainOf, missingInputs, paramPrices, propagate } from "./propagate";
 export type { Bindings, CostElement, DomainOption, Notice, Propagation } from "./propagate";
+export { applyModelPatch, diffModel, isEmptyPatch, ModelPatchZ } from "./model-patch";
+export type { ModelPatch } from "./model-patch";
 export { formState } from "./form-state";
 export type { FieldOption, FieldState, FormState } from "./form-state";
 export { costBreakdown, itemsTableOf, marginOf, pairMoney } from "./money";

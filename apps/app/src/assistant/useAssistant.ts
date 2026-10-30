@@ -16,13 +16,14 @@ export function useAssistantThread(projectId: string | null) {
   return useQuery({ ...orpc.assistant.thread.queryOptions({ input: threadInput(projectId) }), staleTime: Infinity });
 }
 
-/** What changed after a run or a direct write: the configuration, the lists, the thread. */
+/** What changed after a run or a direct write: the configuration, the lists, the AI page's chat list. */
 export function useAssistantInvalidate() {
   const qc = useQueryClient();
   return () => {
     void qc.invalidateQueries({ queryKey: orpc.configs.get.key() });
     void qc.invalidateQueries({ queryKey: orpc.configs.rows.key() });
     void qc.invalidateQueries({ queryKey: orpc.assistant.status.key() });
+    void qc.invalidateQueries({ queryKey: orpc.assistant.threads.key() });
   };
 }
 

@@ -286,7 +286,14 @@ New schema, shipped with its migration (`db:generate`) and re-exported from `sch
     elsewhere it starts a general thread; on a configuration it starts that configuration's thread over —
     the old one is deleted (after a confirm, never mid-answer), and what it filled stays on the
     configuration. A general thread that creates a configuration becomes that configuration's thread.
-    There is no thread list in this build.
+    *(2026-10-28)* The AI configuration page lists them instead (`AssistantPage.tsx`): its bar's UI5
+    `Search` opens on a click to the user's own chats, pinned first then the latest, searched as one
+    types (title, configuration name, the chat's text) and deleted there; the open chat's title is a
+    menu (pin, rename, delete). An empty chat there is a welcome — a `HeroBanner` in the assistant's
+    gradient with the chat box inside — which gives way to the chat on the first send. The panel keeps
+    Joule's gradient head, its greeting collapsing once the chat starts. A deleted chat's configuration and what it
+    filled stay. The panel is not drawn on that page; *Open configuration* opens the form with the
+    panel on the same thread. `assistant_thread.pinned`, migration `0008`.
   - Server-owned history: the server loads the messages by thread id rather than trusting the client's
     copy. `@tanstack/ai-persistence`'s message store over this one table if it fits; no run/interrupt
     stores.

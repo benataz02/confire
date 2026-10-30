@@ -3,6 +3,13 @@ import { Bar, Button, Dialog, Form, FormGroup, FormItem, Input, Label } from "@u
 import { useI18n } from "../../i18n.ts";
 import { W } from "./ParamForm.tsx";
 
+// The form pads its own content column, so the dialog part's default padding is off.
+if (typeof document !== "undefined") {
+  let el = document.getElementById("confire-pd-style");
+  if (!el) { el = document.createElement("style"); el.id = "confire-pd-style"; document.head.appendChild(el); }
+  el.textContent = `.confire-pd::part(content){padding:0;}`;
+}
+
 /** A section's or group's heading. Buffer-and-commit like the parameter page. */
 export function TitleDialog({ initial, section, onCancel, onOk }: {
   initial: string;

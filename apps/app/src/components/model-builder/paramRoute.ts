@@ -29,6 +29,11 @@ export function paramSearch(s: Record<string, unknown>): ParamSearch {
   return out;
 }
 
+/** Search of `/$slug/models/$id/table`: the key of a table that exists — tables are added in the tree. */
+export type TableSearch = { key: string };
+
+export const tableSearch = (s: Record<string, unknown>): TableSearch => ({ key: typeof s.key === "string" ? s.key : "" });
+
 // Spread reorders keys, and a cleared field is `undefined`. Both have to compare equal to the
 // value the page opened on, or the unsaved mark sticks after an edit is typed back.
 function canonicalJson(v: unknown): string {

@@ -1,8 +1,11 @@
-import { useMemo, type CSSProperties } from "react";
-import { Input, SuggestionItemCustom, TextArea } from "@ui5/webcomponents-react";
+import { useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  Input, List, ResponsivePopover, SuggestionItem, SuggestionItemCustom, TextArea, type TextAreaDomRef,
+} from "@ui5/webcomponents-react";
+import generateHighlightedMarkup from "@ui5/webcomponents-base/dist/util/generateHighlightedMarkup.js";
 import { DslError, parse, type Issue, type ModelDef } from "@confire/config-engine";
 import { useI18n } from "../../i18n.ts";
-import { complete, matches, scopeSuggestions, type TableCols } from "./exprHelpers.ts";
+import { complete, matches, scopeSuggestions, trailingIdent, type Suggestion, type TableCols } from "./exprHelpers.ts";
 
 // The one expression editor used everywhere in the builder: monospace, parse-on-change with
 // span-accurate messages, trailing-token suggestions in the Input's native popup. Each
@@ -12,7 +15,9 @@ import { complete, matches, scopeSuggestions, type TableCols } from "./exprHelpe
 if (typeof document !== "undefined" && !document.getElementById("confire-expr-style")) {
   const el = document.createElement("style");
   el.id = "confire-expr-style";
-  el.textContent = `.confire-expr::part(input),.confire-expr::part(textarea){font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}`;
+  el.textContent = `.confire-expr::part(input),.confire-expr::part(textarea){font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}`
+    // Input's own suggestions popover rules (Suggestions.css), which live in its shadow root.
+    + `.confire-expr-pop{box-shadow:var(--sapContent_Shadow1);}.confire-expr-pop::part(header),.confire-expr-pop::part(content){padding:0;}`;
   document.head.appendChild(el);
 }
 
@@ -71,25 +76,83 @@ export function ExprInput({
   const sugg = matches(all, text).slice(0, 8);
   const emit = (v: string | undefined) => onChange(!v && optional ? undefined : (v ?? ""));
 
-  // Long formulas need room more than they need completion: UI5 has no suggestion popup for
-  // TextArea, so `rows` trades the trailing-token list for a growing multi-line box.
-  // ponytail: if the missing completion bites, the upgrade is a Popover anchored to the TextArea.
+  // TextArea has no suggestion slot (SuggestionItem is Input's alone), so the multi-line box
+  // rebuilds Input's own popup (InputSuggestionsTemplate): the same popover, list and items,
+  // driven from the text's keys while the focus stays in it. -1 = nothing highlighted yet.
+  const area = useRef<TextAreaDomRef>(null);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const shown = open && sugg.length > 0;
+  const at = Math.min(active, sugg.length - 1);
+  const width = area.current?.offsetWidth ?? 0;
+  const pick = (s: Suggestion) => {
+    emit(complete(text, s));
+    setOpen(false);
+    area.current?.focus();
+  };
+
+  // One wrapper: FormItem gives every direct child its own slot and splits the width between them.
   if (rows)
     return (
-      <TextArea
-        id={fieldId}
-        className="confire-expr"
-        style={{ width: "100%", ...style }}
-        rows={rows}
-        growing
-        growingMaxRows={rows + 5}
-        value={text}
-        placeholder={placeholder}
-        valueState={error ? "Negative" : "None"}
-        valueStateMessage={<div>{errorText}</div>}
-        onInput={(e) => emit(e.target.value)}
-        data-expr-input
-      />
+      <div style={{ width: "100%" }}>
+        <TextArea
+          ref={area}
+          id={fieldId}
+          className="confire-expr"
+          style={{ width: "100%", ...style }}
+          rows={rows}
+          growing
+          growingMaxRows={rows + 5}
+          value={text}
+          placeholder={placeholder}
+          valueState={error ? "Negative" : "None"}
+          valueStateMessage={<div>{errorText}</div>}
+          onInput={(e) => {
+            // Escape reverts the whole edit unless its input event is cancelled: with the list
+            // open, Escape only means "close the list". A keystroke's detail is null, typings aside.
+            if (e.detail?.escapePressed && shown) { e.preventDefault(); setOpen(false); return; }
+            const v = e.target.value;
+            // Completion replaces the trailing token, so it is only offered with the caret at the end.
+            // ponytail: caret-aware completion mid-formula needs the caret restored after the write.
+            const caret = e.target.shadowRoot?.querySelector("textarea")?.selectionEnd;
+            setOpen(caret === undefined || caret === v.length);
+            setActive(-1);
+            emit(v);
+          }}
+          onKeyDown={(e) => {
+            if (!shown) return;
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              setActive(e.key === "ArrowDown" ? Math.min(at + 1, sugg.length - 1) : Math.max(at - 1, -1));
+            } else if (e.key === "Enter") {
+              // Nothing highlighted: Enter is a new line, as it would be without the list.
+              if (at >= 0) { e.preventDefault(); pick(sugg[at]!); } else setOpen(false);
+            } else if (["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Tab"].includes(e.key)) {
+              setOpen(false);
+            }
+          }}
+          onClick={() => setOpen(false)}
+          data-expr-input
+        />
+        <ResponsivePopover className="confire-expr-pop" open={shown} opener={area.current} placement="Bottom"
+          horizontalAlign="Start" hideArrow preventInitialFocus preventFocusRestore tabIndex={-1}
+          style={{ minWidth: width || undefined, maxWidth: `max(40rem, ${width}px)` }}
+          onClose={() => setOpen(false)}>
+          {/* Mouse-down kept from moving the focus, as Input's list does, so the caret stays put. */}
+          <List accessibleRole="ListBox" separators="None" selectionMode="Single"
+            onMouseDown={(e) => e.preventDefault()}>
+            {sugg.map((s, i) => (
+              // `selected`/`focused`/`markupText` are the item state Input sets itself (the
+              // highlight, the keyboard focus ring, the typed part in bold); the wrapper passes them on.
+              <SuggestionItem key={s.text} text={s.text} additionalText={s.label} onClick={() => pick(s)}
+                {...{
+                  selected: i === at, focused: i === at,
+                  markupText: generateHighlightedMarkup(s.text, trailingIdent(text)),
+                }} />
+            ))}
+          </List>
+        </ResponsivePopover>
+      </div>
     );
 
   return (

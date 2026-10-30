@@ -34,7 +34,7 @@ export type CardCtx = {
   threadId: string;
   /** the thread's configuration, once one was started from it */
   threadProjectId: string | null;
-  /** links the chat to it and opens its page: the form, or (docked) the chat's own */
+  /** links the chat to it and, in the panel, opens its form (the AI page stays) */
   onStarted(projectId: string): Promise<void>;
   append(messages: UIMessage[]): void;
   setPending(text: string | null): void;

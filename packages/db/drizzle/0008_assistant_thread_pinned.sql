@@ -1,0 +1,1 @@
+ALTER TABLE "assistant_thread" ADD COLUMN "pinned" boolean DEFAULT false NOT NULL;

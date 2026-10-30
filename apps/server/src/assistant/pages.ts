@@ -56,8 +56,9 @@ const start: Page = {
 export const CONFIGURE_CHAT: Page = { ...configure, section: (p) => [about(p), WRITE, NO_FORM].join("\n") };
 
 export const PAGES: Record<string, Page> = {
+  // The AI page: `$id` is the chat, and route.ts makes a configuration's chat CONFIGURE_CHAT.
   "/$slug/assistant/": start,
-  "/$slug/assistant/$id": CONFIGURE_CHAT,
+  "/$slug/assistant/$id": start,
   "/$slug/configs/$id": configure,
   "/$slug/configs/$id_/quote": configure,
   "/$slug/models/$id": model,

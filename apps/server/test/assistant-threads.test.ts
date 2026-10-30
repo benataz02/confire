@@ -95,6 +95,67 @@ describe.skipIf(!process.env.DATABASE_URL)("threads", () => {
     expect((back!.content as { source?: { value: string } }[])[0]!.source!.value).toBe(PDF.toString("base64"));
     expect(lastDrop(stored.messages)).toEqual({ refs: [ref], text: "50 pcs" });
   });
+
+  test("the AI page's list: own chats with something in them, pinned first, searched, renamed, deleted", async () => {
+    const w = await world();
+    const as = (u: { cookie: string }) => ({ context: { headers: tenantHeaders(w.slug, u.cookie) } });
+    const list = (q?: string, u = w.a) => call(router.assistant.threads, q === undefined ? undefined : { q }, as(u));
+
+    // New chat on a blank chat is that chat again; a chat with a message is never reused.
+    const { id: blank } = await call(router.assistant.newThread, undefined, as(w.a));
+    expect((await call(router.assistant.newThread, undefined, as(w.a))).id).toBe(blank);
+    const older = await newThread(w.tenantId, w.a.userId);
+    const tick = () => Bun.sleep(5); // updatedAt is the order: no two writes in one millisecond
+    await appendMessages(older.id, [{ role: "user", content: "Quote 50 brackets for ACME" }], "Brackets");
+    await tick();
+    await appendMessages(blank, [
+      { role: "user", content: [{ type: "text", content: "And a cable" }] },
+      { role: "tool", toolCallId: "x", content: JSON.stringify({ name: "Bracket steel" }) },
+      { role: "assistant", content: "The cable comes in steel or aluminium." },
+    ]);
+    expect((await call(router.assistant.newThread, undefined, as(w.a))).id).not.toBe(blank);
+    const configChat = await threadFor(w.tenantId, w.a.userId, w.projectId);
+    await tick();
+    await appendMessages(configChat.id, [{ role: "user", content: "What is missing?" }], "What is missing?");
+
+    // Blank chats are left out; the latest first; a configuration's chat carries its name.
+    expect((await list()).map((t) => t.id)).toEqual([configChat.id, blank, older.id]);
+    expect((await list())[0]).toMatchObject({ projectId: w.projectId, projectName: "Cable", pinned: false });
+
+    // Search: title, configuration name, and the chat's words — not tool output; LIKE characters are literal.
+    expect((await list("brack")).map((t) => t.id)).toEqual([older.id]);
+    expect((await list("cable")).map((t) => t.id)).toEqual([configChat.id, blank]);
+    expect((await list("ALUMINIUM")).map((t) => t.id)).toEqual([blank]);
+    expect(await list("%")).toEqual([]);
+
+    // Pin and rename keep the order of the rest: neither touches updatedAt.
+    await call(router.assistant.pinThread, { id: older.id, pinned: true }, as(w.a));
+    await call(router.assistant.renameThread, { id: blank, title: "  Cable for ACME " }, as(w.a));
+    const after = await list();
+    expect(after.map((t) => t.id)).toEqual([older.id, configChat.id, blank]);
+    expect(after[2]!.title).toBe("Cable for ACME");
+
+    // Someone else's chat is not theirs to see, read, rename, pin or delete.
+    expect(await list(undefined, w.b)).toEqual([]);
+    expect(await Promise.all([
+      call(router.assistant.thread, { id: older.id }, as(w.b)),
+      call(router.assistant.renameThread, { id: older.id, title: "mine" }, as(w.b)),
+      call(router.assistant.pinThread, { id: older.id, pinned: false }, as(w.b)),
+      call(router.assistant.deleteThread, { id: older.id }, as(w.b)),
+    ].map(codeOf))).toEqual(["NOT_FOUND", "NOT_FOUND", "NOT_FOUND", "NOT_FOUND"]);
+
+    // Delete: never mid-answer; the configuration stays.
+    let inside!: () => void;
+    const entered = new Promise<void>((r) => (inside = r));
+    const run = withThread(configChat.id, async () => { inside(); await Bun.sleep(50); });
+    await entered;
+    expect(await codeOf(call(router.assistant.deleteThread, { id: configChat.id }, as(w.a)))).toBe("THREAD_BUSY");
+    await run;
+    await call(router.assistant.deleteThread, { id: configChat.id }, as(w.a));
+    expect((await list()).map((t) => t.id)).toEqual([older.id, blank]);
+    expect((await call(router.configs.get, { id: w.projectId }, as(w.a))).project.name).toBe("Cable");
+    expect((await call(router.assistant.thread, { id: blank }, as(w.a))).id).toBe(blank);
+  });
 });
 
 describe.skipIf(!process.env.DATABASE_URL)("assistant files", () => {

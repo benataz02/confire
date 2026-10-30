@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import type { ContentPart, ModelMessage } from "@tanstack/ai";
-import { and, desc, eq, isNull, or, lt, sql } from "drizzle-orm";
-import { db, assistantThread, configProject } from "@confire/db";
+import { and, desc, eq, ilike, isNull, or, lt, sql } from "drizzle-orm";
+import { db, assistantFile, assistantThread, configProject } from "@confire/db";
 import { internalVisible } from "../project-lifecycle.ts";
 import { fileBytes, type Fence, type FileMeta, type FileRef } from "./files.ts";
 
@@ -44,13 +44,66 @@ export async function newThread(tenantId: string, userId: string): Promise<Threa
   return asThread(t!);
 }
 
-/** A configuration's chat starts over (the panel's New chat there): its thread is deleted, under the
- *  lease so never mid-answer, and a new empty one takes its place. Deleted, not kept: the unique index
- *  allows one per (user, configuration) and there is no thread list to reach an old one from. What the
- *  chat filled stays on the configuration (`sources`); `ai_usage` rows keep their thread id. */
-export async function clearThread(tenantId: string, userId: string, projectId: string): Promise<Thread> {
-  const t = await threadFor(tenantId, userId, projectId);
+/** New chat with no configuration: the user's blank one if there is one (no message, no file, not
+ *  answering), made the latest again, so opening the AI page over and over leaves no trail of empty
+ *  chats. Else a new one. */
+export async function blankThread(tenantId: string, userId: string): Promise<Thread> {
+  const [t] = await db.update(assistantThread).set({ updatedAt: new Date() }).where(and(
+    eq(assistantThread.tenantId, tenantId), eq(assistantThread.userId, userId), isNull(assistantThread.projectId),
+    sql`jsonb_array_length(${assistantThread.messages}) = 0`,
+    or(isNull(assistantThread.busyUntil), lt(assistantThread.busyUntil, sql`now()`)),
+    sql`not exists (select 1 from ${assistantFile} where ${assistantFile.threadId} = ${assistantThread.id})`,
+  )).returning(cols);
+  return t ? asThread(t) : newThread(tenantId, userId);
+}
+
+export type ThreadRow = { id: string; title: string; projectId: string | null; projectName: string | null; pinned: boolean; updatedAt: Date };
+
+/** The AI page's list: the user's chats with anything in them, pinned first, then the latest. `q`
+ *  matches the title, the configuration's name, and the words of the chat — the user's and the
+ *  assistant's text, not tool output, which holds field names that would match nearly anything. */
+// ponytail: the latest 100, and a search scans the user's own jsonb; paging and a tsvector column once
+// someone has that many chats.
+export async function listThreads(tenantId: string, userId: string, q?: string): Promise<ThreadRow[]> {
+  const like = q?.trim() ? `%${q.trim().replace(/[\\%_]/g, "\\$&")}%` : null;
+  const said = sql`exists (select 1 from jsonb_array_elements(${assistantThread.messages}) m
+    where m->>'role' in ('user', 'assistant') and case jsonb_typeof(m->'content')
+      when 'string' then m->>'content'
+      when 'array' then (select string_agg(p->>'content', ' ') from jsonb_array_elements(m->'content') p where p->>'type' = 'text')
+    end ilike ${like})`;
+  return db.select({
+    id: assistantThread.id, title: assistantThread.title, projectId: assistantThread.projectId,
+    projectName: configProject.name, pinned: assistantThread.pinned, updatedAt: assistantThread.updatedAt,
+  }).from(assistantThread)
+    .leftJoin(configProject, eq(configProject.id, assistantThread.projectId))
+    .where(and(
+      eq(assistantThread.tenantId, tenantId), eq(assistantThread.userId, userId),
+      sql`jsonb_array_length(${assistantThread.messages}) > 0`,
+      like ? or(ilike(assistantThread.title, like), ilike(configProject.name, like), said) : undefined,
+    ))
+    .orderBy(desc(assistantThread.pinned), desc(assistantThread.updatedAt))
+    .limit(100);
+}
+
+/** Rename or pin one of the user's chats. `updatedAt` stays, so the list keeps its order. */
+export async function setThread(tenantId: string, userId: string, id: string, set: { title?: string; pinned?: boolean }): Promise<void> {
+  const r = await db.update(assistantThread).set(set).where(and(
+    eq(assistantThread.id, id), eq(assistantThread.tenantId, tenantId), eq(assistantThread.userId, userId),
+  )).returning({ id: assistantThread.id });
+  if (!r.length) throw new ORPCError("NOT_FOUND");
+}
+
+/** Delete one of the user's chats, under the lease so never mid-answer. Its dropped files go with it;
+ *  what it filled stays on its configuration (`sources`), and `ai_usage` rows keep its id. */
+export async function deleteThread(tenantId: string, userId: string, id: string): Promise<void> {
+  const t = await ownThread(tenantId, userId, id);
   await withThread(t.id, () => db.delete(assistantThread).where(eq(assistantThread.id, t.id)));
+}
+
+/** A configuration's chat starts over (the panel's New chat there): its thread is deleted and a new
+ *  empty one takes its place — the unique index allows one per (user, configuration). */
+export async function clearThread(tenantId: string, userId: string, projectId: string): Promise<Thread> {
+  await deleteThread(tenantId, userId, (await threadFor(tenantId, userId, projectId)).id);
   return threadFor(tenantId, userId, projectId);
 }
 

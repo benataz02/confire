@@ -230,7 +230,7 @@ export const aggregateKey = (tableKey: string, col: string) => `${tableKey}_${co
 /** A section holds two kinds of group, and the form renders each as one UI5 FormGroup.
  *
  *  A **table group** carries nothing but the table key: its FormGroup is keyed and titled from the
- *  TableDef itself, so a rename in TableDialog cannot leave a stale title behind in the structure.
+ *  TableDef itself, so a rename on the table's page cannot leave a stale title behind in the structure.
  *  A **field group** is the ordinary label-and-fields group and is unchanged.
  *
  *  Plain `z.union`, not `discriminatedUnion`: there is no tag field, so every model saved before

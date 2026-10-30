@@ -3,7 +3,7 @@ import {
   Bar, BusyIndicator, Button, Label, MessageStrip, NotificationList, NotificationListItem, ResponsivePopover, Switch,
   Table, TableCell, TableGroupRow, TableHeaderCell, TableHeaderRow, TableRow, Text, Title,
 } from "@ui5/webcomponents-react";
-import { formatLocale } from "../format.ts";
+import { ago } from "../format.ts";
 import { useUiI18n } from "../i18n.ts";
 import { toast } from "../toast.ts";
 import type { NotificationItem, NotificationSetting, NotificationsApi, Preference } from "./api.ts";
@@ -36,17 +36,6 @@ const STATE: Record<string, "Positive" | "Critical" | "Negative"> = {
   "project.declined": "Negative", "project.returned": "Critical", "project.quoted": "Positive",
   "request.quote_accepted": "Positive", "request.quote_declined": "Critical",
 };
-
-const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
-  ["year", 31_536_000], ["month", 2_592_000], ["week", 604_800], ["day", 86_400], ["hour", 3_600], ["minute", 60],
-];
-/** "5 minutes ago", in the page's UI5 language. */
-function ago(d: Date): string {
-  const s = (new Date(d).getTime() - Date.now()) / 1000;
-  const f = new Intl.RelativeTimeFormat(formatLocale(), { numeric: "auto" });
-  const unit = UNITS.find(([, n]) => Math.abs(s) >= n);
-  return unit ? f.format(Math.round(s / unit[1]), unit[0]) : f.format(0, "minute");
-}
 
 /** The bell's text: the type's title over the row's snapshotted params, in the reader's language.
  *  Placeholders: {0} who acted, {1} the project, {2} the company, {3} the quotation number. */

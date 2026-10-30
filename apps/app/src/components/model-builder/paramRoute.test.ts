@@ -5,6 +5,7 @@ test("staying under one model is not leaving it", () => {
   expect(sameModelPath("/acme/models/abc", "/acme/models/abc/parameter")).toBe(true);
   expect(sameModelPath("/acme/models/new", "/acme/models/new/parameter")).toBe(true);
   expect(sameModelPath("/acme/models/abc/parameter", "/acme/models/abc")).toBe(true);
+  expect(sameModelPath("/acme/models/abc", "/acme/models/abc/table")).toBe(true);
 });
 
 test("the list, another model, and a lookalike id are leaving", () => {

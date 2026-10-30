@@ -57,6 +57,13 @@
       "when": 1793123302739,
       "tag": "0007_invitation_drop_register_domain",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793207056586,
+      "tag": "0008_assistant_thread_pinned",
+      "breakpoints": true
     }
   ]
 }

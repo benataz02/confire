@@ -9,7 +9,8 @@ import { copyToProject, fileParts, type FileRef } from "../../assistant/files.ts
 import { readRequest } from "../../assistant/intake.ts";
 import { ASSISTANT_MODEL, available } from "../../assistant/model.ts";
 import {
-  appendMessages, clearThread, dehydrate, lastDrop, linkProject, newThread, ownThread, threadFor, withThread, type Thread,
+  appendMessages, blankThread, clearThread, deleteThread, dehydrate, lastDrop, linkProject, listThreads, ownThread, setThread,
+  threadFor, withThread, type Thread,
 } from "../../assistant/threads.ts";
 import { assertAssistant, assistantOn, MONTHLY_LIMIT_USD, monthUsage, offReason, rateLimit } from "../../assistant/usage.ts";
 
@@ -75,22 +76,42 @@ export const assistantRouter = {
     };
   }),
 
-  /** This user's thread for a configuration, or their latest general one. */
+  /** One of this user's threads by id (the AI page), else theirs for a configuration, else their latest
+   *  general one. */
   thread: userProcedure
-    .input(z.object({ projectId: z.uuid().optional() }))
+    .input(z.object({ projectId: z.uuid().optional(), id: z.uuid().optional() }))
     .handler(async ({ input, context }) => {
-      const t = await threadFor(context.tenantId, context.userId, input.projectId ?? null);
+      const t = input.id
+        ? await ownThread(context.tenantId, context.userId, input.id)
+        : await threadFor(context.tenantId, context.userId, input.projectId ?? null);
       return { id: t.id, projectId: t.projectId, messages: modelMessagesToUIMessages(t.messages) };
     }),
 
-  /** New chat: a new general thread, or with a configuration its thread started over. */
+  /** New chat: a blank general thread, or with a configuration its thread started over. */
   newThread: userProcedure
     .input(z.object({ projectId: z.uuid().optional() }).optional())
     .handler(async ({ input, context }) => ({
       id: (input?.projectId
         ? await clearThread(context.tenantId, context.userId, input.projectId)
-        : await newThread(context.tenantId, context.userId)).id,
+        : await blankThread(context.tenantId, context.userId)).id,
     })),
+
+  /** The AI page's chat list: this user's own, pinned first, optionally searched. */
+  threads: userProcedure
+    .input(z.object({ q: z.string().max(200).optional() }).optional())
+    .handler(({ input, context }) => listThreads(context.tenantId, context.userId, input?.q)),
+
+  renameThread: userProcedure
+    .input(z.object({ id: z.uuid(), title: z.string().trim().min(1).max(200) }))
+    .handler(({ input, context }) => setThread(context.tenantId, context.userId, input.id, { title: input.title })),
+
+  pinThread: userProcedure
+    .input(z.object({ id: z.uuid(), pinned: z.boolean() }))
+    .handler(({ input, context }) => setThread(context.tenantId, context.userId, input.id, { pinned: input.pinned })),
+
+  deleteThread: userProcedure
+    .input(z.object({ id: z.uuid() }))
+    .handler(({ input, context }) => deleteThread(context.tenantId, context.userId, input.id)),
 
   /** Read a drop: propose model, customer and name. Nothing is created. */
   intake: userProcedure

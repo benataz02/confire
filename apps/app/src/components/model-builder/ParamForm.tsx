@@ -43,14 +43,6 @@ export const optValue = (e: { detail: { selectedOption: { value?: string } } }) 
  *  placeholder line. A sentinel no table or column can be called is the whole fix. */
 export const NONE = "(none)";
 
-// Every dialog pads its own content column, so the part's default padding is off for all of them.
-// Shared with TableDialog and TitleDialog — both wear `confire-pd` too.
-if (typeof document !== "undefined") {
-  let el = document.getElementById("confire-pd-style");
-  if (!el) { el = document.createElement("style"); el.id = "confire-pd-style"; document.head.appendChild(el); }
-  el.textContent = `.confire-pd::part(content){padding:0;}`;
-}
-
 /** Label + the ⓘ carrying the field's explanation — the only help a field gets. */
 export const lbl = (text: string, help: string, required?: boolean) => (
   <Label required={required}>
@@ -76,10 +68,15 @@ const DOMAIN_KINDS = [
   ["range", "MODEL_DOMAIN_RANGE"],
 ] as const;
 
-/** Blocks Save: the domain is half-built and would resolve to no options at all. A source with no
- *  columns is checkModel's to report — the key column is convention now, not a field here. */
+/** Blocks Save: the domain is missing or half-built, so a list control would list nothing. A new
+ *  parameter starts as a select with no domain, which is why this waits for Save rather than
+ *  warning live. A source with no columns is checkModel's to report — the key column is convention
+ *  now, not a field here. */
 function domainIssue(p: Param, t: Translate): string | undefined {
-  if (p.domain?.kind !== "options") return undefined;
+  if (!p.domain)
+    return (p.ui === "select" || p.ui === "radio" || p.ui === "multicombo") && p.type !== "boolean"
+      ? t("MODEL_CONTROL_DOMAIN") : undefined;
+  if (p.domain.kind !== "options") return undefined;
   const ref = p.domain.ref;
   if (ref.source !== "manual" && !ref.table) return t("MODEL_CHOOSE_MASTERDATA");
   return undefined;
@@ -89,40 +86,54 @@ function domainIssue(p: Param, t: Translate): string | undefined {
 function controlIssue(p: Param, t: Translate): string | undefined {
   if (p.ui === "checkbox" && p.type !== "boolean") return t("MODEL_CHECKBOX_TYPE");
   if (p.ui === "step" && p.type !== "number") return t("MODEL_STEP_TYPE");
-  if ((p.ui === "select" || p.ui === "radio" || p.ui === "multicombo") && !p.domain && p.type !== "boolean")
-    return t("MODEL_CONTROL_DOMAIN");
   return undefined;
 }
 
 const keyOk = (key: string) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key);
 
-/** Save stays enabled until the first click. These are the problems that click reveals instead of writing. */
-export function paramBlocked(p: Param, draft: ModelDef, isNew: boolean, t: Translate): boolean {
-  const taken = isNew && draft.parameters.some((x) => x.key === p.key);
-  return !keyOk(p.key) || taken || !p.label || !!domainIssue(p, t);
-}
-
-export function useParamFields({ draft, tables, p, set, tried, isNew }: {
-  draft: ModelDef; tables: Tables; p: Param; isNew: boolean; tried: boolean;
-  set: (patch: Partial<Param>) => void;
-}) {
-  const i18n = useI18n();
-  const t: Translate = (key, ...params) => i18n.getText(key, ...params);
-
+/** The buffered parameter, checked against the draft with it spliced in — so an unsaved rename
+ *  resolves the way it will once saved. Pure: the page's Save asks it too. */
+export function checkParam(draft: ModelDef, tables: Tables, p: Param, isNew: boolean, t: Translate) {
   const ok = keyOk(p.key);
   const keyTaken = isNew && draft.parameters.some((x) => x.key === p.key);
   const dIssue = domainIssue(p, t);
-  const cIssue = controlIssue(p, t);
-
-  // The draft with this parameter's own derived keys in scope — both the expression suggestions
-  // and checkModel are read against it, so an unsaved rename resolves the way it will once saved.
   const scope = modelWithParam(draft, p);
   const at = scope.parameters.findIndex((x) => x.key === p.key);
-  const issues = useMemo(() => checkModel(scope, tables), [scope, tables]);
+  const issues = checkModel(scope, tables);
   const mine = at < 0 ? [] : issues.filter((x) => x.path.startsWith(`parameters[${at}]`));
-  const exprIssue = (field: string) =>
-    tried && at >= 0 ? issueFor(issues, `parameters[${at}].${field}`) : undefined;
+  // These are the problems a Save click reveals instead of writing — checkModel's included, or the
+  // model's own Save is where they would surface.
+  const blocked = !ok || keyTaken || !p.label || !!dIssue || mine.length > 0;
+  return { ok, keyTaken, dIssue, scope, at, issues, mine, blocked };
+}
 
+/** One section's view of the page's buffer. */
+export type ParamPart = {
+  p: Param;
+  set: (patch: Partial<Param>) => void;
+  draft: ModelDef;
+  tables: Tables;
+  isNew: boolean;
+  /** An untouched field isn't an error yet — only once Save is pressed. */
+  tried: boolean;
+};
+
+function useParamCheck({ draft, tables, p, isNew }: ParamPart) {
+  const i18n = useI18n();
+  const t: Translate = (key, ...params) => i18n.getText(key, ...params);
+  const c = useMemo(() => checkParam(draft, tables, p, isNew, t), [draft, tables, p, isNew, i18n]);
+  // Live, not gated on `tried`: the field already shows its parse error per keystroke, and a
+  // formula naming something that does not exist is the same kind of mistake.
+  const exprIssue = (field: string) => (c.at >= 0 ? issueFor(c.issues, `parameters[${c.at}].${field}`) : undefined);
+  return { ...c, t, exprIssue };
+}
+
+const FORM = { accessibleMode: "Edit" as const, labelSpan: PAIRS.labelSpan };
+
+export function ParamDefinition(part: ParamPart) {
+  const { p, set, tried, isNew, tables } = part;
+  const { t, ok, keyTaken, dIssue, mine, scope, at, exprIssue } = useParamCheck(part);
+  const cIssue = controlIssue(p, t);
   const errors = tried
     ? [...new Set([
         ...(ok ? [] : [t("MODEL_KEY_INVALID")]),
@@ -132,24 +143,6 @@ export function useParamFields({ draft, tables, p, set, tried, isNew }: {
         ...mine.map((x) => x.message),
       ])]
     : [];
-
-  const ref = p.domain?.kind === "options" ? p.domain.ref : null;
-  const manualRef = ref?.source === "manual" ? ref : null;
-  const sourceRef = ref && ref.source !== "manual" ? ref : null;
-  const rangeDomain = p.domain?.kind === "range" ? p.domain : undefined;
-
-  return {
-    tables, p, set, tried, isNew, t, ok, keyTaken, cIssue, scope, at, exprIssue, errors,
-    manualRef, sourceRef, rangeDomain,
-  };
-}
-
-type Fields = ReturnType<typeof useParamFields>;
-
-const FORM = { accessibleMode: "Edit" as const, labelSpan: PAIRS.labelSpan };
-
-export function ParamDefinition({ f }: { f: Fields }) {
-  const { t, p, set, tried, isNew, ok, keyTaken, errors, cIssue } = f;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
       {errors.length ? (
@@ -173,11 +166,12 @@ export function ParamDefinition({ f }: { f: Fields }) {
               onInput={(e) => set({ label: e.target.value })} />
           </FormItem>
 
-          {/* The help text annotates the label, so it closes the first column rather than sitting
-              in the second: this column is everything the salesperson reads. */}
-          <FormItem labelContent={lbl(t("MODEL_HELP"), t("MODEL_HELP_HELP"))}>
-            <TextArea rows={3} value={p.help ?? ""} style={W}
-              onInput={(e) => set({ help: e.target.value || undefined })} />
+          {/* Default closes the first column, next to the name. It is usually one identifier,
+              so the Input's own suggestion list is enough; the tall formulas stay in Behaviour. */}
+          <FormItem labelContent={lbl(t("MODEL_DEFAULT"), t("MODEL_DEFAULT_HELP"))}>
+            <ExprInput optional value={p.defaultExpr} model={scope} tables={tables}
+              fieldId={`expr-parameters[${at}].defaultExpr`} issue={exprIssue("defaultExpr")}
+              onChange={(v) => set({ defaultExpr: v })} />
           </FormItem>
 
           {/* Second column starts here: what the field holds and how it is asked. Type leads it
@@ -213,8 +207,13 @@ export function ParamDefinition({ f }: { f: Fields }) {
   );
 }
 
-export function ParamDomain({ f }: { f: Fields }) {
-  const { t, p, set, tried, tables, manualRef, sourceRef, rangeDomain } = f;
+export function ParamDomain({ p, set, tried, tables }: ParamPart) {
+  const i18n = useI18n();
+  const t: Translate = (key, ...params) => i18n.getText(key, ...params);
+  const ref = p.domain?.kind === "options" ? p.domain.ref : null;
+  const manualRef = ref?.source === "manual" ? ref : null;
+  const sourceRef = ref && ref.source !== "manual" ? ref : null;
+  const rangeDomain = p.domain?.kind === "range" ? p.domain : undefined;
   return (
     <Form {...FORM} accessibleName={t("MODEL_DOMAIN")} layout={rangeDomain ? SPAN3 : SPAN2}>
       <FormGroup accessibleName={t("MODEL_DOMAIN")} colSpan={SPAN2}>
@@ -259,18 +258,17 @@ export function ParamDomain({ f }: { f: Fields }) {
   );
 }
 
-export function ParamBehavior({ f }: { f: Fields }) {
-  const { t, p, set, tables, scope, at, exprIssue } = f;
+export function ParamBehavior(part: ParamPart) {
+  const { p, set, tables } = part;
+  const { t, scope, at, exprIssue } = useParamCheck(part);
   return (
-    // Four editors of the same height, two per column, each beside the flag that answers the
-    // same question without a formula.
+    // Two columns, filled top to bottom. Help leads the first — the note the form shows —
+    // with read-only and the price under it. The second is when the field applies.
     <Form {...FORM} accessibleName={t("MODEL_BEHAVIOR")} layout={SPAN2}>
       <FormGroup accessibleName={t("MODEL_BEHAVIOR")}>
-        {/* First column: what the field is worth. Read-only sits under the default that owns it. */}
-        <FormItem labelContent={lbl(t("MODEL_DEFAULT"), t("MODEL_DEFAULT_HELP"))}>
-          <ExprInput optional rows={3} value={p.defaultExpr} model={scope} tables={tables}
-            fieldId={`expr-parameters[${at}].defaultExpr`} issue={exprIssue("defaultExpr")}
-            onChange={(v) => set({ defaultExpr: v })} />
+        <FormItem labelContent={lbl(t("MODEL_HELP"), t("MODEL_HELP_HELP"))}>
+          <TextArea rows={3} value={p.help ?? ""} style={W}
+            onInput={(e) => set({ help: e.target.value || undefined })} />
         </FormItem>
 
         <FormItem labelContent={lbl(t("MODEL_READONLY"), t("MODEL_READONLY_HELP"))}>

@@ -1,5 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { AssistantDock } from "../../../assistant/AssistantProvider.tsx";
+import { AssistantPage } from "../../../assistant/AssistantPage.tsx";
 
-// One configuration, worked on in the chat alone. The panel reads the id off the route.
-export const Route = createFileRoute("/$slug/assistant/$id")({ component: AssistantDock });
+// One of the user's chats, beside the list of the others.
+export const Route = createFileRoute("/$slug/assistant/$id")({ component: Chat });
+
+function Chat() {
+  const { id } = Route.useParams();
+  return <AssistantPage threadId={id} />;
+}

@@ -323,6 +323,9 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
 - **Threads** (`threads.ts`) are server-owned and append-only (Sonnet 5.5 refuses edited history): the
   route takes only the last user message's text from the client. One run per thread under a lease
   (`takeLease`/`withThread`, `THREAD_BUSY`); one thread per (user, configuration) plus general ones.
+  A user's chats are listed (`listThreads`: pinned, then the latest; search over title, configuration
+  name and the chat's text), renamed, pinned and deleted (`deleteThread`, under the lease) — their own
+  only. A general New chat is the user's blank thread if there is one (`blankThread`).
   Stored file parts keep a reference (`metadata.file`), never bytes; `hydrate` refills them. File refs
   are fenced by tenant and by their own project or thread. Only PDF, PNG and JPEG, by their bytes.
   Thinking is on and summarized (`reasoning: { level: "high", summary: true }`, the default effort); the
@@ -336,9 +339,15 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   `ASSISTANT_MONTHLY_LIMIT_USD` (default 25). `rateLimit` is 20 calls a
   minute per user. Env read with `||`, not `??`: compose passes an unset variable as `""`.
 - **The panel** (`AssistantPanel.tsx`) is shell state (`AssistantProvider` around `AppShell`), floating
-  over the page's right edge — or docked as the page itself on **AI configuration** (`/assistant`, then
-  `/assistant/$id` once it started one; the home tile): the route renders an empty slot (`AssistantDock`)
-  the same panel lays itself over, so a move to the configuration's page keeps one live chat. **Only a
+  over the page's right edge. **AI configuration** (`AssistantPage.tsx`, the home tile) is a page of its
+  own: one chat under a `Bar` whose UI5 `Search` is the user's chats (a click opens the list; the
+  title's menu pins, renames, deletes), `/assistant` = a new one, `/assistant/$id` = the chat's id,
+  never a configuration's. Both draw `ChatView.tsx`. The page's empty chat is a `HeroBanner` with the
+  greeting and the chat box inside, the first send moving the box to the chat's foot (a view transition);
+  the panel keeps Joule's gradient head, whose greeting collapses once the chat starts. The panel is not
+  drawn there, so one thread is never live twice, and leaving mid-answer stops it; *Open configuration*
+  (after the answer) opens the form with the panel on the same thread. Each `ChatView` writes its
+  finished messages into every cached copy of its thread, as a chat reads its copy once. **Only a
   decision is a card in the chat** (`steps.ts` `DECISION`: `read_request`, `ask_user`,
   `propose_quotation`); everything else the agent does is a **step** — its thinking and each other tool
   call one line in a fold (`Steps.tsx`), open while it works, `N steps` after, a run's turns merged into
@@ -357,8 +366,9 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   lead in order until the candidates show: the panel's parameters and customer first (it waits), then
   what the card does not ask (a table's rows, a broken rule), one per answer and never ending on
   nothing while something is missing; then the user picks in the candidates card and "Review and
-  post" opens the quote page. The model selects or prepares the quotation only when asked. Colours come only from the theme's `--sapAssistant_*` parameters (the panel scopes the
-  emphasized-button parameters to them). `scripts/assistant-eval.ts` is the hand-run eval (it spends
+  post" opens the quote page. The model selects or prepares the quotation only when asked. Colours come only from the theme's `--sapAssistant_*` parameters, and there is no
+  stylesheet: every style is inline on the UI5 components (theme parameters set on them, which reach their
+  shadow DOM). `scripts/assistant-eval.ts` is the hand-run eval (it spends
   money and says so first).
 
 ## `packages/config-engine` — the calculation core
@@ -591,7 +601,9 @@ a missing field is an error (dropping it would show *more* rows than asked for),
 - Comments explain *why*, especially when the obvious approach was tried and failed. Several
   carry verified error strings from a live B1 — do not "clean those up".
 - Big configuration objects are one jsonb document loaded and saved whole (`config_model.definition`,
-  `ui_view.state`), not modelled tables.
+  `ui_view.state`), not modelled tables. A model is stored whole but *sent* as a diff: `models.save`
+  takes `diffModel`'s patch (keyed items per key, the other parts whole) and lays it over the stored
+  row under a lock, `checkModel` running on the merge; `models.create` is the first save.
 - Imports use explicit `.ts` extensions; `verbatimModuleSyntax` is on, so `import type` matters.
 - **UI texts are UI5's i18n** (`@confire/ui/i18n.ts`): each SPA's `src/i18n/messagebundle_<locale>.properties`
   behind its `useI18n()` (`getText("KEY", …)`). English is the base every language is laid over, so a

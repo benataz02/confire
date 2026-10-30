@@ -18,7 +18,8 @@ export const assistantSettings = pgTable("assistant_settings", {
 // `messages` is TanStack AI's ModelMessage[], typed loosely so this package takes no @tanstack/ai
 // dependency (threads.ts casts at its boundary). Append-only: Sonnet 5.5 refuses edited history
 // (preserved thinking), so nothing rewrites or deletes a stored message. `busyUntil` is the one-run
-// lease (`withThread`). Stored file parts carry a reference, never their bytes.
+// lease (`withThread`). Stored file parts carry a reference, never their bytes. The AI page lists them
+// (pinned first, then `updatedAt`); a rename or a pin leaves `updatedAt` alone so the list stays put.
 export const assistantThread = pgTable(
   "assistant_thread",
   {
@@ -27,6 +28,7 @@ export const assistantThread = pgTable(
     userId: text("user_id").notNull(),
     projectId: uuid("project_id").references(() => configProject.id, { onDelete: "cascade" }),
     title: text("title").notNull().default(""),
+    pinned: boolean("pinned").notNull().default(false),
     messages: jsonb("messages").$type<Record<string, unknown>[]>().notNull().default([]),
     busyUntil: timestamp("busy_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
