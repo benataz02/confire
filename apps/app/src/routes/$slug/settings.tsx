@@ -2,11 +2,12 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  BusyIndicator, Card, CardHeader, Form, FormItem, Button, Label, MessageStrip, FlexBox, ObjectStatus,
+  BusyIndicator, Card, CardHeader, Form, FormGroup, FormItem, Button, Label, MessageStrip, FlexBox, ObjectStatus,
   Tab, TabContainer, Text,
 } from "@ui5/webcomponents-react";
 import { NotificationSettings } from "@confire/ui/notifications/Notifications.tsx";
 import { formatLocale } from "@confire/ui/format.ts";
+import { FORM_LAYOUT } from "@confire/ui/formLayout.ts";
 import { useI18n } from "../../i18n.ts";
 import { notifications, orpc, useIsAdmin } from "../../orpc.ts";
 import { PairingCode } from "../../components/PairingCode.tsx";
@@ -106,17 +107,19 @@ function AgentCard() {
               </ObjectStatus>
               {s.error ? <MessageStrip design="Negative" hideCloseButton>{s.error}</MessageStrip> : null}
               {s.updateAvailable ? <MessageStrip design="Information" hideCloseButton>{i18n.getText("ADMIN_AGENT_UPDATE", s.latestVersion ?? "")}</MessageStrip> : null}
-              <Form layout="S1 M1 L1 XL1" labelSpan="S12 M4 L4 XL4">
-                <FormItem labelContent={<Label>{i18n.getText("ADMIN_AGENT_COMPANY")}</Label>}><Text>{s.companyDb ?? none}</Text></FormItem>
-                <FormItem labelContent={<Label>{i18n.getText("ADMIN_AGENT_VERSION")}</Label>}><Text>{s.version ?? none}</Text></FormItem>
-                <FormItem labelContent={<Label>SAP B1</Label>}><Text>{s.services?.b1 ? "✓" : none}</Text></FormItem>
-                <FormItem labelContent={<Label>Beas</Label>}><Text>{s.services?.beas ? "✓" : none}</Text></FormItem>
-                <FormItem labelContent={<Label>{i18n.getText("ADMIN_AGENT_PRINTING")}</Label>}>
+              <Form layout={FORM_LAYOUT} accessibleMode="Display" itemSpacing="Large">
+                <FormGroup>
+                <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_AGENT_COMPANY")}</Label>}><Text>{s.companyDb ?? none}</Text></FormItem>
+                <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_AGENT_VERSION")}</Label>}><Text>{s.version ?? none}</Text></FormItem>
+                <FormItem labelContent={<Label showColon>SAP B1</Label>}><Text>{s.services?.b1 ? "✓" : none}</Text></FormItem>
+                <FormItem labelContent={<Label showColon>Beas</Label>}><Text>{s.services?.beas ? "✓" : none}</Text></FormItem>
+                <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_AGENT_PRINTING")}</Label>}>
                   <Text>{s.services?.print.length ? s.services.print.join(", ") : none}</Text>
                 </FormItem>
-                <FormItem labelContent={<Label>{i18n.getText("ADMIN_AGENT_LAST_OK")}</Label>}>
+                <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_AGENT_LAST_OK")}</Label>}>
                   <Text>{s.lastOkAt ? s.lastOkAt.toLocaleString(formatLocale()) : none}</Text>
                 </FormItem>
+                </FormGroup>
               </Form>
             </>
           )}

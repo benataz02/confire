@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BusyIndicator, Button, Card, CardHeader, FileUploader, FlexBox, Form, FormItem, Input, Label, MessageStrip, Text,
+  BusyIndicator, Button, Card, CardHeader, FileUploader, FlexBox, Form, FormGroup, FormItem, Input, Label, MessageStrip, Text,
 } from "@ui5/webcomponents-react";
 import { sameState } from "@confire/ui/views.ts";
 import { toast } from "@confire/ui/toast.ts";
@@ -85,12 +85,15 @@ function BrandingForm({ current }: { current: General }) {
   return (
     <FlexBox direction="Column" style={{ padding: "1rem", gap: "1rem" }}>
       {save.error ? <MessageStrip design="Negative" hideCloseButton>{save.error.message}</MessageStrip> : null}
-      <Form accessibleMode="Edit" labelSpan="S12 M4 L4 XL4" layout="S1 M1 L1 XL1">
-        <FormItem labelContent={<Label for="brand-name">{i18n.getText("ADMIN_DISPLAY_NAME")}</Label>}>
+      {/* One column, not FORM_LAYOUT: the accent row carries a picker, a field and a button, and a
+          third of a column cannot hold them. */}
+      <Form accessibleMode="Edit" layout="S1 M1 L1 XL1">
+        <FormGroup>
+        <FormItem labelContent={<Label showColon for="brand-name">{i18n.getText("ADMIN_DISPLAY_NAME")}</Label>}>
           <Input id="brand-name" value={draft.displayName} placeholder={current.organization.name} maxlength={100}
             onInput={(e) => setDraft((d) => ({ ...d, displayName: e.target.value }))} />
         </FormItem>
-        <FormItem labelContent={<Label for="brand-accent">{i18n.getText("ADMIN_ACCENT")}</Label>}>
+        <FormItem labelContent={<Label showColon for="brand-accent">{i18n.getText("ADMIN_ACCENT")}</Label>}>
           <FlexBox style={{ gap: "0.5rem", alignItems: "center", width: "100%" }}>
             {/* The platform's own picker; the text field takes a pasted hex code. */}
             <input type="color" aria-label={i18n.getText("ADMIN_PICK_ACCENT")} value={HEX.test(draft.accent) ? draft.accent : HORIZON_BLUE}
@@ -102,7 +105,7 @@ function BrandingForm({ current }: { current: General }) {
             <Button design="Transparent" disabled={!draft.accent} onClick={() => setDraft((d) => ({ ...d, accent: "" }))}>{i18n.getText("ADMIN_DEFAULT")}</Button>
           </FlexBox>
         </FormItem>
-        <FormItem labelContent={<Label>{i18n.getText("ADMIN_LOGO")}</Label>}>
+        <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_LOGO")}</Label>}>
           <FlexBox style={{ gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
             {logo ? <img src={logo} alt={i18n.getText("ADMIN_LOGO")} style={{ blockSize: "2.5rem", maxInlineSize: "10rem", objectFit: "contain" }} />
               : <Text style={{ color: "var(--sapContent_LabelColor)" }}>{i18n.getText("ADMIN_NONE")}</Text>}
@@ -117,6 +120,7 @@ function BrandingForm({ current }: { current: General }) {
             ) : null}
           </FlexBox>
         </FormItem>
+        </FormGroup>
       </Form>
       {uploadError ? <MessageStrip design="Negative" hideCloseButton>{uploadError}</MessageStrip> : null}
       <Text style={{ color: "var(--sapContent_LabelColor)" }}>

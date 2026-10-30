@@ -1,156 +1,153 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-// Plain `Search`, not `ShellBarSearch`: the latter collapses itself back to a magnifier button on
-// icon-press / empty Enter, and that toggle isn't switchable from the outside. `Search` never sets
-// `collapsed`, so the field stays open. Same base component otherwise — scopes, items, popover.
-import { Search, SearchItem, SearchItemGroup, SearchScope } from "@ui5/webcomponents-react";
+import { useEffect, useState } from "react";
+import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
+import { SearchItem, SearchItemGroup, SearchMessageArea, SearchScope, ShellBarSearch } from "@ui5/webcomponents-react";
+import { useEntityNav } from "@confire/ui/EntityLink.tsx";
+import { entityPath } from "@confire/ui/navigation.ts";
+import { formatValue } from "@confire/ui/format.ts";
+import type { EntityFeature, ListQuery, Row } from "@confire/ui/types.ts";
 import { orpc } from "../orpc.ts";
 import { useI18n } from "../i18n.ts";
+import { B1_FEATURES } from "../features/b1/index.ts";
+import { b1Label } from "./AppShell.tsx";
 
-// ShellBar's `content` slot only knows left/right (it splits on a single ShellBarSpacer), so a
-// truly centred field has to leave the flow. The bar spans the full viewport width and sits at
-// the top, so viewport centre == bar centre. The height var is inherited from the ShellBar host
-// through the slot, which keeps the vertical centring theme-correct (2.75rem / 3.25rem).
-if (typeof document !== "undefined" && !document.getElementById("confire-shell-search-style")) {
-  const el = document.createElement("style");
-  el.id = "confire-shell-search-style";
-  el.textContent = `
-.confire-shell-search{position:fixed;top:0;left:50%;transform:translateX(-50%);
-  height:var(--_ui5_shellbar_root_height,3.25rem);display:flex;align-items:center;
-  width:min(34rem,42vw)}
-.confire-shell-search>*{width:100%}
-ui5-search.confire-shellbar-search{background-image:none}
-/* ponytail: below this the centred field would sit on top of the branding — drop it rather than
-   overlap. Move to the ShellBar's own collapsible search slot if mobile search is ever needed. */
-@media (max-width:900px){.confire-shell-search{display:none}}`;
-  document.head.appendChild(el);
+/** One thing the search opens: `to` is a path inside the workspace, as the side nav's `data-to`. */
+export type SearchHit = { text: string; description?: string; icon: string; to: string };
+type Group = { key: string; header: string; hits: SearchHit[] };
+
+const ALL = "all";
+// Unscoped, one group cannot bury the others; scoped, there is one list, so let it breathe.
+const CAP = { all: 5, scoped: 20 };
+const ISO_DAY = /^\d{4}-\d\d-\d\d/;
+const cell = (v: unknown) => (typeof v === "string" && ISO_DAY.test(v) ? formatValue(v, "date") : String(v));
+const join = (...v: unknown[]) => v.filter((x) => x != null && x !== "").map(cell).join(" · ") || undefined;
+
+/** A B1 list's search, as the list itself searches: its visible string columns (the server keeps the
+ *  strings of `select`), in its Standard view's order. A number is a document's DocNum instead — an
+ *  integer, which B1's contains() cannot match. */
+function b1Query(f: EntityFeature, term: string): ListQuery {
+  const h = f.detail.header;
+  const select = [...new Set([f.keyField, h.titleField, ...(h.subtitleFields ?? []),
+    ...f.list.columns.filter((c) => !c.hidden).map((c) => c.key)])];
+  const orderby = (f.list.systemViews?.find((v) => v.isDefault)?.state?.sortBy ?? [])
+    .map((s) => ({ field: s.field, dir: s.direction }));
+  return /^\d+$/.test(term) && h.titleField === "DocNum"
+    ? { select, filter: [{ field: "DocNum", op: "eq", value: Number(term) }], orderby }
+    : { select, filter: [], orderby, search: term };
 }
 
-/** One thing the search can jump to or do. `group` is a section id
- *  (`Menus`, `Configurations`, `Models`, `Settings`); the popover header is translated. */
-export type SearchEntry = {
-  group: string;
-  text: string;
-  description?: string;
-  icon?: string;
-  run: () => void;
-};
-
-const GROUP_KEY: Record<string, string> = {
-  Menus: "SHELL_SEARCH_MENUS",
-  Configurations: "NAV_CONFIGS",
-  Models: "SHELL_SEARCH_MODELS",
-  Settings: "NAV_SETTINGS",
-};
-
-// Scope values double as the group headers, so filtering is `entry.group === scope` — no mapping.
-const ALL = "all";
-// Unscoped, one group can't bury the others; scoped, there's only one list so let it breathe.
-const CAP = { all: 6, scoped: 20 };
-
-// Global shellbar search. Menus + settings come from the caller (it already holds the nav data);
-// objects are fetched on the first keystroke and cached by TanStack for the rest of the session.
-// ponytail: client-side substring match over the two list endpoints the app already caches. Add a
-// server-side search procedure when a tenant outgrows a single list response.
-export function GlobalSearch({ entries, isAdmin }: { entries: SearchEntry[]; isAdmin: boolean }) {
+// The shellbar's search over everything a staff member can open: the pages, SAP's declared lists,
+// configurations, requests, models and master data (admins), and the user's own chats. Every source is
+// its list's own procedure with `query.search`, so the server's permission is the list's; each group
+// fills in as its source answers, and SAP (the slowest, through the agent) comes last so nothing jumps.
+// ponytail: one call per source per settled term (B1's page is its fixed 100 rows, cut here); a server
+// `search` procedure once that fan-out shows up in the agent's load.
+export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: boolean }) {
   const i18n = useI18n();
-  const groupText = (id: string) => {
-    const key = GROUP_KEY[id];
-    return key ? i18n.getText(key) : id;
-  };
-  const navigate = useNavigate({ from: "/$slug" });
+  const t = (key: string) => i18n.getText(key);
+  const go = useEntityNav();
   const [q, setQ] = useState("");
+  const [term, setTerm] = useState("");
+  useEffect(() => { const id = setTimeout(() => setTerm(q.trim()), 250); return () => clearTimeout(id); }, [q]);
   const [open, setOpen] = useState(false);
   const [scope, setScope] = useState(ALL);
+
+  const cap = scope === ALL ? CAP.all : CAP.scoped;
+  const on = (s: string, allowed = true) => !!term && allowed && (scope === ALL || scope === s);
+  // keepPreviousData: the last term's hits stay up while the next one loads, instead of a blink.
+  const opts = { placeholderData: keepPreviousData, retry: false } as const;
+  const page = { query: { select: [], filter: [], orderby: [], search: term }, top: cap };
+  const configs = useQuery({ ...orpc.configs.rows.queryOptions({ input: page }), enabled: on("configs"), ...opts });
+  const requests = useQuery({ ...orpc.requests.rows.queryOptions({ input: page }), enabled: on("requests"), ...opts });
+  const chats = useQuery({ ...orpc.assistant.threads.queryOptions({ input: { q: term } }), enabled: on("chats"), ...opts });
+  const models = useQuery({ ...orpc.models.rows.queryOptions({ input: page }), enabled: on("models", isAdmin), ...opts });
+  const masterdata = useQuery({ ...orpc.masterdata.rows.queryOptions({ input: page }), enabled: on("masterdata", isAdmin), ...opts });
+  const features = Object.values(B1_FEATURES);
+  const b1 = useQueries({
+    queries: features.map((f) => ({
+      ...orpc.entities.rows.queryOptions({ input: { entity: f.entity, query: b1Query(f, term) } }),
+      enabled: on("b1"), ...opts,
+    })),
+  });
+
+  // A disabled source still holds its placeholder, so `on` gates what is drawn as well as what is read.
+  const hits = <T,>(s: string, rows: T[] | undefined, hit: (r: T) => SearchHit, allowed = true) =>
+    on(s, allowed) ? (rows ?? []).slice(0, cap).map(hit) : [];
   const needle = q.trim().toLowerCase();
-
-  const configs = useQuery({ ...orpc.configs.list.queryOptions(), enabled: !!needle });
-  const models = useQuery({ ...orpc.models.list.queryOptions(), enabled: !!needle && isAdmin });
-
-  const hits = useMemo(() => {
-    if (!needle) return [];
-    const objects: SearchEntry[] = [
-      ...(configs.data ?? []).map((c) => ({
-        group: "Configurations",
-        text: c.name,
-        description: [c.customer, c.modelName, c.status].filter(Boolean).join(" · "),
-        icon: "sales-quote",
-        run: () => navigate({ to: "/$slug/configs/$id", params: { id: c.id } }),
+  const groups: Group[] = [
+    {
+      key: "pages", header: t("SHELL_SEARCH_PAGES"),
+      hits: needle && (scope === ALL || scope === "pages")
+        ? pages.filter((p) => `${p.text} ${p.description ?? ""}`.toLowerCase().includes(needle)).slice(0, cap) : [],
+    },
+    { key: "configs", header: t("NAV_CONFIGS"), hits: hits("configs", configs.data?.rows, (r) =>
+      ({ text: r.name, description: join(r.customerName, r.modelName), icon: "sales-quote", to: `/configs/${r.id}` })) },
+    { key: "requests", header: t("NAV_REQUESTS"), hits: hits("requests", requests.data?.rows, (r) =>
+      ({ text: r.name, description: join(r.cardName, r.modelName), icon: "inbox", to: `/configs/${r.id}` })) },
+    { key: "chats", header: t("SHELL_SEARCH_CHATS"), hits: hits("chats", chats.data, (r) =>
+      ({ text: r.title, description: join(r.projectName), icon: "ai", to: `/assistant/${r.id}` })) },
+    { key: "models", header: t("NAV_MODELS"), hits: hits("models", models.data?.rows, (r) =>
+      ({ text: r.name, icon: "tree", to: `/models/${r.id}` }), isAdmin) },
+    { key: "masterdata", header: t("NAV_MASTERDATA"), hits: hits("masterdata", masterdata.data?.rows, (r) =>
+      ({ text: r.name, description: join(r.source), icon: "table-view", to: `/masterdata/${r.id}` }), isAdmin) },
+    ...features.map((f, i) => ({
+      key: `b1:${f.entity}`, header: b1Label(f.entity, t),
+      hits: hits("b1", b1[i]?.data?.rows, (r: Row) => ({
+        text: String(r[f.detail.header.titleField] ?? r[f.keyField]),
+        description: join(...(f.detail.header.subtitleFields ?? []).map((k) => r[k])),
+        icon: f.icon,
+        to: entityPath(`/b1/${f.entity}`, r[f.keyField]),
       })),
-      ...(models.data ?? []).map((m) => ({
-        group: "Models",
-        text: m.name,
-        description: i18n.getText("SHELL_SEARCH_CONFIG_MODEL"),
-        icon: "tree",
-        run: () => navigate({ to: "/$slug/models/$id", params: { id: m.id } }),
-      })),
-    ];
-    return [...entries, ...objects].filter(
-      (e) =>
-        (scope === ALL || e.group === scope) &&
-        (e.text.toLowerCase().includes(needle) || (e.description ?? "").toLowerCase().includes(needle)),
-    );
-  }, [needle, scope, entries, configs.data, models.data, navigate, i18n]);
+    })),
+  ].filter((g) => g.hits.length);
 
-  // Keep first-seen group order so menus stay above objects and settings.
-  const groups = useMemo(() => {
-    const cap = scope === ALL ? CAP.all : CAP.scoped;
-    const by = new Map<string, SearchEntry[]>();
-    for (const h of hits) {
-      const g = by.get(h.group) ?? [];
-      if (g.length < cap) g.push(h);
-      by.set(h.group, g);
-    }
-    return [...by];
-  }, [hits, scope]);
-
-  const pick = (e: SearchEntry) => {
-    setQ("");
-    setOpen(false);
-    e.run();
-  };
+  const busy = q.trim() !== term || [configs, requests, chats, models, masterdata, ...b1].some((r) => r.isFetching);
 
   return (
-    <div className="confire-shell-search" slot="content" data-hide-order="99">
-      <Search
-        className="confire-shellbar-search"
-        placeholder={i18n.getText("SHELL_SEARCH_PLACEHOLDER")}
-        value={q}
-        showClearIcon
-        noTypeahead
-        open={open && groups.length > 0}
-        loading={configs.isFetching || models.isFetching}
-        scopeValue={scope}
-        scopes={
-          <>
-            <SearchScope value={ALL} text={i18n.getText("SHELL_SEARCH_ALL")} />
-            <SearchScope value="Menus" text={i18n.getText("SHELL_SEARCH_MENUS")} />
-            <SearchScope value="Configurations" text={i18n.getText("NAV_CONFIGS")} />
-            {isAdmin ? <SearchScope value="Models" text={i18n.getText("SHELL_SEARCH_MODELS")} /> : null}
-            <SearchScope value="Settings" text={i18n.getText("NAV_SETTINGS")} />
-          </>
-        }
-        onScopeChange={(e) => setScope(e.detail.scope?.value ?? ALL)}
-        onInput={(e) => { setQ(e.target.value ?? ""); setOpen(true); }}
-        onOpen={() => setOpen(true)}
-        onClose={() => setOpen(false)}
-        onSearch={() => { if (hits[0]) pick(hits[0]); }}
-      >
-        {groups.map(([name, items]) => (
-          <SearchItemGroup key={name} headerText={groupText(name)}>
-            {items.map((it, i) => (
-              <SearchItem
-                key={`${name}:${i}`}
-                text={it.text}
-                description={it.description}
-                icon={it.icon}
-                onClick={() => pick(it)}
-              />
-            ))}
-          </SearchItemGroup>
-        ))}
-      </Search>
-    </div>
+    <ShellBarSearch
+      slot="searchField"
+      className="confire-shellbar-search"
+      value={q}
+      showClearIcon
+      noTypeahead
+      open={open && !!q.trim()}
+      fieldLoading={busy}
+      scopeValue={scope}
+      scopes={
+        <>
+          <SearchScope value={ALL} text={t("SHELL_SEARCH_ALL")} />
+          <SearchScope value="pages" text={t("SHELL_SEARCH_PAGES")} />
+          <SearchScope value="configs" text={t("NAV_CONFIGS")} />
+          <SearchScope value="requests" text={t("NAV_REQUESTS")} />
+          <SearchScope value="chats" text={t("SHELL_SEARCH_CHATS")} />
+          {isAdmin ? <SearchScope value="models" text={t("NAV_MODELS")} /> : null}
+          {isAdmin ? <SearchScope value="masterdata" text={t("NAV_MASTERDATA")} /> : null}
+          <SearchScope value="b1" text={t("NAV_SAP")} />
+        </>
+      }
+      messageArea={!busy && term && !groups.length ? <SearchMessageArea text={t("SHELL_SEARCH_NONE")} /> : undefined}
+      onScopeChange={(e) => setScope((e.detail.scope as HTMLElement & { value?: string } | undefined)?.value ?? ALL)}
+      onInput={(e) => { setQ(e.target.value ?? ""); setOpen(true); }}
+      onOpen={() => setOpen(true)}
+      onClose={() => setOpen(false)}
+      // Enter and an item's click are both `search`, the item (picked or arrowed to) in its detail.
+      // Empty Enter goes on to UI5, which collapses the field, as a shellbar search does.
+      onSearch={(e) => {
+        const to = (e.detail as { item?: HTMLElement } | undefined)?.item?.dataset.to ?? groups[0]?.hits[0]?.to;
+        if (!q.trim() || !to) return;
+        e.preventDefault();
+        setQ("");
+        setTerm("");
+        setOpen(false);
+        go(to);
+      }}
+    >
+      {groups.map((g) => (
+        <SearchItemGroup key={g.key} headerText={g.header}>
+          {g.hits.map((h) => (
+            <SearchItem key={h.to} data-to={h.to} text={h.text} description={h.description} icon={h.icon} />
+          ))}
+        </SearchItemGroup>
+      ))}
+    </ShellBarSearch>
   );
 }

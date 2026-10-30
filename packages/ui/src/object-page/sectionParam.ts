@@ -2,9 +2,9 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import type { ObjectPagePropTypes } from "@ui5/webcomponents-react";
 
 /**
- * URL-backed anchor tab for `mode="IconTabBar"` ObjectPages: spread `props` onto the ObjectPage and
- * the open section survives a reload, a shared link and Back out of a drilldown. `go` is the same
- * switch from outside the anchor bar — what a message in the title's popover navigates with.
+ * URL-backed tab for a `mode: "tabs"` ObjectPage (the shared page spreads `props` itself): the open
+ * section survives a reload, a shared link and Back out of a drilldown. `go` is the same switch
+ * from outside the tab bar — what a message in the title's popover navigates with.
  *
  * Only for IconTabBar mode — in Default mode every section is on one scrolling page, so there is
  * nothing to restore that the browser's own scroll restoration doesn't already do.
@@ -24,7 +24,7 @@ export function useSectionParam(): {
   // without the guard that is a navigate per render.
   const go = (next: string) => {
     if (next && next !== section)
-      void navigate({ to: ".", search: (prev) => ({ ...prev, section: next }), replace: true });
+      void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, section: next }), replace: true });
   };
   return {
     props: {

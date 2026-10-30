@@ -19,9 +19,7 @@ function Configs() {
   const navigate = useNavigate({ from: "/$slug" });
   const qc = useQueryClient();
   const models = useQuery(orpc.configs.models.queryOptions());
-  // configs.list still exists for GlobalSearch; this page pages configs.rows, so both keys go.
   const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: orpc.configs.list.queryOptions().queryKey });
     void qc.invalidateQueries({ queryKey: orpc.configs.rows.key() });
   };
 

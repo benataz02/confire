@@ -6,7 +6,7 @@ import getLocale from "@ui5/webcomponents-base/dist/locale/getLocale.js";
 import { useI18nBundle } from "@ui5/webcomponents-react-base/hooks";
 import type { AppRouter } from "@confire/server/router";
 import { useUiSource } from "./source.tsx";
-import type { FilterField, FormField, ListColumn, Section } from "./types.ts";
+import type { FilterField, FormField, Group, ListColumn, Section, SectionTable } from "./types.ts";
 
 // Beas' FieldConstraintsService + ii/Jo/Zo + rg (LIST-REPORT-OBJECT-PAGE.md §7.1). The server
 // answers entities.metadata from the cached $metadata plus the write profile; this module merges
@@ -166,30 +166,42 @@ export function resolveFilters(fields: FilterField[], c: Constraints | undefined
 /** rg(): fields, groups, subsections and fieldGroup children resolved in place; a table's columns
  *  against its collection's own `Fields`. */
 export function resolveSections(sections: Section[], c: Constraints | undefined): Section[] {
-  if (!c) return sections;
-  const fields = (fs: FormField[] | undefined) => fs?.map((f) => resolveField(f, c));
-  return sections.map((s) => ({
-    ...s,
-    ...(s.fields ? { fields: fields(s.fields) } : {}),
-    ...(s.groups ? { groups: s.groups.map((g) => ({ ...g, fields: fields(g.fields)! })) } : {}),
-    ...(s.subsections
-      ? { subsections: s.subsections.map((sub) => ({ ...sub, groups: sub.groups.map((g) => ({ ...g, fields: fields(g.fields)! })) })) }
-      : {}),
-    ...(s.table ? { table: { ...s.table, columns: resolveColumns(s.table.columns, findConstraint(s.table.key, c)?.[1].Fields) } } : {}),
-  }));
+  const field = c ? (f: FormField) => resolveField(f, c) : ownField;
+  const fields = (fs: FormField[] | undefined) => fs?.map(field);
+  const groups = (gs: Group[] | undefined) => gs?.map((g) => ({ ...g, fields: fields(g.fields)! }));
+  const table = (t: SectionTable | undefined) => t && {
+    ...t,
+    columns: c ? resolveColumns(t.columns, findConstraint(t.key, c)?.[1].Fields) : ownColumns(t.columns),
+  };
+  const block = <B extends { fields?: FormField[]; groups?: Group[]; table?: SectionTable }>(b: B): B => ({
+    ...b,
+    ...(b.fields ? { fields: fields(b.fields) } : {}),
+    ...(b.groups ? { groups: groups(b.groups) } : {}),
+    ...(b.table ? { table: table(b.table) } : {}),
+  });
+  return sections.map((s) => ({ ...block(s), ...(s.subsections ? { subsections: s.subsections.map(block) } : {}) }));
 }
+
+/** A record with no entity behind it: the declaration is the whole truth, so every declared field is
+ *  the record's to write (a `readonly` one aside). */
+const ownField = (f: FormField): FormField =>
+  ({ ...f, metaEditable: true, ...(f.fields ? { fields: f.fields.map(ownField) } : {}) });
+
+/** Grid columns with no entity behind them: every one is the grid's to edit (a `readonly` one aside). */
+export const ownColumns = (columns: ListColumn[]): ListColumn[] => columns.map((c) => ({ ...c, metaEditable: true }));
 
 /** Every leaf field of a section tree, in render order. Spacers and fieldGroup shells are not
  *  fields; their children are. */
 export function sectionFields(s: Section): FormField[] {
   const flat = (fs: FormField[] | undefined): FormField[] =>
     (fs ?? []).flatMap((f) => (f.controlType === "fieldGroup" ? flat(f.fields) : [f]));
-  return [
-    ...flat(s.fields),
-    ...(s.groups ?? []).flatMap((g) => flat(g.fields)),
-    ...(s.subsections ?? []).flatMap((sub) => sub.groups.flatMap((g) => flat(g.fields))),
-  ];
+  const block = (b: { fields?: FormField[]; groups?: Group[] }) => [...flat(b.fields), ...(b.groups ?? []).flatMap((g) => flat(g.fields))];
+  return [...block(s), ...(s.subsections ?? []).flatMap(block)];
 }
+
+/** Every collection of a section tree: its own grid, then its subsections'. */
+export const sectionTables = (s: Section): SectionTable[] =>
+  [s.table, ...(s.subsections ?? []).map((sub) => sub.table)].filter((t): t is SectionTable => !!t);
 
 // --- UDFs (§7.3) --------------------------------------------------------------------------------
 const udfEntries = (c: Constraints | undefined) =>

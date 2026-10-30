@@ -1,8 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar, BusyIndicator, Button, Form, FormGroup, FormItem, Input, Label, MessageStrip, ObjectPage, ObjectPageSection,
   ObjectPageTitle, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Text, Title, Toolbar, ToolbarButton,
+  ToolbarItem,
 } from "@ui5/webcomponents-react";
 import { BatchField, configuratorSections, ConsistencyStatus } from "@confire/ui/configurator/ConfiguratorForm.tsx";
 import { GENERAL_SECTION } from "@confire/ui/configurator/formHelpers.ts";
@@ -13,6 +15,9 @@ import { confirm, promptNote } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { formatLocale } from "@confire/ui/format.ts";
 import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
+import { FORM_LAYOUT } from "@confire/ui/formLayout.ts";
+import { PageMessages, useRefusals, type PageMessage } from "@confire/ui/PageMessages.tsx";
+import { PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import { money } from "@confire/ui/money.ts";
 import { uploadFile } from "@confire/ui/files.ts";
 import { client, meQuery, orpc, type Me } from "../../../orpc.ts";
@@ -89,6 +94,10 @@ function ProjectPage({ id }: { id: string }) {
 
   const p = q.data;
   const status = p?.project.status;
+  // What opens the messages by itself: an edit the server refused, a calculation that failed.
+  const refused = useRefusals(queue.error?.refused ? queue.error : null, p?.calcError ? `calc:${p.calcError}` : null);
+  // The page's root: what a message's jump scrolls.
+  const [page, setPage] = useState<HTMLElement | null>(null);
   const editable = buyer && (status === "draft" || status === "returned");
   // What the user entered and the server has not answered yet, over the last answer: an echo of
   // input. Visibility, defaults, options and prices catch up when the answer lands.
@@ -98,7 +107,7 @@ function ProjectPage({ id }: { id: string }) {
   const edit = (patch: InputPatch) => queue.commit(patch);
 
   if (q.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
-  if (q.error) return <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem" }}>{q.error.message}</MessageStrip>;
+  if (q.error) return <PageError error={q.error} />;
   if (!p || !status) return null;
 
   const form = overlayForm(p.form, pending);
@@ -108,6 +117,33 @@ function ProjectPage({ id }: { id: string }) {
   const ready = gaps.length === 0 && !p.form.conflicts.length && !p.calcError && p.project.calculatedAt !== null;
   const error = queue.error?.error ?? submit.error ?? resubmit.error ?? withdraw.error ?? respond.error ?? rename.error ?? remove.error;
   const answerable = buyer && status === "quoted" && p.project.quoteResponse === null;
+
+  // Everything the project has to say about itself, as one list behind the title's messages button:
+  // what the calculation waits on, the rules the inputs break, and whatever a call ran into.
+  const general = { group: i18n.getText("PORTAL_GENERAL"), section: GENERAL_SECTION };
+  const messages: PageMessage[] = [
+    ...(error ? [{
+      id: "error", type: "Negative" as const, text: error.message, ...general,
+      detail: i18n.getText(!queue.error ? "PORTAL_CHANGE_FAILED" : queue.error.refused ? "PORTAL_CHANGE_REFUSED" : "PORTAL_CHANGE_UNSENT"),
+    }] : []),
+    ...(p.calcError ? [{ id: "calc", type: "Negative" as const, text: p.calcError, detail: i18n.getText("PORTAL_CALC_FAILED"), ...general }] : []),
+    // A conflict's jump goes to the first of its parameters actually drawn (`data-param`).
+    ...form.conflicts.map((c, i) => {
+      const key = c.params.find((k) => form.fields[k]?.visible);
+      return { id: `conflict:${i}`, type: "Negative" as const, text: c.message, ...general, anchor: key ? `[data-param="${key}"]` : undefined };
+    }),
+    // What the calculation and the submit wait on. Critical: nothing is wrong yet.
+    ...p.missing.map((m, i) => ({
+      id: `missing:${i}`, type: "Critical" as const, text: m.message, ...general, anchor: m.key ? `[data-param="${m.key}"]` : undefined,
+    })),
+  ];
+  // Focus first: focus entering the content sets the page's scroll padding (the sticky title and
+  // anchor bar), so the section lands below them rather than under.
+  const goSection = (section: string) => {
+    const el = page?.querySelector<HTMLElement>(`[id="ObjectPageSection-${section}"]`);
+    el?.focus({ preventScroll: true });
+    el?.scrollIntoView({ block: "start" });
+  };
 
   const reviewer = p.project.assigneeName ?? supplier;
   const STATUS_NOTE: Record<typeof status, string | null> = {
@@ -167,19 +203,28 @@ function ProjectPage({ id }: { id: string }) {
 
   return (
     // One scrolling page, like the staff side's: General, the model's sections, then prices and timeline.
-    <ObjectPage hidePinButton
+    <ObjectPage hidePinButton ref={setPage}
       titleArea={
         <ObjectPageTitle header={<Title>{p.project.name}</Title>} subHeader={<Text>{p.model.name}</Text>}
           breadcrumbs={<PageBreadcrumbs items={[{ text: i18n.getText("PORTAL_PROJECTS"), to: "/projects" }]} current={p.project.name} />}
-          actionsBar={buyer && status === "draft" ? (
+          actionsBar={
             <Toolbar design="Transparent">
-              <ToolbarButton icon="delete" design="Transparent" text={i18n.getText("PORTAL_DELETE")} disabled={acting}
-                onClick={async () => {
-                  if (await confirm({ title: i18n.getText("PORTAL_DELETE_PROJECT"), message: i18n.getText("PORTAL_DELETE_PROJECT_MESSAGE", p.project.name), actionText: i18n.getText("PORTAL_DELETE"), destructive: true }))
-                    remove.mutate({ id });
-                }} />
+              <ToolbarItem overflowPriority="NeverOverflow">
+                <PageMessages messages={messages} openOn={refused} onSection={goSection} />
+              </ToolbarItem>
+              {/* An edit that never reached the server is kept; this sends it again. */}
+              {queue.error && !queue.error.refused ? (
+                <ToolbarButton icon="refresh" design="Transparent" text={i18n.getText("PORTAL_RETRY")} onClick={queue.retry} />
+              ) : null}
+              {buyer && status === "draft" ? (
+                <ToolbarButton icon="delete" design="Transparent" text={i18n.getText("PORTAL_DELETE")} disabled={acting}
+                  onClick={async () => {
+                    if (await confirm({ title: i18n.getText("PORTAL_DELETE_PROJECT"), message: i18n.getText("PORTAL_DELETE_PROJECT_MESSAGE", p.project.name), actionText: i18n.getText("PORTAL_DELETE"), destructive: true }))
+                      remove.mutate({ id });
+                  }} />
+              ) : null}
             </Toolbar>
-          ) : undefined}>
+          }>
           <Tag design={st.state === "None" ? "Neutral" : st.state} style={{ alignSelf: "center" }}>{i18n.getText(PROJECT_STATUS_KEY[status])}</Tag>
           {p.project.quoteResponse ? (
             <Tag design={p.project.quoteResponse === "accepted" ? "Positive" : "Critical"} style={{ alignSelf: "center" }}>
@@ -193,21 +238,11 @@ function ProjectPage({ id }: { id: string }) {
       {[
         <ObjectPageSection key={GENERAL_SECTION} id={GENERAL_SECTION} titleText={i18n.getText("PORTAL_GENERAL")}>
           <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-            {error ? (
-              <MessageStrip design="Negative" hideCloseButton>
-                {error.message}
-                {/* An edit that never reached the server is kept; this sends it again. */}
-                {queue.error && !queue.error.refused ? (
-                  <Button design="Transparent" icon="refresh" onClick={queue.retry}>{i18n.getText("PORTAL_RETRY")}</Button>
-                ) : null}
-              </MessageStrip>
-            ) : null}
-            {p.calcError ? <MessageStrip design="Negative" hideCloseButton>{p.calcError}</MessageStrip> : null}
             {STATUS_NOTE[status] ? <MessageStrip design="Information" hideCloseButton>{STATUS_NOTE[status]}</MessageStrip> : null}
-            <Form accessibleName={i18n.getText("PORTAL_GENERAL")} labelSpan="S12 M12 L12 XL12" layout="S1 M2 L3 XL3"
+            <Form accessibleName={i18n.getText("PORTAL_GENERAL")} layout={FORM_LAYOUT}
               accessibleMode={editable ? "Edit" : "Display"} itemSpacing={editable ? "Normal" : "Large"}>
               <FormGroup>
-                <FormItem labelContent={<Label for={editable ? "project-name" : undefined} required>{i18n.getText("PORTAL_NAME")}</Label>}>
+                <FormItem labelContent={<Label showColon for={editable ? "project-name" : undefined} required>{i18n.getText("PORTAL_NAME")}</Label>}>
                   {editable ? (
                     <Input id="project-name" value={p.project.name} style={{ width: "100%" }} maxlength={200} disabled={rename.isPending}
                       onChange={(e) => {
@@ -216,7 +251,7 @@ function ProjectPage({ id }: { id: string }) {
                       }} />
                   ) : <Text>{p.project.name}</Text>}
                 </FormItem>
-                <FormItem labelContent={<Label>{i18n.getText("PORTAL_PRODUCT")}</Label>}>
+                <FormItem labelContent={<Label showColon>{i18n.getText("PORTAL_PRODUCT")}</Label>}>
                   <Text>{p.model.name}</Text>
                 </FormItem>
                 <BatchField batches={batches} onChange={editable ? (next) => edit({ batches: next }) : undefined} />

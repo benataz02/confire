@@ -80,7 +80,13 @@ export function applyObjectView(sections: Section[], state: ObjectViewState, mus
       ...s,
       ...(s.fields ? { fields: fields(s.fields) } : {}),
       ...(s.groups ? { groups: s.groups.map((g) => ({ ...g, fields: fields(g.fields)! })) } : {}),
-      ...(s.subsections ? { subsections: s.subsections.map((sub) => ({ ...sub, groups: sub.groups.map((g) => ({ ...g, fields: fields(g.fields)! })) })) } : {}),
+      ...(s.subsections ? {
+        subsections: s.subsections.map((sub) => ({
+          ...sub,
+          ...(sub.fields ? { fields: fields(sub.fields) } : {}),
+          ...(sub.groups ? { groups: sub.groups.map((g) => ({ ...g, fields: fields(g.fields)! })) } : {}),
+        })),
+      } : {}),
       ...(s.table ? { table: { ...s.table, columns: columns(s.table.columns) } } : {}),
     }];
   });

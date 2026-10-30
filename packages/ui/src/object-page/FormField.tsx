@@ -5,10 +5,11 @@ import { statusState } from "../documentStatus.ts";
 import { EntityLink, useCanOpen } from "../EntityLink.tsx";
 import { formatValue } from "../format.ts";
 import { showLink } from "../navigation.ts";
-import type { FormField as Field, Row } from "../types.ts";
+import { evalDyn, isEmptyValue } from "../validation.ts";
+import type { Control, FormField as Field, Row } from "../types.ts";
 
-// beas-form-field (LIST-REPORT-OBJECT-PAGE.md §4.6): one control per field, chosen by `cfl`,
-// `controlType` and the metadata Type. The same component draws object page fields and the
+// beas-form-field (LIST-REPORT-OBJECT-PAGE.md §4.6): one control per field, chosen by a control
+// kind the page was given (`controls[controlType]`), then `cfl`, `controlType` and the metadata Type. The same component draws object page fields and the
 // editable lines grid's cells (`inline`). Display mode is text — the Fiori form guideline, and
 // what `Form accessibleMode="Display"` announces.
 
@@ -16,7 +17,7 @@ import type { FormField as Field, Row } from "../types.ts";
 const LONG_TEXT = 120;
 
 export function FormField({
-  field, value, formData, editable, disabled, error, inline, onChange, onRowSelect, onExistenceError, onCheckStarted,
+  field, value, formData, editable, disabled, error, inline, controls, table, rowIndex, onChange, onPatch, onRowSelect, onExistenceError, onCheckStarted,
 }: {
   field: Field;
   value: unknown;
@@ -26,7 +27,14 @@ export function FormField({
   error?: string;
   /** a grid cell: no label, full width */
   inline?: boolean;
+  /** the page's control kinds */
+  controls?: Record<string, Control>;
+  /** a grid cell's table and line */
+  table?: string;
+  rowIndex?: number;
   onChange: (v: unknown) => void;
+  /** several values at once, for a control kind */
+  onPatch?: (values: Row) => void;
   onRowSelect?: (row: Row) => void;
   onExistenceError?: (message: string | null) => void;
   onCheckStarted?: (p: Promise<unknown>) => void;
@@ -36,12 +44,16 @@ export function FormField({
   const state = error ? ("Negative" as const) : ("None" as const);
   const message = error ? <div>{error}</div> : undefined;
   const label = field.label ?? field.key;
+  const placeholder = field.placeholder;
+
+  const kind = field.controlType ? controls?.[field.controlType] : undefined;
+  if (kind) return kind({ field, value, formData, editable, disabled, error, onChange, patch: onPatch ?? (() => {}), table, rowIndex });
 
   if (field.cfl)
     return (
       <CflField config={field.cfl} value={value} onValueChange={onChange} onRowSelect={onRowSelect}
         onExistenceError={onExistenceError} onCheckStarted={onCheckStarted}
-        editable={editable} disabled={disabled} error={error ?? null} maxLength={field.validators?.maxLength}
+        editable={editable} disabled={disabled} placeholder={placeholder} error={error ?? null} maxLength={field.validators?.maxLength}
         link={field.link} formData={formData} accessibleName={label} />
     );
 
@@ -78,7 +90,10 @@ export function FormField({
           const o = field.options?.find((x) => String(x.value) === v);
           onChange(o ? o.value : null);
         }}>
-        <Option data-v="" selected={value === null || value === undefined || value === ""}>—</Option>
+        {/* A required field that holds a value cannot go back to none. */}
+        {evalDyn(field.required, formData, true, false) && !isEmptyValue(value) ? null : (
+          <Option data-v="" selected={isEmptyValue(value)}>—</Option>
+        )}
         {(field.options ?? []).map((o) => (
           <Option key={String(o.value)} data-v={String(o.value)} selected={String(value) === String(o.value)}>{o.label}</Option>
         ))}
@@ -97,7 +112,7 @@ export function FormField({
 
   if (field.type === "number")
     return (
-      <Input style={width} type="Number" disabled={disabled} accessibleName={label} valueState={state} valueStateMessage={message}
+      <Input style={width} type="Number" disabled={disabled} accessibleName={label} placeholder={placeholder} valueState={state} valueStateMessage={message}
         value={value === null || value === undefined ? "" : String(value)}
         onInput={(e) => {
           const v = e.target.value ?? "";
@@ -109,13 +124,13 @@ export function FormField({
   if (!inline && (field.controlType === "textarea" || (max !== undefined && max > LONG_TEXT)))
     return (
       <TextArea growing growingMaxRows={5} rows={2} style={width} disabled={disabled} accessibleName={label}
-        maxlength={max} valueState={state} valueStateMessage={message}
+        maxlength={max} placeholder={placeholder} valueState={state} valueStateMessage={message}
         value={value === null || value === undefined ? "" : String(value)}
         onInput={(e) => onChange(e.target.value === "" ? null : e.target.value)} />
     );
 
   return (
-    <Input style={width} disabled={disabled} accessibleName={label} maxlength={max} valueState={state} valueStateMessage={message}
+    <Input style={width} disabled={disabled} accessibleName={label} maxlength={max} placeholder={placeholder} valueState={state} valueStateMessage={message}
       value={value === null || value === undefined ? "" : String(value)}
       onInput={(e) => onChange(e.target.value === "" ? null : e.target.value)} />
   );

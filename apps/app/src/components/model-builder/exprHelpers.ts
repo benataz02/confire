@@ -11,6 +11,11 @@ export type Suggestion = {
   label?: string;
 };
 
+/** An expression's problem in words, naming the part of `text` it is about when it has a span. */
+export function issueText(e: { message: string; from?: number; to?: number }, text: string, t: (key: string, ...params: string[]) => string): string {
+  return e.from === undefined ? e.message : `${e.message}${t("MODEL_EXPR_AT", text.slice(e.from, e.to) || t("MODEL_EXPR_END"))}`;
+}
+
 /** One tenant masterdata table, as the builder needs it: a name, its column keys, and which
  *  kind it is. Both kinds share one namespace — a model references either the same way.
  *  `target` is the query's system, for the badge a picker shows; absent on maintained rows. */

@@ -6,15 +6,16 @@ import { FormField } from "../object-page/FormField.tsx";
 import { allExist, notFoundMessage } from "../cfl/existence.ts";
 import type { UiSource } from "../source.tsx";
 import { Grid, type CellTemplate, type GridState, type Selection } from "./Grid.tsx";
-import type { FormField as Field, ListColumn, Row } from "../types.ts";
+import type { Control, FormField as Field, ListColumn, Row } from "../types.ts";
 
-// A document's lines (§3.4, value-help doc §8) on Grid: read mode is Grid's own formatted cells and
-// links; edit mode (a new document's lines) makes every editable column an inline FormField, with
-// Add line / Delete on the toolbar instead of Beas' auto-added draft row.
+// Every editable grid (§3.4, value-help doc §8) on Grid: a document's lines, a declared table, a
+// template's own list. Read mode is Grid's own formatted cells and links; edit mode makes every
+// editable column an inline FormField — or the page's control kind the column names — with Add line
+// / Delete on the toolbar instead of Beas' auto-added draft row.
 //
 // Typing in an AnalyticalTable keeps focus only while each column's Cell component survives the
-// edit — ConfigTable's and useEditGrid's pattern: templates built once per column set, reading this
-// render's lines through a ref.
+// edit — ConfigTable's pattern: templates built once per column set, reading this render's lines
+// through a ref.
 
 /** Cell errors are keyed `<row index>:<column key>`. */
 export const cellKey = (i: number, col: string) => `${i}:${col}`;
@@ -24,6 +25,9 @@ const asField = (c: ListColumn): Field => ({
   key: c.key,
   label: c.label,
   type: c.type,
+  ...(c.required ? { required: true } : {}),
+  ...(c.controlType ? { controlType: c.controlType } : {}),
+  ...(c.placeholder ? { placeholder: c.placeholder } : {}),
   ...(c.options ? { options: c.options } : {}),
   ...(c.maxLength ? { validators: { maxLength: c.maxLength } } : {}),
   ...(c.cflConfig ? { cfl: { dialogConfig: c.cflConfig } } : {}),
@@ -57,7 +61,9 @@ export async function validateCflCells(
 }
 
 /** An editor owns its keys: AnalyticalTable's keyboard navigation takes Arrow/Home/End off any
- *  focused cell and Enter selects the row (useEditGrid's rule). */
+ *  focused cell — caret moves and the value help's type-ahead included — and Enter selects the row.
+ *  Grid has no useF2CellEdit (the hook that turns that off while editing), so a cell stops them
+ *  before they reach the table. */
 const ownKeys = (e: KeyboardEvent) => e.stopPropagation();
 
 /** The array position each grid row carries, so a cell and the selection name the line they mean. */
@@ -72,14 +78,22 @@ const sameColumn = (a: ListColumn, b: ListColumn) => {
 /** B1's "#": VisualOrder counts from 0, and a line not yet in SAP has none — its place is its number. */
 const lineNo: CellTemplate = (row) => <span>{Number(row.VisualOrder ?? row[IDX]) + 1}</span>;
 
-export function EditGrid({ title, columns, rows, onChange, readOnly, fixedRows, errors, toolbarActions, onColumnsChange }: {
+export function EditGrid({
+  title, table, columns, rows, onChange, readOnly, fixedRows, newRow, errors, controls, toolbarActions, onColumnsChange,
+}: {
   title?: string;
+  /** the collection's key, handed to a control kind with the line's position */
+  table?: string;
   columns: ListColumn[];
   rows: Row[];
   onChange: (rows: Row[]) => void;
   readOnly?: boolean;
   /** Delete but no Add line */
   fixedRows?: boolean;
+  /** what Add line starts with; default an empty line */
+  newRow?: (rows: Row[]) => Row;
+  /** the page's control kinds, for the columns that name one */
+  controls?: Record<string, Control>;
   errors?: Record<string, string>;
   /** the caller's buttons, ahead of Add/Delete */
   toolbarActions?: (selection: Selection) => ReactNode;
@@ -111,8 +125,8 @@ export function EditGrid({ title, columns, rows, onChange, readOnly, fixedRows, 
 
   // A value-help pick sets the key and then patches the line from the row in the same tick, before
   // the parent re-renders — so each edit builds on the last one, not on the rows this render got.
-  const latest = useRef({ rows, errors, onChange });
-  latest.current = { rows, errors, onChange };
+  const latest = useRef({ rows, errors, onChange, controls });
+  latest.current = { rows, errors, onChange, controls };
   const setCell = (i: number, patch: Row) => {
     const next = [...latest.current.rows];
     next[i] = { ...next[i], ...patch };
@@ -130,15 +144,17 @@ export function EditGrid({ title, columns, rows, onChange, readOnly, fixedRows, 
         return (
           <div style={{ width: "100%" }} onKeyDown={ownKeys}>
             <FormField inline field={asField(c)} value={r[c.key]} formData={r} editable
+              controls={latest.current.controls} table={table} rowIndex={i}
               error={latest.current.errors?.[cellKey(i, c.key)]}
               onChange={(v) => setCell(i, { [c.key]: v })}
+              onPatch={(values) => setCell(i, values)}
               onRowSelect={c.onRowSelect ? (picked) => setCell(i, c.onRowSelect!(picked)) : undefined} />
           </div>
         );
       }]))),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [visible, readOnly],
+    [visible, readOnly, table],
   );
 
   return (
@@ -154,7 +170,7 @@ export function EditGrid({ title, columns, rows, onChange, readOnly, fixedRows, 
           {readOnly ? null : (
             <>
               {fixedRows ? null : (
-                <Button icon="add" design="Transparent" onClick={() => onChange([...rows, {}])}>{i18n.getText("UI_ADD_LINE")}</Button>
+                <Button icon="add" design="Transparent" onClick={() => onChange([...rows, newRow?.(rows) ?? {}])}>{i18n.getText("UI_ADD_LINE")}</Button>
               )}
               <Button icon="delete" design="Transparent" disabled={!sel.rows.length}
                 onClick={() => {

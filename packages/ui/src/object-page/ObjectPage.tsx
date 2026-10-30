@@ -1,312 +1,135 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useBlocker } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  Bar, Button, Dialog, FlexBox, Menu, MenuItem, MessageStrip, ObjectPage as Ui5ObjectPage, SplitButton, Tab, TabContainer,
-  ToolbarButton,
+  Bar, Button, Dialog, FlexBox, Menu, MenuItem, ObjectPage as Ui5ObjectPage, SplitButton, Tab, TabContainer,
+  ToolbarButton, ToolbarItem, type ObjectPageDomRef,
 } from "@ui5/webcomponents-react";
-import { confirm } from "../confirm.ts";
-import { exists, notFoundMessage } from "../cfl/existence.ts";
 import { useUiI18n } from "../i18n.ts";
-import { useUiSource } from "../source.tsx";
-import { validateCflCells } from "../list-report/EditGrid.tsx";
 import { ColumnsTab, type ColumnItem } from "../list-report/GridSettingsDialog.tsx";
 import { ViewMenu } from "../list-report/FilterHeader.tsx";
-import { isFieldEditable, resolveSections, sectionFields, udfSection, type EntityConstraints } from "../metadata.ts";
-import { evalDyn, getFieldValidationError, isEmptyValue, matchErrorFields, validateForm } from "../validation.ts";
-import { sameState, useViews } from "../views.ts";
+import { sectionFields, sectionTables } from "../metadata.ts";
+import { negativeCount, PageMessages, type PageMessage } from "../PageMessages.tsx";
+import { evalDyn } from "../validation.ts";
+import { useViews } from "../views.ts";
 import { applyObjectView, resolveObjectState, withTableColumns } from "./objectView.ts";
-import { objectPageHeaderArea, objectPageTitle, type RecordNavigation } from "./ObjectPageHeader.tsx";
+import { objectPageHeaderArea, objectPageTitle, recordTitle, type RecordNavigation } from "./ObjectPageHeader.tsx";
 import type { Crumb } from "../PageBreadcrumbs.tsx";
 import { objectPageSection, type SectionContext, type Templates } from "./ObjectPageSection.tsx";
-import type { FormField, HeaderConfig, ObjectViewState, Row, Section } from "../types.ts";
+import { useSectionParam } from "./sectionParam.ts";
+import { useObjectRecord, type CreateAction, type ObjectRecord, type RecordOptions } from "./useObjectRecord.ts";
+import type { FormField, HeaderConfig, ObjectViewState, Section } from "../types.ts";
 
 // app-object-page (LIST-REPORT-OBJECT-PAGE.md §4): a declared section tree over one record, merged
-// with the entity's metadata. The lifecycle is Beas §4.7 — data is copied into formData, Edit takes
-// a baseline, each edit re-validates, Save waits for value-help checks and validates before it
-// hands the diff to the caller, and a failed save maps SAP's complaint onto the field it names.
+// with the entity's metadata when there is one. The record's lifecycle is useObjectRecord's; this
+// draws it — title, sections (one scrolling page, or tabs), the footer, and every problem the record
+// has as one messages button in the title.
 
-export type CreateAction = "view" | "new" | "back";
+export type { CreateAction } from "./useObjectRecord.ts";
 
 /** Object views are stored under `<entity>::object` (OBJECT_TABLE_SUFFIX on the server). */
 const objectTableId = (entity: string) => `${entity}::object`;
 
-export function ObjectPage(p: Templates & {
-  /** the metadata entity — names the layout views and the remembered create action */
+type PageProps = Templates & {
+  /** names the layout views and the remembered create action */
   entity: string;
-  constraints: EntityConstraints;
-  /** the record, or a create seed. Must be a stable object: a new one resets the form. */
-  data: Row;
-  isNew?: boolean;
-  /** no Edit at all (a read-only entity) */
-  readonly?: boolean;
+  header: HeaderConfig;
+  /** one section at a time behind a tab bar, the open one in the URL (`?section=`) */
+  mode?: "tabs";
   /** Edit is offered but disabled — no ETag came with the row */
   editDisabled?: boolean;
-  sections: Section[];
-  header: HeaderConfig;
-  /** fields the page shows but never writes (the quote page's server-built lines) */
-  lockedFields?: string[];
   /** layout views without server calls or save chrome */
   localViews?: boolean;
   /** one create button with this text, instead of the create-and-view/new/back split button */
   createLabel?: string;
-  /** resolves when SAP took it; rejects with SAP's error, which the page maps onto fields */
-  onSave: (diff: Row, opts: { createAction: CreateAction }) => Promise<void>;
-  onCancelCreate?: () => void;
   navigation?: RecordNavigation;
   /** the parent pages, above the title */
   breadcrumbs?: Crumb[];
-  /** an informational strip above the first section */
+  /** an informational strip above the first section — information, never a problem */
   notice?: ReactNode;
-}) {
-  const { constraints, isNew = false } = p;
+  /** the caller's own messages beside the record's: a failed read, a refused Delete */
+  messages?: PageMessage[];
+};
+
+/** A record made outside (kept alive across routes), or the options the page makes one from. */
+export type ObjectPageProps = PageProps & ({ record: ObjectRecord } | RecordOptions);
+
+export function ObjectPage(p: ObjectPageProps) {
+  return "record" in p ? <Page {...p} record={p.record} /> : <OwnRecord {...p} />;
+}
+
+function OwnRecord(p: PageProps & RecordOptions) {
+  const record = useObjectRecord(p);
+  return <Page {...p} record={record} />;
+}
+
+function Page({ record: r, ...p }: PageProps & { record: ObjectRecord }) {
   const i18n = useUiI18n();
   const t = (key: string, ...params: Array<string | number>) => i18n.getText(key, ...params);
   const createText = (a: CreateAction) =>
     a === "new" ? t("UI_CREATE_AND_NEW") : a === "back" ? t("UI_CREATE_AND_BACK") : t("UI_CREATE_AND_VIEW");
-  const fields = constraints.fields;
-  const qc = useQueryClient();
-  const { client } = useUiSource();
-
-  // rg() + the auto UDF section, unless the feature declared its own `udf`.
-  const resolved = useMemo(() => {
-    const r = resolveSections(p.sections, fields);
-    if (r.some((s) => s.id === "udf")) return r;
-    const declared = r.flatMap((s) => [...sectionFields(s).map((f) => f.key), ...(s.table ? [s.table.key] : [])]);
-    const udf = udfSection(fields, declared);
-    return udf ? [...r, udf] : r;
-  }, [p.sections, fields]);
-
-  const [formData, setFormData] = useState<Row>(p.data);
-  const [baseline, setBaseline] = useState<Row | null>(isNew ? p.data : null);
-  const [editing, setEditing] = useState(false);
-  const editingRef = useRef(false);
-  editingRef.current = editing;
-  const isEditMode = isNew || editing;
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [existence, setExistence] = useState<Record<string, string>>({});
-  const [cellErrors, setCellErrors] = useState<Record<string, Record<string, string>>>({});
-  const [pageError, setPageError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const pending = useRef<Promise<unknown>[]>([]);
-  const touched = useRef(new Set<string>());
-
-  // A new record from the caller (load, reload after save, record navigation) replaces the form —
-  // except the same record arriving again (a background refetch) while there are unsaved edits:
-  // those stay, as in Beas.
-  const rowKey = (r: Row) => constraints.keys.map((k) => String(r[k] ?? "")).join("|");
-  const lastKey = useRef(rowKey(p.data));
-  useEffect(() => {
-    const k = rowKey(p.data);
-    const same = k === lastKey.current;
-    lastKey.current = k;
-    if (same && !isNew && editingRef.current && dirtyRef.current) return;
-    setFormData(p.data);
-    setBaseline(isNew ? p.data : null);
-    setEditing(false);
-    setErrors({});
-    setExistence({});
-    setCellErrors({});
-    setPageError(null);
-    touched.current.clear();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.data]);
-
-  const locked = useMemo(() => new Set(p.lockedFields ?? []), [p.lockedFields]);
-  const isEditable = useCallback(
-    (f: FormField) => !p.readonly && !locked.has(f.key) && isFieldEditable(f, isEditMode, isNew),
-    [p.readonly, locked, isEditMode, isNew],
-  );
-  // Lines are written only with a new document: editing an existing one's lines needs B1's
-  // ReplaceCollectionsOnPatch semantics, which nothing here does yet.
-  const isTableEditable = useCallback(
-    (key: string) => isNew && isEditMode && !p.readonly && !locked.has(key) && !!fields[key]?.Editable,
-    [isNew, isEditMode, p.readonly, locked, fields],
-  );
+  const fields = r.constraints?.fields;
+  const label = r.constraints?.label ?? "";
+  const tabs = p.mode === "tabs";
+  const section = useSectionParam();
+  const pageRef = useRef<ObjectPageDomRef>(null);
+  // A message's jump: the tab in tabs mode (a URL, so Back leaves the record), else the section
+  // scrolled in. Focus first: focus entering the content sets the page's scroll padding (the sticky
+  // title and anchor bar), so the section lands below them rather than under.
+  const goSection = (id: string) => {
+    if (tabs) return section.go(id);
+    const el = pageRef.current?.querySelector<HTMLElement>(`[id="ObjectPageSection-${id}"]`);
+    el?.focus({ preventScroll: true });
+    el?.scrollIntoView({ block: "start" });
+  };
 
   // --- layout views ---------------------------------------------------------------------------
-  const resolveLayout = useCallback((s: Partial<ObjectViewState> | null) => resolveObjectState(s, resolved), [resolved]);
+  const resolveLayout = useCallback((s: Partial<ObjectViewState> | null) => resolveObjectState(s, r.sections), [r.sections]);
   const layout = useViews<ObjectViewState>({ tableId: objectTableId(p.entity), resolve: resolveLayout, local: p.localViews });
   const [layoutOpen, setLayoutOpen] = useState(false);
   // Whatever the layout says, edit mode shows what it can write and what it must send.
   const mustShow = useCallback(
-    (f: FormField) => isEditMode && (isEditable(f) || !!evalDyn(f.required, formData, isEditMode, isNew)),
-    [isEditMode, isEditable, formData, isNew],
+    (f: FormField) => r.isEditMode && (r.isEditable(f) || !!evalDyn(f.required, r.formData, r.isEditMode, r.isNew)),
+    [r.isEditMode, r.isEditable, r.formData, r.isNew],
   );
-  const shown = useMemo(
-    () => (layout.state ? applyObjectView(resolved, layout.state, mustShow) : resolved)
-      .filter((s) => evalDyn(s.visible, formData, isEditMode, isNew) !== false),
-    [resolved, layout.state, mustShow, formData, isEditMode, isNew],
-  );
+  const shown = useMemo(() => {
+    const ids = new Set(r.visible.map((s) => s.id));
+    return (layout.state ? applyObjectView(r.sections, layout.state, mustShow) : r.sections).filter((s) => ids.has(s.id));
+  }, [r.sections, r.visible, layout.state, mustShow]);
 
-  // Every field validation reads, plus each collection as a field of its own (Required = at least
-  // one line).
-  const allFields = useMemo<FormField[]>(
-    () => shown.flatMap((s) => (s.table
-      ? [{ key: s.table.key, label: s.label, type: "collection" as const, required: !!fields[s.table.key]?.Required, metaEditable: isTableEditable(s.table.key), metaRequired: !!fields[s.table.key]?.Required }]
-      : sectionFields(s))),
-    [shown, fields, isTableEditable],
-  );
-  const fieldByKey = useMemo(() => new Map(resolved.flatMap(sectionFields).map((f) => [f.key, f])), [resolved]);
-
-  // Each edit re-validates the fields it touched and every field whose `required` is dynamic.
-  useEffect(() => {
-    if (!isEditMode) return;
-    setErrors((prev) => {
-      const next = { ...prev };
-      for (const f of allFields) {
-        if (!touched.current.has(f.key) && typeof f.required !== "function" && !(f.key in prev)) continue;
-        const e = isEditable(f) || (f.type === "collection" && isTableEditable(f.key))
-          ? getFieldValidationError(f, formData[f.key], formData, isEditMode, isNew, t)
-          : null;
-        if (e) next[f.key] = e;
-        else delete next[f.key];
+  // --- messages -------------------------------------------------------------------------------
+  // Every problem the record has, under the section it belongs to, plus the caller's own.
+  const headerCtx = { formData: r.formData, isEditMode: r.isEditMode, isNew: r.isNew, constraints: r.constraints };
+  const title = recordTitle(p.header, headerCtx, label, t);
+  const messages = useMemo<PageMessage[]>(() => {
+    const where = new Map<string, { section: Section; label: string }>();
+    for (const s of r.sections) {
+      for (const f of sectionFields(s)) where.set(f.key, { section: s, label: f.label ?? f.key });
+      for (const tb of sectionTables(s)) where.set(tb.key, { section: s, label: s.subsections?.find((x) => x.table === tb)?.label ?? s.label });
+    }
+    const out: PageMessage[] = [];
+    for (const [key, text] of Object.entries(r.errors)) {
+      const w = where.get(key);
+      out.push({ id: `field:${key}`, type: "Negative", text, detail: w?.label, group: w?.section.label ?? title, section: w?.section.id, anchor: `[data-field="${key}"]` });
+    }
+    for (const [key, cells] of Object.entries(r.cellErrors)) {
+      const w = where.get(key);
+      const cols = (w ? sectionTables(w.section).find((x) => x.key === key)?.columns : undefined) ?? [];
+      for (const [cell, text] of Object.entries(cells)) {
+        const [row = "0", col = ""] = cell.split(":");
+        out.push({
+          id: `cell:${key}:${cell}`, type: "Negative", text,
+          detail: t("UI_CELL", w?.label ?? key, Number(row) + 1, cols.find((c) => c.key === col)?.label ?? col),
+          group: w?.section.label ?? title, section: w?.section.id, anchor: `[data-field="${key}"]`,
+        });
       }
-      return sameState(next, prev) ? prev : next;
-    });
+    }
+    for (const m of r.other) {
+      const s = r.sections.find((x) => x.id === m.section);
+      out.push({ ...m, id: `other:${m.id}`, type: "Negative", group: s?.label ?? title });
+    }
+    if (r.saveError) out.push({ id: "save", type: "Negative", text: r.saveError, detail: t("UI_SAVE_FAILED"), group: title });
+    return [...out, ...(p.messages ?? [])];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData]);
-
-  const updateField = useCallback((key: string, value: unknown) => {
-    touched.current.add(key);
-    setFormData((prev) => {
-      const next = { ...prev, [key]: value };
-      const extra = fieldByKey.get(key)?.onChange?.(value, next);
-      return extra ? { ...next, ...extra } : next;
-    });
-  }, [fieldByKey]);
-
-  const dirty = isEditMode && baseline !== null && !sameState(formData, baseline);
-
-  // --- unsaved-changes guard ------------------------------------------------------------------
-  const dirtyRef = useRef(false);
-  dirtyRef.current = dirty;
-  const savingRef = useRef(false);
-  const isNewRef = useRef(isNew);
-  isNewRef.current = isNew;
-  useBlocker({
-    shouldBlockFn: async ({ current, next }) => {
-      // Same record page (a search param, the section anchor): not leaving. Not so for create
-      // mode: it lives on the list's own path (`/b1/X#create`), so going to `/b1/X` IS leaving.
-      if (!isNewRef.current && current.pathname === next.pathname) return false;
-      if (!dirtyRef.current || savingRef.current) return false;
-      return !(await confirm({
-        title: t("UI_DISCARD_TITLE"),
-        message: t("UI_DISCARD_LEAVE"),
-        actionText: t("UI_DISCARD"),
-        destructive: true,
-      }));
-    },
-    enableBeforeUnload: () => dirtyRef.current,
-  });
-
-  // --- save -----------------------------------------------------------------------------------
-  const writable = (key: string) => {
-    const m = fields[key];
-    return !locked.has(key) && !!(isNew ? m?.Editable || m?.Required : m?.Editable);
-  };
-
-  /** What goes to SAP: the writable fields that differ from the baseline. A cleared text field is
-   *  sent as "" (B1 keeps a value it is sent null for); a new document's lines lose their empty
-   *  cells (and a line added but never filled goes entirely), and a create skips what was never
-   *  filled. */
-  const diffOf = (): Row => {
-    const out: Row = {};
-    for (const [k, v] of Object.entries(formData)) {
-      if (!writable(k) || sameState(v, baseline?.[k])) continue;
-      if (isNew && isEmptyValue(v)) continue;
-      if (Array.isArray(v))
-        out[k] = (v as Row[])
-          .map((line) => Object.fromEntries(Object.entries(line).filter(([, x]) => !isEmptyValue(x))))
-          .filter((line) => Object.keys(line).length);
-      else out[k] = v === null && fields[k]?.Type === "string" ? "" : v;
-    }
-    return out;
-  };
-
-  const reportSaveFailed = (e: unknown) => {
-    const msg = e instanceof Error ? e.message : String(e);
-    const keys = matchErrorFields(msg, allFields.map((f) => f.key));
-    if (keys.length) {
-      setErrors((prev) => ({ ...prev, ...Object.fromEntries(keys.map((k) => [k, msg])) }));
-      setPageError(null);
-    } else setPageError(msg);
-  };
-
-  const save = async (createAction: CreateAction) => {
-    setSaving(true);
-    savingRef.current = true;
-    setPageError(null);
-    try {
-      // 1. value-help checks still in flight
-      while (pending.current.length) {
-        const ps = pending.current;
-        pending.current = [];
-        await Promise.allSettled(ps);
-      }
-      // 2. changed value-help fields that must exist, probed again
-      const ex: Record<string, string> = {};
-      for (const f of allFields) {
-        if (!f.cfl || f.cfl.mustExist === false || !isEditable(f)) continue;
-        const v = formData[f.key];
-        if (isEmptyValue(v) || sameState(v, baseline?.[f.key])) continue;
-        if (!(await exists(qc, client, f.cfl, v))) ex[f.key] = notFoundMessage(f.cfl, t);
-      }
-      // 3. the lines grid's value-help cells
-      const cells: Record<string, Record<string, string>> = {};
-      for (const s of shown) {
-        if (!s.table || !isTableEditable(s.table.key)) continue;
-        const ce = await validateCflCells(qc, client, s.table.columns, (formData[s.table.key] as Row[] | undefined) ?? [], t);
-        if (Object.keys(ce).length) cells[s.table.key] = ce;
-      }
-      // 4. the field rules
-      const errs = validateForm(
-        allFields.map((f) => (f.type === "collection" ? { ...f, metaEditable: isTableEditable(f.key) } : f)).filter((f) => !locked.has(f.key)),
-        formData, { baseline, isNew, t },
-      );
-      const allEx = { ...Object.fromEntries(Object.entries(existence).filter(([k]) => !(k in ex))), ...ex };
-      setErrors(errs);
-      setExistence(allEx);
-      setCellErrors(cells);
-      if (Object.keys(errs).length || Object.keys(allEx).length || Object.keys(cells).length) {
-        setPageError(t("UI_CHECK_FIELDS"));
-        return;
-      }
-      const diff = diffOf();
-      if (!isNew && !Object.keys(diff).length) {
-        setEditing(false);
-        setBaseline(null);
-        return;
-      }
-      dirtyRef.current = false;
-      await p.onSave(diff, { createAction });
-      if (!isNew) {
-        setEditing(false);
-        setBaseline(null);
-      }
-    } catch (e) {
-      reportSaveFailed(e);
-    } finally {
-      setSaving(false);
-      savingRef.current = false;
-    }
-  };
-
-  const cancel = async () => {
-    if (dirty && !(await confirm({ title: t("UI_DISCARD_TITLE"), message: t("UI_DISCARD_RECORD"), actionText: t("UI_DISCARD"), destructive: true })))
-      return;
-    if (isNew) {
-      dirtyRef.current = false;
-      p.onCancelCreate?.();
-      return;
-    }
-    setFormData(baseline ?? p.data);
-    setEditing(false);
-    setBaseline(null);
-    setErrors({});
-    setExistence({});
-    setPageError(null);
-  };
+  }, [r.sections, r.errors, r.cellErrors, r.other, r.saveError, p.messages, title, i18n]);
 
   // --- create action --------------------------------------------------------------------------
   const storageKey = `confire.createAction.${p.entity}`;
@@ -315,36 +138,28 @@ export function ObjectPage(p: Templates & {
   );
   const [createMenu, setCreateMenu] = useState(false);
   const menuId = `confire-create-${p.entity}`;
+  const creating = r.isNew && !r.alwaysEdit;
 
   // --- render ---------------------------------------------------------------------------------
   const ctx: SectionContext = {
-    formData, isEditMode, isNew, updateField,
-    errors: { ...errors, ...existence },
-    cellErrors,
-    isEditable,
-    isTableEditable,
-    onExistenceError: (key, m) => setExistence((e) => {
-      if (!m) {
-        if (!(key in e)) return e;
-        const { [key]: _gone, ...rest } = e;
-        return rest;
-      }
-      return { ...e, [key]: m };
-    }),
-    onCheckStarted: (pr) => { pending.current.push(pr); },
-    onRowSelect: (f, row) => {
-      const patch = f.onRowSelect?.(row);
-      if (patch) setFormData((prev) => ({ ...prev, ...patch }));
-    },
+    formData: r.formData, isEditMode: r.isEditMode, isNew: r.isNew, updateField: r.updateField, update: r.update,
+    errors: r.errors,
+    cellErrors: r.cellErrors,
+    isEditable: r.isEditable,
+    isTableEditable: r.isTableEditable,
+    onExistenceError: r.onExistenceError,
+    onCheckStarted: r.onCheckStarted,
+    onRowSelect: r.onRowSelect,
     onTableColumns: layout.state ? (id, keys) => layout.setState((s) => withTableColumns(s, id, keys)) : undefined,
     templates: p,
+    titleOf: (s) => {
+      const n = negativeCount(messages, s.id);
+      return n ? t("UI_SECTION_COUNT", s.label, n) : s.label;
+    },
   };
 
-  const banner = p.notice || pageError ? (
-    <FlexBox direction="Column" style={{ gap: "0.5rem", marginBottom: "0.5rem" }}>
-      {pageError ? <MessageStrip design="Negative" hideCloseButton>{pageError}</MessageStrip> : null}
-      {p.notice}
-    </FlexBox>
+  const banner = p.notice ? (
+    <FlexBox direction="Column" style={{ gap: "0.5rem", marginBottom: "0.5rem" }}>{p.notice}</FlexBox>
   ) : null;
 
   const layoutControl = p.localViews ? undefined : (
@@ -358,37 +173,45 @@ export function ObjectPage(p: Templates & {
   return (
     <>
       <Ui5ObjectPage
+        ref={pageRef}
         hidePinButton
+        mode={tabs ? "IconTabBar" : "Default"}
+        {...(tabs ? section.props : {})}
         titleArea={objectPageTitle({
-          header: p.header, formData, label: constraints.label,
-          ctx: { formData, isEditMode, isNew, constraints },
-          onEdit: !p.readonly && constraints.writable ? () => { setBaseline(formData); setEditing(true); } : undefined,
+          header: p.header, formData: r.formData, label, ctx: headerCtx,
+          onEdit: !r.readonly && r.constraints?.writable && !r.isEditMode ? r.startEdit : undefined,
           t,
           editDisabled: p.editDisabled,
           navigation: p.navigation,
           breadcrumbs: p.breadcrumbs,
+          messages: (
+            <ToolbarItem overflowPriority="NeverOverflow">
+              <PageMessages messages={messages} onSection={goSection} openOn={r.refused} />
+            </ToolbarItem>
+          ),
           layout: layoutControl,
         })}
-        headerArea={objectPageHeaderArea(p.header.facets, formData, fields)}
-        footerArea={isEditMode ? (
+        headerArea={objectPageHeaderArea(p.header.facets, r.formData, fields)}
+        footerArea={r.isEditMode ? (
           <Bar design="FloatingFooter" endContent={
             <>
-              {!isNew ? (
-                <Button design="Emphasized" disabled={saving || !dirty} onClick={() => void save("view")}>
-                  {saving ? t("UI_SAVING") : t("UI_SAVE")}
+              {!creating ? (
+                // A new record is unsaved by definition: pressing Save is what shows what it still needs.
+                <Button design="Emphasized" disabled={r.saving || (!r.dirty && !r.isNew)} onClick={() => void r.save()}>
+                  {r.saving ? t("UI_SAVING") : t("UI_SAVE")}
                 </Button>
               ) : p.createLabel ? (
-                <Button design="Emphasized" disabled={saving} onClick={() => void save("view")}>
-                  {saving ? t("UI_CREATING") : p.createLabel}
+                <Button design="Emphasized" disabled={r.saving} onClick={() => void r.save()}>
+                  {r.saving ? t("UI_CREATING") : p.createLabel}
                 </Button>
               ) : (
-                <SplitButton id={menuId} design="Emphasized" disabled={saving}
+                <SplitButton id={menuId} design="Emphasized" disabled={r.saving}
                   accessibilityAttributes={{ arrowButton: { hasPopup: "menu", expanded: createMenu } }}
-                  onClick={() => void save(createAction)} onArrowClick={() => setCreateMenu(true)}>
-                  {saving ? t("UI_CREATING") : createText(createAction)}
+                  onClick={() => void r.save(undefined, createAction)} onArrowClick={() => setCreateMenu(true)}>
+                  {r.saving ? t("UI_CREATING") : createText(createAction)}
                 </SplitButton>
               )}
-              <Button disabled={saving} onClick={() => void cancel()}>{t("UI_CANCEL")}</Button>
+              <Button disabled={r.saving} onClick={() => void r.cancel()}>{t("UI_CANCEL")}</Button>
             </>
           } />
         ) : undefined}
@@ -402,7 +225,7 @@ export function ObjectPage(p: Templates & {
             setCreateMenu(false);
             setCreateAction(a);
             localStorage.setItem(storageKey, a);
-            void save(a);
+            void r.save(undefined, a);
           }}>
           {(["view", "new", "back"] as CreateAction[]).map((a) => (
             <MenuItem key={a} data-action={a} text={createText(a)} icon={a === createAction ? "accept" : undefined} />
@@ -410,7 +233,7 @@ export function ObjectPage(p: Templates & {
         </Menu>
       ) : null}
       {layoutOpen && layout.state ? (
-        <LayoutDialog sections={resolved} state={layout.state} mustShow={mustShow}
+        <LayoutDialog sections={r.sections} state={layout.state} mustShow={mustShow}
           onClose={() => setLayoutOpen(false)}
           onConfirm={(next) => { layout.setState(next); setLayoutOpen(false); }} />
       ) : null}

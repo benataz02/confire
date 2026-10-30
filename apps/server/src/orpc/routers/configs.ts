@@ -159,19 +159,6 @@ export const configsRouter = {
       .orderBy(configModel.name),
   ),
 
-  list: userProcedure.handler(({ context }) =>
-    db
-      .select({
-        id: configProject.id, name: configProject.name, status: configProject.status,
-        customer: configProject.customer, modelName: configModel.name, updatedAt: configProject.updatedAt,
-      })
-      .from(configProject)
-      .innerJoin(configModel, eq(configModel.id, configProject.modelId))
-      // The staff's own work list: a client's request lives in Requests (spec §10).
-      .where(and(eq(configProject.tenantId, context.tenantId), isNull(configProject.portalCardCode)))
-      .orderBy(desc(configProject.updatedAt)),
-  ),
-
   /** One page of the configurations list for a saved view. Same wire shape as entities.rows, so
    *  ListReport pages a Postgres list exactly the way it pages a B1 entity set. `customerName` is
    *  flattened out of the `customer` jsonb here rather than in the browser: it has to be sortable

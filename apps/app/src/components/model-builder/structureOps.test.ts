@@ -9,8 +9,8 @@ const PRICE_LIST_ONLY = [{
   message: "a model needs a price list — it is what prices the BOM materials",
 }];
 import {
-  applyMove, canDrop, deleteNode, parseRowKey, placeParam, placeTable, removeFromStructure, rowKeyOf,
-  tableKeyAt,
+  applyMove, canDrop, copyKeyIssues, copyKeys, deleteNodes, duplicateNodes, isItemsRow, outermost, parseRowKey,
+  placeParam, placeTable, renameIdents, rowKeyOf, tableKeyAt,
 } from "./structureOps.ts";
 
 /** Two sections: [fields "g", table "items"] and [fields "g2"]. */
@@ -90,17 +90,92 @@ test("placeTable never leaves the same table in two groups", () => {
 });
 
 test("deleting a table group removes it from the section without touching parameters", () => {
-  const gone = removeFromStructure(model(), { kind: "table", s: 0, g: 1 });
+  const gone = deleteNodes(model(), [{ kind: "table", s: 0, g: 1 }]);
   expect(groupKinds(gone, 0)).toEqual(["group:g"]);
   expect(placedTables(gone)).toEqual([]);
   expect(gone.parameters.map((p) => p.key)).toEqual(["width"]);
 });
 
-test("deleteNode drops the defs a section held", () => {
-  const gone = deleteNode(model(), { kind: "section", s: 0 });
+test("deleteNodes drops the defs a section held", () => {
+  const gone = deleteNodes(model(), [{ kind: "section", s: 0 }]);
   expect(gone.structure.sections.map((s) => s.key)).toEqual(["other"]);
   expect(gone.parameters).toEqual([]);
   expect(gone.tables).toEqual([]);
+});
+
+test("deleteNodes takes several positions at once without one shifting the next", () => {
+  const m = model();
+  m.computed = [{ key: "a", expr: "1" }, { key: "b", expr: "2" }, { key: "c", expr: "3" }];
+  const gone = deleteNodes(m, [{ kind: "group", s: 0, g: 0 }, { kind: "group", s: 1, g: 0 }, { kind: "formula", i: 0 }, { kind: "formula", i: 2 }]);
+  expect(groupKinds(gone, 0)).toEqual(["table:items"]);
+  expect(groupKinds(gone, 1)).toEqual([]);
+  expect(gone.computed.map((c) => c.key)).toEqual(["b"]);
+  expect(gone.parameters).toEqual([]);
+});
+
+test("a row inside a picked section or group is not acted on twice", () => {
+  const refs = outermost(model(), [{ kind: "section", s: 0 }, { kind: "group", s: 0, g: 0 }, { kind: "param", key: "width" }, { kind: "group", s: 1, g: 0 }]);
+  expect(refs).toEqual([{ kind: "section", s: 0 }, { kind: "group", s: 1, g: 0 }]);
+});
+
+test("a formula row is addressed by index and never dragged", () => {
+  expect(parseRowKey("c:2")).toEqual({ kind: "formula", i: 2 });
+  expect(rowKeyOf({ kind: "formula", i: 2 })).toBe("c:2");
+  expect(canDrop(model(), "c:0", "p:width", "After")).toBe(false);
+  expect(canDrop(model(), "p:width", "c:0", "Before")).toBe(false);
+});
+
+test("the items grid is the one row that is neither deleted nor copied", () => {
+  expect(isItemsRow(model(), { kind: "table", s: 0, g: 1 })).toBe(true);
+  expect(isItemsRow(model(), { kind: "group", s: 0, g: 0 })).toBe(false);
+});
+
+test("a copied section takes its content, renamed, and lands after the last section", () => {
+  const m = model();
+  m.parameters.push({ key: "height", label: "Height", type: "number", ui: "input", visibleWhen: 'width > 2 && height != "width"' });
+  (m.structure.sections[0]!.groups[0] as { params: string[] }).params.push("height");
+  const refs = [{ kind: "section", s: 0 } as const];
+  const keys = copyKeys(m, refs);
+  // the items grid stays out: a model holds exactly one
+  expect(keys.map((k) => `${k.kind}:${k.from}→${k.key}`)).toEqual(["section:main→main2", "param:width→width2", "param:height→height2"]);
+  const out = duplicateNodes(m, refs, keys);
+  expect(out.structure.sections.map((s) => s.key)).toEqual(["main", "other", "main2"]);
+  expect(out.structure.sections[2]!.groups).toEqual([{ key: "g", title: "G", params: ["width2", "height2"] }]);
+  // the copy reads the copy; the string literal is not a reference
+  expect(out.parameters.find((p) => p.key === "height2")!.visibleWhen).toBe('width2 > 2 && height2 != "width"');
+  expect(out.parameters.find((p) => p.key === "height")!.visibleWhen).toBe('width > 2 && height != "width"');
+  expect(checkModel(out, [])).toEqual(PRICE_LIST_ONLY);
+});
+
+test("copied groups, parameters and formulas go to the bottom of where their source is", () => {
+  const m = model();
+  m.computed = [{ key: "area", expr: "width * 2" }, { key: "x", expr: "1" }];
+  const refs = [{ kind: "group", s: 1, g: 0 }, { kind: "param", key: "width" }, { kind: "formula", i: 0 }] as const;
+  const out = duplicateNodes(m, [...refs], copyKeys(m, [...refs]));
+  expect(groupKinds(out, 1)).toEqual(["group:g2", "group:g3"]);
+  expect((out.structure.sections[0]!.groups[0] as { params: string[] }).params).toEqual(["width", "width2"]);
+  expect(out.computed).toEqual([...m.computed, { key: "area2", expr: "width2 * 2" }]);
+});
+
+test("a copy's keys are checked against the model and against each other", () => {
+  const m = model();
+  m.parameters.push({ key: "depth", label: "Depth", type: "number", ui: "input" });
+  (m.structure.sections[1]!.groups[0] as { params: string[] }).params.push("depth");
+  const keys = copyKeys(m, [{ kind: "param", key: "width" }, { kind: "group", s: 1, g: 0 }]);
+  expect(keys.map((k) => k.key)).toEqual(["width2", "g3", "depth2"]);
+  expect(copyKeyIssues(m, keys)).toEqual({});
+  keys[0]!.key = "fresh";
+  keys[1]!.key = "1g";
+  keys[2]!.key = "fresh";
+  expect(copyKeyIssues(m, keys)).toEqual({ "p:width": "taken", "g:1.0": "invalid", "p:depth": "taken" });
+  keys[0]!.key = "width";
+  keys[2]!.key = "depth2";
+  expect(copyKeyIssues(m, keys)).toEqual({ "p:width": "taken", "g:1.0": "invalid" });
+});
+
+test("renameIdents leaves an expression it cannot read alone", () => {
+  expect(renameIdents('a + "', new Map([["a", "b"]]))).toBe('a + "');
+  expect(renameIdents("max(a, ab)", new Map([["a", "b"]]))).toBe("max(b, ab)");
 });
 
 test("placeParam lands in a field group, not a table group", () => {

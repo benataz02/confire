@@ -49,6 +49,9 @@ export type ListColumn = {
   cflConfig?: CflDialogConfig;
   /** a picked value-help row patches the line, e.g. ItemCode fills ItemDescription */
   onRowSelect?: (row: Row) => Row;
+  /** the cell's editor: a key of the page's `controls` (one entry serves every cell of its kind) */
+  controlType?: string;
+  placeholder?: string;
   // --- filled from metadata ---
   maxLength?: number;
   /** metadata Editable — the write allowlist reached this column */
@@ -139,9 +142,13 @@ export type FormField = {
     pattern?: string;
     custom?: (value: unknown, formData: Row) => string | null;
   };
-  /** runs in updateField; what it returns is merged into the record too */
-  onChange?: (value: unknown, formData: Row) => Row | void;
-  controlType?: "textarea" | "checkbox" | "combobox" | "fieldGroup";
+  /** runs in updateField; what it returns is merged into the record too (`previous`: before the edit) */
+  onChange?: (value: unknown, formData: Row, previous: Row) => Row | void;
+  /** a built-in control, or a key of the page's `controls` */
+  controlType?: "textarea" | "checkbox" | "combobox" | "fieldGroup" | (string & {});
+  /** the ⓘ beside the label: what the field means */
+  help?: string;
+  placeholder?: string;
   /** fieldGroup children: one label, several controls */
   fields?: FormField[];
   cfl?: CflFieldConfig;
@@ -158,7 +165,22 @@ export type FormField = {
 };
 
 export type Group = { id: string; label?: string; fields: FormField[] };
-export type Subsection = { id: string; label: string; groups: Group[] };
+
+/** A collection drawn as a grid. `fixedRows`: lines may be edited and deleted but not added (a
+ *  copy's draft, whose every line names the source line it copies). */
+export type SectionTable = {
+  key: string;
+  columns: ListColumn[];
+  fixedRows?: boolean;
+  /** what Add line starts with; default an empty line */
+  newRow?: (rows: Row[]) => Row;
+  /** runs on every edit of the lines, as a field's `onChange` does: what it returns is merged in */
+  onChange?: (rows: Row[], formData: Row, previous: Row) => Row | void;
+};
+
+/** One block of a section: a form (fields, groups) or a grid. UI5: only where a section has two
+ *  or more blocks — a section with one puts it straight in the section. */
+export type Subsection = { id: string; label: string; fields?: FormField[]; groups?: Group[]; table?: SectionTable };
 
 /** §4.4. A section holds fields, groups, subsections — or one collection as a grid. */
 export type Section = {
@@ -168,9 +190,10 @@ export type Section = {
   fields?: FormField[];
   groups?: Group[];
   subsections?: Subsection[];
-  /** `fixedRows`: lines may be edited and deleted but not added (a copy's draft, whose every line
-   *  names the source line it copies) */
-  table?: { key: string; columns: ListColumn[]; fixedRows?: boolean };
+  table?: SectionTable;
+  /** tabs mode only (UI5 honours it nowhere else): the section fills the page's height, for content
+   *  that scrolls itself */
+  fitContent?: boolean;
 };
 
 export type Facet = {
@@ -196,6 +219,8 @@ export type HeaderConfig = {
   createTitle?: string;
   facets?: Facet[];
   actions?: (ctx: HeaderActionContext) => ReactNode;
+  /** controls in the title's navigation bar, before the record navigation; drawn on a new record too */
+  navigationActions?: (ctx: HeaderActionContext) => ReactNode;
 };
 
 /** A view a feature declares in code (Beas `systemViews`). `state: null` = the declared defaults;
@@ -215,6 +240,9 @@ export type ListFeature = {
 export type DetailFeature = {
   header: HeaderConfig;
   sections: Section[];
+  /** one section at a time behind a tab bar, the open one in the URL (`?section=`); default is one
+   *  scrolling page */
+  mode?: "tabs";
   /** what a new record starts with in create mode */
   createDefaults?: () => Row;
   /** section/field templates, keyed by id — a section drawn by the app (the BP's Portal section) */
@@ -242,8 +270,28 @@ export type FormContext = {
   isEditMode: boolean;
   isNew: boolean;
   updateField: (key: string, value: unknown) => void;
+  /** one edit over several fields */
+  update: (fn: (r: Row) => Row) => void;
 };
 export type SectionTemplate = (ctx: FormContext & { content: ReactNode }) => ReactNode;
 export type FieldTemplate = (ctx: FormContext & {
   field: FormField; value: unknown; error?: string; isEditable: boolean;
 }) => ReactNode;
+
+/** What a control kind draws with: a form field, or a grid cell (`table` + `rowIndex`, and
+ *  `formData` is then the line). */
+export type ControlContext = {
+  field: FormField;
+  value: unknown;
+  formData: Row;
+  editable: boolean;
+  disabled?: boolean;
+  error?: string;
+  onChange: (value: unknown) => void;
+  /** several values at once: the record's fields, or a cell's line (a pick that fills a neighbour) */
+  patch: (values: Row) => void;
+  table?: string;
+  rowIndex?: number;
+};
+/** A control kind, named by `controlType`: one entry serves every field and cell of its kind. */
+export type Control = (ctx: ControlContext) => ReactNode;

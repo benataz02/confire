@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ModelBuilderPage } from "../../../components/model-builder/ModelBuilderPage.tsx";
-import { sectionSearch } from "../../../lib/sectionParam.ts";
+import { sectionSearch } from "@confire/ui/object-page/sectionParam.ts";
 
 export const Route = createFileRoute("/$slug/models/$id/")({
   validateSearch: sectionSearch,
@@ -8,6 +8,5 @@ export const Route = createFileRoute("/$slug/models/$id/")({
 });
 
 function Builder() {
-  const { id } = Route.useParams();
-  return <ModelBuilderPage id={id} />;
+  return <ModelBuilderPage />;
 }

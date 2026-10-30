@@ -25,8 +25,14 @@ const formatField = (formData: Row, fields: Record<string, FieldConstraint> | un
   return formatValue(formData[key], m?.Type, m?.Options, isIntegerType(m?.EdmType));
 };
 
-/** Title: the create title, or the record's title field. Subtitle: the subtitle fields, formatted
- *  by their metadata type. */
+/** The create title, or the record's title field — and while that is empty, the create title or the
+ *  entity's label. */
+export function recordTitle(header: HeaderConfig, ctx: HeaderActionContext, label: string, t: (key: string, ...params: Array<string | number>) => string): string {
+  if (ctx.isNew) return header.createTitle ?? t("UI_NEW", label);
+  return formatField(ctx.formData, ctx.constraints?.fields, header.titleField) || header.createTitle || label;
+}
+
+/** Title: {@link recordTitle}. Subtitle: the subtitle fields, formatted by their metadata type. */
 export function objectPageTitle(o: {
   header: HeaderConfig;
   formData: Row;
@@ -38,45 +44,53 @@ export function objectPageTitle(o: {
   navigation?: RecordNavigation;
   /** the trail above the title */
   breadcrumbs?: Crumb[];
+  /** the messages button: a Toolbar child, first in the actions */
+  messages?: ReactNode;
   /** the layout view menu + Adapt layout: Toolbar children, after the page's actions */
   layout?: ReactNode;
   t: (key: string, ...params: Array<string | number>) => string;
 }): ReactElement<ObjectPageTitlePropTypes> {
   const { header, formData, ctx } = o;
   const fields = ctx.constraints?.fields;
-  const title = ctx.isNew
-    ? header.createTitle ?? o.t("UI_NEW", o.label)
-    : formatField(formData, fields, header.titleField);
+  const title = recordTitle(header, ctx, o.label, o.t);
   const subtitle = ctx.isNew ? "" : (header.subtitleFields ?? [])
     .map((k) => formatField(formData, fields, k))
     .filter(Boolean)
     .join(" · ");
   const actions = header.actions?.(ctx);
+  const navActions = header.navigationActions?.(ctx);
+  const recordNav = o.navigation && !ctx.isNew ? o.navigation : undefined;
   // The trail names the record by what users quote: a document's DocNum (its key, DocEntry, is
   // internal), else the key itself (CardCode, ItemCode). A new record by the create title.
   const code = ctx.isNew ? null : formData.DocNum ?? formData[ctx.constraints?.keys[0] ?? ""];
-  const crumb = code == null || code === "" ? title || o.label : String(code);
+  const crumb = code == null || code === "" ? title : String(code);
   return (
     <ObjectPageTitle
       breadcrumbs={o.breadcrumbs ? <PageBreadcrumbs items={o.breadcrumbs} current={crumb} /> : undefined}
-      header={<Title>{title || o.label}</Title>}
+      header={<Title>{title}</Title>}
       subHeader={subtitle ? <Text>{subtitle}</Text> : undefined}
-      navigationBar={o.navigation && !ctx.isNew ? (
+      navigationBar={recordNav || navActions ? (
         <Toolbar design="Transparent">
+          {navActions ? <ToolbarItem>{navActions}</ToolbarItem> : null}
           {/* Same overflowGroup: the four moves stay together. A bar that cannot fit all of them
               puts every one in the overflow menu, rather than leaving First visible and Last hidden. */}
-          <ToolbarButton overflowGroup="record" design="Transparent" icon="media-rewind" tooltip={o.t("UI_FIRST")} accessibleName={o.t("UI_FIRST")}
-            disabled={o.navigation.busy || o.navigation.atFirst} onClick={o.navigation.first} />
-          <ToolbarButton overflowGroup="record" design="Transparent" icon="navigation-left-arrow" tooltip={o.t("UI_PREVIOUS")} accessibleName={o.t("UI_PREVIOUS")}
-            disabled={o.navigation.busy || o.navigation.atFirst} onClick={o.navigation.prev} />
-          <ToolbarButton overflowGroup="record" design="Transparent" icon="navigation-right-arrow" tooltip={o.t("UI_NEXT")} accessibleName={o.t("UI_NEXT")}
-            disabled={o.navigation.busy || o.navigation.atLast} onClick={o.navigation.next} />
-          <ToolbarButton overflowGroup="record" design="Transparent" icon="media-forward" tooltip={o.t("UI_LAST")} accessibleName={o.t("UI_LAST")}
-            disabled={o.navigation.busy || o.navigation.atLast} onClick={o.navigation.last} />
+          {recordNav ? (
+            <>
+              <ToolbarButton overflowGroup="record" design="Transparent" icon="media-rewind" tooltip={o.t("UI_FIRST")} accessibleName={o.t("UI_FIRST")}
+                disabled={recordNav.busy || recordNav.atFirst} onClick={recordNav.first} />
+              <ToolbarButton overflowGroup="record" design="Transparent" icon="navigation-left-arrow" tooltip={o.t("UI_PREVIOUS")} accessibleName={o.t("UI_PREVIOUS")}
+                disabled={recordNav.busy || recordNav.atFirst} onClick={recordNav.prev} />
+              <ToolbarButton overflowGroup="record" design="Transparent" icon="navigation-right-arrow" tooltip={o.t("UI_NEXT")} accessibleName={o.t("UI_NEXT")}
+                disabled={recordNav.busy || recordNav.atLast} onClick={recordNav.next} />
+              <ToolbarButton overflowGroup="record" design="Transparent" icon="media-forward" tooltip={o.t("UI_LAST")} accessibleName={o.t("UI_LAST")}
+                disabled={recordNav.busy || recordNav.atLast} onClick={recordNav.last} />
+            </>
+          ) : null}
         </Toolbar>
       ) : undefined}
       actionsBar={
         <Toolbar design="Transparent">
+          {o.messages}
           {o.onEdit && !ctx.isEditMode ? (
             <ToolbarButton design="Emphasized" icon="edit" text={o.t("UI_EDIT")} disabled={o.editDisabled} onClick={o.onEdit} />
           ) : null}

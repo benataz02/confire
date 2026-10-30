@@ -41,7 +41,6 @@ export function useConfigProcess(id: string, isNew: boolean, on: { left: (to: "l
   const update = useMutation(orpc.configs.update.mutationOptions({ onSuccess: (v) => qc.setQueryData(getKey, v) }));
   // The actions that leave this page answer a different id, or nothing: they invalidate the lists.
   const invalidateLists = () => {
-    void qc.invalidateQueries({ queryKey: orpc.configs.list.queryOptions().queryKey });
     void qc.invalidateQueries({ queryKey: orpc.configs.rows.key() });
   };
   const create = useMutation(orpc.configs.create.mutationOptions({

@@ -1,4 +1,4 @@
-import { refKeyCols, type LookupRef, type ResolvedTable } from "@confire/config-engine";
+import { displayColumns, refKeyCols, type LookupRef, type ResolvedTable } from "@confire/config-engine";
 import type { CflDialogConfig, Row } from "../types.ts";
 
 // CflConfigsService: one factory per entity a value help can pick from. Each returns a literal and
@@ -161,6 +161,9 @@ export const cfl = {
     const table = ref.source === "manual" ? "" : ref.table;
     const cols = canonical?.columns ?? [];
     const { valueCol, labelCol } = refKeyCols(ref, cols);
+    // The parameter's "Columns shown" (ref.columns) starts the rest hidden; every column is still
+    // fetched (CflDialog's select) and offered in the dialog's settings.
+    const shown = new Set([valueCol, labelCol, ...displayColumns(ref, cols)]);
     return {
       title: table,
       source: { kind: "masterdata", modelId: scope.modelId, table },
@@ -169,7 +172,7 @@ export const cfl = {
       columns: (cols.length ? cols : [valueCol]).map((c) => ({
         key: c,
         label: canonical?.labels?.[c] || c,
-        ...(canonical?.hidden?.includes(c) ? { hidden: true } : {}),
+        ...(canonical?.hidden?.includes(c) || !shown.has(c) ? { hidden: true } : {}),
       })),
       searchFields: [valueCol, labelCol].filter((c): c is string => !!c),
       // A masterdata page can search and match a key, nothing else — no per-column filters.

@@ -1,6 +1,6 @@
 import {
   CheckBox, Form, FormGroup, FormItem, Icon, Input, Label, MultiComboBox, MultiComboBoxItem, MultiInput,
-  ObjectPageSection, ObjectStatus, Option, RadioButton, SegmentedButton, SegmentedButtonItem, Select, StepInput, Text, Token,
+  ObjectPageSection, ObjectStatus, Option, RadioButton, SegmentedButton, SegmentedButtonItem, Select, Slider, Text, TextArea, Token,
 } from "@ui5/webcomponents-react";
 import {
   isTableGroup, placedTables,
@@ -9,6 +9,7 @@ import {
 import { CflField } from "../cfl/CflField.tsx";
 import { cfl, type QueryScope } from "../cfl/cfl-configs.ts";
 import { TABLE_ITEM } from "../list-report/Grid.tsx";
+import { FORM_LAYOUT } from "../formLayout.ts";
 import { ConfigTable } from "./ConfigTable.tsx";
 import type { Row } from "./configTableOps.ts";
 import { addBatch, BATCHES_PARAM, displayValue } from "./formHelpers.ts";
@@ -62,11 +63,8 @@ function formSections(model: ModelDef): { key: string; title: string; groups: Gr
   }];
 }
 
-// labelSpan 12 everywhere = labels on top of their fields (natively left-aligned), field takes the full column.
-const FORM_PROPS = { labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2" } as const;
-
 // A table group holds exactly one FormItem, and it must not be one column wide: the group spans
-// the whole Form (colSpan mirrors FORM_PROPS.layout) and the item breaks out of the column flow
+// the whole Form (colSpan mirrors its layout) and the item breaks out of the column flow
 // (TABLE_ITEM). ConfigTable's Grid toolbar names the table, with its row count, and carries Add/Delete.
 
 /** A field's provenance mark: the assistant wrote it (with the source as its tip), or a question about
@@ -223,15 +221,28 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
         </MultiComboBox>
       );
 
-    if (p.ui === "step") {
+    if (p.ui === "slider") {
       const r = p.domain?.kind === "range" ? p.domain : undefined;
+      const shown = typeof v === "number" ? v : r?.min;
+      // The editable tooltip is UI5's accessibility advice and lets an exact figure be typed, but
+      // it only shows on hover or focus — the figure beside the track is what a reader sees.
+      // Slider has no valueState: a broken rule is spelled out under it (ruleNote).
       return (
-        <StepInput value={typeof v === "number" ? v : undefined} min={r?.min} max={r?.max} step={r?.step ?? 1}
-          style={{ width: "100%" }} disabled={disabled} required={req}
-          valueState={valueState} valueStateMessage={ruleMessage}
-          onChange={(e) => set(key, e.target.value ?? undefined)} />
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", width: "100%" }}>
+          <Slider value={shown} min={r?.min} max={r?.max} step={r?.step ?? 1}
+            showTooltip editableTooltip accessibleName={p.label} style={{ flex: 1 }} disabled={disabled}
+            onChange={(e) => set(key, e.target.value)} />
+          <Text style={{ whiteSpace: "nowrap" }}>{shown === undefined ? "" : `${shown}${p.unit ? ` ${p.unit}` : ""}`}</Text>
+        </div>
       );
     }
+
+    if (p.ui === "textarea")
+      return (
+        <TextArea rows={3} growing value={typeof v === "string" ? v : ""} style={{ width: "100%" }}
+          disabled={disabled} accessibleName={p.label} {...reqProps}
+          onChange={(e) => set(key, e.target.value || undefined)} />
+      );
 
     if (p.domain?.kind === "options" && p.domain.ref.source === "query") {
       const ref: LookupRef = p.domain.ref;
@@ -297,12 +308,12 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
   ) : undefined;
 
   return (
-    <Form headerText={headerText} accessibleName={headerText ? undefined : title} {...FORM_PROPS} {...formMode}>
+    <Form headerText={headerText} accessibleName={headerText ? undefined : title} layout={FORM_LAYOUT} {...formMode}>
       {groups.map((g, gi) => {
       if (isTableGroup(g)) {
         const def = defOf(g.table)!;
         return (
-          <FormGroup key={`${g.table}:${gi}`} colSpan={FORM_PROPS.layout}>
+          <FormGroup key={`${g.table}:${gi}`} colSpan={FORM_LAYOUT}>
             {/* data-param: table keys share the parameters' namespace, so a missing-row message
                 scrolls here the same way a parameter's does. */}
             <FormItem className={TABLE_ITEM} data-param={g.table}>
@@ -327,34 +338,30 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
             // MultiComboBox filters eliminated options out (no per-item disabled in UI5 v2), so
             // unlike Select/Radio it can't show them greyed — explain the gap with a count instead.
             const showEliminatedNote = !readOnly && !p.readonly && p.ui === "multicombo" && eliminated > 0;
-            // RadioButton and CheckBox take a valueState but have no valueStateMessage slot, so
-            // the broken rule's message is spelled out under them instead.
+            // RadioButton and CheckBox take a valueState but have no valueStateMessage slot, and
+            // Slider has neither, so the broken rule's message is spelled out under them instead.
             const ruleNote = !readOnly && !p.readonly && f.conflicts
-              && (p.ui === "radio" || p.ui === "checkbox" || (p.type === "boolean" && p.ui !== "select"));
+              && (p.ui === "radio" || p.ui === "checkbox" || p.ui === "slider" || (p.type === "boolean" && p.ui !== "select"));
             return (
               <FormItem key={k} labelContent={
-                // labelSpan is 12, so the label owns a full-width row above its control — its
-                // right end IS the input's top-right corner, which is where the price belongs.
-                <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", width: "100%" }}>
-                  <Label required={f.required && !readOnly && !p.readonly}>
-                    {p.label + (p.unit ? ` (${p.unit})` : "")}
-                    {p.help ? <Icon name="message-information" accessibleName={p.help} title={p.help}
-                      style={{ marginInlineStart: "0.375rem", cursor: "help", color: "var(--sapContent_IconColor)" }} /> : null}
-                  </Label>
-                  {f.price !== undefined ? (
-                    <ObjectStatus style={{ marginInlineStart: "auto" }}>
-                      {money(f.price, currency)}
-                    </ObjectStatus>
-                  ) : null}
-                </div>
+                <Label required={f.required && !readOnly && !p.readonly} showColon>
+                  {p.label + (p.unit ? ` (${p.unit})` : "")}
+                  {p.help ? <Icon name="message-information" accessibleName={p.help} title={p.help}
+                    style={{ marginInlineStart: "0.375rem", cursor: "help", color: "var(--sapContent_IconColor)" }} /> : null}
+                </Label>
               }>
                 {/* data-param is what a conflict message in the page's popover scrolls to —
                     the controls themselves vary too much to each carry an id. */}
                 <div data-param={k} style={{ display: "flex", flexDirection: "column", gap: "0.125rem", width: "100%" }}>
+                  {/* The label sits beside the field, so the option's price closes the control's
+                      own row, after the assistant's mark. */}
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
-                    {control(k)}
+                    <div style={{ flex: 1, minInlineSize: 0, display: "flex" }}>{control(k)}</div>
                     {marks?.[k] ? <MarkIcon mark={marks[k]!} label={i18n.getText("UI_MARK_QUESTION")}
                       onPress={(el) => onMarkPress?.(k, el)} /> : null}
+                    {f.price !== undefined ? (
+                      <ObjectStatus style={{ flex: "none", whiteSpace: "nowrap" }}>{money(f.price, currency)}</ObjectStatus>
+                    ) : null}
                   </div>
                   {showEliminatedNote ? (
                     <Text style={{ fontSize: "0.75rem", color: "var(--sapContent_LabelColor)" }}>
@@ -375,41 +382,47 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
   );
 }
 
-/** The batch quantities, as a FormItem in a page's General. Omit onChange to show them read-only. Type a quantity, Enter (or
- *  leaving the field) makes it a token; uncontrolled, so the typed text is cleared by hand.
- *  `label` is for a caller whose field is not the configuration's own quantities — the model
- *  builder's defaults. */
-export function BatchField({ batches, onChange, label, valueState }: {
+/** The batch quantities, as a FormItem in a page's General. Omit onChange to show them read-only. */
+export function BatchField({ batches, onChange }: { batches: number[]; onChange?: (batches: number[]) => void }) {
+  const i18n = useUiI18n();
+  return (
+    <FormItem labelContent={<Label showColon required={!!onChange}>{i18n.getText("UI_BATCHES")}</Label>}>
+      <BatchInput batches={batches} onChange={onChange} />
+    </FormItem>
+  );
+}
+
+/** The batch quantities' control. Type a quantity, Enter (or leaving the field) makes it a token;
+ *  uncontrolled, so the typed text is cleared by hand. `label` names it for a caller whose field is
+ *  not the configuration's own quantities — the model builder's defaults. */
+export function BatchInput({ batches, onChange, label, valueState }: {
   batches: number[];
   onChange?: (batches: number[]) => void;
   label?: string;
-  /** The configuration page errors as soon as the list is empty. A caller that reveals errors
-   *  only after an explicit save (the model builder) passes its own. */
+  /** The configuration page errors as soon as the list is empty. A caller that reveals errors only
+   *  after an explicit save (the model builder) passes its own. */
   valueState?: "Negative" | "None";
 }) {
   const i18n = useUiI18n();
   const text = label ?? i18n.getText("UI_BATCHES");
+  if (!onChange) return <Text>{batches.join(", ")}</Text>;
   return (
-    <FormItem labelContent={<Label required={!!onChange}>{text}</Label>}>
-      {onChange ? (
-        <MultiInput type="Number" data-param={BATCHES_PARAM} style={{ width: "100%" }}
-          placeholder={i18n.getText("UI_BATCHES_PLACEHOLDER")} accessibleName={text}
-          valueState={valueState ?? (batches.length ? "None" : "Negative")}
-          valueStateMessage={<div>{i18n.getText("UI_BATCHES_HINT")}</div>}
-          tokens={batches.map((b) => <Token key={b} text={String(b)} />)}
-          onChange={(e) => {
-            const next = addBatch(batches, e.target.value ?? "");
-            if (next !== batches) onChange(next);
-            e.target.value = "";
-          }}
-          onTokenDelete={(e) => {
-            const gone = new Set(e.detail.tokens.map((tk) => Number((tk as HTMLElement).getAttribute("text"))));
-            const left = batches.filter((b) => !gone.has(b));
-            // Deleting the last quantity falls back to 1 rather than leaving nothing to price.
-            onChange(left.length ? left : [1]);
-          }} />
-      ) : <Text>{batches.join(", ")}</Text>}
-    </FormItem>
+    <MultiInput type="Number" data-param={BATCHES_PARAM} style={{ width: "100%" }}
+      placeholder={i18n.getText("UI_BATCHES_PLACEHOLDER")} accessibleName={text}
+      valueState={valueState ?? (batches.length ? "None" : "Negative")}
+      valueStateMessage={<div>{i18n.getText("UI_BATCHES_HINT")}</div>}
+      tokens={batches.map((b) => <Token key={b} text={String(b)} />)}
+      onChange={(e) => {
+        const next = addBatch(batches, e.target.value ?? "");
+        if (next !== batches) onChange(next);
+        e.target.value = "";
+      }}
+      onTokenDelete={(e) => {
+        const gone = new Set(e.detail.tokens.map((tk) => Number((tk as HTMLElement).getAttribute("text"))));
+        const left = batches.filter((b) => !gone.has(b));
+        // Deleting the last quantity falls back to 1 rather than leaving nothing to price.
+        onChange(left.length ? left : [1]);
+      }} />
   );
 }
 

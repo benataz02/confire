@@ -2,7 +2,7 @@ export { ModelDefZ, LookupRefZ, ParamZ, ConstraintZ, BomLineZ, OperationZ, ValZ,
 export type { Constraint, Entries, Group, TableGroup, FieldGroup, LookupRef, ModelDef, ODataQuery, Option, Param, QuerySource, ResolvedLookups, ResolvedTable, ItemsTable, TableColumn, TableDef, TableRows, Val } from "./model";
 export { columnOptions, evalTableRows, itemSplit, splitShares, splitWeights, tableAggregates, typedPrice } from "./tables";
 export type { ItemLine } from "./tables";
-export { DslError, evaluate, parse } from "./dsl";
+export { DslError, evaluate, parse, tokenize } from "./dsl";
 export type { Ast, Scope } from "./dsl";
 export { checkModel, FUNCS, RESERVED_LINE_FIELDS, aggregateKeysOf, bomItemCodes, referencedTables, syncTables } from "./check";
 export type { Issue, KnownTable } from "./check";

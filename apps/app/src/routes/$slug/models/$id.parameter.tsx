@@ -8,9 +8,8 @@ export const Route = createFileRoute("/$slug/models/$id/parameter")({
 });
 
 function Page() {
-  const { id } = Route.useParams();
   const search = Route.useSearch();
-  // A duplicate navigates to the copy on this same route. The buffer is useState, so the page
+  // A duplicate navigates to the copy on this same route. The record is read once, so the page
   // remounts on the new key instead of keeping the source's fields.
-  return <ParamPage key={search.key ?? "new"} modelId={id} search={search} />;
+  return <ParamPage key={search.key ?? "new"} search={search} />;
 }

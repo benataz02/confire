@@ -2,7 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, eq, inArray } from "drizzle-orm";
 import { db, configModel, configProject } from "@confire/db";
-import { applyModelPatch, checkModel, ModelDefZ, ModelPatchZ, syncTables, type KnownTable, type ModelDef } from "@confire/config-engine";
+import { applyModelPatch, checkModel, isEmptyPatch, ModelDefZ, ModelPatchZ, syncTables, type KnownTable, type ModelDef } from "@confire/config-engine";
 import { adminProcedure } from "../base.ts";
 import { resolveLookups } from "../../lookups.ts";
 import { knownTables } from "./masterdata.ts";
@@ -20,14 +20,19 @@ function assertValid(definition: ModelDef, known: KnownTable[]) {
   if (issues.length) throw new ORPCError("BAD_REQUEST", { message: "Model has errors", data: { issues } });
 }
 
+/** The customer portal's columns beside the definition: optional on a save, defaulted on a create. */
+const PortalZ = {
+  portal: z.boolean().optional(),
+  portalPricing: z.enum(["indicative", "request"]).optional(),
+};
+
 const MODEL_FIELDS: SqlFields = {
   name: { col: configModel.name, kind: "string" },
   updatedAt: { col: configModel.updatedAt, kind: "date" },
 };
 
 export const modelsRouter = {
-  /** One page of the models list for a saved view. `list` stays: GlobalSearch still needs the
-   *  whole array to search it in the browser. */
+  /** One page of the models list for a saved view. */
   rows: adminProcedure.input(ListPageZ).handler(async ({ input, context }) => {
     const { where, orderBy } = compileQuery(MODEL_FIELDS, input.query);
     const raw = await db
@@ -42,14 +47,6 @@ export const modelsRouter = {
     return listPage(raw, input.top, input.skip);
   }),
 
-  list: adminProcedure.handler(({ context }) =>
-    db
-      .select({ id: configModel.id, name: configModel.name, updatedAt: configModel.updatedAt })
-      .from(configModel)
-      .where(eq(configModel.tenantId, context.tenantId))
-      .orderBy(configModel.name),
-  ),
-
   get: adminProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
     const [row] = await db
       .select()
@@ -63,50 +60,49 @@ export const modelsRouter = {
   /** A model's first save: there is nothing stored to diff against yet. RETURNING the whole row so
    *  the builder seeds models.get for the page it moves to instead of fetching it back. */
   create: adminProcedure
-    .input(z.object({ definition: ModelDefZ }))
+    .input(z.object({ definition: ModelDefZ, ...PortalZ }))
     .handler(async ({ input, context }) => {
       assertValid(input.definition, knownTables(await masterdataRows(context.tenantId)));
       const [ins] = await db
         .insert(configModel)
-        .values({ tenantId: context.tenantId, name: input.definition.name, definition: input.definition })
+        .values({
+          tenantId: context.tenantId, name: input.definition.name, definition: input.definition,
+          portal: input.portal, portalPricing: input.portalPricing,
+        })
         .returning();
       return ins!;
     }),
 
   /** What changed since the builder's last save (`diffModel`), laid over the stored definition under
    *  a row lock, so a concurrent save of other items is merged rather than overwritten. The gate
-   *  runs on the merged model: that is what is stored. */
+   *  runs on the merged model: that is what is stored. The portal columns (spec D15, D21) ride
+   *  along when they changed, but only a definition change moves `updatedAt`: it is what makes a
+   *  stored calculation stale, and publishing cannot change one. Unpublishing hides the model from
+   *  the catalog; projects already created from it keep working. */
   save: adminProcedure
-    .input(z.object({ id: z.uuid(), patch: ModelPatchZ }))
+    .input(z.object({ id: z.uuid(), patch: ModelPatchZ, ...PortalZ }))
     .handler(async ({ input, context }) => {
       const known = knownTables(await masterdataRows(context.tenantId));
+      const portal = {
+        ...(input.portal === undefined ? {} : { portal: input.portal }),
+        ...(input.portalPricing === undefined ? {} : { portalPricing: input.portalPricing }),
+      };
       return db.transaction(async (tx) => {
         const fence = and(eq(configModel.id, input.id), eq(configModel.tenantId, context.tenantId));
-        const [row] = await tx.select({ definition: configModel.definition }).from(configModel).where(fence).for("update");
+        const [row] = await tx.select({ definition: configModel.definition, updatedAt: configModel.updatedAt })
+          .from(configModel).where(fence).for("update");
         if (!row) throw new ORPCError("NOT_FOUND");
-        const definition = applyModelPatch(row.definition, input.patch);
-        assertValid(definition, known);
+        // The stored definition already passed the gate: a portal-only save does not run it again.
+        const changed = !isEmptyPatch(input.patch);
+        const definition = changed ? applyModelPatch(row.definition, input.patch) : row.definition;
+        if (changed) assertValid(definition, known);
+        if (!changed && !Object.keys(portal).length) return { updatedAt: row.updatedAt };
         const [updated] = await tx.update(configModel)
-          .set({ name: definition.name, definition, updatedAt: new Date() })
+          .set({ ...portal, ...(changed ? { name: definition.name, definition, updatedAt: new Date() } : {}) })
           .where(fence)
           .returning({ updatedAt: configModel.updatedAt });
         return updated!;
       });
-    }),
-
-  /** Publish on the customer portal (spec D15, D21). Its own call, not part of `save`: these are
-   *  columns beside the definition, and touching `updatedAt` here would invalidate every stored
-   *  calculation of the model for a change that cannot affect one. Unpublishing hides the model
-   *  from the catalog; projects already created from it keep working. */
-  publish: adminProcedure
-    .input(z.object({ id: z.uuid(), portal: z.boolean(), portalPricing: z.enum(["indicative", "request"]) }))
-    .handler(async ({ input, context }) => {
-      const [row] = await db.update(configModel)
-        .set({ portal: input.portal, portalPricing: input.portalPricing })
-        .where(and(eq(configModel.id, input.id), eq(configModel.tenantId, context.tenantId)))
-        .returning();
-      if (!row) throw new ORPCError("NOT_FOUND");
-      return row;
     }),
 
   // Copy under the first free name. Server-side so the stored definition is what gets copied,

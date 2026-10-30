@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Form, FormGroup, FormItem, Input, Label, Option, Select, Text } from "@ui5/webcomponents-react";
 import { BatchField } from "@confire/ui/configurator/ConfiguratorForm.tsx";
+import { FORM_LAYOUT } from "@confire/ui/formLayout.ts";
 import { CflField } from "@confire/ui/cfl/CflField.tsx";
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import { EntityLink } from "@confire/ui/EntityLink.tsx";
@@ -51,10 +52,10 @@ export function GeneralForm({ locked, request, head, batches, modelName, models,
     ? <EntityLink route="/models" target={head.modelId}>{modelLabel}</EntityLink>
     : <Text>{modelLabel}</Text>;
   return (
-    <Form accessibleName={t("CONFIG_GENERAL")} labelSpan="S12 M12 L12 XL12" layout="S1 M2 L4 XL4"
+    <Form accessibleName={t("CONFIG_GENERAL")} layout={FORM_LAYOUT}
       accessibleMode={locked ? "Display" : "Edit"} itemSpacing={locked ? "Large" : "Normal"}>
       <FormGroup>
-        <FormItem labelContent={<Label for={locked ? undefined : "cfg-name"} required>{t("CONFIG_NAME")}</Label>}>
+        <FormItem labelContent={<Label showColon for={locked ? undefined : "cfg-name"} required>{t("CONFIG_NAME")}</Label>}>
           {locked ? <Text>{head.name}</Text> : (
           <Input id="cfg-name" value={head.name} style={{ width: "100%" }}
             disabled={saving}
@@ -66,7 +67,7 @@ export function GeneralForm({ locked, request, head, batches, modelName, models,
             }} />
           )}
         </FormItem>
-        <FormItem labelContent={<Label required>{t("CONFIG_MODEL")}</Label>}>
+        <FormItem labelContent={<Label showColon required>{t("CONFIG_MODEL")}</Label>}>
           {modelReadOnly ? (
             /* Switching the model wipes every entry, batch and table row, because a param key
                only means something inside its own model. Once there is anything to lose the
@@ -87,7 +88,7 @@ export function GeneralForm({ locked, request, head, batches, modelName, models,
           </Select>
           )}
         </FormItem>
-        <FormItem labelContent={<Label required>{t("CONFIG_CUSTOMER")}</Label>}>
+        <FormItem labelContent={<Label showColon required>{t("CONFIG_CUSTOMER")}</Label>}>
           {locked || request ? fieldText(!locked, <Text>{head.customer?.cardName ?? ""}</Text>) : (
           /* Wrapper, not a prop: the id is only a jump target for the message popover. */
           <div id="cfg-customer" style={{ width: "100%" }}>

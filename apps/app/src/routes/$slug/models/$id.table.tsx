@@ -8,7 +8,6 @@ export const Route = createFileRoute("/$slug/models/$id/table")({
 });
 
 function Page() {
-  const { id } = Route.useParams();
   const search = Route.useSearch();
-  return <TablePage key={search.key} modelId={id} search={search} />;
+  return <TablePage key={search.key} search={search} />;
 }

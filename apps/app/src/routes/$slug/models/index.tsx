@@ -26,9 +26,7 @@ function Models() {
   }), [i18n]);
   const navigate = useNavigate({ from: "/$slug" });
   const qc = useQueryClient();
-  // models.list still exists for GlobalSearch; this page pages models.rows, so both keys go.
   const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: orpc.models.list.queryOptions().queryKey });
     void qc.invalidateQueries({ queryKey: orpc.models.rows.key() });
   };
 

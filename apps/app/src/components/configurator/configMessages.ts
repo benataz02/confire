@@ -1,6 +1,6 @@
 import type { FormState, ModelDef, Notice } from "@confire/config-engine";
 import { GENERAL_SECTION } from "@confire/ui/configurator/formHelpers.ts";
-import type { PageMessage } from "../PageMessages.tsx";
+import type { PageMessage } from "@confire/ui/PageMessages.tsx";
 
 /** `(key, ...params)` — the caller's `i18n.getText`, so this stays pure and testable. */
 export type TextFn = (key: string, ...params: string[]) => string;

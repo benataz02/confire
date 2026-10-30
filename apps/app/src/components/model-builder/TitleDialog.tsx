@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Bar, Button, Dialog, Form, FormGroup, FormItem, Input, Label } from "@ui5/webcomponents-react";
 import { useI18n } from "../../i18n.ts";
+import { FORM_LAYOUT } from "@confire/ui/formLayout.ts";
 import { W } from "./ParamForm.tsx";
 
 // The form pads its own content column, so the dialog part's default padding is off.
@@ -34,9 +35,9 @@ export function TitleDialog({ initial, section, onCancel, onOk }: {
         } />
       }
     >
-      <Form labelSpan="S12 M12 L12 XL12" style={{ padding: "1rem" }}>
+      <Form layout={FORM_LAYOUT} style={{ padding: "1rem" }}>
         <FormGroup accessibleName={heading}>
-          <FormItem labelContent={<Label>{t("MODEL_TITLE")}</Label>}>
+          <FormItem labelContent={<Label showColon>{t("MODEL_TITLE")}</Label>}>
             <Input value={v} style={W} autoFocus
               onInput={(e) => setV(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") onOk(v); }} />

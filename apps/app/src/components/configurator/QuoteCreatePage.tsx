@@ -95,7 +95,7 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
         </MessageStrip>
       ) : undefined}
       tableActions={tableActions}
-      onCancelCreate={backToConfig}
+      onLeave={backToConfig}
       // A client's request is reached from Requests, a configuration from Configurations.
       breadcrumbs={[
         d.portal ? { text: t("NAV_REQUESTS"), to: "/requests" } : { text: t("NAV_CONFIGS"), to: "/configs" },

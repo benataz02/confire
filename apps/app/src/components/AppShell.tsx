@@ -16,8 +16,8 @@ import { initials } from "@confire/ui/format.ts";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { NotificationsPopover, useUnreadCount } from "@confire/ui/notifications/Notifications.tsx";
 import { B1_FEATURES } from "../features/b1/index.ts";
-import { GlobalSearch, type SearchEntry } from "./GlobalSearch.tsx";
-import { useEffect, useRef, useState, useMemo } from "react";
+import { GlobalSearch, type SearchHit } from "./GlobalSearch.tsx";
+import { useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 import { LANGUAGES, useLanguage } from "@confire/ui/i18n.ts";
@@ -106,54 +106,21 @@ function Shell() {
     if (to) go(to);
   };
 
-  // What the shellbar search can reach besides objects: the same targets as the side nav, plus the
-  // appearance settings that otherwise only live in the user menu.
-  const searchEntries = useMemo<SearchEntry[]>(() => {
-    // `group` is a stable section id. GlobalSearch translates the header, and the scope filter
-    // compares ids, so a language switch does not empty the list.
-    const page = (text: string, to: string, icon: string) => ({ group: "Menus", text, icon, run: () => go(to) });
-    const label = (key: string) => i18n.getText(key);
-    return [
-      page(label("NAV_CONFIGS"), "/configs", "sales-quote"),
-      page(label("ASSISTANT_PAGE_TITLE"), "/assistant", "ai"),
-      page(label("SHELL_SEARCH_PORTAL_REQUESTS"), "/requests", "inbox"),
-      ...Object.values(B1_FEATURES).map((f) => {
-        const navKey = B1_NAV_KEY[f.entity];
-        return {
-          group: "Menus" as const,
-          text: navKey ? label(navKey) : f.entity,
-          description: label("NAV_SAP"),
-          icon: f.icon,
-          run: () => go(`/b1/${f.entity}`),
-        };
-      }),
-      ...(isAdmin
-        ? [
-            page(label("NAV_MODELS"), "/models", "tree"),
-            page(label("SHELL_SEARCH_MASTERDATA"), "/masterdata", "table-view"),
-            page(label("SHELL_SEARCH_PORTAL_INVITATIONS"), "/portal/invitations", "paper-plane"),
-          ]
-        : []),
-      page(label("NAV_SETTINGS"), "/settings", "action-settings"),
-      ...THEMES.map((item) => {
-        const themeKey = THEME_KEY[item.id];
-        return {
-          group: "Settings",
-          text: themeKey ? label(themeKey) : item.label,
-          description: label("SHELL_SEARCH_THEME"),
-          icon: "palette",
-          run: () => setThemeState(item.id),
-        };
-      }),
-      { group: "Settings", text: label("NAV_COMPACT"), description: label("USER_MENU_DENSITY"), icon: "resize-horizontal", run: () => setDensity('compact') },
-      { group: "Settings", text: label("NAV_COZY"), description: label("USER_MENU_DENSITY"), icon: "resize-horizontal", run: () => setDensity('cozy') },
-      ...LANGUAGES.map((l) => ({
-        group: "Settings", text: l.label, description: label("USER_MENU_LANGUAGE"), icon: "translate",
-        run: () => setLanguage(l.id),
-      })),
-    ];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, go, i18n]);
+  // The search's pages: the side nav's targets, the same admin cut.
+  const t = (key: string) => i18n.getText(key);
+  const searchPages: SearchHit[] = [
+    { text: t("NAV_HOME"), icon: "home", to: "/" },
+    ...Object.values(B1_FEATURES).map((f) => ({ text: b1Label(f.entity, t), description: t("NAV_SAP"), icon: f.icon, to: `/b1/${f.entity}` })),
+    { text: t("NAV_CONFIGS"), icon: "sales-quote", to: "/configs" },
+    { text: t("ASSISTANT_PAGE_TITLE"), icon: "ai", to: "/assistant" },
+    ...(isAdmin ? [
+      { text: t("NAV_MODELS"), icon: "tree", to: "/models" },
+      { text: t("NAV_MASTERDATA"), icon: "table-view", to: "/masterdata" },
+    ] : []),
+    { text: t("NAV_REQUESTS"), description: t("NAV_PORTAL"), icon: "inbox", to: "/requests" },
+    ...(isAdmin ? [{ text: t("NAV_INVITATIONS"), description: t("NAV_PORTAL"), icon: "paper-plane", to: "/portal/invitations" }] : []),
+    { text: t("NAV_SETTINGS"), icon: "action-settings", to: "/settings" },
+  ];
 
   const signOut = async () => {
     await authClient.signOut();
@@ -189,7 +156,8 @@ function Shell() {
                 Confire
               </ShellBarBranding>
             }
-            content={<GlobalSearch entries={searchEntries} isAdmin={isAdmin} />}
+            searchField={<GlobalSearch pages={searchPages} isAdmin={isAdmin} />}
+            showSearchField
             profile={<Avatar id="user-menu-opener" initials={initials(user?.name ?? "")}>
               {user?.image ? <img src={user.image} alt={user.name} /> : null}
             </Avatar>}

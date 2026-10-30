@@ -180,3 +180,23 @@ body {
   /* not `none`: no animation means no animationend, and the bar would never leave */
   .confire-footer-out { animation-duration: 1ms }
 }
+
+/* The staff shell's search (GlobalSearch), centred on the bar while it is a field — collapsed, it is a
+   button in its own place among the actions. ShellBar lays its `searchField` out beside the actions and
+   has no centre slot, so the field leaves the flow; the bar spans the viewport at its top, so the
+   viewport's centre is the bar's. A document rule on the host beats the component's :host rules.
+   ponytail: below 64rem a centred field would cover the branding, so it stays in the bar's flow, where
+   ShellBar's own responsive collapse takes care of it. */
+@media (min-width: 64rem) {
+  ui5-shellbar-search.confire-shellbar-search:not([collapsed]) {
+    position: fixed;
+    top: calc(var(--_ui5_shellbar_root_height, 3.25rem) / 2);
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(36rem, 40vw);
+  }
+}
+/* Horizon draws the field's bottom border as a background-image (sapField_BackgroundStyle). */
+ui5-shellbar-search.confire-shellbar-search {
+  background-image: none;
+}

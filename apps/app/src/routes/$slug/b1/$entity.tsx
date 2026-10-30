@@ -137,7 +137,7 @@ function EntityCreate({ feature }: { feature: EntityFeature }) {
   return (
     <ObjectPage key={d.createEpoch} isNew entity={feature.entity} constraints={constraints} data={seed}
       sections={feature.detail.sections} header={feature.detail.header}
-      onSave={d.save} onCancelCreate={() => open(route)}
+      onSave={d.save} onLeave={() => open(route)}
       breadcrumbs={[{ text: b1Label(feature.entity, (k) => i18n.getText(k)), to: route }]} />
   );
 }
@@ -194,7 +194,7 @@ function EntityCopy({ feature }: { feature: EntityFeature }) {
         toast(CREATED[r.entity] ? i18n.getText(CREATED[r.entity]!, num) : `${r.entity} ${num} created`);
         open(`/b1/${r.entity}`, r.docEntry);
       }}
-      onCancelCreate={back}
+      onLeave={back}
       breadcrumbs={[{ text: b1Label(feature.entity, (k) => i18n.getText(k)), to: `/b1/${feature.entity}` }]} />
   );
 }

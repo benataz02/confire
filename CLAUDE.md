@@ -192,8 +192,8 @@ it as `EntityConstraints` plus a **seed**, and `submit` validates the form laid 
 the invitee its owner. Settings → Portal holds the extras and the lead series (`SeriesService`, empty =
 B1's default lead series).
 
-**Portal projects** (spec §7): a published model (`config_model.portal`, set by `models.publish`, not
-by `save` — publishing must not bump `updatedAt`) becomes a client's project, `config_project` with
+**Portal projects** (spec §7): a published model (`config_model.portal`, saved by `models.save` beside
+the definition; only a definition change bumps `updatedAt`) becomes a client's project, `config_project` with
 `portalCardCode` set. **The engine runs on the server**: `portal/orpc/projects.ts` returns the
 projection in `portal/projection.ts` (pure, tested) and never a `ModelDef`, lookups or a candidate —
 that module is the fence outward (`toPortalForm` over the shared form state), and `config-patch.ts`'
@@ -561,7 +561,43 @@ generates a page.
 - **Features are declared.** `apps/app/src/features/b1/` (documents, business partners, items; `B1_FEATURES`
   is the registry — the `/b1/$entity` routes accept nothing else, and the side nav and search list
   it). A feature is plain object literals: list columns, filter fields, system views, header, section
-  tree. Local lists (configs, models, masterdata) declare theirs in the route file.
+  tree. Local lists (configs, models, masterdata) declare theirs in the route file. The model builder
+  is declared the same way (`apps/app/src/features/model/`: the model, a parameter, a table, as
+  functions of `t`), and so is the masterdata editor.
+- **Two ways to save, no third.** Every record page but the configurator is the shared `ObjectPage`
+  with an explicit Save that sends what changed; the configurator autosaves (`usePatchQueue`). The
+  record's lifecycle is `useObjectRecord` (`object-page/useObjectRecord.ts`, its rules as a pure
+  reducer in `recordState.ts`): buffer, baseline, dirty, the leave guard, the save pipeline (probes →
+  rules → `onSave`). `ObjectPage` makes one from its props, or takes a `record` made outside — the
+  model builder's scope (`draftScope.tsx`) keeps the model's alive across the builder, parameter and
+  table routes, so opening a parameter drops no edit. Options, each meaning something for any record:
+  `alwaysEdit` (no Edit; a save rebases and editing goes on; Cancel leaves through `onLeave`),
+  `validate` (the record's own rules — they *replace* the declared ones, `required` then only draws
+  the asterisk; fields by key, cells as `<row>:<column>` under the table key, `other` for what has no
+  field), `sameRecord` (the guard's "still here"), no `constraints` (every declared field is the
+  record's), `update(fn)` (one edit over several fields), `save(next)`, and `onSave` may resolve with
+  the record as stored. The model is a record of flat keys (`features/model/record.ts`:
+  `pricing.priceList` = checkModel's issue path); its Save is one `models.save` of `diffModel`'s patch
+  plus the portal columns when they changed.
+- **Declarations, not templates, where a field will do.** A `Subsection` holds fields, groups or a
+  grid like a `Section`; `Section.fitContent` (tabs only, UI5's rule); `DetailFeature.mode: "tabs"`
+  puts one section at a time behind a tab bar, the open one in `?section=` (`sectionParam.ts`).
+  `FormField.help` is the ⓘ. **Control kinds**: a field's or column's `controlType` names an entry of
+  the page's `controls` map (the builder's `expr`, `masterdataQuery`, `batches`… in
+  `model-builder/controls.tsx`) — one entry serves every field and grid cell of its kind; a control
+  may `patch` several values (a pick that fills its neighbour). A grid's `newRow` and `onChange` are
+  its line seed and its side effects. Every editable grid is `EditGrid`.
+- **Problems are messages, never a red strip.** Every Object Page — the shared one, the configurator
+  in both SPAs, the portal's company page — has one messages button first in its title
+  (`@confire/ui/PageMessages.tsx`), each section's anchor or tab counting its Negative ones. The shared
+  page builds the list from the record (field, cell, `other`, an unmatched save failure) plus the
+  caller's `messages`. It opens itself only when an action comes back refused — a Save stopped or
+  rejected (`record.refused`), an autosave refused or a calculation failed (`useRefusals`) — and only
+  for a Negative message. An informational `notice` strip stays: information, not a problem.
+- **Labels sit beside their fields** everywhere, by *not* setting `labelSpan` (UI5's default puts them
+  on top below 600 px of the form's own width), with one column layout, `FORM_LAYOUT`
+  (`@confire/ui/formLayout.ts`). No code sets `labelSpan`; a grid in a form spans its item's whole
+  grid (`TABLE_ITEM`). An option's price closes its control's row in `ConfiguratorForm`.
 - **Metadata only merges** (`metadata.ts`, Beas `ii`/`rg`): label, type, options and
   MaxLength fill what a declared field left out; `Required` becomes `required` unless the field
   declared a function; editability is `isEditMode && Editable && !readonly` (on create, `Required`
@@ -581,13 +617,15 @@ generates a page.
   `match` for probes). The key is `keyField ?? columns[0]`. A failed existence probe counts as
   "exists". Type-ahead is `startswith`, the dialog `contains`.
 - **Templates** are props keyed by id (`cellTemplates`, `filterTemplates`, `sectionTemplates`, …);
-  section/group templates get the default `content` so they can wrap rather than replace.
+  section/group templates get the default `content` so they can wrap rather than replace. A template
+  is for what a declaration cannot say (the structure tree, the preview, a dynamic grid).
 - Deviations from Beas, on purpose: `Editable`/`writable` come from the server; `resolveColumns`
   fills grid columns from metadata; `fixedFilters: FilterCond[]` replaces raw `defaultFilter`
   OData; the value-help dialog persists one layout per user (`cfl:<source>`), not named views;
   document lines are `Grid` in both modes, editable cells as stable per-column templates
   (`EditGrid`; a new Cell component remounts the input under the cursor) with Add line / Delete
-  instead of an auto-added draft row; lines are editable on a *new* document only.
+  instead of an auto-added draft row; B1 lines are editable on a *new* document only (a record with
+  no metadata owns its lines).
 
 One rule worth knowing before editing `compileList`: a **filter** — or a **search field** — naming
 a missing field is an error (dropping it would show *more* rows than asked for), a **select** or

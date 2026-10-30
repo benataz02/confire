@@ -79,7 +79,9 @@ export function queryString(q?: QueryOptions): string {
   if (q.select?.length) set("$select", q.select.map((c) => assertName(c, "column")).join(","));
   if (q.orderby) set("$orderby", q.orderby);
   if (q.top !== undefined) set("$top", String(q.top));
-  if (q.skip !== undefined) set("$skip", String(q.skip));
+  // `$skip=0` is a no-op, and Beas refuses a lone one: "Syntax error in $top/$skip: It's not
+  // allowed to define only one of this parameter. Define both or none".
+  if (q.skip) set("$skip", String(q.skip));
   if (q.expand) set("$expand", q.expand);
   if (q.count) set("$count", "true");
   return parts.join("&");

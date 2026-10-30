@@ -1,380 +1,196 @@
-import { useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { CheckBox, ComboBox, ComboBoxItem, Input, Option, Select, Text } from "@ui5/webcomponents-react";
 import {
-  Button, CheckBox, ComboBox, ComboBoxItem, Form, FormGroup, FormItem, Input, MessageStrip, Option, Select,
-  StepInput, Text,
-} from "@ui5/webcomponents-react";
-import {
-  checkModel, isTableGroup, QTY_COL, REQUIRED_ITEM_COLS, RESERVED_LINE_FIELDS,
-  type LookupRef, type ModelDef, type TableColumn, type TableDef,
+  QTY_COL, REQUIRED_ITEM_COLS, RESERVED_LINE_FIELDS, type LookupRef, type TableColumn, type TableDef,
 } from "@confire/config-engine";
-import { Grid, GridForm } from "@confire/ui/list-report/Grid.tsx";
-import { useFieldConstraints, type EntityConstraints } from "@confire/ui/metadata.ts";
+import { EditGrid } from "@confire/ui/list-report/EditGrid.tsx";
+import { GridForm } from "@confire/ui/list-report/Grid.tsx";
+import { ownColumns, useFieldConstraints, type EntityConstraints } from "@confire/ui/metadata.ts";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
-import type { ListColumn, Section } from "@confire/ui/types.ts";
-import { ExprInput } from "./ExprInput.tsx";
-import { NONE, PAIRS, W, lbl, optValue } from "./ParamForm.tsx";
-import type { TableSearch } from "./paramRoute.ts";
-import { masterdataRef, modelWithTable, rowVars, sourceBadge, type TableCols } from "./exprHelpers.ts";
-import { useModelDraft } from "./draftScope.tsx";
-import { issueFor } from "./useDraftModel.ts";
-import { positions, useEditGrid } from "./useEditGrid.tsx";
+import { PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
+import type { Control, ListColumn, Row } from "@confire/ui/types.ts";
+import {
+  checkTable, columnErrors, commitTable, lockedColumns, newColumn, tableIssues, tableSections,
+} from "../../features/model/table.ts";
 import { useI18n } from "../../i18n.ts";
 import { copy, type Translate } from "./builderMessages.ts";
-
-/** What is wrong with a table or field key, in the author's words — formulas read both by key. */
-const keyProblem = (key: string, t: Translate) =>
-  !key ? t("MODEL_KEY_EMPTY")
-  : !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key) ? t("MODEL_KEY_CHARS")
-  : undefined;
-
-const newKey = (prefix: string, taken: string[]) => {
-  let n = taken.length + 1;
-  while (taken.includes(`${prefix}${n}`)) n++;
-  return `${prefix}${n}`;
-};
+import { builderControls } from "./controls.tsx";
+import { useModelDraft } from "./draftScope.tsx";
+import { masterdataRef, modelWithTable, sourceBadge, type TableCols } from "./exprHelpers.ts";
+import { NONE, W, optValue } from "./ParamForm.tsx";
+import type { TableSearch } from "./paramRoute.ts";
 
 /** A manual option list, as one comma-separated field. Enough for "circular, rectangular"; a list
  *  worth maintaining belongs in masterdata, where it is shared across models. */
-const manualText = (ref: Extract<LookupRef, { source: "manual" }>) =>
-  ref.options.map((o) => String(o.value)).join(", ");
+const manualText = (ref: Extract<LookupRef, { source: "manual" }>) => ref.options.map((o) => String(o.value)).join(", ");
 const parseManual = (type: TableColumn["type"], text: string): LookupRef => ({
   source: "manual",
-  options: text
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
+  options: text.split(",").map((s) => s.trim()).filter(Boolean)
     .map((v) => ({ value: type === "number" ? Number(v) : type === "boolean" ? v === "true" : v })),
 });
 
-/** Columns the table's own definition leans on: renaming or deleting one would break the price
- *  split, silently stop writing a mapped SAP field, or leave the document history with nothing to
- *  match on. Mapped columns are derived, not hardcoded, so the set follows the author if they remap. */
-const lockedColumns = (t: TableDef): Set<string> =>
-  t.role === "items" ? new Set([...REQUIRED_ITEM_COLS, ...Object.keys(t.map ?? {})]) : new Set<string>();
-
-/** A new calculation table. The role is not a choice: a model has exactly one items table, seeded
- *  by starterModel and undeletable, and every table added in the builder is a calc table. */
-export const newCalcTable = (taken: string[], t: Translate): TableDef => ({
-  key: newKey("table", taken),
-  title: copy(t, "MODEL_DEFAULT_TABLE", "Table"),
-  role: "calc",
-  columns: [{ key: "value", label: copy(t, "MODEL_COL_VALUE", "Value"), type: "number", cell: { kind: "input" } }],
-});
-
-// The table is the record's one field, so the shared ObjectPage's buffer, dirty mark, discard guard
-// and Save/Cancel cover it whole; the two sections are templates over that field.
-const CONSTRAINTS: EntityConstraints = {
-  name: "ModelTable", label: "", keys: [], writable: true, printable: false, flows: [],
-  fields: { table: { Type: "string", EdmType: "", Editable: true } },
-};
-
-/** The draft with this buffered table spliced in, checked — so a cell formula reading another of
- *  the table's own aggregates resolves before the table is committed. */
-function checkTable(draft: ModelDef, tables: TableCols[], t: TableDef, openedAs: string, tr: Translate) {
-  const scope = modelWithTable(draft, t);
-  const at = (scope.tables ?? []).findIndex((x) => x.key === t.key);
-  const issues = checkModel(scope, tables);
-  const mine = issues.filter((x) => x.path.startsWith(`tables[${at}]`));
-  const keyTaken = (draft.tables ?? []).some((x) => x.key === t.key && x.key !== openedAs);
-  // A mapping to a column the grid no longer has is the one issue with no field here, and nothing
-  // here could fix it: it stays the builder's message rather than locking Save.
-  const blocked = !!keyProblem(t.key, tr) || keyTaken || !t.columns.length
-    || t.columns.some((c) => keyProblem(c.key, tr)) || mine.some((x) => x.path !== `tables[${at}].map`);
-  // Every error is shown on the field it is about, and only there — and only once Save was tried.
-  const issueAt = (sub: string) => mine.find((x) => x.path === `tables[${at}]${sub}`)?.message;
-  return { scope, at, issues, keyTaken, blocked, issueAt };
-}
-
-type Part = {
-  t: TableDef;
-  edit: (patch: Partial<TableDef>) => void;
-  draft: ModelDef;
-  tables: TableCols[];
-  openedAs: string;
-  /** Nothing is wrong until the author says they are done: a half-typed key or an empty option
-   *  list is a work in progress, not a mistake. Save is the moment that judgement is asked for. */
-  tried: boolean;
-};
-
-/** One table of the open model. Placement is not here — that is the structure tree's job.
- *  `modelId` absent means the model itself is still unsaved. */
-export function TablePage({ modelId, search }: { modelId?: string; search: TableSearch }) {
+/** One table of the open model, a record of its own. Save writes it into the model record, saves the
+ *  model and returns; placement is the structure tree's job. */
+export function TablePage({ search }: { search: TableSearch }) {
   const m = useModelDraft();
   const i18n = useI18n();
   const tr: Translate = (key, ...params) => i18n.getText(key, ...params);
   const navigate = useNavigate({ from: "/$slug" });
-  // Read once: a new object resets the page's form, and a Save renames the table in the draft.
-  const [initial] = useState(() => (m.draft.tables ?? []).find((x) => x.key === search.key));
-  const [data] = useState(() => ({ table: structuredClone(initial) }));
-  const [tried, setTried] = useState(false);
-  const sections = useMemo<Section[]>(() => [
-    { id: "definition", label: tr("MODEL_DEFINITION") },
-    { id: "fields", label: tr("MODEL_FIELDS") },
-  ], [i18n]);
+  // Read once: a new object resets the record, and a Save renames the table in the model.
+  const [initial] = useState(() => (m.def.tables ?? []).find((x) => x.key === search.key));
+  const [data] = useState<Row | undefined>(() => initial && structuredClone(initial));
+  const sections = useMemo(() => tableSections(tr, initial?.role ?? "calc"), [i18n, initial]);
+  // One check per record object: the page's validate and the Fields grid's cells share it.
+  const checked = useMemo(() => {
+    const seen = new WeakMap<Row, ReturnType<typeof checkTable>>();
+    return (r: Row) => {
+      let c = seen.get(r);
+      if (!c) seen.set(r, (c = checkTable(m.def, m.tableCols, r as TableDef)));
+      return c;
+    };
+  }, [m.def, m.tableCols]);
+  const validate = useCallback((r: Row) => tableIssues(r, m.def, m.tableCols, initial?.key ?? "", tr), [m.def, m.tableCols, initial, i18n]);
 
-  const back = () => modelId
-    ? navigate({ to: "/$slug/models/$id", params: { id: modelId }, search: { section: "params" } })
+  if (!initial || !data) return <PageError error={new Error(tr("MODEL_MISSING_TABLE"))} />;
+  const back = () => m.id
+    ? navigate({ to: "/$slug/models/$id", params: { id: m.id }, search: { section: "params" } })
     : navigate({ to: "/$slug/models/new", search: { section: "params" } });
 
-  if (!initial)
-    return <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem", width: "auto" }}>{tr("MODEL_MISSING_TABLE")}</MessageStrip>;
-
-  const part = (ctx: { formData: Record<string, unknown>; updateField: (key: string, v: unknown) => void }): Part => {
-    const t = ctx.formData.table as TableDef;
-    // One cast, here, rather than one at every call site: spreading a discriminated union loses
-    // the tag, and every patch keeps the role it already had.
-    return { t, edit: (patch) => ctx.updateField("table", { ...t, ...patch } as TableDef), draft: m.draft, tables: m.tableCols, openedAs: initial.key, tried };
-  };
-
   return (
-    <ObjectPage
-      isNew
-      entity="ModelTable"
-      constraints={CONSTRAINTS}
-      data={data}
-      sections={sections}
+    <ObjectPage entity="ModelTable" localViews data={data} sections={sections} validate={validate} alwaysEdit
       header={{
-        titleField: "table",
+        titleField: "title",
         createTitle: tr("MODEL_DETAIL_TABLE", initial.role === "items" ? tr("MODEL_ITEM_GRID") : tr("MODEL_CALC_TABLE"), initial.title || initial.key),
       }}
-      localViews
-      createLabel={tr("MODEL_SAVE")}
-      onCancelCreate={() => void back()}
       breadcrumbs={[
         { text: tr("NAV_MODELS"), to: "/models" },
-        { text: m.draft.name.trim() || tr("MODEL_NEW"), to: modelId ? `/models/${modelId}` : "/models/new", search: { section: "params" } },
+        { text: m.def.name.trim() || tr("MODEL_NEW"), to: m.id ? `/models/${m.id}` : "/models/new", search: { section: "params" } },
       ]}
+      controls={builderControls({ scope: (c) => modelWithTable(m.def, c.formData as TableDef), tables: m.tableCols })}
       sectionTemplates={{
-        definition: (ctx) => <TableDefinition {...part(ctx)} />,
-        fields: (ctx) => <TableFields {...part(ctx)} />,
+        fields: (ctx) => (
+          <TableFields tb={ctx.formData as TableDef} tables={m.tableCols} checked={checked}
+            // One cast, here: spreading a discriminated union loses the tag, and every patch keeps its role.
+            edit={(patch) => ctx.update((r) => ({ ...r, ...patch }))} />
+        ),
       }}
-      onSave={async (diff) => {
-        const t = diff.table as TableDef | undefined;
-        if (t) {
-          if (checkTable(m.draft, m.tableCols, t, initial.key, tr).blocked) {
-            setTried(true);
-            throw new Error(tr("MODEL_CHECK_FIELDS"));
-          }
-          const next = commitTable(m.draft, initial.key, t);
-          m.update(() => next);
-          // A model that still fails elsewhere keeps the table in its draft and shows why on the
-          // page this returns to.
-          m.save(next);
-        }
+      onLeave={back}
+      onSave={async (_diff, { formData }) => {
+        m.saveModel(commitTable(m.def, initial.key, formData as TableDef));
         await back();
-      }}
-    />
+      }} />
   );
 }
 
-/** The table written back over the one the page opened; a rename follows into placement, or the
- *  group points at a table that is gone. */
-function commitTable(d: ModelDef, openedAs: string, t: TableDef): ModelDef {
-  return {
-    ...d,
-    tables: (d.tables ?? []).map((x) => (x.key === openedAs ? t : x)),
-    structure: openedAs === t.key ? d.structure : {
-      sections: d.structure.sections.map((sec) => ({
-        ...sec,
-        groups: sec.groups.map((g) => (isTableGroup(g) && g.table === openedAs ? { table: t.key } : g)),
-      })),
-    },
-  };
-}
-
-function TableDefinition({ t, edit, draft, tables, openedAs, tried }: Part) {
+function TableFields({ tb, tables, checked, edit }: {
+  tb: TableDef;
+  tables: TableCols[];
+  checked: (r: Row) => ReturnType<typeof checkTable>;
+  edit: (patch: Partial<TableDef>) => void;
+}) {
   const i18n = useI18n();
   const tr: Translate = (key, ...params) => i18n.getText(key, ...params);
-  const c = useMemo(() => checkTable(draft, tables, t, openedAs, tr), [draft, tables, t, openedAs, i18n]);
-  // An issue on the table as a whole (its key colliding with a parameter, say) belongs to its key.
-  const keyError = tried
-    ? (keyProblem(t.key, tr) ?? (c.keyTaken ? tr("MODEL_TABLE_KEY_TAKEN", t.key) : c.issueAt("")))
-    : undefined;
-  return (
-    <Form {...PAIRS} accessibleMode="Edit">
-      <FormGroup accessibleName={tr("MODEL_DEFINITION")} columnSpan={2}>
-        <FormItem labelContent={lbl(tr("MODEL_KEY"), tr("MODEL_KEY_HELP"), true)}>
-          <Input value={t.key} style={W} valueState={keyError ? "Negative" : "None"}
-            valueStateMessage={<div>{keyError}</div>}
-            onInput={(e) => edit({ key: e.target.value })} />
-        </FormItem>
-        <FormItem labelContent={lbl(tr("MODEL_TITLE"), tr("MODEL_TITLE_HELP"))}>
-          <Input value={t.title} style={W}
-            onInput={(e) => edit({ title: e.target.value })} />
-        </FormItem>
-        {t.role === "calc" ? (
-          <>
-            <FormItem labelContent={lbl(tr("MODEL_MIN_ROWS"), tr("MODEL_MIN_ROWS_HELP"))}>
-              <StepInput style={W} min={0} value={t.minRows ?? 0}
-                onChange={(e) => edit({ minRows: e.target.value || undefined })} />
-            </FormItem>
-            <FormItem labelContent={lbl(tr("MODEL_MAX_ROWS"), tr("MODEL_MAX_ROWS_HELP"))}>
-              <StepInput style={W} min={0} value={t.maxRows ?? 0}
-                onChange={(e) => edit({ maxRows: e.target.value || undefined })} />
-            </FormItem>
-          </>
-        ) : null}
-      </FormGroup>
-
-      {t.role === "items" ? (
-        // Full width and its own group: an expression needs the room, and it is not a field
-        // of the grid — it is how the configuration's price is divided between the rows.
-        // columnSpan={2} alone is not enough: a group's span is also its inner column-count, so
-        // the one item would sit in the left half. ui5-form-group is display:contents, which
-        // makes the item a direct child of that multicol box — so column-span reaches it.
-        <FormGroup accessibleName={tr("MODEL_COST_BASIS")} columnSpan={2}>
-          <FormItem style={{ columnSpan: "all" }}
-            labelContent={lbl(tr("MODEL_COST_BASIS"), tr("MODEL_COST_BASIS_HELP"), true)}>
-            <ExprInput value={t.basisExpr} model={c.scope} tables={tables} rows={2} style={W}
-              extraVars={rowVars(t.columns, tables)}
-              fieldId={`expr-tables[${c.at}].basisExpr`}
-              issue={tried ? issueFor(c.issues, `tables[${c.at}].basisExpr`) : undefined}
-              onChange={(v) => edit({ basisExpr: v ?? "" })} />
-          </FormItem>
-        </FormGroup>
-      ) : null}
-    </Form>
-  );
-}
-
-function TableFields({ t, edit, draft, tables, openedAs, tried }: Part) {
-  const i18n = useI18n();
-  const tr: Translate = (key, ...params) => i18n.getText(key, ...params);
-  const c = useMemo(() => checkTable(draft, tables, t, openedAs, tr), [draft, tables, t, openedAs, i18n]);
-  const issueAt = (sub: string) => (tried ? c.issueAt(sub) : undefined);
-  const colKeyError = (key: string, j: number) =>
-    tried ? (keyProblem(key, tr) ?? c.issueAt(`.columns[${j}]`) ?? c.issueAt(`.columns[${j}].key`)) : undefined;
-  const locked = lockedColumns(t);
-  const editCols = (fn: (cs: TableColumn[]) => TableColumn[]) => edit({ columns: fn(t.columns) });
-  const setCol = (j: number, patch: Partial<TableColumn>) =>
-    editCols((cs) => cs.map((x, k) => (k === j ? ({ ...x, ...patch } as TableColumn) : x)));
-
-  // Memoized: useEditGrid rebuilds its cell templates when the column set changes, and a rebuild
-  // remounts the input under the cursor.
-  const columns = useMemo<ListColumn[]>(() => [
-    { key: "key", label: tr("MODEL_KEY"), width: 160 },
-    { key: "label", label: tr("MODEL_COL_LABEL"), width: 180 },
-    { key: "type", label: tr("MODEL_COL_TYPE"), width: 128 },
-    { key: "unit", label: tr("MODEL_COL_UNIT"), width: 96 },
-    { key: "cell", label: tr("MODEL_COL_CELL"), width: 160 },
-    { key: "value", label: tr("MODEL_COL_OPTIONS") },
-  ], [i18n]);
-  const itemColumns = useMemo<ListColumn[]>(() => [
-    ...columns,
-    { key: "required", label: tr("MODEL_MANDATORY"), width: 112 },
-    { key: "map", label: tr("MODEL_B1_FIELD"), width: 240 },
-  ], [columns, i18n]);
+  // The grid paints the cells the page's messages list, off the same check.
+  const deferred = useDeferredValue(tb);
+  const errors = useMemo(() => {
+    const c = checked(deferred as unknown as Row);
+    return columnErrors(deferred, c.mine, c.at, tr);
+  }, [deferred, checked, i18n]);
+  const locked = lockedColumns(tb);
+  const items = tb.role === "items";
 
   // Only the column mapping depends on SAP. It failing must not block model authoring, so the map
-  // cell falls back to a free-text field rather than this page refusing to render.
-  // The same cached Quotations metadata the B1 pages read: it is served from entity_meta in
-  // Postgres and only re-read from $metadata on an explicit Refresh, so a day in the browser costs
-  // nothing and a UDF added in B1 shows up as soon as that row is refreshed.
-  const schema = useFieldConstraints("Quotations");
+  // cell falls back to a free-text field rather than this page refusing to render. The same cached
+  // Quotations metadata the B1 pages read: served from entity_meta, re-read from $metadata only on an
+  // explicit Refresh, so a UDF added in B1 shows up as soon as that row is refreshed.
+  const schema = useFieldConstraints(items ? "Quotations" : undefined);
   const lineFields = useMemo(() => (schema.data ? lineFieldsOf(schema.data) : null), [schema.data]);
 
-  const grid = useEditGrid(t.columns, t.role === "items" ? itemColumns : columns, {
-    key: (col, j) => (
-      <Input style={W} value={col.key} readonly={locked.has(col.key)}
-        valueState={colKeyError(col.key, j) ? "Negative" : "None"}
-        valueStateMessage={<div>{colKeyError(col.key, j)}</div>}
-        onInput={(e) => setCol(j, { key: e.target.value })} />
-    ),
-    label: (col, j) => <Input style={W} value={col.label} onInput={(e) => setCol(j, { label: e.target.value })} />,
-    type: (col, j) => (
-      <Select style={W} value={col.type}
-        onChange={(e) => setCol(j, { type: optValue(e) as TableColumn["type"] })}>
-        {(["string", "number", "boolean"] as const).map((ty) => (
-          <Option key={ty} value={ty}>{ty}</Option>
-        ))}
-      </Select>
-    ),
-    unit: (col, j) => (
-      <Input style={W} value={col.unit ?? ""} onInput={(e) => setCol(j, { unit: e.target.value || undefined })} />
-    ),
-    cell: (col, j) => (
-      <Select style={W} value={col.cell.kind}
+  // Memoized: EditGrid keeps a cell mounted while its column stays the same.
+  const columns = useMemo<ListColumn[]>(() => ownColumns([
+    { key: "key", label: tr("MODEL_KEY"), width: 160, controlType: "columnKey", required: true },
+    { key: "label", label: tr("MODEL_COL_LABEL"), width: 180, controlType: "text" },
+    { key: "type", label: tr("MODEL_COL_TYPE"), width: 128, required: true, options: (["string", "number", "boolean"] as const).map((v) => ({ value: v, label: v })) },
+    { key: "unit", label: tr("MODEL_COL_UNIT"), width: 96, controlType: "optionalText" },
+    { key: "cell", label: tr("MODEL_COL_CELL"), width: 160, controlType: "cellKind" },
+    { key: "value", label: tr("MODEL_COL_OPTIONS"), controlType: "cellValue" },
+    ...(items ? [
+      { key: "required", label: tr("MODEL_MANDATORY"), width: 112, controlType: "columnRequired" },
+      { key: "map", label: tr("MODEL_B1_FIELD"), width: 240, controlType: "lineField" },
+    ] : []),
+  ]), [i18n, items]);
+
+  const exprs = builderControls({ scope: () => checked(tb as unknown as Row).scope, tables });
+  const controls: Record<string, Control> = {
+    ...exprs,
+    columnKey: (c) => locked.has(String(c.value)) ? <Text>{String(c.value)}</Text> : exprs.text!(c),
+    cellKind: (c) => (
+      <Select style={W} value={(c.value as TableColumn["cell"]).kind} accessibleName={c.field.label}
         onChange={(e) => {
           const kind = optValue(e) as TableColumn["cell"]["kind"];
-          setCol(j, {
-            cell:
-              kind === "formula" ? { kind: "formula", expr: "0" }
-              : kind === "options" ? { kind: "options", ref: { source: "manual", options: [] } }
-              : { kind: "input" },
-          });
+          c.onChange(kind === "formula" ? { kind: "formula", expr: "0" }
+            : kind === "options" ? { kind: "options", ref: { source: "manual", options: [] } }
+            : { kind: "input" });
         }}>
         <Option value="input">{tr("MODEL_CELL_INPUT")}</Option>
         <Option value="options">{tr("MODEL_CELL_OPTIONS")}</Option>
         <Option value="formula">{tr("MODEL_CELL_FORMULA")}</Option>
       </Select>
     ),
-    value: (col, j) =>
-      col.cell.kind === "formula" ? (
-        // Same scope check.ts applies: the model's identifiers plus this row's
-        // earlier columns. A reference to a later column is an error, not a cycle.
-        <ExprInput value={col.cell.expr} model={c.scope} tables={tables}
-          extraVars={rowVars(t.columns.slice(0, j), tables)}
-          fieldId={`expr-tables[${c.at}].columns[${j}]`}
-          issue={tried ? issueFor(c.issues, `tables[${c.at}].columns[${j}].cell`) : undefined}
-          onChange={(v) => setCol(j, { cell: { kind: "formula", expr: v ?? "" } })} />
-      ) : col.cell.kind === "options" ? (
-        <OptionsCell lookup={col.cell.ref} type={col.type} tables={tables} error={issueAt(`.columns[${j}].cell`)}
-          onChange={(ref) => setCol(j, { cell: { kind: "options", ref } })} />
-      ) : (
-        <Text>{tr("MODEL_CELL_INPUT_HINT")}</Text>
-      ),
+    // What the cell holds: a formula (the model's names plus this row's earlier columns — the scope
+    // check.ts applies; a later column is an error, not a cycle), a source, or nothing to set.
+    cellValue: (c) => {
+      const col = c.formData as TableColumn;
+      const j = c.rowIndex ?? 0;
+      if (col.cell.kind === "formula")
+        return exprs.rowExpr!({
+          ...c, value: col.cell.expr, formData: { columns: tb.columns.slice(0, j) },
+          field: { ...c.field, required: true }, onChange: (v) => c.patch({ cell: { kind: "formula", expr: (v as string | undefined) ?? "" } }),
+        });
+      if (col.cell.kind === "options")
+        return <OptionsCell lookup={col.cell.ref} type={col.type} tables={tables} error={c.error}
+          onChange={(ref) => c.patch({ cell: { kind: "options", ref } })} />;
+      return <Text>{tr("MODEL_CELL_INPUT_HINT")}</Text>;
+    },
     // Code, name and quantity are what make a row a quotation line: ticked, and not the author's to untick.
-    required: (col, j) => (
-      <CheckBox accessibleName={tr("MODEL_IS_MANDATORY", col.label || col.key)}
-        checked={!!col.required || REQUIRED_ITEM_COLS.has(col.key)} disabled={REQUIRED_ITEM_COLS.has(col.key)}
-        onChange={(e) => setCol(j, { required: e.target.checked || undefined })} />
+    columnRequired: (c) => {
+      const key = String(c.formData.key);
+      return (
+        <CheckBox accessibleName={tr("MODEL_IS_MANDATORY", String(c.formData.label || key))}
+          checked={!!c.value || REQUIRED_ITEM_COLS.has(key)} disabled={REQUIRED_ITEM_COLS.has(key)}
+          onChange={(e) => c.onChange(e.target.checked || undefined)} />
+      );
+    },
+    // Quantity is not the author's to map: config-quote.ts writes DocumentLine.Quantity itself (row
+    // quantity x batch), and RESERVED_LINE_FIELDS rejects a mapping to it — so show where it lands.
+    lineField: (c) => c.formData.key === QTY_COL ? <Text>Quantity</Text> : (
+      <LineFieldHelp value={String(c.value ?? "")} fields={lineFields} loading={schema.isPending} error={c.error}
+        onChange={(field) => c.onChange(field || undefined)} />
     ),
-    // Quantity is not the author's to map: config-quote.ts writes DocumentLine.Quantity itself
-    // (row quantity x batch), and RESERVED_LINE_FIELDS rejects a mapping to it — so show where it
-    // lands and leave it alone.
-    map: (col) =>
-      t.role !== "items" ? null
-      : col.key === QTY_COL ? (
-        <Input style={W} value="Quantity" readonly />
-      ) : (
-        <LineFieldHelp value={t.map?.[col.key] ?? ""}
-          fields={lineFields} loading={schema.isPending} error={issueAt(`.map.${col.key}`)}
-          onChange={(field) => {
-            const map = { ...(t.map ?? {}) };
-            if (field) map[col.key] = field;
-            else delete map[col.key];
-            edit({ map: Object.keys(map).length ? map : undefined });
-          }} />
-      ),
-  });
+  };
+  // A line is a column, its SAP field (the table's `map`) riding along so the grid redraws it.
+  const map = (tb as { map?: Record<string, string> }).map;
+  const rows = useMemo<Row[]>(() => tb.columns.map((c) => ({ ...c, map: map?.[c.key] })), [tb.columns, map]);
 
   return (
     // A Form of its own for the card padding the definition gets, as the shared table sections do.
-    <GridForm name={tr("MODEL_FIELDS")}>
-      {/* Not an empty-state hint: the one place "no fields" (which blocks Save) is reported. */}
-      <Grid {...grid} title={tr("MODEL_FIELDS")} fill={false} selectionMode="Multiple"
-        noDataText={tried ? tr("MODEL_FIELDS_EMPTY") : undefined}
-        toolbarActions={(sel) => {
-          // Locked fields stay put — their key is read-only for the same reason.
-          const gone = new Set([...positions(sel.rows)].filter((j) => !locked.has(t.columns[j]?.key ?? "")));
-          return (
-            <>
-              <Button icon="add" design="Transparent" onClick={() =>
-                editCols((cs) => [
-                  ...cs,
-                  { key: newKey("col", cs.map((x) => x.key)), label: copy(tr, "MODEL_DEFAULT_FIELD", "Field"), type: "number", cell: { kind: "input" } },
-                ])}>{tr("MODEL_ADD_FIELD")}</Button>
-              <Button icon="delete" design="Transparent" disabled={!gone.size}
-                onClick={() => {
-                  // row ids are positions, so a kept selection would land on the rows that moved up
-                  sel.clear();
-                  editCols((cs) => cs.filter((_, k) => !gone.has(k)));
-                }}>{tr("MODEL_DELETE")}</Button>
-            </>
-          );
-        }} />
-    </GridForm>
+    <div data-field="columns">
+      <GridForm name={tr("MODEL_FIELDS")}>
+        <EditGrid title={tr("MODEL_FIELDS")} table="columns" columns={columns} rows={rows} errors={errors}
+          controls={controls}
+          newRow={(all) => newColumn(all.map((r) => String(r.key)), copy(tr, "MODEL_DEFAULT_FIELD", "Field")) as unknown as Row}
+          onChange={(next) => {
+            // Locked fields stay put — their key is read-only for the same reason.
+            const kept = next.length < rows.length ? rows.filter((r) => next.includes(r) || locked.has(String(r.key))) : next;
+            const map = Object.fromEntries(kept.flatMap((r) => (r.map ? [[String(r.key), String(r.map)]] : [])));
+            edit({
+              columns: kept.map(({ map: _map, ...c }) => c as TableColumn),
+              map: Object.keys(map).length ? map : undefined,
+            } as Partial<TableDef>);
+          }} />
+      </GridForm>
+    </div>
   );
 }
 
@@ -396,9 +212,7 @@ function OptionsCell({ lookup, type, tables, error, onChange }: {
         valueState={error ? "Negative" : "None"} valueStateMessage={<div>{error}</div>}
         onChange={(e) => {
           const name = optValue(e);
-          onChange(name === NONE
-            ? { source: "manual", options: [] }
-            : masterdataRef(tables.find((t) => t.name === name)));
+          onChange(name === NONE ? { source: "manual", options: [] } : masterdataRef(tables.find((t) => t.name === name)));
         }}>
         <Option value={NONE}>{i18n.getText("MODEL_LIST_DOTS")}</Option>
         {tables.map((t) => (

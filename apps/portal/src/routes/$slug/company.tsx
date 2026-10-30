@@ -2,12 +2,14 @@ import { useState } from "react";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Button, Form, FormItem, Label, List, ListItemStandard, MessageStrip, ObjectPage, ObjectPageSection, ObjectPageTitle,
-  Text, Title,
+  Button, Form, FormGroup, FormItem, Label, List, ListItemStandard, MessageStrip, ObjectPage, ObjectPageSection, ObjectPageTitle,
+  Text, Title, Toolbar, ToolbarItem,
 } from "@ui5/webcomponents-react";
 import { CompanyPeople, type PortalMemberRow } from "@confire/ui/portal/CompanyPeople.tsx";
 import { InviteDialog } from "@confire/ui/portal/InviteDialog.tsx";
 import { confirm } from "@confire/ui/confirm.ts";
+import { FORM_LAYOUT } from "@confire/ui/formLayout.ts";
+import { PageMessages, useRefusals, type PageMessage } from "@confire/ui/PageMessages.tsx";
 import { toast } from "@confire/ui/toast.ts";
 import { meQuery, orpc, type Me } from "../../orpc.ts";
 import { useI18n } from "../../i18n.ts";
@@ -56,6 +58,15 @@ function Company() {
     },
   }));
   const busy = setRole.isPending || remove.isPending || cancelInvite.isPending;
+  // A refused role change or removal opens the messages; a list that failed to load does not.
+  const refused = useRefusals(failed);
+  const peopleGroup = { group: i18n.getText("PORTAL_PEOPLE"), section: "people" };
+  const messages: PageMessage[] = [
+    ...(failed ? [{ id: "failed", type: "Negative" as const, text: failed.message, detail: i18n.getText("PORTAL_CHANGE_FAILED"), ...peopleGroup }] : []),
+    ...(people.error ? [{ id: "people", type: "Negative" as const, text: people.error.message, ...peopleGroup }] : []),
+  ];
+  const [page, setPage] = useState<HTMLElement | null>(null);
+  const goSection = (section: string) => page?.querySelector<HTMLElement>(`[id="ObjectPageSection-${section}"]`)?.scrollIntoView({ block: "start" });
   const domainList = (domains.data ?? []).map((d) => d.domain);
 
   const removeMember = async (m: PortalMemberRow) => {
@@ -79,11 +90,19 @@ function Company() {
 
   return (
     <ObjectPage
+      ref={setPage}
       hidePinButton
       titleArea={
         <ObjectPageTitle
           header={<Title>{company.data?.cardName ?? me.company.cardName}</Title>}
           subHeader={<Text>{[me.company.cardCode, typeLabel].filter(Boolean).join(" · ")}</Text>}
+          actionsBar={
+            <Toolbar design="Transparent">
+              <ToolbarItem overflowPriority="NeverOverflow">
+                <PageMessages messages={messages} openOn={refused} onSection={goSection} />
+              </ToolbarItem>
+            </Toolbar>
+          }
         />
       }
     >
@@ -93,18 +112,18 @@ function Company() {
             {i18n.getText("PORTAL_COMPANY_UNREACHABLE", tenant)}
           </MessageStrip>
         ) : null}
-        <Form layout="S1 M2 L2 XL2" labelSpan="S12 M4 L4 XL4">
-          {line(i18n.getText("PORTAL_NAME"), s?.CardName ?? me.company.cardName)}
-          {line(i18n.getText("PORTAL_CUSTOMER_NUMBER"), me.company.cardCode)}
-          {line(i18n.getText("PORTAL_PHONE"), s?.Phone1)}
-          {line(i18n.getText("PORTAL_EMAIL"), s?.EmailAddress)}
-          {line(i18n.getText("PORTAL_ADDRESS"), [s?.Address, [s?.ZipCode, s?.City].filter(Boolean).join(" "), s?.Country].filter(Boolean).join(", "))}
+        <Form layout={FORM_LAYOUT} accessibleMode="Display" itemSpacing="Large">
+          <FormGroup>
+            {line(i18n.getText("PORTAL_NAME"), s?.CardName ?? me.company.cardName)}
+            {line(i18n.getText("PORTAL_CUSTOMER_NUMBER"), me.company.cardCode)}
+            {line(i18n.getText("PORTAL_PHONE"), s?.Phone1)}
+            {line(i18n.getText("PORTAL_EMAIL"), s?.EmailAddress)}
+            {line(i18n.getText("PORTAL_ADDRESS"), [s?.Address, [s?.ZipCode, s?.City].filter(Boolean).join(" "), s?.Country].filter(Boolean).join(", "))}
+          </FormGroup>
         </Form>
       </ObjectPageSection>
 
       <ObjectPageSection id="people" titleText={i18n.getText("PORTAL_PEOPLE")}>
-        {failed ? <MessageStrip design="Negative" hideCloseButton>{failed.message}</MessageStrip> : null}
-        {people.error ? <MessageStrip design="Negative" hideCloseButton>{people.error.message}</MessageStrip> : null}
         {/* Remounted on every refetch: a refused role change leaves UI5's Select showing the value
             that was picked, and identical data would not re-render it. */}
         <CompanyPeople key={people.dataUpdatedAt} members={people.data?.members ?? []} invitations={people.data?.invitations ?? []}

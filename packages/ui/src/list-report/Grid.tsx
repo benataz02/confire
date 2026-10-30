@@ -14,6 +14,7 @@ import { endAligned, formatValue, optionLabel, parseIsoDate } from "../format.ts
 import { linkValue } from "../navigation.ts";
 import { GridSettingsDialog } from "./GridSettingsDialog.tsx";
 import type { ListColumn, Row, ViewState } from "../types.ts";
+import { FORM_LAYOUT } from "../formLayout.ts";
 
 // beas-grid, read mode (LIST-REPORT-OBJECT-PAGE.md §3.4) over AnalyticalTable: the view decides
 // which columns show, in what order, at which widths, sorted and grouped how. Sorting
@@ -96,20 +97,21 @@ const useExpandGroups = (hooks: ReactTableHooks) => {
  *  ConfiguratorForm's table groups): the Form lays a group's items in `column-count` columns, so the
  *  item breaks out with `column-span: all` (FormItem's columnSpan is deprecated since UI5 2.23 and
  *  does nothing), and its label part is hidden — the Form's title or the Grid's toolbar names the
- *  table. */
+ *  table. Labels sit beside their fields, so the item's own grid keeps a column for one: the
+ *  content spans them all, or the table would fill only the label's. */
 export const TABLE_ITEM = "confire-table-item";
 if (typeof document !== "undefined" && !document.getElementById(TABLE_ITEM)) {
   const el = document.createElement("style");
   el.id = TABLE_ITEM;
-  el.textContent = `.${TABLE_ITEM}{column-span:all}.${TABLE_ITEM}::part(label){display:none}`;
+  el.textContent = `.${TABLE_ITEM}{column-span:all}.${TABLE_ITEM}::part(label){display:none}`
+    + `.${TABLE_ITEM}::part(content){grid-column:1/-1}`;
   document.head.appendChild(el);
 }
 
 /** A `statusRows` grid's closed line (global.css). */
 const CLOSED_ROW = "confire-row-closed";
 
-// ConfiguratorForm's FORM_PROPS, so a grid sits in a page the way ConfigTable sits in a section.
-const GRID_FORM = { accessibleMode: "Edit", labelSpan: "S12 M12 L12 XL12", layout: "S1 M2 L2 XL2", headerLevel: "H5" } as const;
+const GRID_FORM = { accessibleMode: "Edit", layout: FORM_LAYOUT, headerLevel: "H5" } as const;
 
 /** A grid in a Form of its own: one full-width group, as ConfiguratorForm places a table. With
  *  `headerText` the Form titles the table; without, `name` only labels it (a section already does). */

@@ -103,7 +103,7 @@ function OnboardingForm() {
               void navigate({ to: "/$slug" });
             }}
             // Nowhere to go back to without a seat: the user's own places on the sign-in host.
-            onCancelCreate={() => void hardRedirect(authUrl("/login"))}
+            onLeave={() => void hardRedirect(authUrl("/login"))}
           />
         )}
       </div>

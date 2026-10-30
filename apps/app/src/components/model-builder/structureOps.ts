@@ -1,24 +1,28 @@
-import { isTableGroup, type FieldGroup, type ModelDef } from "@confire/config-engine";
+import { isTableGroup, tokenize, type FieldGroup, type Group, type ModelDef, type Param, type TableDef } from "@confire/config-engine";
 
 // Pure structure-tree edits for the Parameters tab. All functions return new ModelDefs.
 
 // A table is a group, so it is addressed by position like a group is — `t:` rather than `g:` only
-// so the tree can tell the two apart when drawing a row and picking its actions. That leaves the
-// parameter as the tree's only leaf.
+// so the tree can tell the two apart when drawing a row. That leaves the parameter as the tree's
+// only leaf. A formula is no node of the structure (the model stores nothing positional about
+// one), but it is a row of the same table, so it is addressed here too: by its index.
 export type RowRef =
   | { kind: "section"; s: number }
   | { kind: "group"; s: number; g: number }
   | { kind: "table"; s: number; g: number }
-  | { kind: "param"; key: string };
+  | { kind: "param"; key: string }
+  | { kind: "formula"; i: number };
 
 export const rowKeyOf = (r: RowRef): string =>
   r.kind === "section" ? `s:${r.s}`
   : r.kind === "group" ? `g:${r.s}.${r.g}`
   : r.kind === "table" ? `t:${r.s}.${r.g}`
+  : r.kind === "formula" ? `c:${r.i}`
   : `p:${r.key}`;
 
 export function parseRowKey(k: string): RowRef {
   if (k.startsWith("s:")) return { kind: "section", s: Number(k.slice(2)) };
+  if (k.startsWith("c:")) return { kind: "formula", i: Number(k.slice(2)) };
   if (k.startsWith("g:") || k.startsWith("t:")) {
     const [s, g] = k.slice(2).split(".").map(Number);
     return { kind: k[0] === "g" ? "group" : "table", s: s!, g: g! };
@@ -46,7 +50,7 @@ const fieldGroupAt = (def: ModelDef, s: number, g: number): FieldGroup | undefin
 export function canDrop(def: ModelDef, srcKey: string, dstKey: string, placement: Placement): boolean {
   const src = parseRowKey(srcKey);
   const dst = parseRowKey(dstKey);
-  if (srcKey === dstKey) return false;
+  if (srcKey === dstKey || src.kind === "formula" || dst.kind === "formula") return false;
   // A parameter goes into a field group or beside another parameter. Dropping one onto a table
   // group is the one move that has to be refused here: a table group holds no parameter list, so
   // the drop would silently vanish.
@@ -146,7 +150,7 @@ export function applyMove(def: ModelDef, srcKey: string, dstKey: string, placeme
     };
   }
 
-  // section reorder
+  if (src.kind !== "section") return def;
   const sec = def.structure.sections[src.s]!;
   const rest = def.structure.sections.filter((_, i) => i !== src.s);
   const dstSecKey = def.structure.sections[(dst as { s: number }).s]!.key;
@@ -154,33 +158,44 @@ export function applyMove(def: ModelDef, srcKey: string, dstKey: string, placeme
   return { ...def, structure: { sections: [...rest.slice(0, at), sec, ...rest.slice(at)] } };
 }
 
-export function removeFromStructure(def: ModelDef, ref: RowRef): ModelDef {
-  if (ref.kind === "param") return stripParam(def, ref.key);
-  if (atGroupLevel(ref))
-    return {
-      ...def,
-      structure: {
-        sections: def.structure.sections.map((s, si) =>
-          si === ref.s ? { ...s, groups: s.groups.filter((_, gi) => gi !== ref.g) } : s,
-        ),
-      },
-    };
-  return { ...def, structure: { sections: def.structure.sections.filter((_, si) => si !== ref.s) } };
+/** What a selection acts on: a row inside a picked section or group goes with it, so it is dropped
+ *  rather than deleted or copied a second time. */
+export function outermost(def: ModelDef, refs: RowRef[]): RowRef[] {
+  const secs = new Set(refs.flatMap((r) => (r.kind === "section" ? [r.s] : [])));
+  const grps = new Set(refs.flatMap((r) => (r.kind === "group" ? [`${r.s}.${r.g}`] : [])));
+  return refs.filter((r) => {
+    if (atGroupLevel(r)) return !secs.has((r as { s: number }).s);
+    if (r.kind !== "param") return true;
+    const at = findParam(def, r.key);
+    return !at || (!secs.has(at.s) && !grps.has(`${at.s}.${at.g}`));
+  });
 }
 
-/** Strip a node and drop the parameter/table defs it held. Unplaced leftovers have no repair UI. */
-export function deleteNode(def: ModelDef, ref: RowRef): ModelDef {
-  const groups = ref.kind === "section" ? (def.structure.sections[ref.s]?.groups ?? [])
-    : ref.kind === "group" || ref.kind === "table" ? [def.structure.sections[ref.s]?.groups[ref.g]]
-    : [];
-  const paramKeys = new Set(ref.kind === "param" ? [ref.key]
-    : groups.flatMap((g) => (g && !isTableGroup(g) ? g.params : [])));
-  const tableKeys = new Set(groups.flatMap((g) => (g && isTableGroup(g) ? [g.table] : [])));
-  const out = removeFromStructure(def, ref);
+/** Strip the rows and drop the parameter/table defs they held, in one pass: the refs are positions,
+ *  so deleting them one after another would shift the ones still to go. */
+export function deleteNodes(def: ModelDef, refs: RowRef[]): ModelDef {
+  const secs = new Set(refs.flatMap((r) => (r.kind === "section" ? [r.s] : [])));
+  const grps = new Set(refs.flatMap((r) => (atGroupLevel(r) ? [`${(r as { s: number }).s}.${(r as { g: number }).g}`] : [])));
+  const formulas = new Set(refs.flatMap((r) => (r.kind === "formula" ? [r.i] : [])));
+  const params = new Set(refs.flatMap((r) => (r.kind === "param" ? [r.key] : [])));
+  const tables = new Set<string>();
+  def.structure.sections.forEach((s, si) => s.groups.forEach((g, gi) => {
+    if (!secs.has(si) && !grps.has(`${si}.${gi}`)) return;
+    if (isTableGroup(g)) tables.add(g.table);
+    else g.params.forEach((p) => params.add(p));
+  }));
   return {
-    ...out,
-    parameters: out.parameters.filter((p) => !paramKeys.has(p.key)),
-    tables: (out.tables ?? []).filter((t) => !tableKeys.has(t.key)),
+    ...def,
+    parameters: def.parameters.filter((p) => !params.has(p.key)),
+    computed: def.computed.filter((_, i) => !formulas.has(i)),
+    tables: (def.tables ?? []).filter((t) => !tables.has(t.key)),
+    structure: {
+      sections: def.structure.sections.flatMap((s, si) => (secs.has(si) ? [] : [{
+        ...s,
+        groups: s.groups.flatMap((g, gi) => (grps.has(`${si}.${gi}`) ? []
+          : [isTableGroup(g) ? g : { ...g, params: g.params.filter((p) => !params.has(p)) }])),
+      }])),
+    },
   };
 }
 
@@ -208,28 +223,186 @@ export const tableKeyAt = (def: ModelDef, s: number, g: number): string | undefi
   return grp && isTableGroup(grp) ? grp.table : undefined;
 };
 
-/** Clone a param, uniquify its key, and insert it after the source (same group if placed). */
-export function duplicateParam(def: ModelDef, key: string): ModelDef {
-  const src = def.parameters.find((p) => p.key === key);
-  if (!src) return def;
-  const taken = [...def.parameters.map((p) => p.key), ...def.computed.map((c) => c.key)];
-  let copyKey = key, n = 2;
-  while (taken.includes(copyKey)) copyKey = `${key}${n++}`;
-  const copy = { ...structuredClone(src), key: copyKey };
-  const at = def.parameters.findIndex((p) => p.key === key);
+const isItemsTable = (def: ModelDef, key: string) => (def.tables ?? []).some((t) => t.key === key && t.role === "items");
+
+/** The items grid is the one row that can be neither deleted nor copied: checkModel requires
+ *  exactly one. (A section that holds it still can — its copy simply leaves the grid out.) */
+export const isItemsRow = (def: ModelDef, r: RowRef) =>
+  r.kind === "table" && isItemsTable(def, tableKeyAt(def, r.s, r.g) ?? "");
+
+/** One key a duplicate creates: proposed unique, and the author's to change before it applies.
+ *  `id` names the copied node; `from` is the key it copies. A copied section's groups keep their
+ *  keys — group keys are unique per section, and the copy is a section of its own. */
+export type CopyKey = { id: string; kind: "section" | "group" | "param" | "table" | "formula"; from: string; key: string };
+
+/** `door` → `door2`, `door2` → `door3`: a copy of a copy counts on rather than growing `door22`. */
+function nextKey(from: string, taken: string[]): string {
+  const base = from.replace(/\d+$/, "") || from;
+  let n = 2;
+  while (taken.includes(`${base}${n}`)) n++;
+  return `${base}${n}`;
+}
+
+/** Which keys a copy draws from: one pool per namespace. Parameters and formulas share one, which is
+ *  the expression scope; a group's is its section's. */
+const poolOf = (k: CopyKey) =>
+  k.kind === "param" || k.kind === "formula" ? "ident" : k.kind === "group" ? `group:${k.id.slice(2).split(".")[0]}` : k.kind;
+
+function takenIn(def: ModelDef, pool: string): string[] {
+  if (pool === "ident") return [...def.parameters.map((p) => p.key), ...def.computed.map((c) => c.key)];
+  if (pool === "section") return def.structure.sections.map((s) => s.key);
+  if (pool === "table") return (def.tables ?? []).map((t) => t.key);
+  const s = Number(pool.slice("group:".length));
+  return def.structure.sections[s]?.groups.flatMap((g) => (isTableGroup(g) ? [] : [g.key])) ?? [];
+}
+
+/** Every key duplicating `refs` (outermost, no items row) creates, each proposed unique. */
+export function copyKeys(def: ModelDef, refs: RowRef[]): CopyKey[] {
+  const out: CopyKey[] = [];
+  const pools = new Map<string, string[]>();
+  const add = (id: string, kind: CopyKey["kind"], from: string) => {
+    const k: CopyKey = { id, kind, from, key: "" };
+    const pool = poolOf(k);
+    const taken = pools.get(pool) ?? takenIn(def, pool);
+    pools.set(pool, taken);
+    k.key = nextKey(from, taken);
+    taken.push(k.key);
+    out.push(k);
+  };
+  const contents = (groups: Group[]) => groups.forEach((g) => {
+    if (!isTableGroup(g)) g.params.forEach((p) => add(`p:${p}`, "param", p));
+    else if (!isItemsTable(def, g.table)) add(`t:${g.table}`, "table", g.table);
+  });
+  for (const r of refs) {
+    if (r.kind === "section") {
+      const s = def.structure.sections[r.s];
+      if (s) { add(`s:${r.s}`, "section", s.key); contents(s.groups); }
+    } else if (r.kind === "group") {
+      const g = fieldGroupAt(def, r.s, r.g);
+      if (g) { add(`g:${r.s}.${r.g}`, "group", g.key); contents([g]); }
+    } else if (r.kind === "table") {
+      const key = tableKeyAt(def, r.s, r.g);
+      if (key && !isItemsTable(def, key)) add(`t:${key}`, "table", key);
+    } else if (r.kind === "param") add(`p:${r.key}`, "param", r.key);
+    else {
+      const c = def.computed[r.i];
+      if (c) add(`c:${r.i}`, "formula", c.key);
+    }
+  }
+  return out;
+}
+
+/** Each key's problem, by id: not an identifier, or already used in its namespace — by the model or
+ *  by another copy. */
+export function copyKeyIssues(def: ModelDef, keys: CopyKey[]): Record<string, "invalid" | "taken"> {
+  const out: Record<string, "invalid" | "taken"> = {};
+  for (const k of keys) {
+    const pool = poolOf(k);
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k.key)) out[k.id] = "invalid";
+    else if (takenIn(def, pool).includes(k.key) || keys.some((o) => o !== k && poolOf(o) === pool && o.key === k.key))
+      out[k.id] = "taken";
+  }
+  return out;
+}
+
+/** An expression with identifiers renamed. Token spans, not a regex: a string literal that happens
+ *  to read like a key stays as it is. One that does not tokenize is left for checkModel to report.
+ *  ponytail: exact identifiers only — a derived column (`door_Name`) or a table sum (`holes_count`)
+ *  keeps the original's prefix; rewrite those too if copied sections start reading them. */
+export function renameIdents(src: string, to: Map<string, string>): string {
+  if (!to.size) return src;
+  let toks: ReturnType<typeof tokenize>;
+  try { toks = tokenize(src); } catch { return src; }
+  let out = "", at = 0;
+  for (const tk of toks) {
+    const next = tk.k === "ident" ? to.get(tk.v) : undefined;
+    if (next === undefined) continue;
+    out += src.slice(at, tk.from) + next;
+    at = tk.to;
+  }
+  return out + src.slice(at);
+}
+
+const PARAM_EXPRS = ["defaultExpr", "visibleWhen", "requiredWhen", "priceExpr"] as const;
+
+/** Copy the rows under `keys` (from copyKeys), each appended at the bottom of where its source is:
+ *  a section after the last section, a group or table at the end of its section, a parameter at
+ *  the end of its group, a formula after the last formula. A copied group or section takes its
+ *  whole content, and the copies' expressions read each other: a copied rule naming a parameter
+ *  copied alongside it names the copy. */
+export function duplicateNodes(def: ModelDef, refs: RowRef[], keys: CopyKey[]): ModelDef {
+  const keyOf = new Map(keys.map((k) => [k.id, k.key]));
+  const idents = new Map(keys.filter((k) => k.kind === "param" || k.kind === "formula").map((k) => [k.from, k.key]));
+  const re = (src: string) => renameIdents(src, idents);
+  const params: Param[] = [];
+  const computed: ModelDef["computed"] = [];
+  const tables: TableDef[] = [];
+
+  const copyParam = (key: string): string[] => {
+    const to = keyOf.get(`p:${key}`);
+    const p = def.parameters.find((x) => x.key === key);
+    if (!to || !p) return [];
+    const copy: Param = { ...structuredClone(p), key: to };
+    for (const f of PARAM_EXPRS) if (copy[f] !== undefined) copy[f] = re(copy[f]);
+    params.push(copy);
+    return [to];
+  };
+  const copyTable = (key: string): Group[] => {
+    const to = keyOf.get(`t:${key}`);
+    const t = (def.tables ?? []).find((x) => x.key === key);
+    if (!to || !t) return [];
+    tables.push({
+      ...structuredClone(t), key: to,
+      columns: t.columns.map((c) => (c.cell.kind === "formula" ? { ...c, cell: { ...c.cell, expr: re(c.cell.expr) } } : c)),
+    });
+    return [{ table: to }];
+  };
+  const copyGroups = (groups: Group[], key?: string): Group[] => groups.flatMap((g) => (isTableGroup(g)
+    ? copyTable(g.table)
+    : [{ ...g, key: key ?? g.key, params: g.params.flatMap(copyParam) }]));
+
+  const intoSection = new Map<number, Group[]>();
+  const intoGroup = new Map<string, string[]>();
+  const push = <K, V>(m: Map<K, V[]>, k: K, v: V[]) => m.set(k, [...(m.get(k) ?? []), ...v]);
+  const sections: ModelDef["structure"]["sections"] = [];
+  for (const r of refs) {
+    if (r.kind === "section") {
+      const s = def.structure.sections[r.s];
+      const key = keyOf.get(`s:${r.s}`);
+      if (s && key) sections.push({ ...s, key, groups: copyGroups(s.groups) });
+    } else if (r.kind === "group") {
+      const g = fieldGroupAt(def, r.s, r.g);
+      const key = keyOf.get(`g:${r.s}.${r.g}`);
+      if (g && key) push(intoSection, r.s, copyGroups([g], key));
+    } else if (r.kind === "table") {
+      push(intoSection, r.s, copyTable(tableKeyAt(def, r.s, r.g) ?? ""));
+    } else if (r.kind === "param") {
+      const at = findParam(def, r.key);
+      const copied = copyParam(r.key);
+      if (at) push(intoGroup, `${at.s}.${at.g}`, copied);
+    } else {
+      const c = def.computed[r.i];
+      const key = keyOf.get(`c:${r.i}`);
+      if (c && key) computed.push({ key, expr: re(c.expr) });
+    }
+  }
+
   return {
     ...def,
-    parameters: [...def.parameters.slice(0, at + 1), copy, ...def.parameters.slice(at + 1)],
+    parameters: [...def.parameters, ...params],
+    computed: [...def.computed, ...computed],
+    tables: [...(def.tables ?? []), ...tables],
     structure: {
-      sections: def.structure.sections.map((s) => ({
-        ...s,
-        groups: s.groups.map((g) => {
-          if (isTableGroup(g)) return g;
-          const i = g.params.indexOf(key);
-          if (i < 0) return g;
-          return { ...g, params: [...g.params.slice(0, i + 1), copyKey, ...g.params.slice(i + 1)] };
-        }),
-      })),
+      sections: [
+        ...def.structure.sections.map((s, si) => ({
+          ...s,
+          groups: [
+            ...s.groups.map((g, gi) => (isTableGroup(g) ? g : { ...g, params: [...g.params, ...(intoGroup.get(`${si}.${gi}`) ?? [])] })),
+            ...(intoSection.get(si) ?? []),
+          ],
+        })),
+        ...sections,
+      ],
     },
   };
 }

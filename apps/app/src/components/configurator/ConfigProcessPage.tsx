@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BusyIndicator, Button, IllustratedMessage, ListItemStandard, MessageStrip,
+  BusyIndicator, Button, IllustratedMessage, ListItemStandard,
   Link, ObjectPage, ObjectPageSection, ObjectPageTitle, Panel, Popover, ResponsivePopover, SelectDialog, Tag, Text, Title,
   ToggleButton, Toolbar,
   ToolbarButton, ToolbarItem,
@@ -28,7 +28,7 @@ import { configMessages } from "./configMessages.ts";
 import { GeneralForm } from "./GeneralForm.tsx";
 import { ProcessFooter } from "./ProcessFooter.tsx";
 import { useConfigProcess } from "./useConfigProcess.ts";
-import { PageMessages } from "../PageMessages.tsx";
+import { PageMessages, useRefusals } from "@confire/ui/PageMessages.tsx";
 import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
 import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import { useAssistantShell } from "../../assistant/AssistantProvider.tsx";
@@ -65,6 +65,13 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   });
   const { q, view, project, form, selection, queue } = proc;
   const getKey = orpc.configs.get.queryKey({ input: { id } });
+  // What opens the messages by itself: an edit the server refused, a calculation that failed, a
+  // create that did not go through. Never an edit on its way, never a warning.
+  const refused = useRefusals(
+    queue.error?.refused ? queue.error : null,
+    view?.calculation.state === "failed" ? `calc:${view.calculation.message ?? ""}` : null,
+    proc.create.error,
+  );
 
   // The batch quantity the items grid and the rail are priced at. Read through `batches` below, so
   // a deleted quantity falls back to the first rather than pricing at one that no longer exists.
@@ -171,10 +178,19 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
     return (
       <ObjectPage titleArea={
         <ObjectPageTitle header={<Title>{t("CONFIG_NEW")}</Title>}
-          breadcrumbs={<PageBreadcrumbs items={[{ text: t("NAV_CONFIGS"), to: "/configs" }]} current={t("CONFIG_NEW")} />} />
+          breadcrumbs={<PageBreadcrumbs items={[{ text: t("NAV_CONFIGS"), to: "/configs" }]} current={t("CONFIG_NEW")} />}
+          actionsBar={
+            <Toolbar design="Transparent">
+              <ToolbarItem overflowPriority="NeverOverflow">
+                <PageMessages openOn={refused} onSection={() => {}} messages={proc.create.error ? [{
+                  id: "create", type: "Negative", text: proc.create.error.message, detail: t("CONFIG_CHANGE_FAILED"),
+                  group: t("CONFIG_GENERAL"), section: GENERAL_SECTION,
+                }] : []} />
+              </ToolbarItem>
+            </Toolbar>
+          } />
       }>
         <ObjectPageSection id={GENERAL_SECTION} titleText={t("CONFIG_GENERAL")}>
-          {proc.create.error ? <MessageStrip design="Negative" hideCloseButton>{proc.create.error.message}</MessageStrip> : null}
           {general}
         </ObjectPageSection>
       </ObjectPage>
@@ -361,7 +377,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
               {/* A Toolbar only measures — and overflows — its own item types: the two plain
                   controls are wrapped, everything else is a ToolbarButton. */}
               <ToolbarItem overflowPriority="NeverOverflow">
-                <PageMessages messages={messages} okText={t("CONFIG_OK")}
+                <PageMessages messages={messages} okText={t("CONFIG_OK")} openOn={refused}
                   onSection={goSection} />
               </ToolbarItem>
               {/* An edit that never reached the server is kept; this sends it again. */}

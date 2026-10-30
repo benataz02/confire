@@ -5,7 +5,7 @@ import {
 import generateHighlightedMarkup from "@ui5/webcomponents-base/dist/util/generateHighlightedMarkup.js";
 import { DslError, parse, type Issue, type ModelDef } from "@confire/config-engine";
 import { useI18n } from "../../i18n.ts";
-import { complete, matches, scopeSuggestions, trailingIdent, type Suggestion, type TableCols } from "./exprHelpers.ts";
+import { complete, issueText, matches, scopeSuggestions, trailingIdent, type Suggestion, type TableCols } from "./exprHelpers.ts";
 
 // The one expression editor used everywhere in the builder: monospace, parse-on-change with
 // span-accurate messages, trailing-token suggestions in the Input's native popup. Each
@@ -42,8 +42,8 @@ export function ExprInput({
   placeholder?: string;
   /** empty input -> undefined (for condition/when/default fields) */
   optional?: boolean;
-  /** semantic issue from checkModel for this field, shown when the text parses */
-  issue?: Issue;
+  /** checkModel's issue for this field, or its message (the record's), shown when the text parses */
+  issue?: Issue | string;
   /** DOM id (MessageView jump target) */
   fieldId?: string;
   /** render as a growing TextArea of this many rows instead of a one-line Input */
@@ -67,11 +67,8 @@ export function ExprInput({
     }
   }, [text]);
   const error = parseError ?? issue ?? null;
-  const errorText = error
-    ? `${error.message}${error.from !== undefined
-      ? i18n.getText("MODEL_EXPR_AT", text.slice(error.from, error.to) || i18n.getText("MODEL_EXPR_END"))
-      : ""}`
-    : "";
+  const errorText = !error ? "" : typeof error === "string" ? error
+    : issueText(error, text, (key, ...params) => i18n.getText(key, ...params));
 
   const sugg = matches(all, text).slice(0, 8);
   const emit = (v: string | undefined) => onChange(!v && optional ? undefined : (v ?? ""));

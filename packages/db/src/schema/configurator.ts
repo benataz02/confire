@@ -18,8 +18,8 @@ export const configModel = pgTable(
     tenantId: text("tenant_id").notNull(),
     name: text("name").notNull(),
     definition: jsonb("definition").$type<ModelDef>().notNull(),
-    // Customer portal (spec D15, D21): columns, not ModelDef keys, so publishing never bumps
-    // `updatedAt` — that would invalidate every stored calculation of the model.
+    // Customer portal (spec D15, D21): columns, not ModelDef keys. Saved by models.save beside the
+    // definition; only a definition change bumps `updatedAt`, which makes stored calculations stale.
     portal: boolean("portal").notNull().default(false),
     portalPricing: text("portal_pricing").$type<PortalPricing>().notNull().default("request"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

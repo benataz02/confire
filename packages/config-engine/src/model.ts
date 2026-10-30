@@ -54,7 +54,7 @@ export const ParamZ = z.object({
   key: KeyZ,
   label: z.string(),
   type: z.enum(["string", "number", "boolean"]),
-  ui: z.enum(["input", "select", "radio", "checkbox", "multicombo", "step"]),
+  ui: z.enum(["input", "textarea", "select", "radio", "checkbox", "multicombo", "slider"]),
   domain: z
     .union([
       z.object({ kind: z.literal("options"), ref: LookupRefZ }),
