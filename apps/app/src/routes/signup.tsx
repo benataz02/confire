@@ -1,7 +1,8 @@
 import { createFileRoute, redirect, Link } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Input, Button, MessageStrip } from "@ui5/webcomponents-react";
+import { MessageStrip } from "@ui5/webcomponents-react";
+import { AuthCard, AuthField, AuthHead, AuthTile } from "@confire/ui/auth/AuthLayout.tsx";
 import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { SocialButtons } from "../components/SocialButtons.tsx";
@@ -58,50 +59,44 @@ function Signup() {
   if (signUp.isSuccess) {
     return (
       <AuthLayout>
-        <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_CHECK_INBOX")}</h2>
-        <p className="auth-sub">
-          {emph(i18n.getText("SHELL_AUTH_VERIFY_SENT", "\u0000"), email)}
-        </p>
-        <p className="auth-alt">
-          {i18n.getText("SHELL_AUTH_VERIFY_RETRY")} <Link to="/login" search={{ redirect: redirectTo, email }}>{i18n.getText("SHELL_AUTH_SIGN_IN")}</Link>
-        </p>
+        <AuthHead title={i18n.getText("SHELL_AUTH_CHECK_INBOX")} />
+        <AuthCard center>
+          <AuthTile icon="email-read" />
+          <p className="auth-body">{emph(i18n.getText("SHELL_AUTH_VERIFY_SENT", "\u0000"), email)}</p>
+          <p className="auth-note">{i18n.getText("SHELL_AUTH_VERIFY_RETRY")}</p>
+          <Link className="auth-btn" to="/login" search={{ redirect: redirectTo, email }}>{i18n.getText("SHELL_AUTH_BACK_SIGN_IN")}</Link>
+        </AuthCard>
       </AuthLayout>
     );
   }
 
   return (
     <AuthLayout>
-      <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_CREATE_TITLE")}</h2>
-      <p className="auth-sub">{i18n.getText("SHELL_AUTH_CREATE_SUB")}</p>
-      {signUp.error ? <MessageStrip design="Negative" hideCloseButton>{signUp.error.message}</MessageStrip> : null}
-      <label className="auth-field">
-        <span>{i18n.getText("SHELL_AUTH_NAME")}</span>
-        <Input value={name} onInput={(e) => setName(e.target.value)} />
-      </label>
-      <label className="auth-field">
-        <span>{i18n.getText("SHELL_AUTH_WORK_EMAIL")}</span>
-        <Input type="Email" value={email} readonly={invited !== undefined} onInput={(e) => setEmail(e.target.value)} />
-      </label>
-      <label className="auth-field">
-        <span>{i18n.getText("SHELL_AUTH_PASSWORD")}</span>
-        <Input type="Password" value={password} onInput={(e) => setPassword(e.target.value)} />
-      </label>
-      <label className="auth-field">
-        <span>{i18n.getText("SHELL_AUTH_REPEAT_PASSWORD")}</span>
-        <Input
-          type="Password"
-          value={repeat}
-          valueState={mismatch ? "Negative" : "None"}
-          valueStateMessage={<span>{i18n.getText("SHELL_AUTH_PASSWORD_MISMATCH")}</span>}
-          onInput={(e) => setRepeat(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
+      <AuthHead title={i18n.getText("SHELL_AUTH_CREATE_TITLE")} lead={i18n.getText("SHELL_AUTH_CREATE_SUB")} />
+      <AuthCard onSubmit={submit}>
+        {signUp.error ? <MessageStrip design="Negative" hideCloseButton>{signUp.error.message}</MessageStrip> : null}
+        <SocialButtons redirect={redirectTo} />
+        <div className="auth-or">{i18n.getText("SHELL_AUTH_OR")}</div>
+        <AuthField label={i18n.getText("SHELL_AUTH_NAME")} name="name" autoComplete="name" required value={name} onChange={(e) => setName(e.target.value)} />
+        <AuthField
+          label={i18n.getText("SHELL_AUTH_WORK_EMAIL")} type="email" name="email" autoComplete="username" required
+          readOnly={invited !== undefined} value={email} onChange={(e) => setEmail(e.target.value)}
         />
-      </label>
-      <Button design="Emphasized" disabled={signUp.isPending || mismatch} onClick={submit}>
-        {signUp.isPending ? i18n.getText("SHELL_AUTH_CREATING") : i18n.getText("SHELL_AUTH_CREATE_ACCOUNT")}
-      </Button>
-      <div className="auth-or">{i18n.getText("SHELL_AUTH_OR")}</div>
-      <SocialButtons redirect={redirectTo} />
+        <div className="auth-row">
+          <AuthField
+            label={i18n.getText("SHELL_AUTH_PASSWORD")} type="password" name="password" autoComplete="new-password" required
+            value={password} onChange={(e) => setPassword(e.target.value)}
+          />
+          <AuthField
+            label={i18n.getText("SHELL_AUTH_REPEAT_PASSWORD")} type="password" name="repeat" autoComplete="new-password" required
+            error={mismatch ? i18n.getText("SHELL_AUTH_PASSWORD_MISMATCH") : null}
+            value={repeat} onChange={(e) => setRepeat(e.target.value)}
+          />
+        </div>
+        <button type="submit" className="auth-btn auth-btn--em" disabled={signUp.isPending || mismatch}>
+          {signUp.isPending ? i18n.getText("SHELL_AUTH_CREATING") : i18n.getText("SHELL_AUTH_CREATE_ACCOUNT")}
+        </button>
+      </AuthCard>
       <p className="auth-alt">
         {i18n.getText("SHELL_AUTH_HAVE_ACCOUNT")} <Link to="/login" search={{ redirect: redirectTo, email: invited }}>{i18n.getText("SHELL_AUTH_SIGN_IN")}</Link>
       </p>

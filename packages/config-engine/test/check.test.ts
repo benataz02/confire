@@ -44,11 +44,17 @@ describe("checkModel", () => {
     expect(issues.some((i) => i.path === "constraints[2].assert")).toBe(true);
   });
 
-  test("unitCost allowed only in pricing", () => {
+  test("unitCost is no identifier", () => {
     const bad = structuredClone(model);
     bad.bom[0]!.qty = "unitCost";
     expect(checkModel(bad, PRICES).length).toBe(1);
-    expect(checkModel(model, PRICES)).toEqual([]); // priceExpr uses unitCost and is fine
+    expect(checkModel(model, PRICES)).toEqual([]);
+  });
+
+  test("the margin is a share of the price: 0 up to, not including, 100", () => {
+    for (const margin of [0, 99.9]) expect(checkModel({ ...model, pricing: { ...model.pricing, margin } }, PRICES)).toEqual([]);
+    for (const margin of [-1, 100, Number.NaN])
+      expect(checkModel({ ...model, pricing: { ...model.pricing, margin } }, PRICES).map((i) => i.path)).toEqual(["pricing.margin"]);
   });
 
   test("parse error surfaces with span", () => {
@@ -254,7 +260,7 @@ describe("referencedTables", () => {
     const m = structuredClone(model);
     m.parameters[0]!.domain = { kind: "options", ref: { source: "query", table: "items", valueCol: "ItemCode" } };
     m.bom[0]!.qty = 'LOOKUP("prices", "code", material, "price")';
-    m.pricing.priceExpr = 'unitCost * LOOKUP("margins", "k", "std", "v")';
+    m.parameters[1]!.priceExpr = 'LOOKUP("margins", "k", "std", "v")';
     expect([...referencedTables(m)].sort()).toEqual(["items", "margins", "prices"]);
   });
 

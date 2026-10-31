@@ -11,6 +11,7 @@ import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { RouteError, RouteNotFound } from "@confire/ui/Boundaries.tsx";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { UiSourceProvider, type UiSource } from "@confire/ui/source.tsx";
+import { applyStoredTheme } from "@confire/ui/appearance.ts";
 import { routeTree } from "./routeTree.gen.ts";
 import { client, meQuery, orpc } from "./orpc.ts";
 
@@ -55,6 +56,8 @@ declare module "@tanstack/react-router" {
     router: typeof router;
   }
 }
+
+await applyStoredTheme();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

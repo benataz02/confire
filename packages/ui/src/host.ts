@@ -54,6 +54,14 @@ export function origins(loc: Loc = window.location): { auth: string; portal: str
     : { auth: at(`${loc.hostname}:5173`), portal: at(`${loc.hostname}:5180`) };
 }
 
+/** A page of the marketing site (apps/site) on the apex — dev's on :4321. English has no prefix and
+ *  the site has only en/es/eu, so any other app language links the English page. */
+export function siteUrl(path = "/", lang = "en", loc: Loc = window.location): string {
+  const domain = /^(?:app|portal)\.(.+)$/.exec(loc.hostname)?.[1];
+  const origin = domain ? `${loc.protocol}//${domain}` : `${loc.protocol}//${loc.hostname}:4321`;
+  return `${origin}${lang === "es" || lang === "eu" ? `/${lang}` : ""}${path}`;
+}
+
 /** A page on the sign-in host. */
 export const authUrl = (path = "/") => `${origins().auth}${path}`;
 

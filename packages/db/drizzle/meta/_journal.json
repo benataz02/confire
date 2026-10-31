@@ -64,6 +64,13 @@
       "when": 1793207056586,
       "tag": "0008_assistant_thread_pinned",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793462499654,
+      "tag": "0009_config_project_margin",
+      "breakpoints": true
     }
   ]
 }

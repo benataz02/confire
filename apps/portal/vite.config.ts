@@ -1,13 +1,14 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import { preloadFonts } from "../../packages/ui/src/preloadFonts.ts";
 
 // The customer portal's SPA (spec §3, §9). Same shape as apps/app's config, on its own port:
 // http://localhost:5180/<slug>/. The proxy keeps it same-origin with the portal process (:3001), and
 // the sign-in host's host-only `localhost` cookie reaches it (cookies ignore ports), so there's no
 // CORS to configure.
 export default defineConfig({
-  plugins: [tanstackRouter({ target: "react", autoCodeSplitting: true }), react()],
+  plugins: [tanstackRouter({ target: "react", autoCodeSplitting: true }), react(), preloadFonts()],
   resolve: {
     // One React / QueryClient context / UI5 registry with @confire/ui (see apps/app/vite.config.ts).
     dedupe: ["react", "react-dom", "@tanstack/react-query", "@tanstack/react-router", "@ui5/webcomponents-react", "@ui5/webcomponents", "@ui5/webcomponents-base"],

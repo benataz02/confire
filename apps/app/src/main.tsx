@@ -12,6 +12,7 @@ import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen.ts";
 import { RouteError, RouteNotFound } from "@confire/ui/Boundaries.tsx";
 import { UiSourceProvider, type UiSource } from "@confire/ui/source.tsx";
+import { applyStoredTheme } from "@confire/ui/appearance.ts";
 import { client, meQuery, orpc, useCurrency } from "./orpc.ts";
 
 const queryClient = new QueryClient({
@@ -41,6 +42,8 @@ declare module "@tanstack/react-router" {
     router: typeof router;
   }
 }
+
+await applyStoredTheme();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

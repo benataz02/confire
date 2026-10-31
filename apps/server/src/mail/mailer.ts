@@ -8,7 +8,8 @@ import { platformDomain } from "../tenant.ts";
 // Every caller fires and forgets: a mail is never on a request's critical path (spec §12), so a
 // slow Resend costs nothing, and a sign-in's timing never depends on whether a mail went out.
 // Every mail is a no-reply notification: no Reply-To, and mail.<domain> receives nothing — the
-// conversation is the project's timeline, not an inbox.
+// conversation is the project's timeline, not an inbox. The one exception is the marketing site's
+// demo request (demo-request.ts): it goes to Confire's own inbox, Reply-To the requester.
 
 export type Mail = {
   to: string;
@@ -21,9 +22,11 @@ export type Mail = {
   sender?: string;
   /** `<event>/<id>` (Resend keeps it 24 h): a retried send is the original send, not a second mail. */
   idempotencyKey?: string;
+  /** Only the demo request's (demo-request.ts): the reply goes to the requester. */
+  replyTo?: string;
 };
 
-export type SentMail = { to: string; subject: string; from: string; html: string; text: string };
+export type SentMail = { to: string; subject: string; from: string; html: string; text: string; replyTo?: string };
 export type SendResult = { error: string | null };
 
 // A sending_access key: it can send and nothing else, so a leak cannot touch domains or keys.
@@ -46,7 +49,7 @@ export const devOutbox: SentMail[] = [];
 async function rendered(mail: Mail) {
   const from = formatFrom(mail.fromName, `${mail.sender ?? "notify"}@${mailDomain}`);
   const [html, text] = await Promise.all([render(mail.body), render(mail.body, { plainText: true })]);
-  return { from, to: mail.to, subject: mail.subject, html, text };
+  return { from, to: mail.to, subject: mail.subject, html, text, ...(mail.replyTo ? { replyTo: mail.replyTo } : {}) };
 }
 
 /**

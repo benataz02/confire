@@ -129,10 +129,9 @@ function parseEnums(schema: Node): EnumMap {
   return out;
 }
 
-function field(
-  node: Node,
-  ctx: { enums: EnumMap; complex: Record<string, Node>; depth: number },
-): B1Field | null {
+type Ctx = { enums: EnumMap; complex: Record<string, Node>; depth: number };
+
+function field(node: Node, ctx: Ctx): B1Field | null {
   const name = attr(node, "Name");
   let type = attr(node, "Type");
   if (!name || !type) return null;
@@ -171,38 +170,36 @@ function field(
 }
 
 /**
- * One entity set's schema from `$metadata?scope=entityset&entityset=X&dependency=true`.
- * `entitySets` maps a fully-qualified EntityType to its set name so ReferentialConstraints can
- * name a target the router can actually read; pass the cached entity list.
+ * Every entity set's schema in a `$metadata` document. B1's scoped read
+ * (`scope=entityset&entityset=X&dependency=true`) holds the one set asked for — or, before 10.0
+ * FP2608, the whole document (1.5 MB, 361 sets, 88 ms to parse: hera, 2026-10-30). Beas has no
+ * scoped read: its one ~220 KB document is all ~120 sets. `entitySets` maps a fully-qualified
+ * EntityType to its set name so ReferentialConstraints can name a target the router can actually
+ * read; pass the cached entity list. A set whose EntityType is missing is left out.
  */
-export function parseEntitySchema(
-  xml: string,
-  entitySetName: string,
-  entitySets: B1EntityRef[] = [],
-): B1EntitySchema {
+export function parseEntitySchemas(xml: string, entitySets: B1EntityRef[] = []): B1EntitySchema[] {
   const schema = schemaOf(xml);
-  const setNode = entitySetNodes(schema).find((n) => attr(n, "Name") === entitySetName);
-  if (!setNode) throw new Error(`EntitySet '${entitySetName}' not found in metadata`);
-  const ref = refOf(setNode);
-  if (!ref) throw new Error(`EntitySet '${entitySetName}' is not readable`);
-
-  const typeName = shortName(ref.entityType);
-  const typeNode = many(schema.EntityType).find((n) => attr(n, "Name") === typeName);
-  if (!typeNode) throw new Error(`EntityType '${typeName}' not found in metadata`);
-
   const complex: Record<string, Node> = {};
   for (const c of many(schema.ComplexType)) {
     const n = attr(c, "Name");
     if (n) complex[n] = c;
   }
   const ctx = { enums: parseEnums(schema), complex, depth: 0 };
+  const types = new Map(many(schema.EntityType).map((n) => [attr(n, "Name"), n]));
+  const refs = entitySetNodes(schema).map(refOf).filter((e): e is B1EntityRef => !!e);
+  // The addition over SAP's parser: a NavigationProperty's ReferentialConstraint says which of
+  // this entity's own fields is a foreign key, and into what. That is the value help.
+  const setByType = new Map([...entitySets, ...refs].map((e) => [e.entityType, e.name]));
+  return refs.flatMap((ref) => {
+    const typeNode = types.get(shortName(ref.entityType));
+    return typeNode ? [schemaFor(typeNode, ref, ctx, setByType)] : [];
+  });
+}
 
+function schemaFor(typeNode: Node, ref: B1EntityRef, ctx: Ctx, setByType: Map<string, string>): B1EntitySchema {
   const fields = many(typeNode.Property).map((p) => field(p, ctx)).filter((f): f is B1Field => !!f);
   const byName = new Map(fields.map((f) => [f.name, f]));
 
-  // The addition over SAP's parser: a NavigationProperty's ReferentialConstraint says which of
-  // this entity's own fields is a foreign key, and into what. That is the value help.
-  const setByType = new Map([...entitySets, ref].map((e) => [e.entityType, e.name]));
   for (const nav of many(typeNode.NavigationProperty)) {
     let navType = attr(nav, "Type") ?? "";
     if (navType.startsWith("Collection(")) navType = navType.slice("Collection(".length, -1);
@@ -216,7 +213,8 @@ export function parseEntitySchema(
     }
   }
 
-  const keys = many(many(typeNode.Key)[0]?.PropertyRef)
+  // Beas writes the element lowercase, `<key>`, which the XML is case-sensitive about.
+  const keys = many(many(typeNode.Key ?? typeNode.key)[0]?.PropertyRef)
     .map((k) => attr(k, "Name"))
     .filter((k): k is string => !!k);
 

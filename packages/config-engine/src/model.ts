@@ -54,7 +54,8 @@ export const ParamZ = z.object({
   key: KeyZ,
   label: z.string(),
   type: z.enum(["string", "number", "boolean"]),
-  ui: z.enum(["input", "textarea", "select", "radio", "checkbox", "multicombo", "slider"]),
+  // "select" is the advanced one (a value help over a query domain); "dropdown" is always a plain list.
+  ui: z.enum(["input", "textarea", "dropdown", "select", "radio", "checkbox", "multicombo", "slider"]),
   domain: z
     .union([
       z.object({ kind: z.literal("options"), ref: LookupRefZ }),
@@ -65,7 +66,8 @@ export const ParamZ = z.object({
   visibleWhen: z.string().optional(),
   /** mandatory only while this holds — see `mandatory` */
   requiredWhen: z.string().optional(),
-  /** informational per-unit price shown at the field's top-right; never enters the calculated price */
+  /** per-unit cost of the field's current value, shown at its top-right — part of the unit cost
+   *  (computeOutputs' `other`) */
   priceExpr: z.string().optional(),
   /** the quote waits for it (missingInputs, enforced by buildQuoteSeed): asterisk on the label,
    *  negative state while empty. A default that fills the field counts as an answer; a hidden
@@ -269,8 +271,9 @@ export const ModelDefZ = z.object({
     ),
   }),
   // A computed value is global: it shares one namespace with the parameters and is usable in any
-  // expression. The builder lists them flat, so there is nothing positional to store.
-  computed: z.array(z.object({ key: KeyZ, expr: z.string() })),
+  // expression. `param` is the builder's alone: the parameter it is drawn under and deleted with
+  // (absent on older models, which draw under the last parameter).
+  computed: z.array(z.object({ key: KeyZ, expr: z.string(), param: KeyZ.optional() })),
   // optional, not .default([]): a zod default lands in the inferred type as *required*, which
   // would force `tables: []` into every existing ModelDef literal.
   tables: z.array(TableDefZ).optional(),
@@ -290,7 +293,9 @@ export const ModelDefZ = z.object({
   // No currency here: it is B1's, fixed when the company database is created, so it belongs to the
   // tenant rather than to each model — sap_connection.localCurrency, served on `me`.
   pricing: z.object({
-    priceExpr: z.string(),
+    // Share of the price, in percent: price = unit cost / (1 - margin / 100). checkModel keeps it
+    // in [0, 100). A configuration may override it (config_project.margin).
+    margin: z.number(),
     quoteItemCode: z.string().min(1),
     // The B1 price list the BOM materials are costed from. Optional here, required by checkModel:
     // a model saved before price lists existed must still load, it just cannot be saved again

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ModelDefZ, ParamZ, TableDefZ, type ModelDef } from "./model";
+import { isTableGroup, ModelDefZ, ParamZ, TableDefZ, type ModelDef } from "./model";
 
 // A model is saved as what changed since the last save, not as the whole document: the builder
 // diffs its draft against the definition it loaded (`diffModel`) and the server lays that over the
@@ -111,5 +111,48 @@ export function applyModelPatch(def: ModelDef, patch: ModelPatch): ModelDef {
     const p = patch[k] as KeyedPatch<Keyed> | undefined;
     if (p) out[k] = applyKeyed<Keyed>(def[k] ?? [], p);
   }
-  return out as ModelDef;
+  return keepPlaced(def, out as ModelDef);
+}
+
+/** `section/group` of every field group, and of the group placing each parameter. */
+function placements(d: ModelDef): { groups: Set<string>; of: Map<string, string> } {
+  const groups = new Set<string>();
+  const of = new Map<string, string>();
+  for (const s of d.structure.sections)
+    for (const g of s.groups) {
+      if (isTableGroup(g)) continue;
+      groups.add(`${s.key}/${g.key}`);
+      for (const p of g.params) of.set(p, `${s.key}/${g.key}`);
+    }
+  return { groups, of };
+}
+
+/** A parameter exists only while a group places it — the builder deletes a group's parameters with
+ *  it. A patch is diffed against what that builder loaded, so its whole structure never names a
+ *  parameter another save added since: that one goes back into the group it was stored in, or, the
+ *  patch having deleted that group, goes with it, as do the formulas tied to it. A parameter that
+ *  was already stored in no group goes too. */
+function keepPlaced(before: ModelDef, after: ModelDef): ModelDef {
+  const now = placements(after);
+  const was = placements(before).of;
+  const back = new Map<string, string[]>();
+  const gone = new Set<string>();
+  for (const p of after.parameters) {
+    if (now.of.has(p.key)) continue;
+    const g = was.get(p.key);
+    if (g && now.groups.has(g)) back.set(g, [...(back.get(g) ?? []), p.key]);
+    else gone.add(p.key);
+  }
+  if (!back.size && !gone.size) return after;
+  return {
+    ...after,
+    parameters: after.parameters.filter((p) => !gone.has(p.key)),
+    computed: after.computed.filter((c) => c.param === undefined || !gone.has(c.param)),
+    structure: {
+      sections: after.structure.sections.map((s) => ({
+        ...s,
+        groups: s.groups.map((g) => (isTableGroup(g) ? g : { ...g, params: [...g.params, ...(back.get(`${s.key}/${g.key}`) ?? [])] })),
+      })),
+    },
+  };
 }

@@ -15,3 +15,7 @@ apps/portal/tsconfig.tsbuildinfo
 .tanstack/
 # CI drops the pinned cloudflared here before building the agent (apps/server/Dockerfile).
 apps/agent/bin/cloudflared.exe
+# The site's prebuild output (apps/site/scripts/prebuild.ts) and Astro's generated types.
+apps/site/src/generated/
+apps/site/public/fonts/
+apps/site/.astro/

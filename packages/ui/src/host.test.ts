@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { origins, safeRedirect, slugOf, tenantPath } from "./host.ts";
+import { origins, safeRedirect, siteUrl, slugOf, tenantPath } from "./host.ts";
 
 // Mirrors apps/server/src/tenant.ts (the server re-validates; this is UX and redirect safety).
 
@@ -47,4 +47,13 @@ test("safeRedirect accepts the sign-in host's and the portal's origins, nothing 
   expect(ok("https://portal.confire.ai/acme/", prod)).toBe("https://portal.confire.ai/acme/");
   expect(ok("https://confire.ai/", prod)).toBeNull(); // the cookie's domain, but not an app
   expect(ok("https://x.confire.ai/", prod)).toBeNull();
+});
+
+test("siteUrl: the marketing site on the apex (dev: :4321), English unprefixed, other app languages as the site's /es/ /eu/", () => {
+  const app = { protocol: "https:", hostname: "app.confire.ai" };
+  expect(siteUrl("/privacy/", "en", app)).toBe("https://confire.ai/privacy/");
+  expect(siteUrl("/privacy/", "es", { protocol: "https:", hostname: "portal.confire.ai" })).toBe("https://confire.ai/es/privacy/");
+  expect(siteUrl("/", "eu", app)).toBe("https://confire.ai/eu/");
+  expect(siteUrl("/cookies/", "de", app)).toBe("https://confire.ai/cookies/"); // a language the site lacks reads English
+  expect(siteUrl("/", "en", { protocol: "http:", hostname: "localhost" })).toBe("http://localhost:4321/");
 });

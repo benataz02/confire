@@ -1,0 +1,29 @@
+---
+import Icon from "../Icon.astro";
+import { dict, type Lang } from "../../i18n/index.ts";
+
+// Evening Horizon even on a Morning page: the `.evening` scope (spec §5.3).
+interface Props { lang: Lang }
+const t = dict[Astro.props.lang].security;
+const icons = ["locked", "shield", "connected"] as const;
+---
+<section id="security" class="evening band">
+  <span class="glow b" aria-hidden="true"></span>
+  <div class="wrap sec-split">
+    <div class="rv">
+      <span class="eyebrow">{t.eyebrow}</span>
+      <h2>{t.title}</h2>
+      <p class="lead band-lead">{t.lead}</p>
+      <ul class="points">{t.points.map((p, i) => <li><span class="ic"><Icon name={icons[i]!} /></span><div><b>{p.title}</b><span>{p.text}</span></div></li>)}</ul>
+    </div>
+    <div class="arch rv" role="img" aria-label={t.archLabel}>
+      <div class="node"><span class="ic"><Icon name="share-2" /></span><div><b>Confire</b><span class="tiny muted">{t.hosted}</span></div></div>
+      <div class="tunnel"><span class="lbl"><Icon name="locked" />{t.tunnel}</span></div>
+      <div class="lan"><span class="tag">{t.network}</span>
+        <div class="node"><span class="ic"><Icon name="shield" /></span><div><b>{t.agent}</b><span class="tiny muted">{t.agentNote}</span></div><span class="os st-pos"><span class="pulse pos"></span>{t.online}</span></div>
+        <span class="wire"></span>
+        <div class="node"><span class="ic"><Icon name="it-host" /></span><div><b>SAP Business One</b><span class="tiny muted">Service Layer · Beas</span></div></div>
+      </div>
+    </div>
+  </div>
+</section>

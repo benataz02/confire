@@ -1,0 +1,88 @@
+---
+import { dict, type Lang } from "../i18n/index.ts";
+import { localePath } from "../lib/urls.ts";
+import { SITE } from "../site.config.ts";
+
+// The consent card (spec §10): hidden until the script decides, so with JavaScript off nothing asks
+// and nothing tracks. Reject and Accept look and weigh the same. The choice lives in localStorage
+// (strictly necessary, never sent anywhere); the footer's Cookie settings reopens the card.
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+const t = dict[lang].consent;
+---
+<div class="consent" role="region" aria-label={t.title} hidden data-consent
+  data-meta={SITE.metaPixelId} data-linkedin={SITE.linkedinPartnerId} data-conversion-id={SITE.linkedinConversionId}>
+  <b>{t.title}</b>
+  <p class="muted">{t.text} <a href={localePath(lang, "/cookies/")}>{t.details}</a></p>
+  <div class="row"><button class="btn" type="button" data-choice="denied">{t.reject}</button><button class="btn" type="button" data-choice="granted">{t.accept}</button></div>
+</div>
+
+<script>
+  import { plan, type Choice } from "../lib/consent.ts";
+
+  const KEY = "consent";
+  const card = document.querySelector<HTMLElement>("[data-consent]")!;
+  const pixels = { meta: card.dataset.meta ?? "", linkedin: card.dataset.linkedin ?? "" };
+  const conversion = document.body.hasAttribute("data-conversion");
+  const w = window as unknown as Record<string, any>;
+  const loaded = new Set<string>();
+
+  const read = (): Choice => {
+    try {
+      const v = localStorage.getItem(KEY);
+      return v === "granted" || v === "denied" ? v : null;
+    } catch {
+      return null; // storage blocked: ask every time, load nothing
+    }
+  };
+  const write = (c: "granted" | "denied") => {
+    try { localStorage.setItem(KEY, c); } catch { /* the choice holds for this page only */ }
+  };
+  const inject = (src: string) => document.head.append(Object.assign(document.createElement("script"), { src, async: true }));
+
+  // The vendors' own base code, minus their inline snippets (the CSP has no 'unsafe-inline').
+  function load(which: "meta" | "linkedin") {
+    if (loaded.has(which)) return;
+    loaded.add(which);
+    if (which === "meta") {
+      const fbq: any = (...args: unknown[]) => (fbq.callMethod ? fbq.callMethod(...args) : fbq.queue.push(args));
+      Object.assign(fbq, { push: fbq, loaded: true, version: "2.0", queue: [] });
+      w.fbq = w._fbq = fbq;
+      inject("https://connect.facebook.net/en_US/fbevents.js");
+      fbq("init", pixels.meta);
+      fbq("track", "PageView");
+      if (conversion) fbq("track", "Lead");
+    } else {
+      w._linkedin_partner_id = pixels.linkedin;
+      w._linkedin_data_partner_ids = [pixels.linkedin];
+      const lintrk: any = (a: unknown, b: unknown) => lintrk.q.push([a, b]);
+      lintrk.q = [];
+      w.lintrk = lintrk;
+      inject("https://snap.licdn.com/li.lms-analytics/insight.min.js");
+      if (conversion && card.dataset.conversionId) lintrk("track", { conversion_id: Number(card.dataset.conversionId) });
+    }
+  }
+
+  const initial = plan(read(), pixels);
+  card.hidden = !initial.showCard;
+  initial.load.forEach(load);
+
+  card.querySelector("[data-choice=granted]")!.addEventListener("click", () => {
+    write("granted");
+    card.hidden = true;
+    plan("granted", pixels).load.forEach(load);
+  });
+  card.querySelector("[data-choice=denied]")!.addEventListener("click", () => {
+    const withdrawing = read() === "granted";
+    write("denied");
+    card.hidden = true;
+    if (withdrawing) location.reload(); // the only way to unload a vendor's script
+  });
+  for (const b of document.querySelectorAll<HTMLButtonElement>("[data-consent-open]")) {
+    b.hidden = false;
+    b.addEventListener("click", () => {
+      card.hidden = false;
+      card.querySelector("button")!.focus();
+    });
+  }
+</script>

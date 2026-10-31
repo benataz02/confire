@@ -85,7 +85,8 @@ export function missingSources(input: CalcInput & Record<string, unknown>): stri
 /** `configs.calculate` with a source required for every written value: no value from nowhere. */
 export function sourcedCalculate(ctx: ToolCtx): AnyServerTool {
   const base = configsRouter.calculate["~orpc"].inputSchemas!.at(-1) as unknown as z.ZodObject;
-  const input = base.extend({
+  // No margin: it is the shop's commercial call, not a value read off a request.
+  const input = base.omit({ margin: true }).extend({
     sources: SourcesZ.describe("Where each written value came from, by field key (a parameter, a table, `batches`, `customer`): `{ file, page, quote }` with the exact text read off a file, or `{ chat }` with the user's own words from this chat."),
   });
   return procedureTool("configs.calculate", configsRouter.calculate as AnyProcedure, ctx, {

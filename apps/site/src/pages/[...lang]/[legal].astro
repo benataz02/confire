@@ -1,0 +1,37 @@
+---
+import { getCollection, render, type CollectionEntry } from "astro:content";
+import Base from "../../layouts/Base.astro";
+import { dict, LANGS, type Lang } from "../../i18n/index.ts";
+import { localePath } from "../../lib/urls.ts";
+import { SITE } from "../../site.config.ts";
+
+// /privacy/, /legal-notice/, /cookies/ in each language that has the file (src/content/legal).
+export async function getStaticPaths() {
+  const entries = await getCollection("legal");
+  const langsOf = (key: string) => LANGS.filter((l) => entries.some((e) => e.id === `${l}/${key}`));
+  return entries.map((entry) => {
+    const [lang, key] = entry.id.split("/") as [Lang, string];
+    return { params: { lang: lang === "en" ? undefined : lang, legal: key }, props: { entry, lang, key, langs: langsOf(key) } };
+  });
+}
+
+const { entry, lang, key, langs } = Astro.props as { entry: CollectionEntry<"legal">; lang: Lang; key: string; langs: Lang[] };
+const { Content } = await render(entry);
+const t = dict[lang];
+const site = Astro.site!.href.replace(/\/$/, "");
+const home = localePath(lang, "/"), path = `/${key}/`;
+const crumbs = { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [
+  { "@type": "ListItem", position: 1, name: "Confire", item: site + home },
+  { "@type": "ListItem", position: 2, name: entry.data.title, item: site + localePath(lang, path) },
+] };
+---
+<Base lang={lang} path={path} langs={langs} title={`${entry.data.title} · Confire`} description={entry.data.description} jsonLd={[crumbs]}>
+  <section class="page">
+    <div class="wrap">
+      <nav class="crumbs" aria-label="Breadcrumb"><a href={home}>Confire</a> / <span aria-current="page">{entry.data.title}</span></nav>
+      <h1>{entry.data.title}</h1>
+      <div class="prose"><Content /></div>
+      {SITE.contactEmail && <p class="prose"><b>{t.footer.contact}:</b> <a href={`mailto:${SITE.contactEmail}`}>{SITE.contactEmail}</a></p>}
+    </div>
+  </section>
+</Base>

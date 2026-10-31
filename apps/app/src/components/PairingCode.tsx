@@ -8,7 +8,17 @@ import { useI18n } from "../i18n.ts";
 // the SAP server — and the one-time code its wizard asks for last. Onboarding and Settings → SAP
 // agent both show it; each issues the code through its own procedure.
 
-const DOWNLOAD = authUrl("/download/confire-agent.exe");
+export const DOWNLOAD = authUrl("/download/confire-agent.exe");
+
+/** Whether `code` has expired, looked at again now and then so an expired code says so without a reload. */
+export function useExpired(code: { expiresAt: Date } | null) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(t);
+  }, []);
+  return !!code && code.expiresAt.getTime() <= now;
+}
 
 export function PairingCode({ code, onNewCode, busy }: {
   code: { code: string; expiresAt: Date } | null;
@@ -16,13 +26,7 @@ export function PairingCode({ code, onNewCode, busy }: {
   busy: boolean;
 }) {
   const i18n = useI18n();
-  // Re-render now and then, so an expired code says so without a reload.
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 15_000);
-    return () => clearInterval(t);
-  }, []);
-  const expired = !!code && code.expiresAt.getTime() <= now;
+  const expired = useExpired(code);
 
   return (
     <FlexBox direction="Column" style={{ gap: "0.75rem" }}>

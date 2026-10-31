@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { getTheme, setTheme as applyTheme } from "@ui5/webcomponents-base/dist/config/Theme.js";
+import { setTheme as applyTheme } from "@ui5/webcomponents-base/dist/config/Theme.js";
+import { boot } from "@ui5/webcomponents-base/dist/Boot.js";
 
 // Theme and content density, remembered per browser — the user menu of both apps offers them.
 
@@ -18,12 +19,25 @@ export const THEMES = [
 
 export type Density = "cozy" | "compact";
 
+/** The theme the user picked in a user menu, else Horizon Auto: Morning or Evening by the OS, as
+ *  confire.ai. Nothing is stored until someone picks, so the OS keeps deciding for whoever never did. */
+const storedTheme = () => localStorage.getItem("theme") ?? "sap_horizon_auto";
+
+/** Each SPA awaits it before its first render. UI5 always boots in Morning: the bundle runs UI5's
+ *  shared chunks, whose components boot it, before main.tsx's own imports register the other
+ *  themes — and UI5 drops a theme registered mid-boot. So the theme is set once UI5 has booted, and
+ *  nothing is drawn until it is in: the first frame is already Evening on a dark OS. */
+export async function applyStoredTheme() {
+  await boot();
+  await applyTheme(storedTheme());
+}
+
 const bodyDensity = (): Density =>
   document.body.classList.contains("ui5-content-density-compact") ? "compact" : "cozy";
 
 export function useAppearance() {
   const [density, setDensity] = useState<Density>(() => (localStorage.getItem("density") as Density) ?? bodyDensity());
-  const [theme, setTheme] = useState<string>(() => localStorage.getItem("theme") ?? getTheme());
+  const [theme, setThemeState] = useState(storedTheme);
 
   useEffect(() => {
     document.body.classList.toggle("ui5-content-density-compact", density === "compact");
@@ -31,10 +45,11 @@ export function useAppearance() {
     localStorage.setItem("density", density);
   }, [density]);
 
-  useEffect(() => {
-    applyTheme(theme);
-    localStorage.setItem("theme", theme);
-  }, [theme]);
+  const setTheme = (id: string) => {
+    localStorage.setItem("theme", id);
+    setThemeState(id);
+    void applyTheme(id);
+  };
 
   return { theme, setTheme, density, setDensity };
 }

@@ -1,0 +1,23 @@
+---
+import Base from "../../layouts/Base.astro";
+import { dict, LANGS, type Lang } from "../../i18n/index.ts";
+import { localePath } from "../../lib/urls.ts";
+import { SITE } from "../../site.config.ts";
+
+// A demo request that did not reach the inbox (spec §9): say so, and give the way around it.
+export const getStaticPaths = () => LANGS.map((lang) => ({ params: { lang: lang === "en" ? undefined : lang }, props: { lang } }));
+const { lang } = Astro.props as { lang: Lang };
+const t = dict[lang].demoError;
+---
+<Base lang={lang} path="/demo-error/" title={`${t.title} · Confire`} description={t.description} noindex>
+  <section class="page">
+    <div class="wrap">
+      <h1>{t.heading}</h1>
+      <p class="lead">
+        {t.text}
+        {SITE.contactEmail ? <>{t.writeTo} <a href={`mailto:${SITE.contactEmail}`}>{SITE.contactEmail}</a>.</> : t.tryLater}
+      </p>
+      <a class="btn em lg" href={`${localePath(lang, "/")}#demo`}>{t.retry}</a>
+    </div>
+  </section>
+</Base>

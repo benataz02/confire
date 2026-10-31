@@ -52,7 +52,9 @@ export function anchorOf(path: string, draft: ModelDef): string | undefined {
     const key = (draft.tables ?? [])[Number(t[1])]?.key;
     return key ? tableRow(draft, key) : undefined;
   }
-  if (/^computed\[\d+\]\.expr$/.test(path)) return `[id="expr-${path}"]`;
+  // A formula is edited in a dialog its tree row opens, like a parameter on its page.
+  const c = /^computed\[(\d+)\]/.exec(path);
+  if (c) return `[data-key="c:${c[1]}"]`;
   return undefined; // model / structure / tables — the section is the answer
 }
 
@@ -97,16 +99,12 @@ export function modelIssues(r: Row, issues: Issue[], t: Translate): RecordIssues
   return { fields, cells, other };
 }
 
-/** What the builder says beside the record's own problems: a failed read, a stale preview, a
- *  refused Delete or Duplicate, the issues the server refused the last Save with. */
+/** What the builder says beside the record's own problems: a failed read, a refused Delete or
+ *  Duplicate. */
 export function builderMessages(a: {
-  /** checkModel's issues for the record on screen — while there are any, the preview lags */
-  issues: Issue[];
-  /** the record's issues are on screen (a saved model, or a new one after its first Save) */
-  shown: boolean;
   /** duplicate/delete refusal — the server knows things the confirm dialog cannot */
   actionError?: Error | null;
-  /** the preview's value help could not be resolved (agent offline, broken query) */
+  /** the option lists could not be resolved (agent offline, broken query) */
   lookupsError?: Error | null;
   t: Translate;
   /** a section id → its title */
@@ -114,18 +112,11 @@ export function builderMessages(a: {
 }): PageMessage[] {
   const { t } = a;
   const out: PageMessage[] = [];
+  // On the page, the combination tables are what go without options; the preview says it itself.
   if (a.lookupsError)
     out.push({
       id: "lookups", type: "Negative", text: a.lookupsError.message, detail: t("MODEL_LOOKUPS_FAILED"),
-      group: a.title("params"), section: "params",
-    });
-  // The preview falls back to the last valid model while there are errors; without saying so it
-  // would just stop tracking the edits mid-typing.
-  if (a.shown && a.issues.length)
-    out.push({
-      id: "preview", type: "Critical",
-      text: t(a.issues.length === 1 ? "MODEL_PREVIEW_STALE" : "MODEL_PREVIEW_STALE_N", String(a.issues.length)),
-      group: a.title("params"), section: "params",
+      group: a.title("rules"), section: "rules",
     });
   if (a.actionError)
     out.push({ id: "action", type: "Negative", text: a.actionError.message, detail: t("MODEL_ACTION_FAILED"), group: t("MODEL_GROUP_MODEL") });

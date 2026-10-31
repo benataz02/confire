@@ -35,7 +35,7 @@ const DEF: ModelDef = {
   tables: [itemsTable()],
   constraints: [{ kind: "expr", assert: 'size != "S" || grade != "steel"', message: "No S in steel" }],
   bom: [], routing: [],
-  pricing: { priceExpr: "0", quoteItemCode: "X" },
+  pricing: { margin: 0, quoteItemCode: "X" },
   batchDefaults: [10, 20],
 };
 
@@ -167,7 +167,7 @@ const BOX: ModelDef = {
   ],
   structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["size", "width", "note"] }] }] },
   computed: [], tables: [], constraints: [], bom: [], routing: [],
-  pricing: { priceExpr: "1", quoteItemCode: "BOX" },
+  pricing: { margin: 0, quoteItemCode: "BOX" },
   batchDefaults: [10],
 };
 const PDF = Buffer.from("%PDF-1.4 a drawing");

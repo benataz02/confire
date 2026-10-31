@@ -24,7 +24,7 @@ const OPENAPI_PREFIX = "/api/openapi";
  * portal (portal/index.ts) are the same shape over their own router and SPA — one function, so the
  * body cap cannot drift apart.
  */
-export function serve({ auth, router, title, routes, spaDist, port }: {
+export function serve({ auth, router, title, routes, spaDist, port, origin }: {
   auth: typeof Auth;
   router: Router<{ headers: Headers }>;
   /** the OpenAPI document's title */
@@ -35,8 +35,25 @@ export function serve({ auth, router, title, routes, spaDist, port }: {
   /** the built SPA. In dev the SPA runs on Vite and proxies /rpc + /api here instead. */
   spaDist: string;
   port: number;
+  /** this process's own browser origin (tenant.ts authUrl / portalUrl): the only one that may write */
+  origin: string;
 }) {
   const app = new Hono();
+
+  // confire.ai (the marketing site, which runs ad scripts after consent) is the same *site* as
+  // app.confire.ai, so a SameSite=Lax session cookie rides along on a form POST from it, and a form
+  // body needs no CORS preflight: /api/openapi parses one, /files/* takes uploads. So a write
+  // carrying a foreign Origin is refused here, before any route. No Origin passes: the agent's
+  // pairing call and curl send none, and a browser always sends one on a cross-origin POST.
+  // Better Auth checks its own trustedOrigins; /api/demo-request is the apex's own form (portal).
+  app.use("*", async (c, next) => {
+    const from = c.req.header("origin");
+    if (from && from !== origin && !["GET", "HEAD", "OPTIONS"].includes(c.req.method)
+      && !c.req.path.startsWith("/api/auth/") && c.req.path !== "/api/demo-request") {
+      return c.text("Forbidden origin", 403);
+    }
+    await next();
+  });
   // The raw error, before oRPC flattens it into a response that logs nothing. An ORPCError below 500
   // is an answer (UNAUTHORIZED, NOT_FOUND, a validation BAD_REQUEST); anything else is a bug or an
   // outage — B1/agent failures arrive as BAD_GATEWAY/SERVICE_UNAVAILABLE (b1.ts toOrpcError).
@@ -54,8 +71,8 @@ export function serve({ auth, router, title, routes, spaDist, port }: {
   // POST /api/openapi/configs/calculate with a JSON body, and the docs page (Scalar) is the prefix
   // itself. Same builders, same session cookie + x-tenant, so it reaches nothing /rpc does not.
   // The docs and spec are for signed-in users only; the procedures guard themselves as always.
-  // It also parses form bodies, which a cross-site <form> could POST — but the session cookie is
-  // SameSite=Lax (Better Auth's default), so such a request arrives signed out.
+  // It also parses form bodies, which another origin's <form> could POST: the origin guard above
+  // refuses those (a same-site one, from the apex, would arrive signed in).
   // ponytail: router-derived paths and no API keys; a public REST API (curated `openapi({ path })`
   // routes, per-tenant keys) builds on this handler when an outside caller exists.
   const generator = new OpenAPIGenerator();

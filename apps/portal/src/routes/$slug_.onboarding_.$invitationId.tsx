@@ -5,7 +5,7 @@ import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
 import { ObjectPageSkeleton } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import { authClient } from "../auth-client.ts";
 import { client, meQuery, orpc } from "../orpc.ts";
-import { PortalAuthLayout } from "../components/AuthChrome.tsx";
+import { InvitationUnusable } from "../components/AuthChrome.tsx";
 import { authUrl, hardRedirect } from "@confire/ui/host.ts";
 import { invitationGuard } from "../lib/guards.ts";
 import { useI18n } from "../i18n.ts";
@@ -50,17 +50,7 @@ function OnboardingForm() {
   if (inv.data?.type === "existing") return <Navigate from="/$slug" to="/$slug/accept/$invitationId" params={{ invitationId }} replace />;
   const error = inv.error ?? schema.error;
   if (error) {
-    return (
-      <PortalAuthLayout tenant={me.tenant}>
-        <h2 className="auth-h1">{i18n.getText("PORTAL_INVITE_UNUSABLE")}</h2>
-        <MessageStrip design="Negative" hideCloseButton>{error.message}</MessageStrip>
-        <p className="auth-sub">{i18n.getText("PORTAL_INVITE_ASK_NEW", tenant)}</p>
-        <p className="auth-alt">
-          {i18n.getText("PORTAL_SIGNED_IN_AS", me.user.email)}{" "}
-          <a href="#" onClick={(e) => { e.preventDefault(); void switchAccount(); }}>{i18n.getText("PORTAL_OTHER_ACCOUNT")}</a>
-        </p>
-      </PortalAuthLayout>
-    );
+    return <InvitationUnusable tenant={me.tenant} message={error.message} email={me.user.email} onOtherAccount={() => void switchAccount()} />;
   }
 
   return (

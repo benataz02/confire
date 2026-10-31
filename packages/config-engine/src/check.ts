@@ -5,7 +5,7 @@ export type Issue = { path: string; message: string; from?: number; to?: number 
 
 export type KnownTable = { name: string; columns: string[] };
 
-export const FUNCS = new Set(["IF", "MIN", "MAX", "ROUND", "CEIL", "FLOOR", "ABS", "CONCAT", "HAS", "LOOKUP"]);
+export const FUNCS = new Set(["IF", "MIN", "MAX", "ROUND", "CEIL", "FLOOR", "ABS", "CONCAT", "HAS", "LOOKUP", "ISBLANK", "SELECTED"]);
 
 /** DocumentLine fields an items table may not map a column to: the price split owns them. */
 export const RESERVED_LINE_FIELDS = new Set(["ItemCode", "Quantity", "UnitPrice", "LineNum"]);
@@ -118,7 +118,6 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   const derivedSet = new Set(derived);
   const base = new Set([...paramKeys, ...computedKeys, ...derived, ...aggregates]);
   const withQty = new Set([...base, "qty"]);
-  const pricingScope = new Set([...withQty, "unitCost"]);
 
   const checkExpr = (src: string | undefined, path: string, allowed: Set<string>) => {
     if (src === undefined) return;
@@ -142,7 +141,7 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
     checkExpr(p.defaultExpr, `parameters[${i}].defaultExpr`, base);
     checkExpr(p.visibleWhen, `parameters[${i}].visibleWhen`, base);
     checkExpr(p.requiredWhen, `parameters[${i}].requiredWhen`, base);
-    // base, not pricingScope: the badge is per-unit and shown before any batch exists.
+    // base, not withQty: the cost is per unit and the badge shows before any batch exists.
     checkExpr(p.priceExpr, `parameters[${i}].priceExpr`, base);
   });
   model.computed.forEach((c, i) => checkExpr(c.expr, `computed[${i}].expr`, base));
@@ -179,7 +178,10 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
     checkExpr(o.runMinPerUnit, `routing[${i}].runMinPerUnit`, withQty);
     checkExpr(o.ratePerHour, `routing[${i}].ratePerHour`, withQty);
   });
-  checkExpr(model.pricing.priceExpr, "pricing.priceExpr", pricingScope);
+  // 100% would divide the cost by zero; below 0 is selling under cost by design, which no shop sets
+  // as its default.
+  if (!(model.pricing.margin >= 0 && model.pricing.margin < 100))
+    issues.push({ path: "pricing.margin", message: "the margin is a share of the price: at least 0% and under 100%" });
   // Mandatory, not optional: a BOM line carries no price of its own any more, so without a price
   // list every material costs an unanswerable question.
   if (!model.pricing.priceList)
@@ -428,5 +430,4 @@ function* exprsOf(model: ModelDef): Generator<string> {
   // and it fails at runtime with "unknown table" while checkModel reports nothing.
   for (const t of model.tables ?? [])
     for (const c of t.columns) if (c.cell.kind === "formula") yield c.cell.expr;
-  yield model.pricing.priceExpr;
 }

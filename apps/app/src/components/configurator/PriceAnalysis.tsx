@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import {
-  Label, MultiComboBox, MultiComboBoxItem, ObjectStatus, Tag, Text, Title,
+  Label, MultiComboBox, MultiComboBoxItem, Tag, Text, Title,
 } from "@ui5/webcomponents-react";
-import { LineChart } from "@ui5/webcomponents-react-charts";
+import { BarChart } from "@ui5/webcomponents-react-charts";
 import type { ModelDef } from "@confire/config-engine";
 import type { client } from "../../orpc.ts";
 import {
-  candidateLabel, chartRows, fmt, lineKey, mergeSelection, percent, sortRows, type Sel,
+  candidateLabel, fmt, lineKey, mergeSelection, sortRows, type Sel,
 } from "./runView.ts";
 import { money } from "@confire/ui/money.ts";
 import { useCurrency } from "../../orpc.ts";
@@ -18,9 +18,14 @@ import type { ListColumn, Row } from "@confire/ui/types.ts";
 const IDX = "#i";
 const QTY = "#qty";
 const PRICE = "#price";
-const MARGIN = "#margin";
 const TOTAL = "#total";
 const LOWEST = "#lowest";
+// The chart's segments, per unit: the cost's three parts, then the margin on top of them.
+const SEGMENTS = [["#mat", "CONFIG_MATERIALS"], ["#ops", "CONFIG_OPERATIONS"], ["#oth", "CONFIG_OTHER_COSTS"], ["#mrg", "CONFIG_MARGIN"]] as const;
+/** One bar's band, in px: what the chart's height grows by per grid row. The bar itself is slimmer
+ *  than the band by the rounding stroke (global.css `.confire-rounded-bars`), which draws outside it. */
+const BAR_ROW = 28;
+const BAR = 16;
 
 const toSel = (r: Row): Sel => ({ candidateIdx: r[IDX] as number, batchQty: r[QTY] as number });
 const keyOf = (r: Row) => lineKey(toSel(r));
@@ -30,8 +35,9 @@ const DEFAULT_SORT: GridState["sortBy"] = [{ field: QTY, direction: "asc" }, { f
 type Candidates = Awaited<ReturnType<typeof client.configs.get>>["candidates"];
 
 // The candidates view: one grid row per candidate × batch quantity, so a ticked row IS one future
-// quotation line. Each open parameter is a column and a filter. Below it, how the price moves with
-// quantity. Every figure and the Lowest tag are the view's; the cap is a message-popover warning.
+// quotation line. Each open parameter is a column and a filter. Below it, the same rows as bars:
+// what each unit price is made of. Every figure and the Lowest tag are the view's; the cap is a
+// message-popover warning.
 export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, selection, onSelect, disabled }: {
   model: ModelDef;
   candidates: Candidates;
@@ -50,16 +56,14 @@ export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, s
   // Keyed on the keys' contents: a new view is a new array.
   const qtyText = t("CONFIG_QUANTITY");
   const priceText = t("CONFIG_UNIT_PRICE");
-  const marginText = t("CONFIG_MARGIN");
   const totalText = t("CONFIG_TOTAL");
   const lowestText = t("CONFIG_LOWEST");
   const columns = useMemo<ListColumn[]>(() => [
     ...keys.map((k) => ({ key: k, label: paramLabel(k), groupable: true })),
     { key: QTY, label: qtyText, type: "number" as const, groupable: true },
     { key: PRICE, label: priceText, type: "number" as const },
-    { key: MARGIN, label: marginText, type: "number" as const },
     { key: TOTAL, label: totalText, type: "number" as const },
-  ], [keys.join(), model.parameters, qtyText, priceText, marginText, totalText]);
+  ], [keys.join(), model.parameters, qtyText, priceText, totalText]);
   // Sort, grouping and widths are the user's until the column set changes under them (a
   // recalculation that leaves other parameters open), then they start over.
   const sig = columns.map((c) => c.key).join();
@@ -78,17 +82,13 @@ export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, s
         <Text>{money(r[PRICE] as number, currency)}</Text>
       </div>
     ),
-    // Negative only below zero: any other threshold would be a policy this app does not have.
-    [MARGIN]: (r) => {
-      const m = r[MARGIN] as number | null;
-      return <ObjectStatus state={m !== null && m < 0 ? "Negative" : "None"}>{percent(m)}</ObjectStatus>;
-    },
     [TOTAL]: (r) => <Text>{money(r[TOTAL] as number, currency)}</Text>,
   }), [currency, lowestText]);
 
   const all = candidates.flatMap((c, i) => c.perBatch.map((b): Row => ({
     ...Object.fromEntries(keys.map((k) => [k, String(c.assignment[k] ?? "—")])),
-    [IDX]: i, [QTY]: b.batchQty, [PRICE]: b.unitPrice, [TOTAL]: b.total, [LOWEST]: b.lowest, [MARGIN]: b.margin,
+    [IDX]: i, [QTY]: b.batchQty, [PRICE]: b.unitPrice, [TOTAL]: b.total, [LOWEST]: b.lowest,
+    "#mat": b.material, "#ops": b.operations, "#oth": b.other, "#mrg": b.unitPrice - b.unitCost,
   })));
   // One filter per column that actually varies — a single value has nothing to narrow.
   const domains = [...keys.map((k) => ({ key: k, label: paramLabel(k) })), { key: QTY, label: qtyText }]
@@ -107,10 +107,12 @@ export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, s
     [selection, resync],
   );
 
-  const chart = chartRows(candidates, selection);
-  const dataset = batches.map((q, j) =>
-    Object.fromEntries([["qty", q], ...chart.map((i) => [`c${i}`, candidates[i]!.perBatch[j]!.unitPrice])]));
-  const label = (i: number) => candidateLabel(t, keys, candidates[i]!.assignment);
+  // The grid's rows, filtered and sorted as it shows them. One quantity needs no quantity in the label.
+  const dataset = rows.map((r) => ({
+    ...r,
+    label: [candidateLabel(t, keys, candidates[r[IDX] as number]!.assignment),
+      ...(batches.length > 1 ? [t("CONFIG_QTY_AXIS", fmt(r[QTY] as number))] : [])].join(" · "),
+  }));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
@@ -140,23 +142,21 @@ export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, s
           else onSelect(mergeSelection(selection, new Set(rows.map(keyOf)), picked.map(toSel)));
         }} />
 
-      {/* The grid above is this chart's table view — same numbers, exact — so the chart can stay
-          a shape: no data labels, a legend only once there are lines to tell apart. */}
-      {chart.length ? (
+      {/* The grid above is this chart's table view — same rows, same order, exact figures — so the
+          bars stay a shape: no data labels; the tooltip and the legend name the parts. */}
+      {dataset.length ? (
         <>
-          <Title level="H6" style={{ marginBlockStart: "1.25rem" }}>
-            {chart.length === 1 ? t("CONFIG_CHART_ONE", label(chart[0]!)) : t("CONFIG_CHART")}
-          </Title>
-          <LineChart style={{ height: "16rem" }} dataset={dataset} noLegend={chart.length === 1}
-            dimensions={[{ accessor: "qty", formatter: (v) => t("CONFIG_QTY_AXIS", fmt(Number(v))) }]}
-            measures={chart.map((i) => ({
-              accessor: `c${i}`, label: label(i), hideDataLabel: true, width: 2,
-              // Keyed to the candidate, not the pick order, so unpicking one row never repaints
-              // the others. ponytail: two picked rows 11 apart share a colour (the theme has 11);
-              // the legend still tells them apart — map picks to free slots if that ever bites.
-              color: `var(--sapChart_OrderedColor_${(i % 11) + 1})`,
-              formatter: (v: number) => money(v, currency),
-            }))} />
+          <Title level="H6" style={{ marginBlockStart: "1.25rem" }}>{t("CONFIG_CHART")}</Title>
+          <div style={{ maxHeight: "32rem", overflowY: "auto" }}>
+            <BarChart className="confire-rounded-bars" style={{ height: `${dataset.length * BAR_ROW + 64}px` }}
+              dataset={dataset} dimensions={[{ accessor: "label" }]}
+              chartConfig={{ legendPosition: "top", legendHorizontalAlign: "left" }}
+              measures={SEGMENTS.map(([accessor, key], n) => ({
+                accessor, label: t(key), stackId: "price", hideDataLabel: true, width: BAR,
+                color: `var(--sapChart_OrderedColor_${n + 1})`,
+                formatter: (v: number) => money(v, currency),
+              }))} />
+          </div>
         </>
       ) : null}
     </div>

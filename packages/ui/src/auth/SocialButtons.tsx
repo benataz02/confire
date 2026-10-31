@@ -1,7 +1,7 @@
-import { Button } from "@ui5/webcomponents-react";
 import { useUiI18n } from "../i18n.ts";
 
-// Brand glyphs as inline SVG (no icon dependency). The sign-in host's login + signup.
+// Brand glyphs as inline SVG (no icon dependency), in their owners' colours — the one exception to the
+// auth pages' Horizon-variables-only rule. The sign-in host's login + signup.
 const GoogleGlyph = () => (
   <svg viewBox="0 0 48 48" aria-hidden="true">
     <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.6 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6.1C12.2 13.5 17.6 9.5 24 9.5z" />
@@ -21,17 +21,18 @@ const MicrosoftGlyph = () => (
 
 export type SocialProvider = "google" | "microsoft";
 
-/** Google and Microsoft sign-in. `signIn` is the app's: it owns the auth client and the callback URLs. */
+/** Google and Microsoft sign-in, side by side: the names show, "Continue with …" is their accessible
+ *  name. `signIn` is the app's: it owns the auth client and the callback URLs. */
 export function SocialButtons({ signIn }: { signIn: (provider: SocialProvider) => void }) {
   const i18n = useUiI18n();
   return (
-    <div className="auth-social">
-      <Button onClick={() => signIn("google")}>
-        <span className="auth-social__label"><GoogleGlyph /> {i18n.getText("UI_CONTINUE_GOOGLE")}</span>
-      </Button>
-      <Button onClick={() => signIn("microsoft")}>
-        <span className="auth-social__label"><MicrosoftGlyph /> {i18n.getText("UI_CONTINUE_MICROSOFT")}</span>
-      </Button>
+    <div className="auth-row">
+      <button type="button" className="auth-btn" aria-label={i18n.getText("UI_CONTINUE_GOOGLE")} onClick={() => signIn("google")}>
+        <GoogleGlyph />Google
+      </button>
+      <button type="button" className="auth-btn" aria-label={i18n.getText("UI_CONTINUE_MICROSOFT")} onClick={() => signIn("microsoft")}>
+        <MicrosoftGlyph />Microsoft
+      </button>
     </div>
   );
 }

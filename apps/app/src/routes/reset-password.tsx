@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Input, Button, MessageStrip } from "@ui5/webcomponents-react";
+import { MessageStrip } from "@ui5/webcomponents-react";
+import { AuthCard, AuthField, AuthHead, AuthTile } from "@confire/ui/auth/AuthLayout.tsx";
 import { authClient } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { authUrl, hardRedirect, currentSlug } from "@confire/ui/host.ts";
@@ -35,9 +36,13 @@ function ResetPassword() {
   if (error || !token) {
     return (
       <AuthLayout>
-        <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_LINK_DEAD")}</h2>
-        <p className="auth-sub">{i18n.getText("SHELL_AUTH_LINK_DEAD_SUB")}</p>
-        <p className="auth-alt"><Link to="/forgot-password">{i18n.getText("SHELL_AUTH_SEND_NEW_LINK")}</Link></p>
+        <AuthHead title={i18n.getText("SHELL_AUTH_LINK_DEAD")} />
+        <AuthCard center>
+          <AuthTile icon="message-error" tone="negative" />
+          <p className="auth-body">{i18n.getText("SHELL_AUTH_LINK_DEAD_SUB")}</p>
+          <Link className="auth-btn auth-btn--em" to="/forgot-password">{i18n.getText("SHELL_AUTH_SEND_NEW_LINK")}</Link>
+        </AuthCard>
+        <p className="auth-alt"><Link to="/login">{i18n.getText("SHELL_AUTH_BACK_SIGN_IN")}</Link></p>
       </AuthLayout>
     );
   }
@@ -45,9 +50,12 @@ function ResetPassword() {
   if (reset.isSuccess) {
     return (
       <AuthLayout>
-        <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_PASSWORD_CHANGED")}</h2>
-        <p className="auth-sub">{i18n.getText("SHELL_AUTH_PASSWORD_CHANGED_SUB")}</p>
-        <p className="auth-alt"><Link to="/login">{i18n.getText("SHELL_AUTH_SIGN_IN")}</Link></p>
+        <AuthHead title={i18n.getText("SHELL_AUTH_PASSWORD_CHANGED")} />
+        <AuthCard center>
+          <AuthTile icon="accept" tone="positive" />
+          <p className="auth-body">{i18n.getText("SHELL_AUTH_PASSWORD_CHANGED_SUB")}</p>
+          <Link className="auth-btn auth-btn--em" to="/login">{i18n.getText("SHELL_AUTH_SIGN_IN")}</Link>
+        </AuthCard>
       </AuthLayout>
     );
   }
@@ -57,27 +65,22 @@ function ResetPassword() {
 
   return (
     <AuthLayout>
-      <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_CHOOSE_PASSWORD")}</h2>
-      <p className="auth-sub">{i18n.getText("SHELL_AUTH_PASSWORD_RULE")}</p>
-      {reset.error ? <MessageStrip design="Negative" hideCloseButton>{reset.error.message}</MessageStrip> : null}
-      <label className="auth-field">
-        <span>{i18n.getText("SHELL_AUTH_NEW_PASSWORD")}</span>
-        <Input type="Password" value={password} onInput={(e) => setPassword(e.target.value)} />
-      </label>
-      <label className="auth-field">
-        <span>{i18n.getText("SHELL_AUTH_REPEAT_PASSWORD")}</span>
-        <Input
-          type="Password"
-          value={repeat}
-          valueState={mismatch ? "Negative" : "None"}
-          valueStateMessage={<span>{i18n.getText("SHELL_AUTH_PASSWORD_MISMATCH")}</span>}
-          onInput={(e) => setRepeat(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
+      <AuthHead title={i18n.getText("SHELL_AUTH_CHOOSE_PASSWORD")} lead={i18n.getText("SHELL_AUTH_PASSWORD_RULE")} />
+      <AuthCard onSubmit={submit}>
+        {reset.error ? <MessageStrip design="Negative" hideCloseButton>{reset.error.message}</MessageStrip> : null}
+        <AuthField
+          label={i18n.getText("SHELL_AUTH_NEW_PASSWORD")} type="password" name="password" autoComplete="new-password" required
+          value={password} onChange={(e) => setPassword(e.target.value)}
         />
-      </label>
-      <Button design="Emphasized" disabled={!password || !repeat || mismatch || reset.isPending} onClick={submit}>
-        {reset.isPending ? i18n.getText("SHELL_AUTH_SAVING") : i18n.getText("SHELL_AUTH_CHANGE_PASSWORD")}
-      </Button>
+        <AuthField
+          label={i18n.getText("SHELL_AUTH_REPEAT_PASSWORD")} type="password" name="repeat" autoComplete="new-password" required
+          error={mismatch ? i18n.getText("SHELL_AUTH_PASSWORD_MISMATCH") : null}
+          value={repeat} onChange={(e) => setRepeat(e.target.value)}
+        />
+        <button type="submit" className="auth-btn auth-btn--em" disabled={!password || !repeat || mismatch || reset.isPending}>
+          {reset.isPending ? i18n.getText("SHELL_AUTH_SAVING") : i18n.getText("SHELL_AUTH_CHANGE_PASSWORD")}
+        </button>
+      </AuthCard>
     </AuthLayout>
   );
 }

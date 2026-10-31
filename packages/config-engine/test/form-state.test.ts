@@ -24,7 +24,7 @@ const model: ModelDef = {
   }],
   constraints: [{ kind: "expr", assert: 'size != "L" || !coated', message: "L comes uncoated" }],
   bom: [], routing: [],
-  pricing: { priceExpr: "0", quoteItemCode: "X" },
+  pricing: { margin: 0, quoteItemCode: "X" },
   batchDefaults: [1],
 };
 const lookups: ResolvedLookups = {
@@ -52,6 +52,16 @@ describe("formState", () => {
     expect(f.fields.color).toMatchObject({ visible: false, required: false });
     expect(state({ coated: true }).fields.color).toMatchObject({ visible: true, required: true });
     expect(state({ coated: true }).fields.coated!.price).toBe(5);
+  });
+
+  test("SELECTED hides a field until its select is picked", () => {
+    const m: ModelDef = {
+      ...model,
+      parameters: model.parameters.map((p) => (p.key === "color" ? { ...p, visibleWhen: "SELECTED(size)" } : p)),
+    };
+    const at = (entries: Record<string, string>) => formState(m, lookups, propagate(m, lookups, entries, {}), {});
+    expect(at({}).fields.color).toMatchObject({ visible: false, required: false });
+    expect(at({ size: "S" }).fields.color).toMatchObject({ visible: true, required: true });
   });
 
   test("options carry the reason they are out, and a table ref's extra columns", () => {

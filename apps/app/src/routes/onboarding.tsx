@@ -1,10 +1,12 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Input, Button, MessageStrip, BusyIndicator } from "@ui5/webcomponents-react";
+import { Icon, MessageStrip } from "@ui5/webcomponents-react";
+import { AuthCard, AuthChip, AuthField, AuthHead, AuthSteps } from "@confire/ui/auth/AuthLayout.tsx";
+import { formatLocale } from "@confire/ui/format.ts";
 import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
-import { PairingCode } from "../components/PairingCode.tsx";
+import { DOWNLOAD, useExpired } from "../components/PairingCode.tsx";
 import { lobbyQuery, orpc } from "../orpc.ts";
 import { authUrl, currentSlug, hardRedirect, isReserved, tenantUrl } from "@confire/ui/host.ts";
 import { useI18n } from "../i18n.ts";
@@ -68,8 +70,6 @@ function Onboarding() {
     onSuccess: () => setStep("agent"),
   });
 
-  // The only way off this page without an org: browser-back just re-runs the dispatcher (/login),
-  // which sends a user with no place straight back here.
   const signOut = async () => {
     await authClient.signOut();
     queryClient.clear();
@@ -83,50 +83,50 @@ function Onboarding() {
 
   if (step === "agent") return <AgentStep slug={slug} signOut={signOut} />;
 
+  const slugChip = slug && !slugValid ? <AuthChip tone="negative" icon="error">{i18n.getText("SHELL_AUTH_SLUG_INVALID")}</AuthChip>
+    : slugValid && avail.isFetching ? <AuthChip tone="neutral">{i18n.getText("SHELL_AUTH_SLUG_CHECKING")}</AuthChip>
+    : available ? <AuthChip tone="positive" icon="sys-enter-2">{i18n.getText("SHELL_AUTH_SLUG_AVAILABLE")}</AuthChip>
+    : slugValid && avail.data === false ? <AuthChip tone="negative" icon="error">{i18n.getText("SHELL_AUTH_SLUG_TAKEN")}</AuthChip>
+    : null;
+
   return (
     <AuthLayout>
-      <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_SETUP_TITLE")}</h2>
-      <p className="auth-sub">{i18n.getText("SHELL_AUTH_SETUP_SUB")}</p>
-      {errMsg ? <MessageStrip design="Negative" hideCloseButton>{errMsg}</MessageStrip> : null}
-
-      <label className="auth-field">
-        <span>{i18n.getText("SHELL_AUTH_COMPANY_NAME")}</span>
-        <Input
-          value={company}
-          placeholder="ACME GmbH"
-          onInput={(e) => onCompany(e.target.value)}
+      <SetupSteps current={0} />
+      <AuthHead title={i18n.getText("SHELL_AUTH_SETUP_TITLE")} lead={i18n.getText("SHELL_AUTH_SETUP_SUB")} />
+      <AuthCard onSubmit={() => canCreate && create.mutate()}>
+        {errMsg ? <MessageStrip design="Negative" hideCloseButton>{errMsg}</MessageStrip> : null}
+        <AuthField
+          label={i18n.getText("SHELL_AUTH_COMPANY_NAME")} name="organization" autoComplete="organization" required
+          placeholder="ACME GmbH" value={company} onChange={(e) => onCompany(e.target.value)}
         />
-      </label>
-
-      <label className="auth-field">
-        <span>{i18n.getText("SHELL_AUTH_WORKSPACE_URL")}</span>
-        <Input
-          value={slug}
-          placeholder="acme"
-          onInput={(e) => { setSlugEdited(true); setSlug(sanitizeSlug(e.target.value)); }}
-          onKeyDown={(e) => e.key === "Enter" && canCreate && create.mutate()}
+        <AuthField
+          label={i18n.getText("SHELL_AUTH_WORKSPACE_URL")} prefix={`${window.location.host}/`} autoComplete="off" spellCheck={false} required
+          placeholder={i18n.getText("SHELL_AUTH_SLUG_EXAMPLE")} value={slug}
+          onChange={(e) => { setSlugEdited(true); setSlug(sanitizeSlug(e.target.value)); }}
+          hint={<><span>{i18n.getText("SHELL_AUTH_SLUG_HINT")}</span>{slugChip}</>}
         />
-        <small className="auth-sub">
-          {`${window.location.host}/${slug || i18n.getText("SHELL_AUTH_SLUG_EXAMPLE")}`}
-          {slug && !slugValid ? ` ${i18n.getText("SHELL_AUTH_SLUG_INVALID")}` : ""}
-          {slugValid && avail.isFetching ? ` ${i18n.getText("SHELL_AUTH_SLUG_CHECKING")}` : ""}
-          {available ? ` ${i18n.getText("SHELL_AUTH_SLUG_AVAILABLE")}` : ""}
-          {slugValid && avail.data === false ? ` ${i18n.getText("SHELL_AUTH_SLUG_TAKEN")}` : ""}
-        </small>
-      </label>
-
-      <Button
-        design="Emphasized"
-        disabled={!canCreate}
-        onClick={() => create.mutate()}
-      >
-        {create.isPending ? i18n.getText("SHELL_AUTH_SETTING_UP") : i18n.getText("SHELL_AUTH_CREATE_COMPANY")}
-      </Button>
-
-      <p className="auth-alt">
-        {i18n.getText("SHELL_AUTH_NOT_NOW")} <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("SHELL_AUTH_SIGN_OUT")}</a>
-      </p>
+        <button type="submit" className="auth-btn auth-btn--em" disabled={!canCreate}>
+          {create.isPending ? i18n.getText("SHELL_AUTH_SETTING_UP") : i18n.getText("SHELL_AUTH_CREATE_COMPANY")}
+        </button>
+      </AuthCard>
+      <NotNow signOut={signOut} />
     </AuthLayout>
+  );
+}
+
+function SetupSteps({ current }: { current: number }) {
+  const i18n = useI18n();
+  return <AuthSteps steps={[i18n.getText("SHELL_AUTH_STEP_COMPANY"), i18n.getText("SHELL_AUTH_STEP_SAP")]} current={current} />;
+}
+
+// The only way off this page without an org: browser-back just re-runs the dispatcher (/login),
+// which sends a user with no place straight back here.
+function NotNow({ signOut }: { signOut: () => Promise<void> }) {
+  const i18n = useI18n();
+  return (
+    <p className="auth-alt">
+      {i18n.getText("SHELL_AUTH_NOT_NOW")} <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("SHELL_AUTH_SIGN_OUT")}</a>
+    </p>
   );
 }
 
@@ -140,21 +140,55 @@ function AgentStep({ slug, signOut }: { slug: string; signOut: () => Promise<voi
   const status = useQuery({ ...orpc.sap.onboardingAgentStatus.queryOptions(), refetchInterval: 3000 });
   const connected = status.data?.connected === true;
   useEffect(() => { if (connected) hardRedirect(tenantUrl(slug)); }, [connected, slug]);
+  const expired = useExpired(code.data ?? null);
+  // The SAP server is another machine: a copy is for a remote desktop's shared clipboard.
+  const [copied, setCopied] = useState(false);
+  const copy = () => void navigator.clipboard.writeText(DOWNLOAD).then(() => setCopied(true));
 
   return (
-    <AuthLayout>
-      <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_CONNECT_TITLE")}</h2>
-      <p className="auth-sub">{i18n.getText("SHELL_AUTH_CONNECT_SUB")}</p>
-      {code.error ? <MessageStrip design="Negative" hideCloseButton>{code.error.message}</MessageStrip> : null}
-      <PairingCode code={code.data ?? null} busy={code.isPending} onNewCode={() => code.mutate(undefined)} />
-      <p className="auth-sub" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-        {connected ? i18n.getText("SHELL_AUTH_AGENT_CONNECTED") : <><BusyIndicator active size="S" />{i18n.getText("SHELL_AUTH_AGENT_WAITING")}</>}
-      </p>
-      {/* A paired agent whose SAP refuses it: say why rather than wait forever. */}
-      {status.data?.paired && status.data.error ? <MessageStrip design="Critical" hideCloseButton>{status.data.error}</MessageStrip> : null}
-      <p className="auth-alt">
-        {i18n.getText("SHELL_AUTH_NOT_NOW")} <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("SHELL_AUTH_SIGN_OUT")}</a>
-      </p>
+    <AuthLayout wide>
+      <SetupSteps current={1} />
+      <AuthHead title={i18n.getText("SHELL_AUTH_CONNECT_TITLE")} lead={i18n.getText("SHELL_AUTH_CONNECT_SUB")} />
+      <AuthCard>
+        {code.error ? <MessageStrip design="Negative" hideCloseButton>{code.error.message}</MessageStrip> : null}
+        {/* A paired agent whose SAP refuses it: say why rather than wait forever. */}
+        {status.data?.paired && status.data.error ? <MessageStrip design="Critical" hideCloseButton>{status.data.error}</MessageStrip> : null}
+        <ol className="auth-ol">
+          <li>
+            <div>
+              <b>{i18n.getText("ADMIN_PAIR_DOWNLOAD")}</b>
+              <div className="auth-dl">
+                <Icon name="download" />
+                <a href={DOWNLOAD}>{DOWNLOAD}</a>
+                <button type="button" className="auth-btn auth-btn--sm" onClick={copy}>
+                  <Icon name={copied ? "accept" : "copy"} />{i18n.getText(copied ? "SHELL_AUTH_COPIED" : "SHELL_AUTH_COPY")}
+                </button>
+              </div>
+              <p className="auth-note">{i18n.getText("ADMIN_PAIR_SMARTSCREEN")}</p>
+            </div>
+          </li>
+          <li>
+            <div>
+              <b>{i18n.getText("ADMIN_PAIR_CODE")}</b>
+              <div className="auth-code">
+                <code aria-live="polite" className={expired ? "expired" : undefined}>{code.data?.code ?? "····-····"}</code>
+                <button type="button" className="auth-btn auth-btn--fit" disabled={code.isPending} onClick={() => code.mutate(undefined)}>
+                  <Icon name="refresh" />{i18n.getText("ADMIN_PAIR_NEW_CODE")}
+                </button>
+              </div>
+              {code.data ? (
+                <p className="auth-note">{expired ? i18n.getText("ADMIN_PAIR_EXPIRED")
+                  : i18n.getText("ADMIN_PAIR_VALID", code.data.expiresAt.toLocaleTimeString(formatLocale(), { hour: "2-digit", minute: "2-digit" }))}</p>
+              ) : null}
+            </div>
+          </li>
+        </ol>
+        <div className="auth-wait" role="status">
+          <span className={connected ? "auth-pulse auth-pulse--done" : "auth-pulse"} />
+          {connected ? i18n.getText("SHELL_AUTH_AGENT_CONNECTED") : i18n.getText("SHELL_AUTH_AGENT_WAITING")}
+        </div>
+      </AuthCard>
+      <NotNow signOut={signOut} />
     </AuthLayout>
   );
 }

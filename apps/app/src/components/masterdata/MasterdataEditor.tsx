@@ -1,13 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Form, FormGroup, FormItem, Icon, IllustratedMessage, Input, Label, ObjectStatus, Text } from "@ui5/webcomponents-react";
+import { Button, Icon, IllustratedMessage, Input, Option, Select, SuggestionItem } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import type { QuerySource, Val } from "@confire/config-engine";
 import { confirm } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
-import { formatLocale } from "@confire/ui/format.ts";
-import { FORM_LAYOUT } from "@confire/ui/formLayout.ts";
 import { EditGrid } from "@confire/ui/list-report/EditGrid.tsx";
 import { Grid, GridForm, type GridState } from "@confire/ui/list-report/Grid.tsx";
 import { ownColumns } from "@confire/ui/metadata.ts";
@@ -15,9 +13,10 @@ import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
 import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import { useObjectRecord, type RecordIssues } from "@confire/ui/object-page/useObjectRecord.ts";
 import type { PageMessage } from "@confire/ui/PageMessages.tsx";
-import type { Control, ListColumn, Row, Section } from "@confire/ui/types.ts";
+import type { Control, ControlContext, ListColumn, Row, Section } from "@confire/ui/types.ts";
 import { useI18n } from "../../i18n.ts";
 import { orpc } from "../../orpc.ts";
+import { filterHints, selectHints, sortHints, type Target } from "./queryHints.ts";
 
 // One editor for both kinds of masterdata, an always-editing record. The kind is picked once, on
 // create: a saved row keeps it, because switching would throw away either the maintained rows or
@@ -90,13 +89,13 @@ function rowsFor(prev: Col[], next: Col[], rows: Cell[][]): Cell[][] {
 const typed = (col: Col, raw: string): Cell =>
   col.type === "number" ? (raw === "" ? null : Number(raw)) : col.type === "boolean" ? raw === "true" : raw;
 
-const sectionsOf = (t: Translate, saved: boolean): Section[] => {
+const sectionsOf = (t: Translate): Section[] => {
   const kind = (k: Draft["kind"]) => (fd: Row) => fd.kind === k;
   return [
     {
       id: "general", label: t("ADMIN_SECTION_GENERAL"),
       fields: [
-        { key: "name", label: t("ADMIN_NAME"), required: true, placeholder: t("ADMIN_NAME_PLACEHOLDER"), help: t("ADMIN_NAME_HINT") },
+        { key: "name", label: t("ADMIN_NAME"), required: true, placeholder: t("ADMIN_NAME_PLACEHOLDER") },
         // Fixed once saved: the two kinds store different things, and a flip would throw away
         // either the maintained rows or the query.
         {
@@ -129,22 +128,20 @@ const sectionsOf = (t: Translate, saved: boolean): Section[] => {
       id: "query", label: t("ADMIN_KIND_QUERY"), visible: kind("query"),
       fields: [
         { key: "query.target", label: t("ADMIN_SOURCE"), required: true, options: [{ value: "b1", label: "B1" }, { value: "beas", label: "Beas" }] },
-        { key: "query.entitySet", label: t("ADMIN_ENTITY_SET"), required: true, placeholder: "Items", help: t("ADMIN_ENTITY_SET_HINT") },
-        // `columns` drives $select *and* the label/visibility bags, so it commits on change, never
-        // per keystroke, and prunes the bags as it does.
-        {
-          key: "query.columns", label: t("ADMIN_SELECT"), controlType: "columnList", placeholder: "ItemCode, ItemName",
-          onChange: (v, r) => prunedColUi(v as string[], r["query.labels"] as Record<string, string> | undefined, r["query.hidden"] as string[] | undefined),
-        },
-        { key: "query.filter", label: t("ADMIN_FILTER"), controlType: "textarea", placeholder: "ItemType eq 'itItems' and Frozen eq 'tNO'" },
-        { key: "query.orderby", label: t("ADMIN_SORT"), placeholder: "ItemName" },
+        { key: "query.entitySet", label: t("ADMIN_ENTITY_SET"), required: true, controlType: "entitySet" },
         // Not a schedule — there is no job runner. It is how old the cache may get before a read
         // refreshes it in the background, so a table nobody opens never costs a call.
         { key: "query.syncMinutes", label: `${t("ADMIN_SYNC_EVERY")} (${t("ADMIN_MINUTES")})`, type: "number", placeholder: t("ADMIN_MANUAL_ONLY") },
+        // The query's own parts get a row each: they are long. `columns` drives $select *and* the
+        // label/visibility bags, so it commits on change, never per keystroke, and prunes the bags as it does.
+        {
+          key: "query.columns", label: t("ADMIN_SELECT"), controlType: "columnList", placeholder: "ItemCode, ItemName", wide: true,
+          onChange: (v, r) => prunedColUi(v as string[], r["query.labels"] as Record<string, string> | undefined, r["query.hidden"] as string[] | undefined),
+        },
+        { key: "query.filter", label: t("ADMIN_FILTER"), controlType: "filter", placeholder: "ItemType eq 'itItems' and Frozen eq 'tNO'", wide: true },
+        { key: "query.orderby", label: t("ADMIN_SORT"), controlType: "orderby", placeholder: "ItemName", wide: true },
       ],
     },
-    // A new table has nothing cached yet.
-    ...(saved ? [{ id: "cache", label: t("ADMIN_CACHE"), visible: kind("query") }] : []),
     { id: "preview", label: t("ADMIN_PREVIEW"), visible: kind("query") },
     { id: "queryColumns", label: t("ADMIN_QUERY_COLUMNS"), visible: kind("query") },
   ];
@@ -192,7 +189,7 @@ function Editor({ row }: { row?: MasterdataRow }) {
     columns: row.kind === "table" ? (row.columns as Col[]) : emptyDraft().columns,
     rows: row.rows as Cell[][], query: row.query ?? emptyDraft().query,
   } : emptyDraft()));
-  const sections = useMemo(() => sectionsOf(t, !!id), [i18n, id]);
+  const sections = useMemo(() => sectionsOf(t), [i18n]);
   const validate = useCallback((r: Row) => issuesOf(r, t), [i18n]);
   const [preview, setPreview] = useState<{ cols: string[]; rows: Cell[][] } | null>(null);
 
@@ -206,10 +203,11 @@ function Editor({ row }: { row?: MasterdataRow }) {
     onSuccess: (r) => setPreview({ cols: r.columns, rows: r.rows as Cell[][] }),
     onError: () => setPreview(null),
   }));
-  // Refill this table's cache now. `rowCount` and `syncedAt` are on the row, so the list page is as
-  // stale as this editor after one.
+  // Refill this table's cache now. `rowCount`, `syncedAt` and `syncError` are on the row, so the list
+  // page is as stale as this editor after one, failed or not.
   const sync = useMutation(orpc.masterdata.sync.mutationOptions({
-    onSuccess: (r) => { void invalidate(); toast(t(r.count === 1 ? "ADMIN_SYNCED_ONE" : "ADMIN_SYNCED_MANY", r.count)); },
+    onSuccess: (r) => toast(t(r.count === 1 ? "ADMIN_SYNCED_ONE" : "ADMIN_SYNCED_MANY", r.count)),
+    onSettled: () => void invalidate(),
   }));
   const save = useMutation(orpc.masterdata.save.mutationOptions());
   // A Delete leaves past the discard guard: its own confirm already asked.
@@ -244,6 +242,10 @@ function Editor({ row }: { row?: MasterdataRow }) {
       // Awaited: the page a create moves to reads its row from this list.
       await invalidate();
       toast(t("ADMIN_MD_SAVED"));
+      // A query save empties its cache (the rows answered the old query), so refill it now rather
+      // than on the next read. Not awaited: a big table takes a while, and the button shows it.
+      // useMutation's own callbacks still run once a create has moved to the saved row's page.
+      if (d.kind === "query") sync.mutate({ id: saved.id });
       if (!id) await navigate({ to: "/$slug/masterdata/$id", params: { id: saved.id }, replace: true });
       return toRecord(d);
     },
@@ -255,7 +257,7 @@ function Editor({ row }: { row?: MasterdataRow }) {
       id: `action:${i}`, type: "Negative" as const, text: e.message, detail: t("ADMIN_ACTION_FAILED"), group: t("ADMIN_SECTION_GENERAL"),
     }] : [])),
     ...(testFetch.error ? [{ id: "preview", type: "Negative" as const, text: testFetch.error.message, detail: t("ADMIN_TEST_FETCH"), group: t("ADMIN_PREVIEW"), section: "preview" }] : []),
-    ...(row?.syncError ? [{ id: "sync", type: "Negative" as const, text: row.syncError, detail: t("ADMIN_LAST_ERROR"), group: t("ADMIN_CACHE"), section: "cache" }] : []),
+    ...(row?.syncError ? [{ id: "sync", type: "Negative" as const, text: row.syncError, detail: t("ADMIN_LAST_ERROR"), group: t("ADMIN_CACHE") }] : []),
   ];
 
   const controls: Record<string, Control> = {
@@ -271,35 +273,41 @@ function Editor({ row }: { row?: MasterdataRow }) {
           onInput={(e) => c.onChange(e.target.value)} />
       </div>
     ),
-    columnList: (c) => (
-      <Input value={((c.value as string[] | undefined) ?? []).join(", ")} placeholder={c.field.placeholder} accessibleName={c.field.label}
-        style={{ width: "100%" }}
-        onChange={(e) => c.onChange([...new Set((e.target.value ?? "").split(/[,\s]+/).filter(Boolean))])} />
-    ),
+    entitySet: (c) => <EntitySelect c={c} />,
+    columnList: (c) => <QueryInput c={c} part="columns" />,
+    filter: (c) => <QueryInput c={c} part="filter" />,
+    orderby: (c) => <QueryInput c={c} part="orderby" />,
   };
 
+  // The cache's state is the stored row's, never the record's: laid over the form for the header
+  // facets only, so a sync shows without touching what is being edited.
+  const cached = id && d.kind === "query";
+  const page = cached ? { ...record, formData: { ...record.formData, syncedAt: row?.syncedAt ?? null, rowCount: row?.rowCount ?? 0 } } : record;
+
   return (
-    <ObjectPage record={record} entity="Masterdata" localViews
+    <ObjectPage record={page} entity="Masterdata" localViews
       header={{
         titleField: "name",
         createTitle: t("ADMIN_NEW_TABLE"),
+        facets: cached ? [
+          { field: "syncedAt", label: t("ADMIN_LAST_SYNCED"), type: "date" },
+          { field: "rowCount", label: t("ADMIN_CACHED_ROWS"), type: "numeric" },
+        ] : undefined,
         actions: id ? () => (
           <>
             {d.kind === "query" ? (
               // Disabled while dirty for the same reason Duplicate is: the sync runs the SAVED query,
               // so running it against edits still on screen would cache the wrong answer.
               <Button design="Transparent" icon="synchronize" disabled={record.dirty || sync.isPending}
-                tooltip={record.dirty ? t("ADMIN_SYNC_SAVE_FIRST") : t("ADMIN_SYNC_TOOLTIP")}
                 onClick={() => sync.mutate({ id })}>
                 {sync.isPending ? t("ADMIN_SYNCING") : t("ADMIN_SYNC_NOW")}
               </Button>
             ) : null}
             <Button design="Transparent" icon="copy" disabled={record.dirty || duplicate.isPending}
-              tooltip={record.dirty ? t("ADMIN_SAVE_FIRST") : t("ADMIN_DUPLICATE_TABLE")}
               onClick={() => duplicate.mutate({ id })}>
               {t("ADMIN_DUPLICATE")}
             </Button>
-            <Button design="Transparent" icon="delete" disabled={remove.isPending} tooltip={t("ADMIN_DELETE_TABLE")}
+            <Button design="Transparent" icon="delete" disabled={remove.isPending}
               onClick={async () => {
                 if (await confirm({
                   title: t("ADMIN_DELETE_TABLE"), message: t("ADMIN_MD_DELETE_MSG", d.name),
@@ -316,7 +324,6 @@ function Editor({ row }: { row?: MasterdataRow }) {
       controls={controls}
       sectionTemplates={{
         rows: (ctx) => <RowsSection d={fromRecord(ctx.formData)} onRows={(rows) => ctx.updateField("rows", rows)} />,
-        cache: () => <CacheSection syncedAt={row?.syncedAt ?? null} rowCount={row?.rowCount ?? 0} syncError={row?.syncError ?? null} />,
         preview: (ctx) => {
           const cur = fromRecord(ctx.formData);
           return <PreviewSection d={cur} preview={preview} fetching={testFetch.isPending}
@@ -325,6 +332,67 @@ function Editor({ row }: { row?: MasterdataRow }) {
         },
         queryColumns: (ctx) => <QueryColumnsSection d={fromRecord(ctx.formData)} update={ctx.update} />,
       }} />
+  );
+}
+
+/** The source's entity sets, off its metadata. With SAP unreachable the list is the saved one
+ *  alone — Save's test fetch needs SAP anyway. */
+function EntitySelect({ c }: { c: ControlContext }) {
+  const target = (c.formData["query.target"] ?? "b1") as Target;
+  const value = String(c.value ?? "");
+  // The server caches the list a day, so ask once and never retry.
+  const entities = useQuery({ ...orpc.masterdata.entities.queryOptions({ input: { target } }), staleTime: Infinity, retry: false });
+  const list = entities.data ?? [];
+  const options = !value || list.some((e) => e.name === value) ? list : [{ name: value, label: value }, ...list];
+  return (
+    <Select value={value} accessibleName={c.field.label} style={{ width: "100%" }}
+      valueState={c.error ? "Negative" : "None"} valueStateMessage={<div>{c.error}</div>}
+      onChange={(e) => c.onChange(e.target.value)}>
+      {value ? null : <Option value="">—</Option>}
+      {options.map((e) => (
+        <Option key={e.name} value={e.name} additionalText={e.label !== e.name ? e.label : undefined}>{e.name}</Option>
+      ))}
+    </Select>
+  );
+}
+
+/** One part of the query, suggested off the chosen entity set's fields. Only a help — with SAP
+ *  unreachable it is a plain text box, and Save's test fetch is still what judges the query. */
+function QueryInput({ c, part }: { c: ControlContext; part: "columns" | "filter" | "orderby" }) {
+  const target = (c.formData["query.target"] ?? "b1") as Target;
+  const entitySet = String(c.formData["query.entitySet"] ?? "");
+  // The server caches both (a day; B1's fields until a Refresh), so ask once and never retry: a
+  // missing suggestion is not worth four agent round trips.
+  const entities = useQuery({ ...orpc.masterdata.entities.queryOptions({ input: { target } }), staleTime: Infinity, retry: false });
+  const known = !!entities.data?.some((e) => e.name === entitySet);
+  const fields = useQuery({
+    ...orpc.masterdata.fields.queryOptions({ input: { target, entitySet } }),
+    enabled: known, staleTime: Infinity, retry: false,
+  });
+  // The column list commits on change, never per keystroke (it prunes the label bags as it does),
+  // so its text is a draft until then; the other parts are plain strings.
+  const list = part === "columns";
+  const [draft, setDraft] = useState<string | null>(null);
+  const text = list ? (draft ?? ((c.value as string[] | undefined) ?? []).join(", ")) : String(c.value ?? "");
+  const f = fields.data ?? [];
+  const hints = part === "columns" ? selectHints(text, f)
+    : part === "filter" ? filterHints(text, f, target)
+    : sortHints(text, f);
+  const commit = (v: string) => {
+    if (!list) return c.onChange(v);
+    setDraft(null);
+    c.onChange([...new Set(v.split(/[,\s]+/).filter(Boolean))]);
+  };
+  return (
+    <Input value={text} placeholder={c.field.placeholder} accessibleName={c.field.label}
+      style={{ width: "100%" }} valueState={c.error ? "Negative" : "None"} valueStateMessage={<div>{c.error}</div>}
+      showSuggestions filter="None"
+      noTypeahead // an item is the whole completed value; autocompleting it while typing fights the caret
+      onInput={(e) => (list ? setDraft(e.target.value) : commit(e.target.value))}
+      // UI5 fires `change` (not `input`) when a suggestion is accepted.
+      onChange={(e) => commit(e.target.value)}>
+      {hints.map((h) => <SuggestionItem key={h.text} text={h.text} additionalText={h.info} />)}
+    </Input>
   );
 }
 
@@ -364,27 +432,6 @@ function RowsSection({ d, onRows }: { d: Draft; onRows: (rows: Cell[][]) => void
           onChange={(next) => onRows(toCells(next))} />
       </GridForm>
     </div>
-  );
-}
-
-function CacheSection({ syncedAt, rowCount, syncError }: { syncedAt: Date | string | null; rowCount: number; syncError: string | null }) {
-  const i18n = useI18n();
-  return (
-    <Form layout={FORM_LAYOUT} accessibleMode="Display" itemSpacing="Large">
-      <FormGroup>
-        <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_LAST_SYNCED")}</Label>}>
-          <Text>{syncedAt ? new Date(syncedAt).toLocaleString(formatLocale()) : i18n.getText("ADMIN_NEVER")}</Text>
-        </FormItem>
-        <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_CACHED_ROWS")}</Label>}>
-          <Text>{i18n.getText(rowCount === 1 ? "ADMIN_ROW_ONE" : "ADMIN_ROW_MANY", rowCount)}</Text>
-        </FormItem>
-        {syncError ? (
-          <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_LAST_ERROR")}</Label>}>
-            <ObjectStatus state="Negative">{syncError}</ObjectStatus>
-          </FormItem>
-        ) : null}
-      </FormGroup>
-    </Form>
   );
 }
 

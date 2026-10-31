@@ -20,7 +20,7 @@ const model: ModelDef = {
   constraints: [],
   bom: [{ id: "b", itemCode: "grade", qty: "1" }],
   routing: [],
-  pricing: { priceExpr: "unitCost", quoteItemCode: "X", priceList: 2, itemTable: "catalog" },
+  pricing: { margin: 0, quoteItemCode: "X", priceList: 2, itemTable: "catalog" },
   batchDefaults: [1],
 };
 

@@ -2,6 +2,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../auth-client.ts";
 import { client, meQuery } from "../orpc.ts";
+import { AuthCard, AuthHead, AuthTile } from "@confire/ui/auth/AuthLayout.tsx";
 import { PortalAuthLayout } from "../components/AuthChrome.tsx";
 import { useI18n } from "../i18n.ts";
 import { hardRedirect, loginUrl } from "@confire/ui/host.ts";
@@ -41,13 +42,16 @@ function Onboarding() {
 
   return (
     <PortalAuthLayout tenant={me.tenant}>
-      <h2 className="auth-h1">{i18n.getText("PORTAL_ONBOARD_ASK", tenant)}</h2>
-      <p className="auth-sub">{i18n.getText("PORTAL_ONBOARD_BODY", tenant, me.user.email)}</p>
-      <p className="auth-alt">
-        {i18n.getText("PORTAL_ONBOARD_OTHER", tenant)}{" "}
-        <a href="#" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("PORTAL_SIGN_OUT")}</a>
-        {" "}{i18n.getText("PORTAL_ONBOARD_THEN")}
-      </p>
+      <AuthHead title={i18n.getText("PORTAL_ONBOARD_ASK", tenant)} />
+      <AuthCard center>
+        <AuthTile icon="locked" tone="ai" />
+        <p className="auth-body">{i18n.getText("PORTAL_ONBOARD_BODY", tenant, me.user.email)}</p>
+        <p className="auth-note">
+          {i18n.getText("PORTAL_ONBOARD_OTHER", tenant)}{" "}
+          <a href="#" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("PORTAL_SIGN_OUT")}</a>
+          {" "}{i18n.getText("PORTAL_ONBOARD_THEN")}
+        </p>
+      </AuthCard>
     </PortalAuthLayout>
   );
 }

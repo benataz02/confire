@@ -1,6 +1,6 @@
 import type { SQL } from "drizzle-orm";
 import {
-  costBreakdown, domainOf, formState, marginOf, paramPrices, syncTables,
+  costBreakdown, domainOf, formState, syncTables,
   type ModelDef, type Notice, type Propagation, type Val,
 } from "@confire/config-engine";
 import type { ConfigCandidate } from "@confire/db";
@@ -91,7 +91,6 @@ export function composeView(live: Pick<LiveProject, "row" | "model" | "md" | "lo
     }
   });
   const capped = stored.length >= 200;
-  const optionRows = paramPrices(model, prop, lookups.tables);
 
   return {
     project: {
@@ -108,16 +107,20 @@ export function composeView(live: Pick<LiveProject, "row" | "model" | "md" | "lo
       keys,
       rows: stored.map((c, i) => ({
         assignment: Object.fromEntries(keys.map((k) => [k, c.assignment[k] ?? null])),
+        // Per unit, what the price is made of: material + operations + other = unitCost, and the
+        // rest of unitPrice is margin.
         perBatch: c.perBatch.map((b) => ({
           batchQty: b.batchQty, unitPrice: b.outputs.unitPrice, unitCost: b.outputs.unitCost, total: b.outputs.batchTotal,
-          margin: marginOf(b.outputs.unitPrice, b.outputs.unitCost), lowest: best.get(b.batchQty)?.idx === i,
+          material: b.outputs.materialPerUnit, operations: b.outputs.laborPerUnit, other: b.outputs.otherPerUnit,
+          lowest: best.get(b.batchQty)?.idx === i,
         })),
       })),
       capped,
       ...(capped ? { widest: widestOf(prop) } : {}),
     },
     costs: costBreakdown(model, lookups, row.tables, stored, selection, row.batches),
-    optionPrices: { rows: optionRows, total: optionRows.reduce((n, r) => n + r.amount, 0) },
+    // The margin the candidates are priced at: the configuration's own, else the model's.
+    margin: model.pricing.margin,
     // What the picked cells price at, before a hand-typed price in the items grid moves it — the
     // grid and the quotation, not this figure, are what the customer is charged.
     selection: {

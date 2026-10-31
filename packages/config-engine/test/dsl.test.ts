@@ -141,6 +141,20 @@ describe("evaluate", () => {
     expect(() => evaluate('CONCAT(opts, "x")', s2)).toThrow(DslError);
   });
 
+  test("ISBLANK / SELECTED read an unpicked field instead of failing on it", () => {
+    const s2 = { vars: { s: "steel", n: 0, off: false, empty: "", none: null, opts: [] as string[] } };
+    for (const v of ["s", "n", "off"]) {
+      expect(evaluate(`SELECTED(${v})`, s2)).toBe(true);
+      expect(evaluate(`ISBLANK(${v})`, s2)).toBe(false);
+    }
+    for (const v of ["unpicked", "empty", "none", "opts"]) {
+      expect(evaluate(`SELECTED(${v})`, s2)).toBe(false);
+      expect(evaluate(`ISBLANK(${v})`, s2)).toBe(true);
+    }
+    expect(evaluate('SELECTED(unpicked) && unpicked == "x"', s2)).toBe(false);
+    expect(evaluate('ISBLANK(CONCAT(empty, ""))', s2)).toBe(true);
+  });
+
   test("unknown function errors", () => {
     expect(() => evaluate("NOPE(1)", scope)).toThrow(DslError);
   });

@@ -1,0 +1,73 @@
+---
+import sap from "../generated/sap.css?raw";
+import "../styles/tokens.css";
+import "../styles/components.css";
+import ShellBar from "../components/ShellBar.astro";
+import Footer from "../components/Footer.astro";
+import Consent from "../components/Consent.astro";
+import { LANGS, OG_LOCALE, type Lang } from "../i18n/index.ts";
+import { alternates, localePath } from "../lib/urls.ts";
+import { dict } from "../i18n/index.ts";
+import { SITE } from "../site.config.ts";
+
+// Every page's frame and head (spec 2026-10-30 §12): canonical, hreflang, Open Graph, the theme's
+// variables inlined (§5.1), the two preloaded fonts, JSON-LD. `path` is language-neutral.
+interface Props {
+  lang: Lang;
+  path: string;
+  title: string;
+  description: string;
+  noindex?: boolean;
+  /** the languages this page exists in: hreflang and the language menus use only these */
+  langs?: readonly Lang[];
+  jsonLd?: object[];
+  /** the thanks page: the ad pixels' conversion event, after consent */
+  conversion?: boolean;
+  ogImage?: string;
+}
+const { lang, path, title, description, noindex = false, langs = LANGS, jsonLd = [], conversion = false } = Astro.props;
+const site = Astro.site!;
+const abs = (p: string) => new URL(p, site).href;
+const ogImage = abs(Astro.props.ogImage ?? `/og/${lang}.png`);
+const consent = Boolean(SITE.metaPixelId || SITE.linkedinPartnerId);
+---
+<!doctype html>
+<html lang={lang}>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{title}</title>
+  <meta name="description" content={description}>
+  {noindex && <meta name="robots" content="noindex">}
+  <link rel="canonical" href={abs(localePath(lang, path))}>
+  {!noindex && alternates(path, langs).map((a) => <link rel="alternate" hreflang={a.lang} href={abs(a.href)}>)}
+  <link rel="icon" href="/confire-logo.png" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="preload" href="/fonts/72-Regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/72-Black.woff2" as="font" type="font/woff2" crossorigin>
+  <style is:inline set:html={sap}></style>
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Confire">
+  <meta property="og:title" content={title}>
+  <meta property="og:description" content={description}>
+  <meta property="og:url" content={abs(localePath(lang, path))}>
+  <meta property="og:image" content={ogImage}>
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content={dict[lang].meta.ogAlt}>
+  <meta property="og:locale" content={OG_LOCALE[lang]}>
+  {langs.filter((l) => l !== lang).map((l) => <meta property="og:locale:alternate" content={OG_LOCALE[l]}>)}
+  <meta name="twitter:card" content="summary_large_image">
+  {jsonLd.map((o) => <script type="application/ld+json" set:html={JSON.stringify(o)} />)}
+  {/* Cookieless and EU-hosted: counts every visitor without consent (spec §10). */}
+  {SITE.plausibleScript && <script is:inline defer data-domain="confire.ai" src={SITE.plausibleScript}></script>}
+</head>
+<body data-conversion={conversion ? "" : undefined}>
+  <a class="skip" href="#main">{dict[lang].skip}</a>
+  <ShellBar lang={lang} path={path} langs={langs} />
+  <main id="main"><slot /></main>
+  <Footer lang={lang} path={path} langs={langs} consent={consent} />
+  {consent && <Consent lang={lang} />}
+</body>
+</html>

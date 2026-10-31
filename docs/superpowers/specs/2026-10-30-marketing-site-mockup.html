@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Confire: AI quoting for SAP Business One manufacturers</title>
+<link rel="stylesheet" href="/files/horizon.css">
+<link id="evening" rel="stylesheet" href="/files/horizon-dark.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="/files/evening-scoped.css">
+<style>
+@font-face { font-family: "72"; src: url(/files/72-Light.woff2) format("woff2"); font-weight: 300; font-display: swap }
+@font-face { font-family: "72"; src: url(/files/72-Regular.woff2) format("woff2"); font-weight: 400; font-display: swap }
+@font-face { font-family: "72"; src: url(/files/72-Bold.woff2) format("woff2"); font-weight: 700; font-display: swap }
+@font-face { font-family: "72"; src: url(/files/72-Black.woff2) format("woff2"); font-weight: 900; font-display: swap }
+@font-face { font-family: "72-Bold"; src: url(/files/72-Bold.woff2) format("woff2"); font-display: swap }
+
+/* ---------- Tokens: every colour is a SAP variable or a color-mix of one ---------- */
+:root {
+  --pad: 1rem; --max: 76rem;
+  --display: clamp(2.5rem, 1.25rem + 4.6vw, 4.75rem);
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --loop: 10s;
+}
+@media (min-width: 600px) { :root { --pad: 2rem } }
+@media (min-width: 1440px) { :root { --pad: 3rem } }
+body, .evening {
+  --glow-brand: color-mix(in oklab, var(--sapBrandColor) 30%, transparent);
+  --glow-ai: color-mix(in oklab, var(--sapAssistant_Background) 24%, transparent);
+  --dot: color-mix(in oklab, var(--sapContent_LabelColor) 26%, transparent);
+  --hairline: color-mix(in oklab, var(--sapList_BorderColor) 80%, transparent);
+  --ai-ink: color-mix(in oklab, var(--sapAssistant_Background) 62%, var(--sapTitleColor));
+  --ai-wash: color-mix(in oklab, var(--sapAssistant_Background) 14%, transparent);
+  --brand-wash: color-mix(in oklab, var(--sapBrandColor) 12%, transparent);
+  --glass: color-mix(in oklab, var(--sapGroup_ContentBackground) 72%, transparent);
+}
+
+* { box-sizing: border-box }
+html { scroll-behavior: smooth; scroll-padding-top: 5rem }
+body { margin: 0; background: var(--sapBackgroundColor); color: var(--sapTextColor); font-family: var(--sapFontFamily);
+  font-size: var(--sapFontLargeSize); line-height: 1.55; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; overflow-x: clip }
+h1, h2, h3, h4 { color: var(--sapTitleColor); margin: 0; text-wrap: balance }
+h1 { font: 900 var(--display)/1.03 var(--sapFontFamily); letter-spacing: -0.03em }
+h2 { font: 700 clamp(1.75rem, 1rem + 2.2vw, 2.75rem)/1.1 var(--sapFontHeaderFamily); letter-spacing: -0.025em }
+h3 { font: 700 1.125rem/1.3 var(--sapFontHeaderFamily); letter-spacing: -0.01em }
+p { margin: 0; text-wrap: pretty }
+a { color: var(--sapLinkColor) }
+.wrap { max-width: var(--max); margin: 0 auto; padding: 0 var(--pad) }
+.ico { width: 1rem; height: 1rem; fill: currentColor; flex: none }
+.muted { color: var(--sapContent_LabelColor) }
+.small { font-size: var(--sapFontSize) }
+.tiny { font-size: var(--sapFontSmallSize) }
+.eyebrow { display: inline-block; font: 700 var(--sapFontSmallSize)/1 var(--sapFontFamily); letter-spacing: .14em; text-transform: uppercase; color: var(--sapHighlightColor); margin-bottom: 1rem }
+.lead { font-size: clamp(1.0625rem, 1rem + .3vw, 1.25rem); color: var(--sapContent_LabelColor); line-height: 1.6 }
+.ai-text { background: var(--sapAssistant_BackgroundGradient); -webkit-background-clip: text; background-clip: text; color: transparent; padding-bottom: .06em }
+.sec-head { max-width: 46rem; margin: 0 auto 3.5rem; text-align: center }
+.sec-head .lead { margin-top: 1rem }
+section { padding: clamp(4.5rem, 3rem + 6vw, 8rem) 0; position: relative; overflow-x: clip }
+
+/* ---------- Buttons ---------- */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; height: 2.25rem; padding: 0 1rem; border-radius: var(--sapButton_BorderCornerRadius);
+  font: 700 var(--sapFontSize) var(--sapFontFamily); text-decoration: none; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--sapButton_BorderColor); background: var(--sapButton_Background); color: var(--sapButton_TextColor);
+  transition: background .2s, transform .2s var(--ease), box-shadow .2s }
+.btn:hover { background: var(--sapButton_Hover_Background) }
+.btn:active { transform: scale(.98) }
+:focus-visible { outline: var(--sapContent_FocusWidth) solid var(--sapContent_FocusColor); outline-offset: 2px }
+.btn.em { background: var(--sapButton_Emphasized_Background); border-color: var(--sapButton_Emphasized_BorderColor); color: var(--sapButton_Emphasized_TextColor);
+  box-shadow: 0 .5rem 1.5rem -.5rem var(--glow-brand) }
+.btn.em:hover { background: var(--sapButton_Emphasized_Hover_Background); box-shadow: 0 .75rem 2rem -.5rem var(--glow-brand) }
+.btn.lite { border-color: transparent; background: transparent; color: var(--sapButton_Lite_TextColor) }
+.btn.lite:hover { background: var(--sapButton_Lite_Hover_Background) }
+.btn.lg { height: 3rem; padding: 0 1.5rem; font-size: var(--sapFontLargeSize); border-radius: .75rem }
+.btn .arrow { transition: transform .2s var(--ease) }
+.btn:hover .arrow { transform: translateX(3px) }
+
+/* ---------- Shell bar ---------- */
+.shell { position: sticky; top: 0; z-index: 50; background: color-mix(in oklab, var(--sapShellColor) 78%, transparent);
+  backdrop-filter: saturate(1.6) blur(16px); -webkit-backdrop-filter: saturate(1.6) blur(16px); border-bottom: 1px solid var(--hairline) }
+.shell .wrap { display: flex; align-items: center; gap: .5rem; height: 3.5rem }
+.brand { display: flex; align-items: center; gap: .625rem; font: 900 1.1875rem var(--sapFontFamily); letter-spacing: -0.02em; color: var(--sapShell_InteractiveTextColor); text-decoration: none; margin-right: auto }
+.mark { width: 1.875rem; height: 1.875rem; border-radius: .625rem; background: var(--sapBrandColor); display: grid; place-items: center;
+  color: var(--sapButton_Emphasized_TextColor); font: 900 1rem var(--sapFontFamily); box-shadow: inset 0 -2px 0 color-mix(in oklab, var(--sapTitleColor) 18%, transparent) }
+.nav { display: none; gap: .125rem; margin-right: .75rem }
+.nav a { color: var(--sapShell_InteractiveTextColor); text-decoration: none; font-size: var(--sapFontSize); padding: .5rem .75rem; border-radius: var(--sapButton_BorderCornerRadius); transition: background .2s }
+.nav a:hover { background: var(--sapButton_Lite_Hover_Background) }
+.desk { display: none }
+@media (min-width: 1024px) { .nav, .desk { display: inline-flex } .phone { display: none } }
+[popover] { border: 1px solid var(--hairline); padding: .375rem; border-radius: .75rem; background: var(--sapGroup_ContentBackground); color: var(--sapTextColor); box-shadow: var(--sapContent_Shadow2) }
+#menu { inset: 4rem .75rem auto auto; width: min(19rem, calc(100vw - 1.5rem)) }
+#lang { inset: 4rem 9rem auto auto; min-width: 11rem }
+[popover] a { display: flex; justify-content: space-between; padding: .75rem; color: var(--sapTextColor); text-decoration: none; border-radius: .5rem }
+[popover] a:hover { background: var(--sapButton_Lite_Hover_Background) }
+[popover] hr { border: 0; border-top: 1px solid var(--hairline); margin: .375rem 0 }
+
+/* ---------- Hero ---------- */
+.hero { padding: clamp(3.5rem, 2rem + 6vw, 7rem) 0 clamp(3rem, 2rem + 4vw, 6rem); background: var(--sapShellColor); isolation: isolate; overflow: clip }
+.hero::before { content: ""; position: absolute; inset: 0; z-index: -2; background-image: radial-gradient(var(--dot) 1px, transparent 1.4px); background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 75% 60% at 50% 35%, black 25%, transparent 78%); -webkit-mask-image: radial-gradient(ellipse 75% 60% at 50% 35%, black 25%, transparent 78%) }
+.glow { position: absolute; z-index: -1; border-radius: 50%; filter: blur(10px); pointer-events: none }
+.glow.b { width: 46rem; height: 30rem; left: 50%; top: 52%; translate: -78% -20%; background: radial-gradient(closest-side, var(--glow-brand), transparent) }
+.glow.a { width: 40rem; height: 28rem; left: 50%; top: 52%; translate: -8% -10%; background: radial-gradient(closest-side, var(--glow-ai), transparent) }
+.hero-copy { text-align: center; display: grid; justify-items: center }
+.pill { display: inline-flex; align-items: center; gap: .5rem; padding: .3125rem .875rem .3125rem .375rem; border-radius: 2rem; text-decoration: none; font-size: var(--sapFontSize);
+  color: var(--sapTextColor); background: var(--glass); border: 1px solid var(--hairline); box-shadow: var(--sapContent_Shadow0); margin-bottom: 2rem; transition: border-color .2s }
+.pill:hover { border-color: var(--sapAssistant_BorderColor) }
+.pill .new { background: var(--sapAssistant_BackgroundGradient); color: var(--sapAssistant_TextColor); border-radius: 1rem; padding: .125rem .5rem; font-weight: 700; font-size: var(--sapFontSmallSize); display: inline-flex; gap: .25rem; align-items: center }
+.pill .new .ico { width: .75rem; height: .75rem }
+.hero h1 { max-width: 15ch; margin-bottom: 1.5rem }
+.hero .lead { max-width: 40rem; margin-bottom: 2.25rem }
+.ctas { display: flex; flex-wrap: wrap; gap: .75rem; justify-content: center }
+.works { margin-top: 2.5rem; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .5rem 1.75rem; color: var(--sapContent_LabelColor); font-size: var(--sapFontSize) }
+.works b { color: var(--sapTitleColor); font-weight: 700; display: inline-flex; align-items: center; gap: .5rem }
+.works b::before { content: ""; width: .375rem; height: .375rem; border-radius: 50%; background: var(--sapPositiveElementColor) }
+
+/* The stage: request -> configuration -> SAP quotation, told in one loop */
+.stage { margin-top: clamp(3rem, 2rem + 4vw, 5rem); display: grid; gap: 0; align-items: center; grid-template-columns: 1fr; justify-items: stretch; max-width: 32rem; margin-inline: auto;
+  padding: clamp(.75rem, .5rem + 1vw, 1.25rem); border-radius: 1.75rem; background: var(--glass); border: 1px solid var(--hairline);
+  box-shadow: 0 2rem 4rem -2rem color-mix(in oklab, var(--sapTitleColor) 25%, transparent); backdrop-filter: blur(6px) }
+@media (min-width: 1024px) { .stage { max-width: var(--max); grid-template-columns: 1fr 4rem 1.6fr 4rem 1fr; margin-inline: var(--pad) } }
+@media (min-width: 1300px) { .stage { margin-inline: auto; max-width: calc(var(--max) - 2 * var(--pad)) } }
+.pane { background: var(--sapGroup_ContentBackground); border-radius: 1.125rem; box-shadow: var(--sapContent_Shadow0); overflow: hidden; font-size: var(--sapFontSize); text-align: left; position: relative }
+.pane-h { display: flex; align-items: center; gap: .5rem; padding: .75rem 1rem; border-bottom: 1px solid var(--hairline); color: var(--sapContent_LabelColor); font-size: var(--sapFontSmallSize); font-weight: 700; letter-spacing: .04em; text-transform: uppercase }
+.pane-h .ico { width: .875rem; height: .875rem }
+.pane-b { padding: 1rem }
+.mail-from { display: flex; align-items: center; gap: .625rem; margin-bottom: .75rem }
+.avatar { width: 2rem; height: 2rem; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: .75rem; background: var(--sapAvatar_1_Background); color: var(--sapAvatar_1_TextColor); flex: none }
+.mail-subj { font-weight: 700; color: var(--sapTitleColor); margin-bottom: .375rem }
+.mail-body { color: var(--sapTextColor); line-height: 1.65 }
+.hl { background-image: linear-gradient(var(--ai-wash), var(--ai-wash)); background-repeat: no-repeat; background-size: 100% 100%; border-radius: .25rem; padding: 0 .125rem;
+  box-shadow: inset 0 -1.5px 0 color-mix(in oklab, var(--sapAssistant_Background) 70%, transparent) }
+.attach { margin-top: .875rem; display: inline-flex; gap: .5rem; align-items: center; padding: .375rem .625rem; border-radius: .5rem; border: 1px solid var(--hairline); font-size: var(--sapFontSmallSize) }
+.attach .ico { fill: var(--sapNegativeElementColor) }
+
+.conn { position: relative; justify-self: center; width: 2px; height: 3.25rem; background: repeating-linear-gradient(180deg, var(--sapContent_ForegroundBorderColor) 0 4px, transparent 4px 8px); opacity: .9 }
+.conn .lbl { position: absolute; left: 1rem; top: 50%; translate: 0 -50%; white-space: nowrap; font-size: var(--sapFontSmallSize); font-weight: 700; color: var(--sapContent_LabelColor) }
+.spark { position: absolute; left: 50%; top: 0; width: 1.5rem; height: 1.5rem; margin: -.75rem 0 0 -.75rem; border-radius: 50%; display: grid; place-items: center;
+  background: var(--sapAssistant_BackgroundGradient); color: var(--sapAssistant_TextColor); box-shadow: 0 0 0 4px var(--ai-wash), 0 0 1.25rem var(--glow-ai) }
+.spark .ico { width: .75rem; height: .75rem }
+.spark.blue { background: var(--sapBrandColor); box-shadow: 0 0 0 4px var(--brand-wash), 0 0 1.25rem var(--glow-brand) }
+@media (min-width: 1024px) {
+  .conn { width: 100%; height: 2px; background: repeating-linear-gradient(90deg, var(--sapContent_ForegroundBorderColor) 0 4px, transparent 4px 8px) }
+  .conn .lbl { left: 50%; top: -1.75rem; translate: -50% 0 }
+  .spark { top: 50%; left: 0 }
+}
+
+.cfg-title { display: flex; justify-content: space-between; align-items: start; gap: 1rem; padding: 1rem 1rem .75rem }
+.cfg-title h4 { font: 700 1.125rem var(--sapFontHeaderFamily) }
+.field { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: .4375rem 0; border-bottom: 1px solid var(--hairline) }
+.field:last-child { border: 0 }
+.field > span:first-child { color: var(--sapContent_LabelColor) }
+.val { display: inline-flex; gap: .3125rem; align-items: center; font-weight: 700; color: var(--sapTitleColor) }
+.val .ico { width: .75rem; height: .75rem; fill: var(--ai-ink) }
+.cfg-grid { display: grid; gap: .75rem; padding: 0 1rem 1rem }
+@media (min-width: 600px) { .cfg-grid { grid-template-columns: 1fr 1.4fr } }
+.box { border: 1px solid var(--hairline); border-radius: .75rem; padding: .5rem .75rem }
+.box-t { font-size: var(--sapFontSmallSize); font-weight: 700; color: var(--sapContent_LabelColor); text-transform: uppercase; letter-spacing: .04em; margin: .25rem 0 .25rem }
+.opt { display: grid; grid-template-columns: auto 1fr auto; gap: .5rem; align-items: center; padding: .4375rem .5rem; margin: 0 -.5rem; border-radius: .5rem }
+.radio { width: .875rem; height: .875rem; border-radius: 50%; border: 1.5px solid var(--sapField_BorderColor) }
+.opt.sel { background: var(--sapButton_Selected_Background) }
+.opt.sel .radio { border: 4px solid var(--sapSelectedColor) }
+.num { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--sapTitleColor) }
+
+.os { display: inline-flex; align-items: center; gap: .3125rem; padding: .1875rem .5rem; border-radius: 1rem; font-size: var(--sapFontSmallSize); font-weight: 700; white-space: nowrap }
+.os .ico { width: .75rem; height: .75rem }
+.st-pos { color: var(--sapPositiveTextColor); background: color-mix(in oklab, var(--sapPositiveElementColor) 14%, transparent) }
+.st-pos .ico { fill: var(--sapPositiveElementColor) }
+.st-inf { color: var(--sapInformationColor); background: color-mix(in oklab, var(--sapInformativeElementColor) 13%, transparent) }
+.st-crit { color: var(--sapCriticalTextColor, var(--sapCriticalElementColor)); background: color-mix(in oklab, var(--sapCriticalElementColor) 14%, transparent) }
+.st-neg { color: var(--sapNegativeTextColor); background: color-mix(in oklab, var(--sapNegativeElementColor) 13%, transparent) }
+.st-ai { color: var(--ai-ink); background: var(--ai-wash) }
+.st-ai .ico { fill: var(--ai-ink) }
+
+.doc-no { font: 700 1.5rem/1 var(--sapFontHeaderFamily); letter-spacing: -0.02em; color: var(--sapTitleColor); margin: .25rem 0 .75rem; font-variant-numeric: tabular-nums }
+.line { display: grid; grid-template-columns: 1fr auto; padding: .375rem 0; border-bottom: 1px solid var(--hairline); gap: .5rem }
+.total { display: flex; justify-content: space-between; align-items: baseline; padding-top: .75rem }
+.total .num { font-size: 1.25rem }
+
+/* the loop */
+@media (prefers-reduced-motion: no-preference) {
+  .hl { animation: hl var(--loop) var(--ease) infinite }
+  .hl:nth-of-type(2) { animation-delay: .25s } .hl:nth-of-type(3) { animation-delay: .5s }
+  .s1 { animation: travel-v var(--loop) var(--ease) infinite; animation-delay: 1.4s }
+  .s2 { animation: travel-v var(--loop) var(--ease) infinite; animation-delay: 5.6s }
+  .fill { animation: fill var(--loop) var(--ease) infinite }
+  .fill.f2 { animation-delay: .3s } .fill.f3 { animation-delay: .6s } .fill.f4 { animation-delay: .9s }
+  .pick { animation: pick var(--loop) var(--ease) infinite }
+  .quote { animation: lift var(--loop) var(--ease) infinite }
+  .quote .os { animation: pop var(--loop) var(--ease) infinite }
+  @media (min-width: 1024px) { .s1, .s2 { animation-name: travel-h } }
+}
+@keyframes hl { 0%, 3% { background-size: 0 100% } 12%, 92% { background-size: 100% 100% } 100% { background-size: 0 100% } }
+@keyframes travel-v { 0% { top: 0; opacity: 0; scale: .6 } 2% { opacity: 1; scale: 1 } 14% { top: 100%; opacity: 1; scale: 1 } 16%, 100% { top: 100%; opacity: 0; scale: .6 } }
+@keyframes travel-h { 0% { left: 0; opacity: 0; scale: .6 } 2% { opacity: 1; scale: 1 } 14% { left: 100%; opacity: 1; scale: 1 } 16%, 100% { left: 100%; opacity: 0; scale: .6 } }
+@keyframes fill { 0%, 28% { opacity: 0; translate: 0 .25rem; filter: blur(2px) } 34%, 93% { opacity: 1; translate: 0; filter: none } 100% { opacity: 0 } }
+@keyframes pick { 0%, 46% { background: transparent } 50%, 93% { background: var(--sapButton_Selected_Background) } 100% { background: transparent } }
+@keyframes lift { 0%, 70% { translate: 0; box-shadow: var(--sapContent_Shadow0) } 74%, 93% { translate: 0 -.375rem; box-shadow: 0 1.25rem 2.5rem -1rem var(--glow-brand), var(--sapContent_Shadow0) } 100% { translate: 0 } }
+@keyframes pop { 0%, 70% { opacity: 0; scale: .7 } 74% { opacity: 1; scale: 1.08 } 77%, 93% { opacity: 1; scale: 1 } 100% { opacity: 0 } }
+.pick .radio { transition: border .3s }
+
+/* ---------- Scroll reveal: CSS only, where the browser supports it ---------- */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .rv { animation: rise linear both; animation-timeline: view(); animation-range: entry 5% cover 28% }
+  }
+}
+@keyframes rise { from { opacity: 0; translate: 0 2rem; filter: blur(4px) } to { opacity: 1; translate: 0; filter: none } }
+
+/* ---------- Before / after ---------- */
+.ba { display: grid; gap: 1.25rem; align-items: stretch }
+@media (min-width: 900px) { .ba { grid-template-columns: 1fr 1fr } }
+.ba-card { border-radius: 1.5rem; padding: clamp(1.5rem, 1rem + 2vw, 2.5rem); display: grid; gap: 1.5rem; align-content: start }
+.ba-old { background: var(--sapBackgroundColor); border: 1px solid var(--hairline) }
+.ba-new { background: linear-gradient(var(--sapGroup_ContentBackground), var(--sapGroup_ContentBackground)) padding-box,
+  linear-gradient(135deg, var(--sapBrandColor), var(--sapAssistant_Background)) border-box; border: 1.5px solid transparent;
+  box-shadow: 0 2rem 4rem -2.5rem var(--glow-brand) }
+.ba-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0 }
+.ba-steps li { display: grid; grid-template-columns: 2rem 1fr; gap: .875rem; padding: .75rem 0; position: relative }
+.ba-steps li:not(:last-child)::after { content: ""; position: absolute; left: calc(1rem - 1px); top: 2.75rem; bottom: -.25rem; width: 2px; background: var(--hairline) }
+.ba-dot { width: 2rem; height: 2rem; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--hairline); background: var(--sapGroup_ContentBackground) }
+.ba-old .ba-dot .ico { fill: var(--sapContent_NonInteractiveIconColor) }
+.ba-new .ba-dot { background: var(--brand-wash); border-color: transparent } .ba-new .ba-dot .ico { fill: var(--sapHighlightColor) }
+.ba-new .ba-dot.ai { background: var(--sapAssistant_BackgroundGradient) } .ba-new .ba-dot.ai .ico { fill: var(--sapAssistant_TextColor) }
+.ba-steps b { display: block; color: var(--sapTitleColor) }
+.ba-steps span { font-size: var(--sapFontSize); color: var(--sapContent_LabelColor) }
+.ba-time { display: flex; align-items: baseline; gap: .75rem; padding-top: 1.25rem; border-top: 1px solid var(--hairline) }
+.ba-time strong { font: 900 clamp(2.25rem, 1.5rem + 2.5vw, 3.25rem)/1 var(--sapFontFamily); letter-spacing: -0.04em }
+.ba-old .ba-time strong { color: var(--sapContent_LabelColor) }
+
+/* ---------- Steps ---------- */
+.steps { display: grid; gap: 2rem; counter-reset: s; position: relative }
+@media (min-width: 900px) { .steps { grid-template-columns: repeat(3, 1fr); gap: 2.5rem }
+  .steps::before { content: ""; position: absolute; top: 1.75rem; left: 3.5rem; right: 3.5rem; height: 2px; background: linear-gradient(90deg, var(--sapBrandColor), var(--sapAssistant_Background)); opacity: .35 } }
+.step { position: relative }
+.step-n { width: 3.5rem; height: 3.5rem; border-radius: 1rem; display: grid; place-items: center; background: var(--sapGroup_ContentBackground); box-shadow: var(--sapContent_Shadow0);
+  font: 300 1.5rem var(--sapFontFamily); color: var(--sapHighlightColor); margin-bottom: 1.5rem; position: relative; font-variant-numeric: tabular-nums }
+.step h3 { margin-bottom: .5rem }
+.step p { color: var(--sapContent_LabelColor) }
+.step .chip { margin-top: 1rem }
+.chip { display: inline-flex; align-items: center; gap: .5rem; padding: .375rem .75rem; border-radius: .625rem; border: 1px solid var(--hairline); background: var(--sapGroup_ContentBackground); font-size: var(--sapFontSmallSize); color: var(--sapTextColor); font-weight: 700 }
+.chip .ico { width: .875rem; height: .875rem }
+
+/* ---------- Bento ---------- */
+.bento { display: grid; gap: 1rem; grid-template-columns: 1fr }
+@media (min-width: 700px) { .bento { grid-template-columns: repeat(2, 1fr) } .t-a, .t-d { grid-column: span 2 } }
+@media (min-width: 1100px) { .bento { grid-template-columns: repeat(6, 1fr) }
+  .t-a { grid-column: span 4 } .t-b { grid-column: span 2 } .t-c { grid-column: span 2 } .t-d { grid-column: span 4 } .t-e, .t-f { grid-column: span 3 } }
+.tile { background: var(--sapTile_Background); border-radius: 1.5rem; border: 1px solid var(--hairline); padding: 1.75rem; display: grid; gap: 1.5rem; align-content: space-between;
+  position: relative; overflow: hidden; transition: transform .35s var(--ease), box-shadow .35s var(--ease) }
+.tile:hover { transform: translateY(-3px); box-shadow: 0 1.5rem 3rem -1.75rem color-mix(in oklab, var(--sapTitleColor) 35%, transparent) }
+.tile h3 { font-size: 1.25rem; margin-bottom: .375rem }
+.tile p { color: var(--sapTile_TextColor); font-size: var(--sapFontSize); line-height: 1.6; max-width: 34rem }
+.tile.ai-tile::after { content: ""; position: absolute; width: 24rem; height: 24rem; right: -8rem; top: -10rem; border-radius: 50%; background: radial-gradient(closest-side, var(--glow-ai), transparent); pointer-events: none }
+.ui { background: var(--sapBackgroundColor); border-radius: 1rem; padding: .875rem; font-size: var(--sapFontSize); border: 1px solid var(--hairline); position: relative; z-index: 1 }
+.ui-row { display: grid; grid-template-columns: 1fr auto; gap: .75rem; align-items: center; padding: .5rem .25rem; border-bottom: 1px solid var(--hairline) }
+.ui-row:last-child { border: 0 }
+.split2 { display: grid; gap: .75rem }
+@media (min-width: 700px) { .split2 { grid-template-columns: 1fr 1fr } }
+.bubble { background: var(--sapAssistant_Answer_Background); border: 1px solid var(--hairline); padding: .625rem .875rem; border-radius: 1rem 1rem 1rem .25rem; margin-top: .5rem }
+.bubble-q { display: flex; gap: .375rem; margin-top: .5rem }
+.qchip { border: 1px solid var(--sapAssistant_BorderColor); color: var(--ai-ink); border-radius: 1rem; padding: .1875rem .75rem; font-weight: 700; font-size: var(--sapFontSmallSize); background: var(--sapGroup_ContentBackground) }
+.dis { color: var(--sapContent_DisabledTextColor); text-decoration: line-through; text-decoration-color: color-mix(in oklab, var(--sapContent_LabelColor) 50%, transparent) }
+.why { display: block; font-size: var(--sapFontSmallSize); color: var(--sapCriticalElementColor); text-decoration: none; margin-top: .125rem }
+.bars { display: grid; gap: .625rem }
+.bar-row { display: grid; grid-template-columns: 2.75rem 1fr auto; gap: .625rem; align-items: center; font-size: var(--sapFontSmallSize) }
+.bar { display: flex; height: .75rem; border-radius: 1rem; overflow: hidden; gap: 2px }
+.bar i { display: block; height: 100% }
+.c1 { background: var(--sapChart_OrderedColor_1) } .c2 { background: var(--sapChart_OrderedColor_2) } .c3 { background: var(--sapChart_OrderedColor_6) }
+.legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: var(--sapFontSmallSize); color: var(--sapContent_LabelColor); margin-top: .25rem }
+.legend span { display: inline-flex; gap: .375rem; align-items: center } .legend i { width: .625rem; height: .625rem; border-radius: .1875rem }
+.doc { display: grid; gap: 1rem }
+@media (min-width: 700px) { .doc { grid-template-columns: 1.6fr 1fr; align-items: center } }
+.tbl { width: 100%; border-collapse: collapse; font-size: var(--sapFontSize) }
+.tbl th { text-align: left; font-size: var(--sapFontSmallSize); color: var(--sapContent_LabelColor); font-weight: 400; padding: .375rem .5rem; border-bottom: 1px solid var(--hairline) }
+.tbl td { padding: .5rem; border-bottom: 1px solid var(--hairline) }
+.tbl tr:last-child td { border: 0 }
+.tbl .r { text-align: right; font-variant-numeric: tabular-nums }
+.code { font-family: var(--sapFontFamily); color: var(--sapLinkColor); font-weight: 700 }
+.once { display: grid; gap: .5rem; padding: 1rem; border-radius: 1rem; background: var(--brand-wash) }
+.once .ico { width: 1.5rem; height: 1.5rem; fill: var(--sapHighlightColor) }
+.pulse { width: .5rem; height: .5rem; border-radius: 50%; display: inline-block; position: relative; flex: none }
+.pulse.neg { background: var(--sapNegativeElementColor) } .pulse.pos { background: var(--sapPositiveElementColor) }
+@media (prefers-reduced-motion: no-preference) { .pulse.pos::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: inherit; animation: ping 2s var(--ease) infinite } }
+@keyframes ping { from { scale: 1; opacity: .6 } to { scale: 3; opacity: 0 } }
+.sys { display: flex; align-items: center; gap: .625rem }
+
+/* ---------- Security (an Evening band inside Morning) ---------- */
+.evening.band { background: var(--sapBackgroundColor); color: var(--sapTextColor); overflow: clip; isolation: isolate }
+.band::before { content: ""; position: absolute; inset: 0; z-index: -1; background-image: radial-gradient(var(--dot) 1px, transparent 1.4px); background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 60% 70% at 75% 50%, black 10%, transparent 70%); -webkit-mask-image: radial-gradient(ellipse 60% 70% at 75% 50%, black 10%, transparent 70%) }
+.band .glow.b { left: 78%; top: 50%; translate: -50% -50%; width: 36rem; height: 36rem }
+.sec-split { display: grid; gap: 3.5rem; align-items: center }
+@media (min-width: 1000px) { .sec-split { grid-template-columns: 1fr 1fr } }
+.points { list-style: none; padding: 0; margin: 2rem 0 0; display: grid; gap: 1.5rem }
+.points li { display: grid; grid-template-columns: 2.5rem 1fr; gap: 1rem }
+.points .ic { width: 2.5rem; height: 2.5rem; border-radius: .75rem; display: grid; place-items: center; background: var(--brand-wash); border: 1px solid var(--hairline) }
+.points .ic .ico { fill: var(--sapHighlightColor); width: 1.125rem; height: 1.125rem }
+.points b { display: block; color: var(--sapTitleColor); margin-bottom: .125rem }
+.points span { color: var(--sapContent_LabelColor); font-size: var(--sapFontSize) }
+.arch { display: grid; justify-items: center; gap: 0; max-width: 26rem; margin-inline: auto; width: 100% }
+.node { width: 100%; background: var(--sapGroup_ContentBackground); border: 1px solid var(--hairline); border-radius: 1rem; padding: 1rem 1.125rem; display: flex; gap: .875rem; align-items: center; font-size: var(--sapFontSize) }
+.node .ic { width: 2.5rem; height: 2.5rem; border-radius: .75rem; display: grid; place-items: center; background: var(--sapBackgroundColor); border: 1px solid var(--hairline) }
+.node .ic .ico { width: 1.125rem; height: 1.125rem; fill: var(--sapContent_IconColor) }
+.node b { display: block; color: var(--sapTitleColor) }
+.node .os { margin-left: auto }
+.tunnel { position: relative; width: 2px; height: 5.5rem; background: repeating-linear-gradient(0deg, var(--sapHighlightColor) 0 6px, transparent 6px 12px); opacity: .9 }
+@media (prefers-reduced-motion: no-preference) { .tunnel { animation: flow 1s linear infinite } }
+@keyframes flow { to { background-position: 0 -12px } }
+.tunnel .lbl { position: absolute; left: 1.125rem; top: 50%; translate: 0 -50%; white-space: nowrap; font-size: var(--sapFontSmallSize); color: var(--sapContent_LabelColor); display: flex; align-items: center; gap: .375rem }
+.tunnel .lbl .ico { width: .75rem; height: .75rem; fill: var(--sapHighlightColor) }
+.lan { width: 100%; border: 1.5px dashed color-mix(in oklab, var(--sapContent_LabelColor) 45%, transparent); border-radius: 1.5rem; padding: 2.25rem 1rem 1rem; position: relative; display: grid; gap: .75rem }
+.lan > .tag { position: absolute; top: -.75rem; left: 1.25rem; background: var(--sapBackgroundColor); padding: 0 .5rem; font-size: var(--sapFontSmallSize); font-weight: 700; color: var(--sapContent_LabelColor); letter-spacing: .06em; text-transform: uppercase }
+.lan .wire { justify-self: center; width: 2px; height: 1rem; background: var(--hairline); margin: -.75rem 0 }
+
+/* ---------- FAQ ---------- */
+.faq-split { display: grid; gap: 2.5rem }
+@media (min-width: 1000px) { .faq-split { grid-template-columns: 1fr 1.6fr; gap: 4rem } .faq-split .sticky { position: sticky; top: 6rem; align-self: start } }
+.faq { display: grid; gap: .625rem }
+details { background: var(--sapGroup_ContentBackground); border: 1px solid var(--hairline); border-radius: 1rem; transition: box-shadow .25s, border-color .25s }
+details[open] { box-shadow: var(--sapContent_Shadow0); border-color: transparent }
+summary { list-style: none; cursor: pointer; padding: 1.125rem 1.25rem; display: flex; gap: 1rem; align-items: center; justify-content: space-between; font-weight: 700; color: var(--sapTitleColor) }
+summary::-webkit-details-marker { display: none }
+summary .tw { width: 1.75rem; height: 1.75rem; border-radius: 50%; display: grid; place-items: center; background: var(--sapBackgroundColor); flex: none; transition: rotate .3s var(--ease), background .2s }
+summary .tw .ico { width: .875rem; height: .875rem; fill: var(--sapContent_IconColor) }
+details[open] summary .tw { rotate: 180deg; background: var(--brand-wash) }
+details p { padding: 0 1.25rem 1.25rem; color: var(--sapContent_LabelColor); max-width: 44rem }
+details::details-content { block-size: 0; overflow: clip; transition: block-size .35s var(--ease), content-visibility .35s allow-discrete }
+details[open]::details-content { block-size: auto }
+:root { interpolate-size: allow-keywords }
+
+/* ---------- CTA ---------- */
+.cta-wrap { position: relative; isolation: isolate }
+.cta-wrap .glow.b { left: 20%; top: 40%; translate: -50% -50% } .cta-wrap .glow.a { left: 85%; top: 70%; translate: -50% -50% }
+.cta { display: grid; gap: 2.5rem; border-radius: 2rem; padding: clamp(1.5rem, 1rem + 3vw, 3.5rem);
+  background: linear-gradient(var(--sapGroup_ContentBackground), var(--sapGroup_ContentBackground)) padding-box, linear-gradient(135deg, var(--sapBrandColor), var(--hairline) 40%, var(--hairline) 60%, var(--sapAssistant_Background)) border-box;
+  border: 1.5px solid transparent; box-shadow: 0 3rem 6rem -3rem color-mix(in oklab, var(--sapTitleColor) 30%, transparent) }
+@media (min-width: 1000px) { .cta { grid-template-columns: 1fr 1.15fr; gap: 4rem } }
+.next { list-style: none; padding: 0; margin: 2rem 0 0; display: grid; gap: 1rem; counter-reset: n }
+.next li { display: grid; grid-template-columns: 1.75rem 1fr; gap: .875rem; font-size: var(--sapFontSize); color: var(--sapContent_LabelColor); counter-increment: n }
+.next li::before { content: counter(n); width: 1.75rem; height: 1.75rem; border-radius: 50%; display: grid; place-items: center; background: var(--brand-wash); color: var(--sapHighlightColor); font-weight: 700; font-size: var(--sapFontSmallSize) }
+.next b { color: var(--sapTitleColor); display: block }
+form { display: grid; gap: 1.125rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); align-content: start }
+.f { display: grid; gap: .375rem }
+.f.full { grid-column: 1 / -1 }
+.f label { font-size: var(--sapFontSize); color: var(--sapContent_LabelColor) }
+.f label i { color: var(--sapNegativeTextColor); font-style: normal }
+input, select, textarea { font: inherit; font-size: var(--sapFontLargeSize); color: var(--sapTextColor); background: var(--sapField_Background);
+  border: 1px solid var(--sapField_BorderColor); border-radius: .625rem; padding: .625rem .75rem; min-height: 2.75rem; width: 100%; transition: border-color .2s, box-shadow .2s }
+input:hover, select:hover, textarea:hover { border-color: var(--sapField_Hover_BorderColor) }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--sapField_Focus_BorderColor); box-shadow: 0 0 0 3px var(--brand-wash) }
+textarea { min-height: 6rem; resize: vertical }
+.trap { position: absolute; left: -9999px }
+.submit-row { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between }
+
+/* ---------- Footer ---------- */
+footer { border-top: 1px solid var(--hairline); padding: 4rem 0 2rem; font-size: var(--sapFontSize); background: var(--sapShellColor) }
+.foot { display: grid; gap: 2.5rem; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)) }
+.foot .about { grid-column: 1 / -1; max-width: 22rem }
+@media (min-width: 900px) { .foot { grid-template-columns: 2fr 1fr 1fr 1fr } .foot .about { grid-column: auto } }
+.foot h4 { font: 700 var(--sapFontSmallSize) var(--sapFontFamily); letter-spacing: .1em; text-transform: uppercase; color: var(--sapContent_LabelColor); margin-bottom: 1rem }
+.foot ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .625rem }
+.foot a { color: var(--sapTextColor); text-decoration: none } .foot a:hover { color: var(--sapLinkColor) }
+.legal { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--hairline); display: flex; flex-wrap: wrap; gap: .75rem 2rem; justify-content: space-between; color: var(--sapContent_LabelColor); font-size: var(--sapFontSmallSize) }
+.legal a { color: inherit }
+
+/* ---------- Consent ---------- */
+.consent { position: fixed; right: 1rem; bottom: 1rem; left: 1rem; z-index: 60; max-width: 26rem; margin-left: auto; background: var(--glass); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--hairline); border-radius: 1.25rem; box-shadow: var(--sapContent_Shadow2); padding: 1.125rem 1.25rem; display: grid; gap: .875rem; font-size: var(--sapFontSize) }
+.consent .row { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem }
+
+/* mockup only */
+.mock-toggle { position: fixed; left: 1rem; bottom: 1rem; z-index: 70; display: flex; border-radius: .75rem; box-shadow: var(--sapContent_Shadow2); overflow: hidden; background: var(--sapGroup_ContentBackground) }
+.mock-toggle button { border: 0; border-radius: 0 }
+.mock-toggle button[aria-pressed=true] { background: var(--sapButton_Selected_Background); color: var(--sapButton_Selected_TextColor) }
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="wrap">
+    <a class="brand" href="#"><span class="mark">C</span>Confire</a>
+    <nav class="nav" aria-label="Main"><a href="#how">How it works</a><a href="#product">Product</a><a href="#security">Security</a><a href="#faq">FAQ</a></nav>
+    <button class="btn lite desk" popovertarget="lang"><svg class="ico"><use href="/files/icons.svg#globe"/></svg>EN</button>
+    <a class="btn lite desk" href="#">Sign in</a>
+    <a class="btn em" href="#demo">Book a demo</a>
+    <button class="btn lite phone" popovertarget="menu" aria-label="Menu"><svg class="ico"><use href="/files/icons.svg#menu2"/></svg></button>
+    <div id="lang" popover><a href="#">English <svg class="ico"><use href="/files/icons.svg#sys-enter-2"/></svg></a><a href="#">Español</a><a href="#">Euskara</a></div>
+    <div id="menu" popover><a href="#how">How it works</a><a href="#product">Product</a><a href="#security">Security</a><a href="#faq">FAQ</a><hr><a href="#">Sign in</a><hr><a href="#">English</a><a href="#">Español</a><a href="#">Euskara</a></div>
+  </div>
+</header>
+
+<main>
+<section class="hero">
+  <span class="glow b" aria-hidden="true"></span><span class="glow a" aria-hidden="true"></span>
+  <div class="wrap hero-copy">
+    <a class="pill" href="#product"><span class="new"><svg class="ico"><use href="/files/icons.svg#ai"/></svg>New</span>Now reads PDFs and drawings <svg class="ico" style="width:.75rem;height:.75rem"><use href="/files/icons.svg#arrow-right"/></svg></a>
+    <h1>From a customer's request to a priced SAP quotation. <span class="ai-text">In minutes.</span></h1>
+    <p class="lead">Confire is AI quoting for manufacturers on SAP Business One. Drop the email or PDF. It fills the configuration, prices it from your BOM, routing and SAP price lists, and posts the quotation to SAP.</p>
+    <div class="ctas">
+      <a class="btn em lg" href="#demo">Book a demo <svg class="ico arrow"><use href="/files/icons.svg#arrow-right"/></svg></a>
+      <a class="btn lg" href="#how">See how it works</a>
+    </div>
+    <div class="works"><span>Works with</span><b>SAP Business One</b><b>Beas Manufacturing</b><b>SAP HANA</b><b>Microsoft SQL Server</b></div>
+  </div>
+
+  <div class="stage" role="img" aria-label="A customer's email asking for 4 conveyors becomes a configured product with prices, then SAP Business One sales quotation 10482.">
+    <div class="pane">
+      <div class="pane-h"><svg class="ico"><use href="/files/icons.svg#email"/></svg>Customer request</div>
+      <div class="pane-b">
+        <div class="mail-from"><span class="avatar">IZ</span><div><b>Iñaki Zubia</b><div class="tiny muted">Talleres Ibarra S.L. · 09:12</div></div></div>
+        <div class="mail-subj">Quote: 4 conveyors</div>
+        <p class="mail-body">Hi, we need <span class="hl">4 conveyors</span>, <span class="hl">12 m long</span> with an <span class="hl">800 mm belt</span> and a 5.5 kW motor. Delivery in March.</p>
+        <span class="attach"><svg class="ico"><use href="/files/icons.svg#document-text"/></svg>layout-CV.pdf</span>
+      </div>
+    </div>
+
+    <div class="conn"><span class="spark s1"><svg class="ico"><use href="/files/icons.svg#ai"/></svg></span><span class="lbl">AI reads</span></div>
+
+    <div class="pane">
+      <div class="pane-h"><svg class="ico"><use href="/files/icons.svg#product"/></svg>Configuration</div>
+      <div class="cfg-title"><div><h4>Conveyor CV-1200</h4><span class="tiny muted">Talleres Ibarra S.L.</span></div><span class="os st-ai"><svg class="ico"><use href="/files/icons.svg#ai"/></svg>Filled from email</span></div>
+      <div class="cfg-grid">
+        <div class="box">
+          <div class="box-t">Parameters</div>
+          <div class="field"><span>Quantity</span><span class="val fill">4 <svg class="ico"><use href="/files/icons.svg#ai"/></svg></span></div>
+          <div class="field"><span>Length</span><span class="val fill f2">12 m <svg class="ico"><use href="/files/icons.svg#ai"/></svg></span></div>
+          <div class="field"><span>Belt</span><span class="val fill f3">800 mm <svg class="ico"><use href="/files/icons.svg#ai"/></svg></span></div>
+          <div class="field"><span>Motor</span><span class="val fill f4">5.5 kW <svg class="ico"><use href="/files/icons.svg#ai"/></svg></span></div>
+        </div>
+        <div class="box">
+          <div class="box-t">Options · per unit</div>
+          <div class="opt pick sel"><span class="radio"></span><span>Standard drive</span><span class="num">18,450 €</span></div>
+          <div class="opt"><span class="radio"></span><span>Heavy-duty</span><span class="num">21,120 €</span></div>
+          <div class="opt"><span class="radio"></span><span>Variable speed</span><span class="num">23,980 €</span></div>
+          <div class="tiny muted" style="padding:.375rem 0 .125rem">Margin 32% · from SAP price list 1</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="conn"><span class="spark blue s2"><svg class="ico"><use href="/files/icons.svg#sales-quote"/></svg></span><span class="lbl">Posted</span></div>
+
+    <div class="pane quote">
+      <div class="pane-h"><svg class="ico"><use href="/files/icons.svg#it-host"/></svg>SAP Business One</div>
+      <div class="pane-b">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span class="tiny muted">Sales Quotation</span><span class="os st-pos"><svg class="ico"><use href="/files/icons.svg#sys-enter-2"/></svg>Posted</span></div>
+        <div class="doc-no">No. 10482</div>
+        <div class="line"><span>CV-1200 Standard drive</span><span class="num">4 ×</span></div>
+        <div class="line"><span class="muted">Valid until</span><span>30 Nov 2026</span></div>
+        <div class="total"><span class="muted">Total</span><span class="num">73,800 €</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="sec-head rv"><span class="eyebrow">Why Confire</span><h2>Quoting a configured product shouldn't take a week.</h2></div>
+    <div class="ba">
+      <div class="ba-card ba-old rv">
+        <div><h3>Today</h3><p class="small muted" style="margin-top:.25rem">Email, a spreadsheet, and the one person who knows the rules.</p></div>
+        <ol class="ba-steps">
+          <li><span class="ba-dot"><svg class="ico"><use href="/files/icons.svg#email"/></svg></span><div><b>The request sits in an inbox</b><span>Until the engineer who knows the product has time.</span></div></li>
+          <li><span class="ba-dot"><svg class="ico"><use href="/files/icons.svg#list"/></svg></span><div><b>Worked out in a spreadsheet</b><span>Rules, costs and margins live in someone's head.</span></div></li>
+          <li><span class="ba-dot"><svg class="ico"><use href="/files/icons.svg#document-text"/></svg></span><div><b>Typed into SAP by hand</b><span>Line by line, price by price.</span></div></li>
+        </ol>
+        <div class="ba-time"><strong>2–5 days</strong><span class="small muted">per quotation*</span></div>
+      </div>
+      <div class="ba-card ba-new rv">
+        <div><h3>With Confire</h3><p class="small muted" style="margin-top:.25rem">One screen between the request and SAP.</p></div>
+        <ol class="ba-steps">
+          <li><span class="ba-dot ai"><svg class="ico"><use href="/files/icons.svg#ai"/></svg></span><div><b>The assistant reads it</b><span>Product, customer and values filled in, with their source marked.</span></div></li>
+          <li><span class="ba-dot"><svg class="ico"><use href="/files/icons.svg#decision"/></svg></span><div><b>Your rules check it</b><span>Only valid combinations, priced from your SAP data.</span></div></li>
+          <li><span class="ba-dot"><svg class="ico"><use href="/files/icons.svg#sales-quote"/></svg></span><div><b>One click to SAP</b><span>The quotation posts with every line and price.</span></div></li>
+        </ol>
+        <div class="ba-time"><strong class="ai-text">Minutes</strong><span class="small muted">from inbox to SAP</span></div>
+      </div>
+    </div>
+    <p class="tiny muted" style="text-align:center;margin-top:1.25rem">* Placeholder. Replace with a real customer's figure.</p>
+  </div>
+</section>
+
+<section id="how" style="background:var(--sapShellColor)">
+  <div class="wrap">
+    <div class="sec-head rv"><span class="eyebrow">How it works</span><h2>Set up once. Quote every day.</h2><p class="lead">The first two steps happen once. The third is your sales team's new routine.</p></div>
+    <div class="steps">
+      <div class="step rv"><span class="step-n">01</span><h3>Connect your SAP</h3><p>Install the Confire agent on your SAP server. It keeps your SAP login there and only passes on what Confire is allowed to ask.</p><span class="chip"><span class="pulse pos"></span>Agent connected · SBO_PRODUCTION</span></div>
+      <div class="step rv"><span class="step-n">02</span><h3>Model your products</h3><p>Describe each product once: its options, the rules between them, its BOM and routing, and the SAP price list that prices it.</p><span class="chip"><svg class="ico"><use href="/files/icons.svg#decision"/></svg>14 parameters · 9 rules · BOM</span></div>
+      <div class="step rv"><span class="step-n">03</span><h3>Quote</h3><p>Drop the customer's request. The assistant fills what it can, asks what's missing, and you post the quotation to SAP.</p><span class="chip" style="color:var(--ai-ink)"><svg class="ico" style="fill:var(--ai-ink)"><use href="/files/icons.svg#attachment"/></svg>Drop a request here</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="product">
+  <div class="wrap">
+    <div class="sec-head rv"><span class="eyebrow">Product</span><h2>Everything between the request and the quotation.</h2><p class="lead">For manufacturers whose products are configured to order, not picked from a catalogue.</p></div>
+    <div class="bento">
+
+      <article class="tile t-a ai-tile rv">
+        <div><span class="os st-ai" style="margin-bottom:1rem"><svg class="ico"><use href="/files/icons.svg#ai"/></svg>AI assistant</span><h3>Reads the request. Asks what's missing.</h3><p>Emails, PDFs and drawings, in your customer's language. Every value it fills carries its source, and when something isn't there it asks instead of guessing.</p></div>
+        <div class="split2">
+          <div class="ui">
+            <div class="ui-row"><span class="muted">Product</span><span class="val">Conveyor CV-1200 <svg class="ico"><use href="/files/icons.svg#ai"/></svg></span></div>
+            <div class="ui-row"><span class="muted">Customer</span><span class="val">Talleres Ibarra <svg class="ico"><use href="/files/icons.svg#ai"/></svg></span></div>
+            <div class="ui-row"><span class="muted">Length</span><span class="val">12 m <svg class="ico"><use href="/files/icons.svg#ai"/></svg></span></div>
+            <div class="ui-row"><span class="muted">Frame finish</span><span class="os st-crit">Not in request</span></div>
+          </div>
+          <div class="ui" style="display:grid;align-content:end">
+            <span class="tiny muted">Assistant</span>
+            <div class="bubble">The email doesn't say the frame finish. Stainless or painted?</div>
+            <div class="bubble-q"><span class="qchip">Stainless</span><span class="qchip">Painted</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="tile t-b rv">
+        <div><h3>Only valid combinations.</h3><p>Rules between options, computed values and limits. The product knowledge stops living in one engineer's head.</p></div>
+        <div class="ui">
+          <div class="box-t">Belt</div>
+          <div class="opt sel"><span class="radio"></span><span>800 mm PVC</span><span></span></div>
+          <div class="opt"><span class="radio"></span><span>800 mm food-grade</span><span></span></div>
+          <div class="opt"><span class="radio" style="opacity:.4"></span><span><span class="dis">1000 mm PVC</span><span class="why">Needs a motor of 7.5 kW or more</span></span><span></span></div>
+        </div>
+      </article>
+
+      <article class="tile t-c rv">
+        <div><h3>Real costs, every quantity.</h3><p>Material from your SAP price lists, operations from your Beas routing, and a margin for each quantity break.</p></div>
+        <div class="ui">
+          <div class="bars">
+            <div class="bar-row"><span class="muted">1 ×</span><span class="bar"><i class="c1" style="width:52%"></i><i class="c2" style="width:30%"></i><i class="c3" style="width:18%"></i></span><span class="num">21,900 €</span></div>
+            <div class="bar-row"><span class="muted">4 ×</span><span class="bar"><i class="c1" style="width:50%"></i><i class="c2" style="width:24%"></i><i class="c3" style="width:26%"></i></span><span class="num">18,450 €</span></div>
+            <div class="bar-row"><span class="muted">10 ×</span><span class="bar"><i class="c1" style="width:49%"></i><i class="c2" style="width:19%"></i><i class="c3" style="width:32%"></i></span><span class="num">16,980 €</span></div>
+          </div>
+          <div class="legend"><span><i class="c1"></i>Material</span><span><i class="c2"></i>Operations</span><span><i class="c3"></i>Margin</span></div>
+        </div>
+      </article>
+
+      <article class="tile t-d rv">
+        <div><h3>Posted straight to SAP Business One.</h3><p>Your items, your prices, your document series. Confire writes the quotation SAP itself would have.</p></div>
+        <div class="doc">
+          <div class="ui" style="padding:.5rem .5rem .25rem">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:.375rem .5rem .625rem"><b>Sales Quotation 10482</b><span class="os st-pos"><svg class="ico"><use href="/files/icons.svg#sys-enter-2"/></svg>Posted</span></div>
+            <table class="tbl">
+              <tr><th>Item</th><th>Description</th><th class="r">Qty</th><th class="r">Price</th></tr>
+              <tr><td class="code">CV-FR-12</td><td>Frame 12 m, stainless</td><td class="r">4</td><td class="r">9,200 €</td></tr>
+              <tr><td class="code">DR-55</td><td>Standard drive 5.5 kW</td><td class="r">4</td><td class="r">5,150 €</td></tr>
+              <tr><td class="code">BT-800</td><td>Belt 800 mm PVC</td><td class="r">4</td><td class="r">4,100 €</td></tr>
+            </table>
+          </div>
+          <div class="once"><svg class="ico"><use href="/files/icons.svg#shield"/></svg><b>Never posted twice</b><span class="small muted">If the connection drops mid-post, Confire checks SAP before trying again. One request, one quotation.</span></div>
+        </div>
+      </article>
+
+      <article class="tile t-e rv">
+        <div><h3>Keeps quoting when SAP is down.</h3><p>Options and prices are kept in Confire, so a maintenance window on your SAP server doesn't stop sales.</p></div>
+        <div class="ui">
+          <div class="ui-row"><span class="sys"><span class="pulse neg"></span>SAP Business One</span><span class="os st-neg">Offline</span></div>
+          <div class="ui-row"><span class="sys"><span class="pulse pos"></span>Confire</span><span class="os st-pos">Quoting from cache</span></div>
+          <div class="ui-row"><span class="muted tiny">Prices synced 4 minutes ago</span><span></span></div>
+        </div>
+      </article>
+
+      <article class="tile t-f rv">
+        <div><h3>A portal for your customers.</h3><p>They request, approve and follow their quotations, orders and invoices, without emailing you for every update.</p></div>
+        <div class="ui">
+          <div class="ui-row"><span><b>Quotation 10482</b><br><span class="tiny muted">4 × Conveyor CV-1200</span></span><span class="os st-inf">Awaiting approval</span></div>
+          <div class="ui-row"><span><b>Order 2291</b><br><span class="tiny muted">2 × Lift table LT-500</span></span><span class="os st-crit">In production</span></div>
+          <div class="ui-row"><span><b>Delivery 1873</b><br><span class="tiny muted">1 × Conveyor CV-800</span></span><span class="os st-pos">Delivered</span></div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="security" class="evening band">
+  <span class="glow b" aria-hidden="true"></span>
+  <div class="wrap sec-split">
+    <div class="rv">
+      <span class="eyebrow">Security</span>
+      <h2>Your SAP stays on your server.</h2>
+      <p class="lead" style="margin-top:1rem">Confire never holds your SAP login and never gets a door into your network.</p>
+      <ul class="points">
+        <li><span class="ic"><svg class="ico"><use href="/files/icons.svg#locked"/></svg></span><div><b>No SAP passwords in the cloud</b><span>The agent keeps them on your server. Confire never sees them.</span></div></li>
+        <li><span class="ic"><svg class="ico"><use href="/files/icons.svg#shield"/></svg></span><div><b>An allowlist, not an open door</b><span>The agent passes on only the request types Confire needs and refuses everything else, on your side.</span></div></li>
+        <li><span class="ic"><svg class="ico"><use href="/files/icons.svg#connected"/></svg></span><div><b>No inbound ports</b><span>The agent dials out through an encrypted tunnel. Your firewall stays exactly as it is.</span></div></li>
+      </ul>
+    </div>
+    <div class="arch rv" role="img" aria-label="Confire, hosted in the EU, reaches the agent on your network through an outbound encrypted tunnel; the agent talks to SAP Business One.">
+      <div class="node"><span class="ic"><svg class="ico"><use href="/files/icons.svg#share-2"/></svg></span><div><b>Confire</b><span class="tiny muted">Hosted in the EU</span></div></div>
+      <div class="tunnel"><span class="lbl"><svg class="ico"><use href="/files/icons.svg#locked"/></svg>Encrypted · outbound only</span></div>
+      <div class="lan"><span class="tag">Your network</span>
+        <div class="node"><span class="ic"><svg class="ico"><use href="/files/icons.svg#shield"/></svg></span><div><b>Confire agent</b><span class="tiny muted">Holds the SAP login · allowlist</span></div><span class="os st-pos"><span class="pulse pos"></span>Online</span></div>
+        <span class="wire"></span>
+        <div class="node"><span class="ic"><svg class="ico"><use href="/files/icons.svg#it-host"/></svg></span><div><b>SAP Business One</b><span class="tiny muted">Service Layer · Beas</span></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap faq-split">
+    <div class="sticky rv"><span class="eyebrow">FAQ</span><h2>Questions IT asks first.</h2><p class="lead" style="margin-top:1rem">Something else? Ask it in the demo, with your own setup in front of us.</p><a class="btn lg" style="margin-top:1.5rem" href="#demo">Book a demo</a></div>
+    <div class="faq rv">
+      <details open><summary>Does Confire work with on-premise SAP Business One? <span class="tw"><svg class="ico"><use href="/files/icons.svg#navigation-down-arrow"/></svg></span></summary><p>Yes, that's what it's built for. A small agent on your SAP server connects Confire to the Service Layer, with nothing to open in your firewall.</p></details>
+      <details><summary>Do I need Beas? <span class="tw"><svg class="ico"><use href="/files/icons.svg#navigation-down-arrow"/></svg></span></summary><p>No. With Beas, Confire also costs your routings. Without it, costs come from the BOM and your SAP price lists.</p></details>
+      <details><summary>Which AI does it use, and what does it see? <span class="tw"><svg class="ico"><use href="/files/icons.svg#navigation-down-arrow"/></svg></span></summary><p>Draft: Claude, by Anthropic. It sees the request you drop and the product it's filling, nothing else in SAP.</p></details>
+      <details><summary>What happens if SAP is offline? <span class="tw"><svg class="ico"><use href="/files/icons.svg#navigation-down-arrow"/></svg></span></summary><p>You keep configuring and pricing from Confire's copy of your options and prices. Posting to SAP waits until it's back.</p></details>
+      <details><summary>Can my customers use it? <span class="tw"><svg class="ico"><use href="/files/icons.svg#navigation-down-arrow"/></svg></span></summary><p>Yes, through their own portal, by invitation. They see only their own documents.</p></details>
+      <details><summary>How long does setup take? <span class="tw"><svg class="ico"><use href="/files/icons.svg#navigation-down-arrow"/></svg></span></summary><p>Draft: the agent installs in minutes. Modelling your first product is what the demo is for.</p></details>
+    </div>
+  </div>
+</section>
+
+<section id="demo" style="padding-top:0">
+  <div class="wrap cta-wrap">
+    <span class="glow b" aria-hidden="true"></span><span class="glow a" aria-hidden="true"></span>
+    <div class="cta rv">
+      <div>
+        <span class="eyebrow">Book a demo</span>
+        <h2>See it on one of your own products.</h2>
+        <ol class="next">
+          <li><div><b>We reply within one working day</b>To set a time that suits you.</div></li>
+          <li><div><b>A 30-minute call</b>Bring a real customer request.</div></li>
+          <li><div><b>We model one of your products</b>And quote it, live.</div></li>
+        </ol>
+      </div>
+      <form method="post" action="/api/demo-request">
+        <div class="f"><label for="n">Name <i>*</i></label><input id="n" name="name" required autocomplete="name"></div>
+        <div class="f"><label for="e">Work email <i>*</i></label><input id="e" name="email" type="email" required autocomplete="email"></div>
+        <div class="f"><label for="c">Company <i>*</i></label><input id="c" name="company" required autocomplete="organization"></div>
+        <div class="f"><label for="s">Your setup</label><select id="s" name="setup"><option>SAP Business One</option><option>SAP Business One + Beas</option><option>Something else</option></select></div>
+        <div class="f full"><label for="msg">What do you quote today?</label><textarea id="msg" name="message" placeholder="Conveyors, lift tables, custom machinery…"></textarea></div>
+        <input class="trap" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <div class="submit-row"><span class="tiny muted">We'll only use this to reply. <a href="#">Privacy</a></span><button class="btn em lg" type="submit">Request a demo <svg class="ico arrow"><use href="/files/icons.svg#arrow-right"/></svg></button></div>
+      </form>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div class="about"><a class="brand" href="#"><span class="mark">C</span>Confire</a><p class="muted" style="margin-top:1rem">AI quoting for manufacturers on SAP Business One.</p></div>
+      <div><h4>Product</h4><ul><li><a href="#how">How it works</a></li><li><a href="#product">Features</a></li><li><a href="#security">Security</a></li><li><a href="#faq">FAQ</a></li></ul></div>
+      <div><h4>Company</h4><ul><li><a href="#demo">Book a demo</a></li><li><a href="#">Sign in</a></li><li><a href="#">Contact</a></li></ul></div>
+      <div><h4>Legal</h4><ul><li><a href="#">Privacy</a></li><li><a href="#">Legal notice</a></li><li><a href="#">Cookies</a></li></ul></div>
+    </div>
+    <div class="legal"><span>© 2026 Confire · <a href="#">English</a> · <a href="#">Español</a> · <a href="#">Euskara</a></span><span>SAP and SAP Business One are trademarks of SAP SE. Confire is not affiliated with SAP.</span></div>
+  </div>
+</footer>
+
+<div class="consent" id="consent" role="region" aria-label="Cookies">
+  <b style="color:var(--sapTitleColor)">Cookies</b>
+  <p class="muted">We'd like to measure which LinkedIn and Meta ads bring you here. That uses those companies' cookies. <a href="#">Details</a></p>
+  <div class="row"><button class="btn" onclick="consent.remove()">Reject</button><button class="btn" onclick="consent.remove()">Accept</button></div>
+</div>
+
+<div class="mock-toggle" role="group" aria-label="Mockup theme">
+  <button class="btn" aria-pressed="false" onclick="theme('not all')">Morning</button>
+  <button class="btn" aria-pressed="false" onclick="theme('all')">Evening</button>
+</div>
+<script>
+const ev = document.getElementById('evening'), tb = document.querySelectorAll('.mock-toggle button');
+function theme(media) { ev.media = media; sync() }
+function sync() { const dark = matchMedia(ev.media).matches; tb[0].ariaPressed = !dark; tb[1].ariaPressed = dark }
+sync();
+</script>
+</body>
+</html>

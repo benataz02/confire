@@ -28,7 +28,7 @@ export function starterModel(name: string, t?: Translate): ModelDef {
     tables: [items],
     bom: [],
     routing: [],
-    pricing: { priceExpr: "unitCost * 1.2", quoteItemCode: "" },
+    pricing: { margin: 20, quoteItemCode: "" },
     batchDefaults: [1, 10, 100],
   };
 }

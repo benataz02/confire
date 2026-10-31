@@ -10,7 +10,7 @@ export type PortalPricing = "indicative" | "request";
 /** What the builder saves: the definition and the two portal columns beside it. */
 export type ModelRow = { definition: ModelDef; portal: boolean; portalPricing: PortalPricing };
 
-const PRICING = ["priceList", "itemTable", "priceExpr", "quoteItemCode"] as const;
+const PRICING = ["priceList", "itemTable", "margin", "quoteItemCode"] as const;
 const HISTORY = ["table", "mappings", "display"] as const;
 
 export type ExprRule = Extract<Constraint, { kind: "expr" }>;

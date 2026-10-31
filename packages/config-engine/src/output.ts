@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { DslError, evaluate, type Scope } from "./dsl";
 import type { Entries, ModelDef, ResolvedLookups, TableRows } from "./model";
-import { bindings } from "./propagate";
+import { bindings, paramPrices, type CostElement } from "./propagate";
 
 export type BomResult = {
   id: string;
@@ -27,8 +27,11 @@ export type OpResult = {
 export type Outputs = {
   bom: BomResult[];
   ops: OpResult[];
+  /** the priced parameters' per-unit costs (Param.priceExpr) */
+  other: CostElement[];
   materialPerUnit: number;
   laborPerUnit: number;
+  otherPerUnit: number;
   unitCost: number;
   unitPrice: number;
   batchTotal: number;
@@ -42,7 +45,8 @@ export function computeOutputs(
   tableRows?: TableRows,
 ): Outputs {
   if (batchQty < 1) throw new RangeError(`batchQty must be >= 1, got ${batchQty}`);
-  const { values } = bindings(model, lookups, assignment, tableRows);
+  const b = bindings(model, lookups, assignment, tableRows);
+  const { values } = b;
   const scope: Scope = { vars: { ...values, qty: batchQty }, tables: lookups.tables };
   const numeric = (src: string, what: string): number => {
     const v = evaluate(src, scope);
@@ -89,11 +93,13 @@ export function computeOutputs(
     );
   }
 
-  const unitCost = materialPerUnit + laborPerUnit;
-  const priceScope: Scope = { vars: { ...scope.vars, unitCost }, tables: lookups.tables };
-  const unitPrice = evaluate(model.pricing.priceExpr, priceScope);
-  if (typeof unitPrice !== "number")
-    throw new DslError("pricing.priceExpr did not evaluate to a number", 0, model.pricing.priceExpr.length);
+  const other = paramPrices(model, b, lookups.tables);
+  const otherPerUnit = other.reduce((n, c) => n + c.amount, 0);
+  const unitCost = materialPerUnit + laborPerUnit + otherPerUnit;
+  // The margin is a share of the price, so the price is the cost grossed up by it.
+  const unitPrice = unitCost / (1 - model.pricing.margin / 100);
+  // A definition saved before the margin existed has none: refuse it rather than quote NaN to SAP.
+  if (!Number.isFinite(unitPrice)) throw new DslError("pricing.margin is not set — set the model's margin", 0, 0);
   // ponytail: raw floats end to end; currency rounding happens at the UI/quote edge
-  return { bom, ops, materialPerUnit, laborPerUnit, unitCost, unitPrice, batchTotal: unitPrice * batchQty };
+  return { bom, ops, other, materialPerUnit, laborPerUnit, otherPerUnit, unitCost, unitPrice, batchTotal: unitPrice * batchQty };
 }

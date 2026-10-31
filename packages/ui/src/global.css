@@ -60,6 +60,27 @@ body {
   border-inline-end: none;
 }
 
+/* A `wide` field: the Form lays a group's items in `column-count` columns, so the item breaks out
+   of them (FormItem's columnSpan is deprecated since UI5 2.23 and does nothing — TABLE_ITEM's rule). */
+.confire-wide-item {
+  column-span: all;
+}
+/* …and keeps a column's label width, or its label takes a third of the whole row. The width is one
+   column's third: the row less the group's 1rem column gaps, over the columns, over 3. Below 600 px
+   the form is one column and the label sits on top, as for every field.
+   ponytail: FORM_LAYOUT's M2 L3 XL3, UI5's label span 4 and its gap restated by hand; recheck on a
+   FORM_LAYOUT change or a UI5 upgrade. */
+@container (min-width: 600px) {
+  .confire-wide-item::part(layout) {
+    grid-template-columns: calc((100% - 1rem) / 6) 1fr;
+  }
+}
+@container (min-width: 1024px) {
+  .confire-wide-item::part(layout) {
+    grid-template-columns: calc((100% - 2rem) / 9) 1fr;
+  }
+}
+
 /* Grid's `statusRows`: a closed line reads muted. */
 .confire-row-closed [data-column-id-cell] {
   color: var(--sapContent_LabelColor);
@@ -199,4 +220,25 @@ body {
 /* Horizon draws the field's bottom border as a background-image (sapField_BackgroundStyle). */
 ui5-shellbar-search.confire-shellbar-search {
   background-image: none;
+}
+/* The AI page points at the search (its chat list): a ring in the assistant's colour, three times,
+   on the field's own pill. */
+@keyframes confire-search-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sapAssistant_BorderColor) 70%, transparent) }
+  70%, 100% { box-shadow: 0 0 0 0.625rem transparent }
+}
+ui5-shellbar-search.confire-search-pulse {
+  border-radius: var(--_ui5_search_input_border_radius, 1.125rem);
+  animation: confire-search-pulse 1.6s ease-out 400ms 3;
+}
+@media (prefers-reduced-motion: reduce) {
+  ui5-shellbar-search.confire-search-pulse { animation: none }
+}
+
+/* Rounded bars. BarChart passes no `radius` on to recharts' <Bar>, so each segment gets a stroke in
+   its own colour (BarChart sets stroke = fill) with round joins: every segment's corners round by
+   half the stroke. ponytail: styles recharts' internal class names; recheck on a charts upgrade. */
+.confire-rounded-bars .recharts-bar-rectangle path {
+  stroke-width: 6px;
+  stroke-linejoin: round;
 }

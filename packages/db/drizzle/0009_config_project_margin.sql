@@ -1,0 +1,1 @@
+ALTER TABLE "config_project" ADD COLUMN "margin" double precision;

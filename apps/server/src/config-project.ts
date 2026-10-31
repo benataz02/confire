@@ -46,6 +46,13 @@ export async function loadModel(tenantId: string, modelId: string) {
 }
 export type LoadedModel = Awaited<ReturnType<typeof loadModel>>;
 
+/** The model as one configuration prices it: its own margin over the model's. Both ways to a
+ *  project's engine (liveEngine, liveProject) go through here, so the view, the recalculation and
+ *  the quotation price alike. */
+const withMargin = (model: LoadedModel, margin: number | null | undefined): LoadedModel =>
+  margin == null ? model
+  : { ...model, definition: { ...model.definition, pricing: { ...model.definition.pricing, margin } } };
+
 /** Each parameter's and table's label by key. A revision stores keys (§7.4); the timeline and the
  *  mail that lists it read them with the model as it is now. */
 export const modelLabels = (def: ModelDef | undefined): Record<string, string> => Object.fromEntries([
@@ -141,9 +148,9 @@ export async function queryTablePage(tenantId: string, input: z.infer<typeof Que
 /** Live model + lookups for a stored calculation. There is no snapshot: stored candidates are
  *  always re-priced against what the model and the cache say now. */
 export async function liveEngine(
-  tenantId: string, project: { modelId: string; entries: Entries; tables?: TableRows },
+  tenantId: string, project: { modelId: string; entries: Entries; tables?: TableRows; margin: number | null },
 ) {
-  const model = await loadModel(tenantId, project.modelId);
+  const model = withMargin(await loadModel(tenantId, project.modelId), project.margin);
   return { model, lookups: await cachedLookups(tenantId, model, project.entries, project.tables) };
 }
 
@@ -263,7 +270,7 @@ export async function liveProject(tenantId: string, where: SQL, side: Side, cach
   const shown = (row: ProjectRow): Calculation => ({ state: row.candidates.length ? "current" : "waiting" });
 
   let row = await read();
-  const model = await loadModel(tenantId, row.modelId);
+  const model = withMargin(await loadModel(tenantId, row.modelId), row.margin);
   const md = await masterdataRows(tenantId);
   let d = await derive(row);
   let calculation = shown(row);

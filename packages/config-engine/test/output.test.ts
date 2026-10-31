@@ -29,9 +29,25 @@ describe("computeOutputs", () => {
     expect(coatOp.desc).toBe("");
     expect(o.laborPerUnit).toBeCloseTo(4.1);
 
+    expect(o.other).toEqual([]);
     expect(o.unitCost).toBeCloseTo(5.38);
-    expect(o.unitPrice).toBeCloseTo(7.532);
-    expect(o.batchTotal).toBeCloseTo(753.2);
+    // margin 50%: half the price is margin
+    expect(o.unitPrice).toBeCloseTo(10.76);
+    expect(o.batchTotal).toBeCloseTo(1076);
+  });
+
+  test("a priced parameter is cost, a hidden one is not, and the margin is grossed up over it", () => {
+    const m = structuredClone(model);
+    m.parameters.find((p) => p.key === "coated")!.priceExpr = "coated ? 2 : 0";
+    m.parameters.find((p) => p.key === "color")!.priceExpr = "1"; // visibleWhen: coated
+    m.pricing.margin = 20;
+    const o = computeOutputs(m, lookups, full, 100);
+    expect(o.other).toEqual([{ key: "coated", label: "Coated", amount: 2 }, { key: "color", label: "Coating color", amount: 1 }]);
+    expect(o.otherPerUnit).toBe(3);
+    expect(o.unitCost).toBeCloseTo(8.38);
+    expect(o.unitPrice).toBeCloseTo(8.38 / 0.8);
+    const bare = computeOutputs(m, lookups, { ...full, coated: false }, 100);
+    expect(bare.other).toEqual([{ key: "coated", label: "Coated", amount: 0 }]);
   });
 
   test("uncoated: conditional line and op drop out", () => {

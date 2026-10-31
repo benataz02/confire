@@ -26,7 +26,7 @@ const model: ModelDef = {
   constraints: [],
   bom: [{ id: "sheet", itemCode: '"SHEET"', qty: "1" }],
   routing: [],
-  pricing: { priceExpr: "unitCost * 2", quoteItemCode: "SHEET-CFG", priceList: 1 },
+  pricing: { margin: 50, quoteItemCode: "SHEET-CFG", priceList: 1 },
   batchDefaults: [3],
 };
 

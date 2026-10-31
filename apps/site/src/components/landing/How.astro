@@ -1,0 +1,18 @@
+---
+import Icon from "../Icon.astro";
+import { dict, type Lang } from "../../i18n/index.ts";
+
+interface Props { lang: Lang }
+const t = dict[Astro.props.lang].how;
+const [connect, model, quote] = t.steps;
+---
+<section id="how" class="alt">
+  <div class="wrap">
+    <div class="sec-head rv"><span class="eyebrow">{t.eyebrow}</span><h2>{t.title}</h2><p class="lead">{t.lead}</p></div>
+    <ol class="steps">
+      <li class="step rv"><span class="step-n" aria-hidden="true">01</span><h3>{connect!.title}</h3><p>{connect!.text}</p><span class="chip"><span class="pulse pos"></span>{connect!.chip}</span></li>
+      <li class="step rv"><span class="step-n" aria-hidden="true">02</span><h3>{model!.title}</h3><p>{model!.text}</p><span class="chip"><Icon name="decision" />{model!.chip}</span></li>
+      <li class="step rv"><span class="step-n" aria-hidden="true">03</span><h3>{quote!.title}</h3><p>{quote!.text}</p><span class="chip ai"><Icon name="attachment" />{quote!.chip}</span></li>
+    </ol>
+  </div>
+</section>

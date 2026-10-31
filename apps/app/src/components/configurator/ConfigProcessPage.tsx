@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BusyIndicator, Button, IllustratedMessage, ListItemStandard,
+  BusyIndicator, Button, IllustratedMessage, Input, Label, ListItemStandard,
   Link, ObjectPage, ObjectPageSection, ObjectPageTitle, Panel, Popover, ResponsivePopover, SelectDialog, Tag, Text, Title,
   ToggleButton, Toolbar,
   ToolbarButton, ToolbarItem,
@@ -22,7 +22,7 @@ import { GENERAL_SECTION } from "@confire/ui/configurator/formHelpers.ts";
 import { useI18n } from "../../i18n.ts";
 import { projectStatusText } from "./runView.ts";
 import { PriceAnalysis } from "./PriceAnalysis.tsx";
-import { CostBody, OptionPrices } from "./InsightsRail.tsx";
+import { CostBody } from "./InsightsRail.tsx";
 import { SimilarConfigs } from "./SimilarConfigs.tsx";
 import { configMessages } from "./configMessages.ts";
 import { GeneralForm } from "./GeneralForm.tsx";
@@ -165,6 +165,8 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   useEffect(() => { setDirty(queue.busy); return () => setDirty(false); }, [queue.busy, setDirty]);
   const [markOpen, setMarkOpen] = useState<{ key: string; opener: HTMLElement } | null>(null);
   const [noticeOpener, setNoticeOpener] = useState<HTMLElement | null>(null);
+  // A typed margin the server would refuse: shown on the field, never sent.
+  const [marginBad, setMarginBad] = useState(false);
 
   const general = (
     <GeneralForm locked={locked} request={!!request} head={head}
@@ -231,6 +233,8 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const itemQty = batches.find((b) => b === viewQty) ?? batches[0];
   const cost = view.costs.find((c) => c.batchQty === itemQty) ?? view.costs[0];
   const itemRows: Record<string, Val>[] = itemsDef ? form.tables[itemsDef.key] ?? [] : [];
+  // What the candidates are priced at: the typed one while it is on its way, else the view's.
+  const margin = queue.pending?.margin ?? view.margin;
 
   // Which row to quote is chosen in the Candidates section. A single candidate leaves nothing to
   // pick, so Create quote selects every batch quantity of it on the way out. The bar stays down
@@ -314,7 +318,6 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
             <IllustratedMessage name="NoData" design="ExtraSmall" titleText={t("CONFIG_NO_COSTS")}
               subtitleText={t("CONFIG_NO_COSTS_SUB")} />
           )}
-          {view.optionPrices.rows.length ? <OptionPrices rows={view.optionPrices.rows} total={view.optionPrices.total} cur={currency} /> : null}
         </div>
       </Panel>
     </div>
@@ -472,15 +475,30 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
         // The count rides in the anchor, like the model builder's issue counts — the Fiori
         // anchor-bar counter.
         <ObjectPageSection key="candidates" id="candidates" titleText={candidates.rows.length ? t("CONFIG_CANDIDATES_COUNT", String(candidates.rows.length)) : t("CONFIG_SECTION_CANDIDATES")}>
-          {/* The prices are the calculation's own, so they render with the agent off. A pending edit
-              is about to replace these candidates, so they stop taking picks. */}
-          {candidates.rows.length > 0 ? (
-            <PriceAnalysis model={model.definition} candidates={candidates} selection={selection}
-              onSelect={proc.pick} disabled={locked || queue.editing} />
-          ) : (
-            <IllustratedMessage name="NoData" design="Medium" titleText={t("CONFIG_NO_CANDIDATES")}
-              subtitleText={t("CONFIG_NO_CANDIDATES_SUB")} />
-          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+            {/* The model's margin until this configuration sets its own. An engine input like the
+                batches: a change recalculates every candidate. */}
+            <div style={{ display: "flex", flexDirection: "column", width: "14rem" }}>
+              <Label for="cfg-margin" showColon>{t("CONFIG_MARGIN_PCT")}</Label>
+              {/* Not a StepInput: with a decimal precision it flags a whole number as invalid. */}
+              <Input id="cfg-margin" type="Number" value={String(margin)} readonly={locked}
+                valueState={marginBad ? "Negative" : "None"} valueStateMessage={<div>{t("CONFIG_MARGIN_RANGE")}</div>}
+                onInput={(e) => { const v = e.target.value; setMarginBad(v === "" || !(Number(v) >= 0 && Number(v) < 100)); }}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (e.target.value !== "" && v >= 0 && v < 100 && v !== margin) proc.commit({ margin: v });
+                }} />
+            </div>
+            {/* The prices are the calculation's own, so they render with the agent off. A pending edit
+                is about to replace these candidates, so they stop taking picks. */}
+            {candidates.rows.length > 0 ? (
+              <PriceAnalysis model={model.definition} candidates={candidates} selection={selection}
+                onSelect={proc.pick} disabled={locked || queue.editing} />
+            ) : (
+              <IllustratedMessage name="NoData" design="Medium" titleText={t("CONFIG_NO_CANDIDATES")}
+                subtitleText={t("CONFIG_NO_CANDIDATES_SUB")} />
+            )}
+          </div>
         </ObjectPageSection>,
         !!request && (
           <ObjectPageSection key="timeline" id="timeline" titleText={t("CONFIG_SECTION_TIMELINE")}>

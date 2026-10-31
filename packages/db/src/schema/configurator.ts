@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
-  boolean, customType, index, jsonb, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid,
+  boolean, customType, doublePrecision, index, jsonb, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid,
 } from "drizzle-orm/pg-core";
 import type { Entries, ModelDef, Outputs, QuerySource, TableRows, Val } from "@confire/config-engine";
 
@@ -115,6 +115,9 @@ export const configProject = pgTable(
     quoteRespondedAt: timestamp("quote_responded_at", { withTimezone: true }),
     entries: jsonb("entries").$type<Entries>().notNull().default({}),
     batches: jsonb("batches").$type<number[]>().notNull().default([]),
+    // This configuration's margin in percent, over the model's `pricing.margin`; null = the model's.
+    // An engine input like `batches`: writing it empties the calculation. Staff only (configs.calculate).
+    margin: doublePrecision("margin"),
     // Row data for the model's tables (item matrix, calculation tables), by table key. A sibling
     // column rather than more keys in `entries`: Entries values are compared with === across
     // propagate/enumerate/enrichLookups, and widening Val to hold row arrays would touch all of it.

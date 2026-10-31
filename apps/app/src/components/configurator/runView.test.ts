@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { candidateLabel, chartRows, mergeSelection, projectStatusText, sortRows, statusUi } from "./runView.ts";
+import { candidateLabel, mergeSelection, projectStatusText, sortRows, statusUi } from "./runView.ts";
 
 /** English sentences, not the properties file — `{n}` is filled in order. */
 const EN: Record<string, string> = {
@@ -17,10 +17,6 @@ const t = (key: string, ...params: string[]) => {
   return template.replace(/\{(\d+)\}/g, (_, i: string) => params[Number(i)] ?? "");
 };
 
-// As the view sends them: `lowest` is the server's flag (first wins on ties).
-const cand = (prices: number[], lowest: boolean[]) => ({ perBatch: prices.map((unitPrice, i) => ({ unitPrice, lowest: lowest[i]! })) });
-const cands = [cand([12, 9], [false, false]), cand([11, 10], [true, false]), cand([13, 8], [false, true])];
-
 describe("labels", () => {
   test("a candidate with nothing open is just the configuration", () => {
     expect(candidateLabel(t, [], {})).toBe("Configuration");
@@ -32,20 +28,6 @@ describe("labels", () => {
     expect(statusUi(t).quoted).toEqual({ state: "Positive", text: "Quoted" });
     expect(projectStatusText(t, "in_review")).toBe("In review");
     expect(projectStatusText(t, "custom")).toBe("custom");
-  });
-});
-
-describe("chartRows", () => {
-  test("one line per picked configuration, in pick order", () => {
-    expect(chartRows(cands, [
-      { candidateIdx: 2, batchQty: 10 }, { candidateIdx: 0, batchQty: 10 }, { candidateIdx: 2, batchQty: 20 },
-    ])).toEqual([2, 0]);
-  });
-  test("nothing picked → the cheapest at the first quantity", () => {
-    expect(chartRows(cands, [])).toEqual([1]);
-  });
-  test("no candidates → no lines", () => {
-    expect(chartRows([], [])).toEqual([]);
   });
 });
 

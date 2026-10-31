@@ -235,7 +235,7 @@ export const configsRouter = {
         // configs.create inserts an empty name, so a copy of a not-yet-named draft would be
         // called " (copy)" without the fallback.
         name: copyName(row.name.trim() || "Configuration", taken.map((t) => t.name)),
-        customer: row.customer, entries: row.entries, batches: row.batches, tables: row.tables, sources: row.sources,
+        customer: row.customer, entries: row.entries, batches: row.batches, margin: row.margin, tables: row.tables, sources: row.sources,
         createdBy: context.userId,
       })
       .returning({ id: configProject.id });
@@ -385,11 +385,14 @@ export const configsRouter = {
       // Read the BP here if a hand-crafted code starts showing up on quotations.
       customer: Customer.nullable().optional().describe("The SAP business partner the quotation goes to (CardCode and CardName); null clears it"),
       ...PatchZ,
+      // Not in PatchZ: the portal takes that, and a client never sets the supplier's margin.
+      margin: z.number().min(0).lt(100).nullable().optional()
+        .describe("This configuration's margin, in percent of the price (price = cost / (1 - margin/100)); null = the model's"),
       sources: SourcesZ.optional()
         .describe("Where each written value came from, by field key (a parameter, a table, `batches` or `customer`): the exact text read off a file with its page, or the user's own words. Optional; the in-app assistant always sends it."),
     }))
     .handler(async ({ input, context }) => {
-      const { id, name, customer, sources, ...patch } = input;
+      const { id, name, customer, sources, margin, ...patch } = input;
       const other = customer !== undefined ? { customer } : {};
       const written = writtenOf(patch, other);
       for (const k of Object.keys(sources ?? {}))
@@ -398,7 +401,7 @@ export const configsRouter = {
       // The customer is the company (spec §7).
       if (p.portalCardCode !== null && customer !== undefined)
         throw new ORPCError("BAD_REQUEST", { message: "A request's customer is the client's" });
-      const engine = touchesEngine(patch);
+      const engine = touchesEngine(patch) || margin !== undefined;
       if (engine) {
         const [row] = await db.select({ modelId: configProject.modelId }).from(configProject)
           .where(and(eq(configProject.id, id), eq(configProject.tenantId, context.tenantId))).limit(1);
@@ -418,6 +421,7 @@ export const configsRouter = {
             ...patchColumns(patch, sources, other),
             ...(name !== undefined ? { name } : {}),
             ...(customer !== undefined ? { customer } : {}),
+            ...(margin !== undefined ? { margin } : {}),
             ...(engine || customer === null ? { candidates: [], selection: null, calculatedAt: null } : {}),
             updatedAt: new Date(),
           })
@@ -444,7 +448,7 @@ export const configsRouter = {
       // Lookups resolve outside the transaction: they can involve a round trip to the customer's
       // agent, and holding a row lock across that is how you get a pile of stuck writers.
       const [pre] = await db
-        .select({ modelId: configProject.modelId, entries: configProject.entries, tables: configProject.tables })
+        .select({ modelId: configProject.modelId, entries: configProject.entries, tables: configProject.tables, margin: configProject.margin })
         .from(configProject)
         .where(visible(context.tenantId, input.projectId))
         .limit(1);

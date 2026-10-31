@@ -6,8 +6,6 @@ import { formatLocale } from "@confire/ui/format.ts";
 // What the process page does with the view beyond drawing it: formatting, and the sort, filter and
 // grouping the user drives. Every figure and flag here is the server's (config-view.ts).
 export type Sel = { candidateIdx: number; batchQty: number };
-/** A candidate row as the view carries it: the open parameters' values, and per batch quantity. */
-type ChartCandidate = { perBatch: { unitPrice: number; lowest: boolean }[] };
 
 export const fmt = (n: number): string => n.toLocaleString(formatLocale(), { maximumFractionDigits: 2 });
 
@@ -69,14 +67,6 @@ export const sortRows = (rows: Row[], sortBy: GridState["sortBy"]): Row[] =>
     }
     return 0;
   });
-
-// Rows the price chart draws: every configuration with a picked cell, in pick order — or, before
-// anything is picked, the cheapest one at the first quantity, so the chart is never empty.
-export function chartRows(candidates: ChartCandidate[], selection: Sel[]): number[] {
-  if (selection.length) return [...new Set(selection.map((s) => s.candidateIdx))];
-  const i = candidates.findIndex((c) => c.perBatch[0]?.lowest);
-  return i < 0 ? [] : [i];
-}
 
 /** One decimal. An em dash where there is no share to show. */
 export function percent(value: number | null): string {

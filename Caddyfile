@@ -1,12 +1,14 @@
-# Two fixed hosts, one process each (spec 2026-10-19-path-tenancy-design.md). The tenant is the first
-# path segment (`/<slug>/…`), which each process reads from its SPA's calls — Caddy routes on the host
-# only, so there is no wildcard name, no wildcard certificate and no DNS challenge.
+# Two fixed hosts, one process each (spec 2026-10-19-path-tenancy-design.md), plus the marketing site.
+# The tenant is the first path segment (`/<slug>/…`), which each process reads from its SPA's calls —
+# Caddy routes on the host only, so there is no wildcard name, no wildcard certificate and no DNS
+# challenge.
 #   app.{$DOMAIN}       sign-in, the /login dispatcher, and the staff app  -> server:3000
 #   portal.{$DOMAIN}    the customer portal                                 -> portal:3001
-#   {$DOMAIN}           nothing of its own yet                              -> sign-in
+#   {$DOMAIN}           the marketing site, static files (apps/site; spec 2026-10-30-marketing-site-design.md)
+#   www.{$DOMAIN}       -> {$DOMAIN}
 # The session cookie is on {$DOMAIN}, so every host under it receives it: never point a name under
-# {$DOMAIN} at a service this stack does not control.
-# ponytail: the apex only redirects until a marketing site exists; then serve that there instead.
+# {$DOMAIN} at a service this stack does not control. The apex is this stack's own files, but it runs
+# ad scripts after consent, which is why serve.ts refuses a write whose Origin is not its process's own.
 # Certificates are Caddy's automatic HTTPS: one per name, HTTP challenge on :80.
 # `encode`: the SPA bundles are UI5-sized (the largest ~740 KB, ~250 KB gzipped) and Hono's
 # serveStatic sends them raw. Safe because nothing here streams (no SSE, no oRPC event iterators).
@@ -21,6 +23,50 @@ portal.{$DOMAIN} {
 	reverse_proxy portal:3001
 }
 
+# The site is files Caddy serves itself, so a crashed or restarting app never takes it down. They
+# arrive in /home/deploy/site (deploy/site.sh, mounted at /srv/site): `current` is a symlink that
+# each deploy switches in one rename, so no restart and no reload.
 {$DOMAIN} {
-	redir https://app.{$DOMAIN}/login
+	encode zstd gzip
+
+	header {
+		# Third parties: Plausible (cookieless, every visitor) and, only after consent, the Meta Pixel and
+		# the LinkedIn Insight Tag (apps/site/src/components/Consent.astro). No 'unsafe-inline' scripts:
+		# the site builds every script into a file (astro.config.ts). Styles: Astro inlines small CSS, the
+		# theme's variables are an inline <style>, and the product visuals use style="".
+		Content-Security-Policy "default-src 'self'; script-src 'self' https://plausible.io https://connect.facebook.net https://snap.licdn.com; connect-src 'self' https://plausible.io https://www.facebook.com https://connect.facebook.net https://px.ads.linkedin.com; img-src 'self' https://www.facebook.com https://px.ads.linkedin.com; style-src 'self' 'unsafe-inline'; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+	}
+
+	# The demo form posts to its own origin; the portal process answers (apps/server/src/demo-request.ts).
+	handle /api/demo-request {
+		reverse_proxy portal:3001
+	}
+
+	handle {
+		root * /srv/site/current
+		# Hashed names never change content; fonts and share images change rarely; HTML always revalidates.
+		header /_astro/* Cache-Control "public, max-age=31536000, immutable"
+		@static path /fonts/* /og/*
+		header @static Cache-Control "public, max-age=604800"
+		@page not path /_astro/* /fonts/* /og/*
+		header @page Cache-Control "no-cache"
+		try_files {path} {path}/index.html
+		file_server
+	}
+
+	# The visitor's language's 404, by path prefix; the status stays 404.
+	handle_errors 404 {
+		root * /srv/site/current
+		rewrite /es/* /es/404/index.html
+		rewrite /eu/* /eu/404/index.html
+		rewrite * /404/index.html
+		file_server
+	}
+}
+
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
 }

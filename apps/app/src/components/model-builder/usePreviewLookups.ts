@@ -14,15 +14,14 @@ export function lookupSkeleton(d: ModelDef): ModelDef {
     constraints: [],
     bom: [],
     routing: [],
-    pricing: { priceExpr: "0", quoteItemCode: "X" },
+    pricing: { margin: 0, quoteItemCode: "X" },
     batchDefaults: [1],
   };
 }
 
-export function usePreviewLookups(draft: ModelDef, { enabled }: { enabled: boolean }) {
+export function usePreviewLookups(draft: ModelDef) {
   return useQuery({
     ...orpc.models.previewLookups.queryOptions({ input: { definition: lookupSkeleton(draft) } }),
-    enabled,
     staleTime: 5 * 60_000, // matches the server-side configs.lookups cache window
     retry: false, // agent-offline should show its message, not spin
     placeholderData: keepPreviousData, // editing a query source keeps loaded fields visible instead of blanking

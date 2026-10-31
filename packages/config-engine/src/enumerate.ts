@@ -35,7 +35,8 @@ export function enumerate(
         capped = true;
         return;
       }
-      candidates.push(cur);
+      // A hidden parameter's stored entry is no part of the configuration (nor of its quote key).
+      candidates.push(Object.fromEntries(Object.entries(cur).filter(([k]) => p.visible[k] !== false)));
       return;
     }
     // smallest live domain first: fail fast, shallow tree

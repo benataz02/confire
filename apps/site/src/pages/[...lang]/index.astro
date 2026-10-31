@@ -1,0 +1,40 @@
+---
+import Base from "../../layouts/Base.astro";
+import Hero from "../../components/landing/Hero.astro";
+import Why from "../../components/landing/Why.astro";
+import How from "../../components/landing/How.astro";
+import Bento from "../../components/landing/Bento.astro";
+import Security from "../../components/landing/Security.astro";
+import Faq from "../../components/landing/Faq.astro";
+import Demo from "../../components/landing/Demo.astro";
+import "../../styles/landing.css";
+import { dict, LANGS, type Lang } from "../../i18n/index.ts";
+import { localePath } from "../../lib/urls.ts";
+import { SITE } from "../../site.config.ts";
+
+export const getStaticPaths = () => LANGS.map((lang) => ({ params: { lang: lang === "en" ? undefined : lang }, props: { lang } }));
+
+const { lang } = Astro.props as { lang: Lang };
+const t = dict[lang];
+const site = Astro.site!.href.replace(/\/$/, "");
+const url = site + localePath(lang, "/");
+// Structured data (spec §12): who, what, and the FAQ exactly as the page shows it.
+const jsonLd = [
+  { "@context": "https://schema.org", "@type": "Organization", name: "Confire", url: `${site}/`, logo: `${site}/logo.png`,
+    ...(Object.values(SITE.social).some(Boolean) ? { sameAs: Object.values(SITE.social).filter(Boolean) } : {}) },
+  { "@context": "https://schema.org", "@type": "WebSite", name: "Confire", url, inLanguage: lang },
+  { "@context": "https://schema.org", "@type": "SoftwareApplication", name: "Confire", applicationCategory: "BusinessApplication",
+    operatingSystem: "Web", url, description: t.meta.description, inLanguage: lang },
+  { "@context": "https://schema.org", "@type": "FAQPage", inLanguage: lang,
+    mainEntity: t.faq.items.map((f) => ({ "@type": "Question", name: f.q, acceptedAnswer: { "@type": "Answer", text: f.a } })) },
+];
+---
+<Base lang={lang} path="/" title={t.meta.title} description={t.meta.description} jsonLd={jsonLd}>
+  <Hero lang={lang} />
+  <Why lang={lang} />
+  <How lang={lang} />
+  <Bento lang={lang} />
+  <Security lang={lang} />
+  <Faq lang={lang} />
+  <Demo lang={lang} />
+</Base>

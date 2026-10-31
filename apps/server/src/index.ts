@@ -1,5 +1,6 @@
 import { auth } from "./auth.ts";
 import { router } from "./orpc/router.ts";
+import { authUrl } from "./tenant.ts";
 import { serve } from "./serve.ts";
 import { fileRoutes } from "./files.ts";
 import { agentRoutes } from "./agent-pairing.ts";
@@ -14,4 +15,5 @@ export default serve({
   routes: fileRoutes("internal").route("/", agentRoutes()).route("/", assistantFileRoutes()).route("/", assistantRoutes()),
   spaDist: "../app/dist",
   port: 3000,
+  origin: authUrl,
 });

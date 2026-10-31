@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
+import { useRouterState } from "@tanstack/react-router";
 import { SearchItem, SearchItemGroup, SearchMessageArea, SearchScope, ShellBarSearch } from "@ui5/webcomponents-react";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { entityPath } from "@confire/ui/navigation.ts";
@@ -49,7 +50,11 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
   const [term, setTerm] = useState("");
   useEffect(() => { const id = setTimeout(() => setTerm(q.trim()), 250); return () => clearTimeout(id); }, [q]);
   const [open, setOpen] = useState(false);
-  const [scope, setScope] = useState(ALL);
+  // The AI page has no chat list of its own: there this search is it, scoped to chats, and pulses on
+  // arrival so it is noticed. Leaving the page puts the scope back.
+  const onAiPage = useRouterState({ select: (s) => s.matches.some((m) => m.routeId.startsWith("/$slug/assistant")) });
+  const [scope, setScope] = useState(onAiPage ? "chats" : ALL);
+  useEffect(() => setScope(onAiPage ? "chats" : ALL), [onAiPage]);
 
   const cap = scope === ALL ? CAP.all : CAP.scoped;
   const on = (s: string, allowed = true) => !!term && allowed && (scope === ALL || scope === s);
@@ -105,7 +110,7 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
   return (
     <ShellBarSearch
       slot="searchField"
-      className="confire-shellbar-search"
+      className={onAiPage ? "confire-shellbar-search confire-search-pulse" : "confire-shellbar-search"}
       value={q}
       showClearIcon
       noTypeahead

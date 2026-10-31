@@ -1,0 +1,22 @@
+{
+  "name": "@confire/site",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "prebuild": "bun scripts/prebuild.ts",
+    "dev": "bun scripts/prebuild.ts && astro dev",
+    "build": "bun scripts/prebuild.ts && astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "^3.7.4",
+    "@sap-theming/theming-base-content": "^11.36.4",
+    "@ui5/webcomponents-base": "^2.27.2",
+    "@ui5/webcomponents-icons": "^2.27.2",
+    "astro": "^7.4.4"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "playwright-core": "1.62.1"
+  }
+}

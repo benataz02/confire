@@ -4,8 +4,8 @@ import { isTableGroup, tokenize, type FieldGroup, type Group, type ModelDef, typ
 
 // A table is a group, so it is addressed by position like a group is — `t:` rather than `g:` only
 // so the tree can tell the two apart when drawing a row. That leaves the parameter as the tree's
-// only leaf. A formula is no node of the structure (the model stores nothing positional about
-// one), but it is a row of the same table, so it is addressed here too: by its index.
+// only leaf. A formula is no node of the structure (it only names the parameter it hangs under),
+// but it is a row of the same table, so it is addressed here too: by its index.
 export type RowRef =
   | { kind: "section"; s: number }
   | { kind: "group"; s: number; g: number }
@@ -50,7 +50,10 @@ const fieldGroupAt = (def: ModelDef, s: number, g: number): FieldGroup | undefin
 export function canDrop(def: ModelDef, srcKey: string, dstKey: string, placement: Placement): boolean {
   const src = parseRowKey(srcKey);
   const dst = parseRowKey(dstKey);
-  if (srcKey === dstKey || src.kind === "formula" || dst.kind === "formula") return false;
+  if (srcKey === dstKey) return false;
+  // A formula goes onto (or just below) the parameter it is to hang under, or beside a formula.
+  if (src.kind === "formula") return (dst.kind === "param" && placement !== "Before") || (dst.kind === "formula" && placement !== "On");
+  if (dst.kind === "formula") return false;
   // A parameter goes into a field group or beside another parameter. Dropping one onto a table
   // group is the one move that has to be refused here: a table group holds no parameter list, so
   // the drop would silently vanish.
@@ -108,6 +111,22 @@ export function applyMove(def: ModelDef, srcKey: string, dstKey: string, placeme
   if (!canDrop(def, srcKey, dstKey, placement)) return def;
   const src = parseRowKey(srcKey);
   const dst = parseRowKey(dstKey);
+
+  // The array's order is the order formulas draw in under one parameter. Onto a parameter ties the
+  // formula to it as its last, just below it as its first; beside a formula takes that one's tie.
+  if (src.kind === "formula") {
+    const c = def.computed[src.i];
+    const target = dst.kind === "formula" ? def.computed[dst.i] : undefined;
+    if (!c || (dst.kind === "formula" && !target)) return def;
+    const rest = def.computed.filter((_, i) => i !== src.i);
+    const param = dst.kind === "param" ? dst.key : target!.param;
+    const first = rest.findIndex((x) => x.param === param);
+    const at = dst.kind === "formula" ? rest.indexOf(target!) + (placement === "After" ? 1 : 0)
+      : placement === "After" && first >= 0 ? first : rest.length;
+    const { param: _, ...bare } = c;
+    const moved = param === undefined ? bare : { ...bare, param };
+    return { ...def, computed: [...rest.slice(0, at), moved, ...rest.slice(at)] };
+  }
 
   if (src.kind === "param") {
     const without = stripParam(def, src.key);
@@ -187,7 +206,8 @@ export function deleteNodes(def: ModelDef, refs: RowRef[]): ModelDef {
   return {
     ...def,
     parameters: def.parameters.filter((p) => !params.has(p.key)),
-    computed: def.computed.filter((_, i) => !formulas.has(i)),
+    // A formula goes with the parameter it is tied to, however that parameter went.
+    computed: def.computed.filter((c, i) => !formulas.has(i) && !(c.param !== undefined && params.has(c.param))),
     tables: (def.tables ?? []).filter((t) => !tables.has(t.key)),
     structure: {
       sections: def.structure.sections.flatMap((s, si) => (secs.has(si) ? [] : [{
@@ -383,7 +403,8 @@ export function duplicateNodes(def: ModelDef, refs: RowRef[], keys: CopyKey[]): 
     } else {
       const c = def.computed[r.i];
       const key = keyOf.get(`c:${r.i}`);
-      if (c && key) computed.push({ key, expr: re(c.expr) });
+      // Tied to the copy of its parameter when that is copied alongside, else to the same one.
+      if (c && key) computed.push({ ...c, key, expr: re(c.expr), ...(c.param && idents.has(c.param) ? { param: idents.get(c.param) } : {}) });
     }
   }
 

@@ -12,7 +12,7 @@ import { makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
 // only, and every procedure behind the same builder it has on /rpc.
 
 const app = (r: Router<{ headers: Headers }>) =>
-  serve({ auth, router: r, title: "test", routes: new Hono(), spaDist: "/nonexistent", port: 0 });
+  serve({ auth, router: r, title: "test", routes: new Hono(), spaDist: "/nonexistent", port: 0, origin: "http://localhost" });
 const req = (a: ReturnType<typeof app>, path: string, init?: RequestInit) =>
   a.fetch(new Request(`http://localhost${path}`, init));
 

@@ -11,6 +11,8 @@ export type InputPatch = {
   unset?: string[];
   batches?: number[];
   tables?: TableRows;
+  /** staff only: the configuration's margin in percent; null = the model's */
+  margin?: number | null;
 };
 type Sel = { candidateIdx: number; batchQty: number };
 
@@ -22,6 +24,7 @@ export function mergePatch(a: InputPatch, b: InputPatch): InputPatch {
   if (b.name !== undefined) out.name = b.name;
   if (b.customer !== undefined) out.customer = b.customer;
   if (b.batches !== undefined) out.batches = b.batches;
+  if (b.margin !== undefined) out.margin = b.margin;
   if (b.tables) out.tables = { ...a.tables, ...b.tables };
   if (b.set || b.unset) {
     const set: Entries = { ...a.set };

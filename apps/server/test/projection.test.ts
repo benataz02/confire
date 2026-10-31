@@ -31,7 +31,7 @@ const model: ModelDef = {
       { key: "double", label: "Double", type: "number", cell: { kind: "formula", expr: "quantity * 2" } },
     ],
   }],
-  pricing: { priceExpr: "unitCost * 1.4", quoteItemCode: "CFG", priceList: 1, itemTable: "catalog" },
+  pricing: { margin: 50, quoteItemCode: "CFG", priceList: 1, itemTable: "catalog" },
   batchDefaults: [10],
 };
 
@@ -75,8 +75,8 @@ describe("toPortalForm / toPortalLookups", () => {
     expect(json).not.toContain("grade_cost");
   });
 
-  test("a hidden field is visible: false and nothing else — its default stays home", () => {
-    expect(form.fields.secret!.value).toBe(42);
+  test("a hidden field is visible: false and nothing else", () => {
+    expect(form.fields.secret!.value).toBeNull(); // hidden: its default does not apply
     expect(pf.fields.secret).toEqual({ visible: false, required: false });
     expect(pf.fields.grade).toMatchObject({ value: "A", required: true });
   });

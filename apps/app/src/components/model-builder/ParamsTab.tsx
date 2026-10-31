@@ -1,23 +1,22 @@
 import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  Bar, Button, BusyIndicator, IllustratedMessage, Input, Menu, MenuItem, SplitButton, SplitterElement, SplitterLayout, Table,
-  TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableSelectionMulti, Tag, Text, Title,
+  Bar, Button, Icon, IllustratedMessage, Menu, MenuItem, SegmentedButton, SegmentedButtonItem,
+  SplitButton, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableSelectionMulti,
+  Tag, Text, Title,
   type SplitButtonDomRef,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/AddColumn.js";
-import { formState, isTableGroup, itemsTable, propagate, type Entries, type ResolvedLookups, type TableRows } from "@confire/config-engine";
+import { isTableGroup, itemsTable } from "@confire/config-engine";
 import type { Issue, ModelDef, Param, TableDef } from "@confire/config-engine";
 import { confirm } from "@confire/ui/confirm.ts";
-import { ExprInput } from "./ExprInput.tsx";
 import type { ParamSearch } from "./paramRoute.ts";
 import { newCalcTable } from "../../features/model/table.ts";
 import { localizeItems } from "./starterModel.ts";
 import { TitleDialog } from "./TitleDialog.tsx";
 import { DuplicateDialog } from "./DuplicateDialog.tsx";
+import { FormulaDialog } from "./FormulaDialog.tsx";
 import type { TableCols } from "./exprHelpers.ts";
-import { configuratorForms } from "@confire/ui/configurator/ConfiguratorForm.tsx";
-import { setEntry } from "@confire/ui/configurator/formHelpers.ts";
 import {
   applyMove, canDrop, copyKeys, deleteNodes, duplicateNodes, isItemsRow, outermost, parseRowKey, placeTable, rowKeyOf,
   tableKeyAt, uniqueKey, type CopyKey, type Placement, type RowRef,
@@ -77,23 +76,68 @@ if (typeof document !== "undefined" && !document.getElementById("confire-params-
   document.head.appendChild(el);
 }
 
-// A layout preference, so per browser like density and theme rather than per model. The key and
-// its "hidden" value predate the on/off switch, so a preview someone hid stays hidden.
-const PREVIEW_KEY = "modelBuilder.previewAt";
-
-/** Whether the live preview shows beside the structure tree; the switch is the page title's. */
-export function usePreviewShown(): [boolean, (shown: boolean) => void] {
-  const [shown, setShown] = useState(() => localStorage.getItem(PREVIEW_KEY) !== "hidden");
-  return [shown, (next) => { setShown(next); localStorage.setItem(PREVIEW_KEY, next ? "right" : "hidden"); }];
-}
-
 type AddKind = "section" | "group" | "param" | "formula" | "calc" | "items";
 const ADD_LABEL: Record<AddKind, string> = {
   section: "MODEL_SECTION", group: "MODEL_GROUP", param: "MODEL_PARAM",
   formula: "MODEL_FORMULA", calc: "MODEL_CALC_TABLE", items: "MODEL_ITEM_GRID",
 };
-// The Add button's main action is the last kind picked from its menu, per browser like the preview.
+// Same glyph on the row and on Add, so the kind is recognisable without the word that used to
+// lead Details ("section · key"). `group` is three people, so a form group uses the list glyph.
+const ADD_ICON: Record<AddKind, string> = {
+  section: "folder-blank", group: "list", param: "form",
+  formula: "fx", calc: "table-view", items: "product",
+};
+
+/** A table is a group in the model; the glyph follows its role (item grid or calculation table). */
+function rowKind(ref: RowRef, draft: ModelDef): AddKind {
+  if (ref.kind !== "table") return ref.kind;
+  const key = tableKeyAt(draft, ref.s, ref.g);
+  return (draft.tables ?? []).find((tb) => tb.key === key)?.role === "items" ? "items" : "calc";
+}
+
+/** Kind glyph. Image mode keeps the kind in the accessible name: Details no longer spells it. */
+function RowIcon({ name, label }: { name: string; label: string }) {
+  return <Icon name={name} mode="Image" design="Neutral" accessibleName={label} showTooltip style={{ flex: "0 0 auto" }} />;
+}
+// The Add button's main action is the last kind picked from its menu, per browser like density.
 const ADD_KEY = "modelBuilder.addLast";
+
+// Stable across a drag: a row key is a position, these are the section/group/parameter keys.
+const collapseId = {
+  section: (key: string) => `S:${key}`,
+  group: (section: string, group: string) => `G:${section}/${group}`,
+  param: (key: string) => `P:${key}`,
+};
+
+function readCollapsed(key: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Per model, so a refresh keeps what was collapsed. ponytail: localStorage, same as the Add button's
+ *  last kind — a ui_user_state row only if this has to follow the user to another browser. */
+function useCollapsed(modelId?: string): [Set<string>, (id: string) => void, (ids: Iterable<string>) => void] {
+  const key = `modelBuilder.collapsed.${modelId ?? "new"}`;
+  const [state, setState] = useState(() => ({ key, ids: readCollapsed(key) }));
+  if (state.key !== key) setState({ key, ids: readCollapsed(key) });
+  const ids = state.key === key ? state.ids : readCollapsed(key);
+  const write = (next: Iterable<string>) => {
+    const stored = new Set(next);
+    localStorage.setItem(key, JSON.stringify([...stored]));
+    setState({ key, ids: stored });
+  };
+  const toggle = (id: string) => {
+    const n = new Set(ids);
+    n.delete(id) || n.add(id);
+    write(n);
+  };
+  return [ids, toggle, write];
+}
 
 function useLastAdd(): [AddKind, (kind: AddKind) => void] {
   const [kind, setKind] = useState<AddKind>(() => {
@@ -103,13 +147,11 @@ function useLastAdd(): [AddKind, (kind: AddKind) => void] {
   return [kind, (next) => { setKind(next); localStorage.setItem(ADD_KEY, next); }];
 }
 
-/** The Parameters section (a template): the structure tree and the live preview to its right. */
-export function ParamsTab({ modelId, draft, update, issues, tables, lookups, lookupsFailed, onRetryLookups, showPreview }: {
+/** The Parameters section (a template): the structure tree. */
+export function ParamsTab({ modelId, draft, update, issues, tables }: {
   /** absent while the model itself is still unsaved — the parameter page lives under `/models/new` */
   modelId?: string;
   draft: ModelDef; update: Update; issues: Issue[]; tables: Tables;
-  lookups?: ResolvedLookups; lookupsFailed?: boolean; onRetryLookups: () => void;
-  showPreview: boolean;
 }) {
   const i18n = useI18n();
   const t: Translate = (key, ...params) => i18n.getText(key, ...params);
@@ -122,16 +164,13 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
     if (modelId) void navigate({ to: "/$slug/models/$id/table", params: { id: modelId }, search: { key } });
     else void navigate({ to: "/$slug/models/new/table", search: { key } });
   };
-  // Formula row switched to its live editors; every other row shows read-only text, which is the
-  // whole reason the rows are the same height.
-  const [fEdit, setFEdit] = useState<number | null>(null);
+  // The formula open in FormulaDialog; no `at` is one not added yet, which only its Save creates.
+  const [formula, setFormula] = useState<{ at?: number; initial: ModelDef["computed"][number] } | null>(null);
   // Section/group whose heading is open in TitleDialog, with the values it opens on; no `ref` is a
   // section not added yet, which only its Save creates.
   const [titleEdit, setTitleEdit] = useState<{ ref?: RowRef; initial: string } | null>(null);
-  // Keyed by stable section/group/param key (not row index) so collapse survives drag-reordering.
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const toggle = (id: string) =>
-    setCollapsed((c) => { const n = new Set(c); n.delete(id) || n.add(id); return n; });
+  // Ids are section/group/parameter keys, not row positions, so a drag does not retarget them.
+  const [collapsed, toggle, setCollapsed] = useCollapsed(modelId);
   // Row keys are positions, so every edit that moves rows clears the selection rather than let it
   // land on whichever rows moved into those places.
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -150,15 +189,32 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   const formulaRow = (i: number): Row => ({ kind: "formula", key: rowKeyOf({ kind: "formula", i }), idx: i, ref: { kind: "formula", i } });
   const defOf = (k: string): TableDef | undefined => (draft.tables ?? []).find((t) => t.key === k);
 
-  // A formula is global and the model stores nothing positional about one, so they all draw under
-  // the last placed parameter — the one row guaranteed to be there to hang them on.
-  const lastParam = draft.structure.sections
-    .flatMap((s) => s.groups.flatMap((g) => (isTableGroup(g) ? [] : g.params))).at(-1);
+  // A formula draws under the parameter it is tied to. One tied to none (a model older than the
+  // tie) or to a parameter placed nowhere draws under the last placed one, the one row guaranteed
+  // to be there to hang it on.
+  const placed = draft.structure.sections.flatMap((s) => s.groups.flatMap((g) => (isTableGroup(g) ? [] : g.params)));
+  const lastParam = placed.at(-1);
+  const drawnUnder = (i: number) => {
+    const p = draft.computed[i]?.param;
+    return p !== undefined && placed.includes(p) ? p : lastParam;
+  };
   const formulas = draft.computed.map((_, i) => i);
+  const formulaAnchors = new Set(formulas.flatMap((i) => {
+    const k = drawnUnder(i);
+    return k ? [k] : [];
+  }));
+  // Includes levels a collapsed parent hides, so Collapse all stays collapsed once that parent opens.
+  const allCollapseIds = draft.structure.sections.flatMap((s) => [
+    collapseId.section(s.key),
+    ...s.groups.flatMap((g) => (isTableGroup(g) ? [] : [
+      collapseId.group(s.key, g.key),
+      ...g.params.flatMap((k) => (formulaAnchors.has(k) ? [collapseId.param(k)] : [])),
+    ])),
+  ]);
 
   draft.structure.sections.forEach((s, si) => {
-    const sId = `S:${s.key}`;
-    rows.push({ kind: "struct", key: rowKeyOf({ kind: "section", s: si }), depth: 0, label: s.title, detail: t("MODEL_DETAIL_SECTION", s.key), ref: { kind: "section", s: si }, at: { s: si }, collapseId: sId });
+    const sId = collapseId.section(s.key);
+    rows.push({ kind: "struct", key: rowKeyOf({ kind: "section", s: si }), depth: 0, label: s.title, detail: s.key, ref: { kind: "section", s: si }, at: { s: si }, collapseId: sId });
     if (collapsed.has(sId)) return;
     s.groups.forEach((g, gi) => {
       // A table is a group, so it draws at group depth with no children and no collapse chevron.
@@ -169,20 +225,18 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
           : "";
         rows.push({
           kind: "struct", key: rowKeyOf({ kind: "table", s: si, g: gi }), depth: 1, label: def?.title || g.table,
-          detail: def
-            ? t("MODEL_DETAIL_TABLE", def.role === "items" ? t("MODEL_ITEM_GRID") : t("MODEL_CALC_TABLE"), cols)
-            : t("MODEL_MISSING_TABLE"),
+          detail: def ? cols : t("MODEL_MISSING_TABLE"),
           ref: { kind: "table", s: si, g: gi }, at: { s: si },
         });
         return;
       }
-      const gId = `G:${s.key}/${g.key}`;
-      rows.push({ kind: "struct", key: rowKeyOf({ kind: "group", s: si, g: gi }), depth: 1, label: g.title, detail: t("MODEL_DETAIL_GROUP", g.key), ref: { kind: "group", s: si, g: gi }, at: { s: si, g: gi }, collapseId: gId });
+      const gId = collapseId.group(s.key, g.key);
+      rows.push({ kind: "struct", key: rowKeyOf({ kind: "group", s: si, g: gi }), depth: 1, label: g.title, detail: g.key, ref: { kind: "group", s: si, g: gi }, at: { s: si, g: gi }, collapseId: gId });
       if (collapsed.has(gId)) return;
       g.params.forEach((k) => {
         const p = draft.parameters.find((x) => x.key === k);
-        const own = k === lastParam ? formulas : [];
-        const pId = `P:${k}`;
+        const own = formulas.filter((i) => drawnUnder(i) === k);
+        const pId = collapseId.param(k);
         rows.push({
           kind: "struct", key: rowKeyOf({ kind: "param", key: k }), depth: 2, label: p?.label || k,
           detail: p ? paramDetail(p, t) : t("MODEL_MISSING_PARAM"),
@@ -239,7 +293,6 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
     const refs = acted;
     if (!refs.length || !await confirmDelete(refs)) return;
     setSelected(new Set());
-    setFEdit(null);
     update((d) => deleteNodes(d, refs));
   };
   const duplicateSelected = (keys: CopyKey[]) => {
@@ -286,9 +339,11 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       }),
     },
   }));
-  const addFormula = () => update((d) => ({
-    ...d,
-    computed: [...d.computed, { key: uniqueKey("value", [...d.parameters.map((p) => p.key), ...d.computed.map((c) => c.key)]), expr: "0" }],
+  const addFormula = (param: string) => setFormula({
+    initial: { key: uniqueKey("value", [...draft.parameters.map((p) => p.key), ...draft.computed.map((c) => c.key)]), expr: "", param },
+  });
+  const saveFormula = (at: number | undefined, f: ModelDef["computed"][number]) => update((d) => ({
+    ...d, computed: at === undefined ? [...d.computed, f] : d.computed.map((x, j) => (j === at ? f : x)),
   }));
   // A table is a group, so it is added to a section, not into one.
   const addTable = (role: "calc" | "items", s: number) => update((d) => {
@@ -299,59 +354,49 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
   const hasItems = (draft.tables ?? []).some((t) => t.role === "items");
 
   // An Add always lands at the bottom: of the one picked row's section or group, else of the last
-  // one. A formula is global and a section is top-level, so those two only ever append.
+  // one. A section is top-level, so it only ever appends. A formula goes under the picked parameter
+  // (or beside the picked formula), else under the last parameter of where a parameter would land.
   const one = picked.length === 1 && picked[0]!.kind === "struct" ? picked[0]!.at : undefined;
   const sections = draft.structure.sections;
   const fieldGroups = (s: number) => sections[s]?.groups.flatMap((g, gi) => (isTableGroup(g) ? [] : [gi])) ?? [];
+  const lastIn = (s: number, g?: number) =>
+    sections[s]?.groups.flatMap((x, gi) => (isTableGroup(x) || (g !== undefined && gi !== g) ? [] : x.params)).at(-1);
+  const pickedRow = picked.length === 1 ? picked[0]! : undefined;
+  const formulaParam = pickedRow?.ref.kind === "param" ? pickedRow.ref.key
+    : pickedRow?.kind === "formula" ? drawnUnder(pickedRow.idx)
+    : one ? lastIn(one.s, one.g) : lastParam;
   const intoS = one ? one.s : sections.length - 1;
   const intoG = one?.g !== undefined ? { s: one.s, g: one.g }
     : [...(one ? [one.s] : sections.map((_, si) => si))].reverse()
       .map((s) => ({ s, g: fieldGroups(s).at(-1) }))
       .find((x): x is { s: number; g: number } => x.g !== undefined);
   const addable: Record<AddKind, boolean> = {
-    section: true, group: intoS >= 0, param: !!intoG, formula: true, calc: intoS >= 0, items: intoS >= 0 && !hasItems,
+    section: true, group: intoS >= 0, param: !!intoG, formula: !!formulaParam, calc: intoS >= 0, items: intoS >= 0 && !hasItems,
   };
   const add = (what: AddKind) => {
     if (!addable[what]) return;
     if (what === "section") setTitleEdit({ initial: "" });
-    else if (what === "formula") addFormula();
+    else if (what === "formula") addFormula(formulaParam!);
     else if (what === "param") openParam(intoG!);
     else if (what === "group") addGroup(intoS);
     else addTable(what, intoS);
   };
 
-  // ponytail: no responsive drop-below — the preview sits right or not at all, which suits the
-  // desktop-only model builder. Wrap it in a DynamicSideContent if a tablet ever needs it.
-  // Both panes scroll themselves: SplitterLayout clips (overflow:hidden), so the tree can no
-  // longer lean on the ObjectPage's scroller. The tree's scroller is its Table's own body.
-  // A size of its own, not "auto": an auto pane measures itself once and freezes at that px, and
-  // straight after a reset that measure can land before the layout settles — the preview then
-  // stops short of the edge until a drag rewrites it. Two percentages always add up to the width.
   return (
-    // flex:1 + minHeight:0 is fitContent's contract (see the params section): fill the page height.
-    // A drag writes px straight onto the panes, so showing the preview again — or a resized page,
-    // where those px would leave a gap — resets to the declared sizes.
-    // The inset is the splitter's margin, not padding on either pane: the section already pads
-    // the top, and a pane padding would drop the structure card below the first preview Form.
-    <SplitterLayout
-      style={{ flex: 1, minHeight: 0, margin: "0 1rem 1rem 0" }}
-      options={{ resetOnCustomDepsChange: [showPreview], resetOnSizeChange: true }}>
-      <SplitterElement key="tree" size={showPreview ? "50%" : "100%"} minSize={280}>
+    // Form's shell (.ui5-form-root) is the rounded card: 0.75rem and the group background. Table
+    // exposes no CSS part for its frame, so the title bar and the rows share this card and overflow
+    // clips them to the curve. flex:1 + minHeight:0 is fitContent's contract (see the params
+    // section): the card fills the page's height and the Table the rest of it. A Scroll-mode Table
+    // scrolls its own rows (`#table` is `height: 100%`) once its height is definite, which is what
+    // keeps the toolbar and the sticky header in place; a 0 basis is that definite height, an
+    // `auto` one is sized to the rows. The section already pads the top and the start.
+    // The dialogs sit inside: they are top-layer popups, which the clip does not reach.
     <div style={{
-      display: "flex", flexDirection: "column",
-      flex: "1 1 auto", minInlineSize: 0, minHeight: 0,
+      display: "flex", flexDirection: "column", flex: "1 1 0", minInlineSize: 0, minHeight: 0,
+      margin: "0 1rem 1rem 0",
+      backgroundColor: "var(--sapGroup_ContentBackground)",
+      borderRadius: "0.75rem", overflow: "hidden",
     }}>
-      {/* Form's shell (.ui5-form-root) is the rounded card: 0.75rem and the group background.
-          Table exposes no CSS part for its frame, so the title bar and the rows share this
-          wrapper and overflow clips them to the curve. The card fills the pane and the Table the
-          rest of it: a Scroll-mode Table scrolls its own rows (`#table` is `height: 100%`) once
-          its height is definite, which is what keeps the toolbar and the sticky header in place.
-          A 0 basis on both is that definite height; an `auto` one is sized to the rows. */}
-      <div style={{
-        display: "flex", flexDirection: "column", flex: "1 1 0", minHeight: 0,
-        backgroundColor: "var(--sapGroup_ContentBackground)",
-        borderRadius: "0.75rem", overflow: "hidden",
-      }}>
       {/* The table's toolbar: Add lands at the bottom (see `add`); Duplicate and Delete act on the
           selection. marginTop cancels the Subheader's -1px overlap, which the clip would shave. */}
       <Bar design="Subheader" style={{ borderBlockEnd: "none", marginTop: 0 }}
@@ -373,6 +418,21 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
             <Button design="Transparent" disabled={!acted.length} onClick={() => void removeSelected()}>
               {t("MODEL_DELETE")}
             </Button>
+            {/* Multiple, and the press is cleared here: Single would leave one item pressed, and React
+                will not write selected={false} again when that prop never changed. */}
+            <SegmentedButton accessibleName={t("MODEL_EXPAND_COLLAPSE")} selectionMode="Multiple" itemsFitContent
+              onSelectionChange={(e) => {
+                const act = (e.detail.selectedItems[0] as HTMLElement | undefined)?.dataset.act;
+                for (const el of e.target.querySelectorAll("ui5-segmented-button-item"))
+                  (el as HTMLElement & { selected: boolean }).selected = false;
+                if (act === "expand") setCollapsed([]);
+                else if (act === "collapse") setCollapsed(allCollapseIds);
+              }}>
+              <SegmentedButtonItem icon="expand-all" tooltip={t("MODEL_EXPAND_ALL")} accessibleName={t("MODEL_EXPAND_ALL")}
+                data-act="expand" selected={false} disabled={!allCollapseIds.length} />
+              <SegmentedButtonItem icon="collapse-all" tooltip={t("MODEL_COLLAPSE_ALL")} accessibleName={t("MODEL_COLLAPSE_ALL")}
+                data-act="collapse" selected={false} disabled={!allCollapseIds.length} />
+            </SegmentedButton>
           </>
         }
       />
@@ -384,7 +444,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
             add(kind);
           }}>
           {(Object.keys(ADD_LABEL) as AddKind[]).map((kind) => (
-            <MenuItem key={kind} data-add={kind} text={t(ADD_LABEL[kind])} disabled={!addable[kind]} />
+            <MenuItem key={kind} data-add={kind} text={t(ADD_LABEL[kind])} icon={ADD_ICON[kind]} disabled={!addable[kind]} />
           ))}
         </Menu>
       ) : null}
@@ -417,7 +477,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
         }}
         onRowClick={(e) => {
           const ref = parseRowKey(((e.detail.row as unknown) as HTMLElement).getAttribute("row-key")!);
-          if (ref.kind === "formula") return setFEdit(ref.i);
+          if (ref.kind === "formula") return setFormula({ at: ref.i, initial: draft.computed[ref.i]! });
           if (ref.kind === "table") {
             const key = tableKeyAt(draft, ref.s, ref.g);
             if (key) openTable(key);
@@ -444,34 +504,20 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
       >
         {rows.map((r) =>
           r.kind === "formula" ? (
-            // Read-only until clicked: a row of live Inputs is taller than a row of Text, and that
-            // gap is what made the formula block look bolted on.
-            <TableRow key={r.key} rowKey={r.key} interactive>
+            // Read-only like every row: a click opens FormulaDialog.
+            <TableRow key={r.key} rowKey={r.key} movable interactive>
               <TableCell>
                 <Gutter depth={3}>
-                  <span style={{ color: "var(--sapContent_LabelColor)", fontStyle: "italic", flex: "0 0 auto" }}>ƒ</span>
-                  {fEdit === r.idx ? (
-                    <Input accessibleName={t("MODEL_FORMULA_KEY")} style={{ width: "100%" }} value={draft.computed[r.idx]!.key} autoFocus
-                      onInput={(e) => update((d) => ({ ...d, computed: d.computed.map((x, j) => (j === r.idx ? { ...x, key: e.target.value } : x)) }))} />
-                  ) : (
-                    <Text>{draft.computed[r.idx]!.key}</Text>
-                  )}
+                  <RowIcon name={ADD_ICON.formula} label={t("MODEL_FORMULA")} />
+                  <Text>{draft.computed[r.idx]!.key}</Text>
                 </Gutter>
               </TableCell>
               <TableCell />
               <TableCell />
               <TableCell>
-                <div style={{ width: "100%" }}>
-                  {fEdit === r.idx ? (
-                    <ExprInput value={draft.computed[r.idx]!.expr} model={draft} tables={tables} fieldId={`expr-computed[${r.idx}].expr`}
-                      issue={issueFor(issues, `computed[${r.idx}].expr`)}
-                      onChange={(v) => update((d) => ({ ...d, computed: d.computed.map((x, j) => (j === r.idx ? { ...x, expr: v ?? "" } : x)) }))} />
-                  ) : (
-                    <Text style={{ color: issueFor(issues, `computed[${r.idx}].expr`) ? "var(--sapNegativeColor)" : undefined }}>
-                      {`= ${draft.computed[r.idx]!.expr}`}
-                    </Text>
-                  )}
-                </div>
+                <Text style={{ color: issueFor(issues, `computed[${r.idx}].expr`) ? "var(--sapNegativeColor)" : undefined }}>
+                  {`= ${draft.computed[r.idx]!.expr}`}
+                </Text>
               </TableCell>
             </TableRow>
           ) : (
@@ -480,9 +526,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
                 <Gutter depth={r.depth} collapse={r.collapseId
                   ? { collapsed: collapsed.has(r.collapseId), onToggle: () => toggle(r.collapseId!) }
                   : undefined}>
-                  {r.ref.kind === "table" ? (
-                    <span style={{ color: "var(--sapContent_LabelColor)", flex: "0 0 auto" }} aria-hidden>▦</span>
-                  ) : null}
+                  <RowIcon name={ADD_ICON[rowKind(r.ref, draft)]} label={t(ADD_LABEL[rowKind(r.ref, draft)])} />
                   <Text style={{ fontWeight: r.depth === 0 ? "bold" : "normal" }}>{r.label}</Text>
                 </Gutter>
               </TableCell>
@@ -497,7 +541,6 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
           ),
         )}
       </Table>
-      </div>
 
       {titleEdit ? (
         <TitleDialog initial={titleEdit.initial} section={titleEdit.ref?.kind !== "group"}
@@ -508,58 +551,12 @@ export function ParamsTab({ modelId, draft, update, issues, tables, lookups, loo
             setTitleEdit(null);
           }} />
       ) : null}
+      {formula ? (
+        <FormulaDialog draft={draft} tables={tables} at={formula.at} initial={formula.initial}
+          onCancel={() => setFormula(null)}
+          onOk={(f) => { saveFormula(formula.at, f); setFormula(null); }} />
+      ) : null}
       {dup ? <DuplicateDialog draft={draft} keys={dup.keys} onCancel={() => setDup(null)} onOk={duplicateSelected} /> : null}
-
-    </div>
-      </SplitterElement>
-      {showPreview ? (
-        <SplitterElement key="preview" size="50%" minSize={280}>
-          <PreviewPane modelId={modelId ?? ""} draft={draft} issues={issues} lookups={lookups}
-            lookupsFailed={lookupsFailed} onRetryLookups={onRetryLookups} />
-        </SplitterElement>
-      ) : null}
-    </SplitterLayout>
-  );
-}
-
-// SplitterLayout is a React component, not a web component — no `slot` to forward, unlike
-// DynamicSideContent's `sideContent`.
-function PreviewPane({ modelId, draft, issues, lookups, lookupsFailed, onRetryLookups }: {
-  modelId: string; draft: ModelDef; issues: Issue[];
-  lookups?: ResolvedLookups; lookupsFailed?: boolean; onRetryLookups: () => void;
-}) {
-  const i18n = useI18n();
-  const [entries, setEntries] = useState<Entries>({});
-  const [tables, setTables] = useState<TableRows>({});
-  const lastGood = useRef(draft);
-  if (issues.length === 0) lastGood.current = draft;
-  const previewModel = issues.length === 0 ? draft : lastGood.current;
-  // The one place the engine still runs in the browser: an unsaved model has no row on the server,
-  // and nothing previewed here is stored or quoted. Same form state the server builds, so the form
-  // has one input shape. ponytail: a value picked off a query field's first page binds no derived
-  // columns here (the server binds them from the stored entry); a preview has none stored.
-  const form = lookups ? formState(previewModel, lookups, propagate(previewModel, lookups, entries, tables), tables) : null;
-
-  return (
-    <div style={{ flex: "1 1 auto", minInlineSize: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      {/* Why the preview is empty is a page message; the retry it needs is not something a
-          message can carry, so the button stays here. */}
-      {lookupsFailed ? (
-        <div style={{ padding: "0.5rem 1rem" }}>
-          <Button icon="refresh" onClick={onRetryLookups}>{i18n.getText("MODEL_RETRY_OPTIONS")}</Button>
-        </div>
-      ) : null}
-      {/* Forms only: the configuration page's anchor bar is its ObjectPage, and this preview has none. */}
-      {lookups && form ? (
-        <div style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-          {configuratorForms({
-            model: previewModel, form, tables: lookups.tables, formulaOverride: true,
-            onChange: (key, v) => setEntries((e) => setEntry(e, key, v)),
-            querySource: { modelId },
-            rows: tables, onRowsChange: (key, rows) => setTables((cur) => ({ ...cur, [key]: rows })),
-          })}
-        </div>
-      ) : lookupsFailed ? null : <BusyIndicator active delay={0} />}
     </div>
   );
 }

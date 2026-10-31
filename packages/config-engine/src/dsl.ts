@@ -276,6 +276,15 @@ function call(n: Extract<Ast, { t: "call" }>, scope: Scope): Val {
           return v === null ? "" : String(v);
         })
         .join("");
+    case "ISBLANK":
+    case "SELECTED": {
+      arity(1);
+      // An unpicked field is an absent key, which every other read refuses as unbound.
+      const a = n.args[0]!;
+      const v = a.t === "ident" ? (Object.hasOwn(scope.vars, a.name) ? scope.vars[a.name]! : null) : arg(0);
+      const blank = v === null || v === "" || (Array.isArray(v) && v.length === 0);
+      return n.name === "ISBLANK" ? blank : !blank;
+    }
     case "HAS": {
       arity(2);
       const l = arg(0);

@@ -128,7 +128,8 @@ export type FormField = {
   label?: string;
   type?: FieldType;
   options?: Option[];
-  colspan?: 1 | 2;
+  /** the form's whole width, a row of its own: a long text (a query's $filter) */
+  wide?: true;
   readonly?: boolean;
   /** editable only while creating (with `readonly`, Beas' ItemCode pattern) */
   editableOnCreate?: boolean;

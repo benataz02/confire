@@ -1,0 +1,250 @@
+/* The landing page's sections, ported from the approved mockup (spec §6). */
+
+/* ---------- Hero ---------- */
+.hero { padding: clamp(3.5rem, 2rem + 6vw, 7rem) 0 clamp(3rem, 2rem + 4vw, 6rem); background: var(--sapShellColor); isolation: isolate; overflow: clip }
+.hero::before { content: ""; position: absolute; inset: 0; z-index: -2; background-image: radial-gradient(var(--dot) 1px, transparent 1.4px); background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 75% 60% at 50% 35%, black 25%, transparent 78%); -webkit-mask-image: radial-gradient(ellipse 75% 60% at 50% 35%, black 25%, transparent 78%) }
+.glow { position: absolute; z-index: -1; border-radius: 50%; filter: blur(10px); pointer-events: none }
+.glow.b { width: 46rem; height: 30rem; left: 50%; top: 52%; translate: -78% -20%; background: radial-gradient(closest-side, var(--glow-brand), transparent) }
+.glow.a { width: 40rem; height: 28rem; left: 50%; top: 52%; translate: -8% -10%; background: radial-gradient(closest-side, var(--glow-ai), transparent) }
+.hero-copy { text-align: center; display: grid; justify-items: center }
+.pill { display: inline-flex; align-items: center; gap: .5rem; padding: .3125rem .875rem .3125rem .375rem; border-radius: 2rem; text-decoration: none; font-size: var(--sapFontSize);
+  color: var(--sapTextColor); background: var(--glass); border: 1px solid var(--hairline); box-shadow: var(--sapContent_Shadow0); margin-bottom: 2rem; transition: border-color .2s }
+.pill:hover { border-color: var(--sapAssistant_BorderColor) }
+.pill .new { background: var(--sapAssistant_BackgroundGradient); color: var(--sapAssistant_TextColor); border-radius: 1rem; padding: .125rem .5rem; font-weight: 700; font-size: var(--sapFontSmallSize); display: inline-flex; gap: .25rem; align-items: center }
+.pill .ico { width: .75rem; height: .75rem }
+/* em, not the mockup's 15ch: ch is the current font's zero, which changes when 72 swaps in (CLS) */
+.hero h1 { max-width: 8.9em; margin-bottom: 1.5rem }
+.hero .lead { max-width: 40rem; margin-bottom: 2.25rem }
+.ctas { display: flex; flex-wrap: wrap; gap: .75rem; justify-content: center }
+.works { margin-top: 2.5rem; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .5rem 1.75rem; color: var(--sapContent_LabelColor); font-size: var(--sapFontSize); list-style: none; padding: 0 }
+.works b { color: var(--sapTitleColor); font-weight: 700; display: inline-flex; align-items: center; gap: .5rem }
+.works b::before { content: ""; width: .375rem; height: .375rem; border-radius: 50%; background: var(--sapPositiveElementColor) }
+
+/* The stage: request -> configuration -> SAP quotation, told in one loop */
+.stage { margin-top: clamp(3rem, 2rem + 4vw, 5rem); display: grid; gap: 0; align-items: center; grid-template-columns: minmax(0, 1fr); justify-items: stretch; max-width: 32rem; margin-inline: auto;
+  padding: clamp(.75rem, .5rem + 1vw, 1.25rem); border-radius: 1.75rem; background: var(--glass); border: 1px solid var(--hairline);
+  box-shadow: 0 2rem 4rem -2rem color-mix(in oklab, var(--sapTitleColor) 25%, transparent); backdrop-filter: blur(6px) }
+@media (max-width: 599px) { .stage { margin-inline: var(--pad) } }
+@media (min-width: 1024px) { .stage { max-width: var(--max); grid-template-columns: minmax(0, 1fr) 4rem minmax(0, 1.6fr) 4rem minmax(0, 1fr); margin-inline: var(--pad) } }
+@media (min-width: 1300px) { .stage { margin-inline: auto; max-width: calc(var(--max) - 2 * var(--pad)) } }
+.pane { background: var(--sapGroup_ContentBackground); border-radius: 1.125rem; box-shadow: var(--sapContent_Shadow0); overflow: hidden; font-size: var(--sapFontSize); text-align: left; position: relative }
+.pane-h { display: flex; align-items: center; gap: .5rem; padding: .75rem 1rem; border-bottom: 1px solid var(--hairline); color: var(--sapContent_LabelColor); font-size: var(--sapFontSmallSize); font-weight: 700; letter-spacing: .04em; text-transform: uppercase }
+.pane-h .ico { width: .875rem; height: .875rem }
+.pane-b { padding: 1rem }
+.mail-from { display: flex; align-items: center; gap: .625rem; margin-bottom: .75rem }
+.avatar { width: 2rem; height: 2rem; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: .75rem; background: var(--sapAvatar_1_Background); color: var(--sapAvatar_1_TextColor); flex: none }
+.mail-subj { font-weight: 700; color: var(--sapTitleColor); margin-bottom: .375rem }
+.mail-body { color: var(--sapTextColor); line-height: 1.65 }
+.hl { background-image: linear-gradient(var(--ai-wash), var(--ai-wash)); background-repeat: no-repeat; background-size: 100% 100%; border-radius: .25rem; padding: 0 .125rem;
+  box-shadow: inset 0 -1.5px 0 color-mix(in oklab, var(--sapAssistant_Background) 70%, transparent) }
+.attach { margin-top: .875rem; display: inline-flex; gap: .5rem; align-items: center; padding: .375rem .625rem; border-radius: .5rem; border: 1px solid var(--hairline); font-size: var(--sapFontSmallSize) }
+.attach .ico { fill: var(--sapNegativeElementColor) }
+
+.conn { position: relative; justify-self: center; width: 2px; height: 3.25rem; background: repeating-linear-gradient(180deg, var(--sapContent_ForegroundBorderColor) 0 4px, transparent 4px 8px); opacity: .9 }
+.conn .lbl { position: absolute; left: 1rem; top: 50%; translate: 0 -50%; white-space: nowrap; font-size: var(--sapFontSmallSize); font-weight: 700; color: var(--sapContent_LabelColor) }
+.spark { position: absolute; left: 50%; top: 0; width: 1.5rem; height: 1.5rem; margin: -.75rem 0 0 -.75rem; border-radius: 50%; display: grid; place-items: center;
+  background: var(--sapAssistant_BackgroundGradient); color: var(--sapAssistant_TextColor); box-shadow: 0 0 0 4px var(--ai-wash), 0 0 1.25rem var(--glow-ai); opacity: 0 }
+.spark .ico { width: .75rem; height: .75rem }
+.spark.blue { background: var(--sapBrandColor); color: var(--sapButton_Emphasized_TextColor); box-shadow: 0 0 0 4px var(--brand-wash), 0 0 1.25rem var(--glow-brand) }
+@media (min-width: 1024px) {
+  .conn { width: 100%; height: 2px; background: repeating-linear-gradient(90deg, var(--sapContent_ForegroundBorderColor) 0 4px, transparent 4px 8px) }
+  .conn .lbl { left: 50%; top: -1.75rem; translate: -50% 0 }
+  .spark { top: 50%; left: 0 }
+}
+
+.cfg-title { display: flex; justify-content: space-between; align-items: start; gap: 1rem; padding: 1rem 1rem .75rem; flex-wrap: wrap }
+
+.field { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: .4375rem 0; border-bottom: 1px solid var(--hairline); gap: .5rem }
+.field:last-child { border: 0 }
+.field > span:first-child { color: var(--sapContent_LabelColor) }
+.val { display: inline-flex; gap: .3125rem; align-items: center; font-weight: 700; color: var(--sapTitleColor) }
+.val .ico { width: .75rem; height: .75rem; fill: var(--ai-ink) }
+.cfg-grid { display: grid; gap: .75rem; padding: 0 1rem 1rem }
+@media (min-width: 600px) { .cfg-grid { grid-template-columns: 1fr 1.4fr } }
+.box { border: 1px solid var(--hairline); border-radius: .75rem; padding: .5rem .75rem; min-width: 0 }
+.box-t { font-size: var(--sapFontSmallSize); font-weight: 700; color: var(--sapContent_LabelColor); text-transform: uppercase; letter-spacing: .04em; margin: .25rem 0 .25rem }
+.opt { display: grid; grid-template-columns: auto 1fr auto; gap: .5rem; align-items: center; padding: .4375rem .5rem; margin: 0 -.5rem; border-radius: .5rem }
+.radio { width: .875rem; height: .875rem; border-radius: 50%; border: 1.5px solid var(--sapField_BorderColor) }
+.opt.sel { background: var(--sapButton_Selected_Background) }
+.opt.sel .radio { border: 4px solid var(--sapSelectedColor) }
+.num { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--sapTitleColor); white-space: nowrap }
+
+.doc-no { font: 700 1.5rem/1 var(--sapFontHeaderFamily); letter-spacing: -0.02em; color: var(--sapTitleColor); margin: .25rem 0 .75rem; font-variant-numeric: tabular-nums }
+.line { display: grid; grid-template-columns: 1fr auto; padding: .375rem 0; border-bottom: 1px solid var(--hairline); gap: .5rem }
+.total { display: flex; justify-content: space-between; align-items: baseline; padding-top: .75rem }
+.total .num { font-size: 1.25rem }
+.doc-h { display: flex; justify-content: space-between; align-items: center; gap: .5rem }
+
+/* the loop: reduced motion shows every end state (spec §5.6) */
+@media (prefers-reduced-motion: no-preference) {
+  .hl { animation: hl var(--loop) var(--ease) infinite }
+  .hl:nth-of-type(2) { animation-delay: .25s } .hl:nth-of-type(3) { animation-delay: .5s }
+  .s1 { animation: travel-v var(--loop) var(--ease) infinite; animation-delay: 1.4s }
+  .s2 { animation: travel-v var(--loop) var(--ease) infinite; animation-delay: 5.6s }
+  .fill { animation: fill var(--loop) var(--ease) infinite }
+  .fill.f2 { animation-delay: .3s } .fill.f3 { animation-delay: .6s } .fill.f4 { animation-delay: .9s }
+  .pick { animation: pick var(--loop) var(--ease) infinite }
+  .quote { animation: lift var(--loop) var(--ease) infinite }
+  .quote .os { animation: pop var(--loop) var(--ease) infinite }
+  @media (min-width: 1024px) { .s1, .s2 { animation-name: travel-h } }
+}
+@keyframes hl { 0%, 3% { background-size: 0 100% } 12%, 92% { background-size: 100% 100% } 100% { background-size: 0 100% } }
+@keyframes travel-v { 0% { top: 0; opacity: 0; scale: .6 } 2% { opacity: 1; scale: 1 } 14% { top: 100%; opacity: 1; scale: 1 } 16%, 100% { top: 100%; opacity: 0; scale: .6 } }
+@keyframes travel-h { 0% { left: 0; opacity: 0; scale: .6 } 2% { opacity: 1; scale: 1 } 14% { left: 100%; opacity: 1; scale: 1 } 16%, 100% { left: 100%; opacity: 0; scale: .6 } }
+@keyframes fill { 0%, 28% { opacity: 0; translate: 0 .25rem; filter: blur(2px) } 34%, 93% { opacity: 1; translate: 0; filter: none } 100% { opacity: 0 } }
+@keyframes pick { 0%, 46% { background: transparent } 50%, 93% { background: var(--sapButton_Selected_Background) } 100% { background: transparent } }
+@keyframes lift { 0%, 70% { translate: 0; box-shadow: var(--sapContent_Shadow0) } 74%, 93% { translate: 0 -.375rem; box-shadow: 0 1.25rem 2.5rem -1rem var(--glow-brand), var(--sapContent_Shadow0) } 100% { translate: 0 } }
+@keyframes pop { 0%, 70% { opacity: 0; scale: .7 } 74% { opacity: 1; scale: 1.08 } 77%, 93% { opacity: 1; scale: 1 } 100% { opacity: 0 } }
+.pick .radio { transition: border .3s }
+
+/* ---------- Before / after ---------- */
+.ba { display: grid; gap: 1.25rem; align-items: stretch }
+@media (min-width: 900px) { .ba { grid-template-columns: 1fr 1fr } }
+.ba-card { border-radius: 1.5rem; padding: clamp(1.5rem, 1rem + 2vw, 2.5rem); display: grid; gap: 1.5rem; align-content: start }
+.ba-old { background: var(--sapBackgroundColor); border: 1px solid var(--hairline) }
+.ba-new { background: linear-gradient(var(--sapGroup_ContentBackground), var(--sapGroup_ContentBackground)) padding-box,
+  linear-gradient(135deg, var(--sapBrandColor), var(--sapAssistant_Background)) border-box; border: 1.5px solid transparent;
+  box-shadow: 0 2rem 4rem -2.5rem var(--glow-brand) }
+.ba-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0 }
+.ba-steps li { display: grid; grid-template-columns: 2rem 1fr; gap: .875rem; padding: .75rem 0; position: relative }
+.ba-steps li:not(:last-child)::after { content: ""; position: absolute; left: calc(1rem - 1px); top: 2.75rem; bottom: -.25rem; width: 2px; background: var(--hairline) }
+.ba-dot { width: 2rem; height: 2rem; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--hairline); background: var(--sapGroup_ContentBackground) }
+.ba-old .ba-dot .ico { fill: var(--sapContent_NonInteractiveIconColor) }
+.ba-new .ba-dot { background: var(--brand-wash); border-color: transparent } .ba-new .ba-dot .ico { fill: var(--sapHighlightColor) }
+.ba-new .ba-dot.ai { background: var(--sapAssistant_BackgroundGradient) } .ba-new .ba-dot.ai .ico { fill: var(--sapAssistant_TextColor) }
+.ba-steps b { display: block; color: var(--sapTitleColor) }
+.ba-steps span { font-size: var(--sapFontSize); color: var(--sapContent_LabelColor) }
+.ba-time { display: flex; align-items: baseline; gap: .75rem; padding-top: 1.25rem; border-top: 1px solid var(--hairline); flex-wrap: wrap }
+.ba-time strong { font: 900 clamp(2.25rem, 1.5rem + 2.5vw, 3.25rem)/1 var(--sapFontFamily); letter-spacing: -0.04em }
+.ba-old .ba-time strong { color: var(--sapContent_LabelColor) }
+
+/* ---------- Steps ---------- */
+.alt { background: var(--sapShellColor) }
+.steps { display: grid; gap: 2rem; position: relative; list-style: none; margin: 0; padding: 0 }
+@media (min-width: 900px) { .steps { grid-template-columns: repeat(3, 1fr); gap: 2.5rem }
+  .steps::before { content: ""; position: absolute; top: 1.75rem; left: 3.5rem; right: 3.5rem; height: 2px; background: linear-gradient(90deg, var(--sapBrandColor), var(--sapAssistant_Background)); opacity: .35 } }
+.step { position: relative }
+.step-n { width: 3.5rem; height: 3.5rem; border-radius: 1rem; display: grid; place-items: center; background: var(--sapGroup_ContentBackground); box-shadow: var(--sapContent_Shadow0);
+  font: 300 1.5rem var(--sapFontFamily); color: var(--sapHighlightColor); margin-bottom: 1.5rem; position: relative; font-variant-numeric: tabular-nums }
+.step h3 { margin-bottom: .5rem }
+.step p { color: var(--sapContent_LabelColor) }
+.step .chip { margin-top: 1rem }
+.chip { display: inline-flex; align-items: center; gap: .5rem; padding: .375rem .75rem; border-radius: .625rem; border: 1px solid var(--hairline); background: var(--sapGroup_ContentBackground); font-size: var(--sapFontSmallSize); color: var(--sapTextColor); font-weight: 700 }
+.chip .ico { width: .875rem; height: .875rem }
+.chip.ai { color: var(--ai-ink) } .chip.ai .ico { fill: var(--ai-ink) }
+
+/* ---------- Bento ---------- */
+.bento { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr) }
+@media (min-width: 700px) { .bento { grid-template-columns: repeat(2, minmax(0, 1fr)) } .t-a, .t-d { grid-column: span 2 } }
+@media (min-width: 1100px) { .bento { grid-template-columns: repeat(6, minmax(0, 1fr)) }
+  .t-a { grid-column: span 4 } .t-b { grid-column: span 2 } .t-c { grid-column: span 2 } .t-d { grid-column: span 4 } .t-e, .t-f { grid-column: span 3 } }
+.tile { background: var(--sapTile_Background); border-radius: 1.5rem; border: 1px solid var(--hairline); padding: clamp(1.25rem, 1rem + 1vw, 1.75rem); display: grid; gap: 1.5rem; align-content: space-between;
+  position: relative; overflow: hidden; transition: transform .35s var(--ease), box-shadow .35s var(--ease) }
+.tile:hover { transform: translateY(-3px); box-shadow: 0 1.5rem 3rem -1.75rem color-mix(in oklab, var(--sapTitleColor) 35%, transparent) }
+.tile h3 { font-size: 1.25rem; margin-bottom: .375rem }
+.tile p { color: var(--sapTile_TextColor); font-size: var(--sapFontSize); line-height: 1.6; max-width: 34rem }
+.tile .badge { margin-bottom: 1rem }
+.tile.ai-tile::after { content: ""; position: absolute; width: 24rem; height: 24rem; right: -8rem; top: -10rem; border-radius: 50%; background: radial-gradient(closest-side, var(--glow-ai), transparent); pointer-events: none }
+.ui { background: var(--sapBackgroundColor); border-radius: 1rem; padding: .875rem; font-size: var(--sapFontSize); border: 1px solid var(--hairline); position: relative; z-index: 1; min-width: 0 }
+.ui-row { display: grid; grid-template-columns: 1fr auto; gap: .75rem; align-items: center; padding: .5rem .25rem; border-bottom: 1px solid var(--hairline) }
+.ui-row:last-child { border: 0 }
+.ui.ask { display: grid; align-content: end }
+.split2 { display: grid; gap: .75rem }
+@media (min-width: 700px) { .split2 { grid-template-columns: 1fr 1fr } }
+.bubble { background: var(--sapAssistant_Answer_Background); border: 1px solid var(--hairline); padding: .625rem .875rem; border-radius: 1rem 1rem 1rem .25rem; margin-top: .5rem }
+.bubble-q { display: flex; gap: .375rem; margin-top: .5rem; flex-wrap: wrap }
+.qchip { border: 1px solid var(--sapAssistant_BorderColor); color: var(--ai-ink); border-radius: 1rem; padding: .1875rem .75rem; font-weight: 700; font-size: var(--sapFontSmallSize); background: var(--sapGroup_ContentBackground) }
+.dis { color: var(--sapContent_DisabledTextColor); text-decoration: line-through; text-decoration-color: color-mix(in oklab, var(--sapContent_LabelColor) 50%, transparent) }
+.radio.off { opacity: .4 }
+.why { display: block; font-size: var(--sapFontSmallSize); color: var(--sapCriticalElementColor); text-decoration: none; margin-top: .125rem }
+.bars { display: grid; gap: .625rem }
+.bar-row { display: grid; grid-template-columns: 2.75rem 1fr auto; gap: .625rem; align-items: center; font-size: var(--sapFontSmallSize) }
+.bar { display: flex; height: .75rem; border-radius: 1rem; overflow: hidden; gap: 2px }
+.bar i { display: block; height: 100% }
+.c1 { background: var(--sapChart_OrderedColor_1) } .c2 { background: var(--sapChart_OrderedColor_2) } .c3 { background: var(--sapChart_OrderedColor_6) }
+.legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: var(--sapFontSmallSize); color: var(--sapContent_LabelColor); margin-top: .25rem }
+.legend span { display: inline-flex; gap: .375rem; align-items: center } .legend i { width: .625rem; height: .625rem; border-radius: .1875rem }
+.doc { display: grid; gap: 1rem }
+@media (min-width: 700px) { .doc { grid-template-columns: 1.6fr 1fr; align-items: center } }
+.doc .ui { padding: .5rem .5rem .25rem; overflow-x: auto }
+.doc .doc-h { padding: .375rem .5rem .625rem }
+.tbl { width: 100%; border-collapse: collapse; font-size: var(--sapFontSize) }
+.tbl th { text-align: left; font-size: var(--sapFontSmallSize); color: var(--sapContent_LabelColor); font-weight: 400; padding: .375rem .5rem; border-bottom: 1px solid var(--hairline) }
+.tbl td { padding: .5rem; border-bottom: 1px solid var(--hairline) }
+.tbl tr:last-child td { border: 0 }
+.tbl .r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap }
+.code { font-family: var(--sapFontFamily); color: var(--sapLinkColor); font-weight: 700 }
+.once { display: grid; gap: .5rem; padding: 1rem; border-radius: 1rem; background: var(--brand-wash) }
+.once .ico { width: 1.5rem; height: 1.5rem; fill: var(--sapHighlightColor) }
+.pulse { width: .5rem; height: .5rem; border-radius: 50%; display: inline-block; position: relative; flex: none }
+.pulse.neg { background: var(--sapNegativeElementColor) } .pulse.pos { background: var(--sapPositiveElementColor) }
+@media (prefers-reduced-motion: no-preference) { .pulse.pos::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: inherit; animation: ping 2s var(--ease) infinite } }
+@keyframes ping { from { scale: 1; opacity: .6 } to { scale: 3; opacity: 0 } }
+.sys { display: flex; align-items: center; gap: .625rem }
+
+/* ---------- Security (an Evening band inside Morning) ---------- */
+.evening.band { background: var(--sapBackgroundColor); color: var(--sapTextColor); overflow: clip; isolation: isolate }
+.band::before { content: ""; position: absolute; inset: 0; z-index: -1; background-image: radial-gradient(var(--dot) 1px, transparent 1.4px); background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 60% 70% at 75% 50%, black 10%, transparent 70%); -webkit-mask-image: radial-gradient(ellipse 60% 70% at 75% 50%, black 10%, transparent 70%) }
+.band .glow.b { left: 78%; top: 50%; translate: -50% -50%; width: 36rem; height: 36rem }
+.sec-split { display: grid; gap: 3.5rem; align-items: center }
+@media (min-width: 1000px) { .sec-split { grid-template-columns: 1fr 1fr } }
+.points { list-style: none; padding: 0; margin: 2rem 0 0; display: grid; gap: 1.5rem }
+.points li { display: grid; grid-template-columns: 2.5rem 1fr; gap: 1rem }
+.points .ic { width: 2.5rem; height: 2.5rem; border-radius: .75rem; display: grid; place-items: center; background: var(--brand-wash); border: 1px solid var(--hairline) }
+.points .ic .ico { fill: var(--sapHighlightColor); width: 1.125rem; height: 1.125rem }
+.points b { display: block; color: var(--sapTitleColor); margin-bottom: .125rem }
+.points span { color: var(--sapContent_LabelColor); font-size: var(--sapFontSize) }
+.arch { display: grid; justify-items: center; gap: 0; max-width: 26rem; margin-inline: auto; width: 100% }
+.node { width: 100%; background: var(--sapGroup_ContentBackground); border: 1px solid var(--hairline); border-radius: 1rem; padding: 1rem 1.125rem; display: flex; gap: .875rem; align-items: center; font-size: var(--sapFontSize); flex-wrap: wrap }
+.node .ic { width: 2.5rem; height: 2.5rem; border-radius: .75rem; display: grid; place-items: center; background: var(--sapBackgroundColor); border: 1px solid var(--hairline) }
+.node .ic .ico { width: 1.125rem; height: 1.125rem; fill: var(--sapContent_IconColor) }
+.node b { display: block; color: var(--sapTitleColor) }
+.node > div { flex: 1; min-width: 8rem }
+.tunnel { position: relative; width: 2px; height: 5.5rem; background: repeating-linear-gradient(0deg, var(--sapHighlightColor) 0 6px, transparent 6px 12px); opacity: .9 }
+@media (prefers-reduced-motion: no-preference) { .tunnel { animation: flow 1s linear infinite } }
+@keyframes flow { to { background-position: 0 -12px } }
+.tunnel .lbl { position: absolute; left: 1.125rem; top: 50%; translate: 0 -50%; white-space: nowrap; font-size: var(--sapFontSmallSize); color: var(--sapContent_LabelColor); display: flex; align-items: center; gap: .375rem }
+.tunnel .lbl .ico { width: .75rem; height: .75rem; fill: var(--sapHighlightColor) }
+.lan { width: 100%; border: 1.5px dashed color-mix(in oklab, var(--sapContent_LabelColor) 45%, transparent); border-radius: 1.5rem; padding: 2.25rem 1rem 1rem; position: relative; display: grid; gap: .75rem }
+.lan > .tag { position: absolute; top: -.75rem; left: 1.25rem; background: var(--sapBackgroundColor); padding: 0 .5rem; font-size: var(--sapFontSmallSize); font-weight: 700; color: var(--sapContent_LabelColor); letter-spacing: .06em; text-transform: uppercase }
+.lan .wire { justify-self: center; width: 2px; height: 1rem; background: var(--hairline); margin: -.75rem 0 }
+
+/* ---------- FAQ ---------- */
+.faq-split { display: grid; gap: 2.5rem }
+@media (min-width: 1000px) { .faq-split { grid-template-columns: 1fr 1.6fr; gap: 4rem } .faq-split .sticky { position: sticky; top: 6rem; align-self: start } }
+.faq-split .btn { margin-top: 1.5rem }
+.faq { display: grid; gap: .625rem }
+details { background: var(--sapGroup_ContentBackground); border: 1px solid var(--hairline); border-radius: 1rem; transition: box-shadow .25s, border-color .25s }
+details[open] { box-shadow: var(--sapContent_Shadow0); border-color: transparent }
+summary { list-style: none; cursor: pointer; padding: 1.125rem 1.25rem; display: flex; gap: 1rem; align-items: center; justify-content: space-between; font-weight: 700; color: var(--sapTitleColor) }
+summary::-webkit-details-marker { display: none }
+summary .tw { width: 1.75rem; height: 1.75rem; border-radius: 50%; display: grid; place-items: center; background: var(--sapBackgroundColor); flex: none; transition: rotate .3s var(--ease), background .2s }
+summary .tw .ico { width: .875rem; height: .875rem; fill: var(--sapContent_IconColor) }
+details[open] summary .tw { rotate: 180deg; background: var(--brand-wash) }
+details p { padding: 0 1.25rem 1.25rem; color: var(--sapContent_LabelColor); max-width: 44rem }
+@media (prefers-reduced-motion: no-preference) {
+  details::details-content { block-size: 0; overflow: clip; transition: block-size .35s var(--ease), content-visibility .35s allow-discrete }
+  details[open]::details-content { block-size: auto }
+}
+
+/* ---------- CTA ---------- */
+#demo { padding-top: 0 }
+.cta-wrap { position: relative; isolation: isolate }
+.cta-wrap .glow.b { left: 20%; top: 40%; translate: -50% -50% } .cta-wrap .glow.a { left: 85%; top: 70%; translate: -50% -50% }
+.cta { display: grid; gap: 2.5rem; border-radius: 2rem; padding: clamp(1.5rem, 1rem + 3vw, 3.5rem);
+  background: linear-gradient(var(--sapGroup_ContentBackground), var(--sapGroup_ContentBackground)) padding-box, linear-gradient(135deg, var(--sapBrandColor), var(--hairline) 40%, var(--hairline) 60%, var(--sapAssistant_Background)) border-box;
+  border: 1.5px solid transparent; box-shadow: 0 3rem 6rem -3rem color-mix(in oklab, var(--sapTitleColor) 30%, transparent) }
+@media (min-width: 1000px) { .cta { grid-template-columns: 1fr 1.15fr; gap: 4rem } }
+.next { list-style: none; padding: 0; margin: 2rem 0 0; display: grid; gap: 1rem; counter-reset: n }
+.next li { display: grid; grid-template-columns: 1.75rem 1fr; gap: .875rem; font-size: var(--sapFontSize); color: var(--sapContent_LabelColor); counter-increment: n }
+.next li::before { content: counter(n); width: 1.75rem; height: 1.75rem; border-radius: 50%; display: grid; place-items: center; background: var(--brand-wash); color: var(--sapHighlightColor); font-weight: 700; font-size: var(--sapFontSmallSize) }
+.next b { color: var(--sapTitleColor); display: block }
+
+/* small pieces the mockup set inline */
+.cfg-name { display: block; font: 700 1.125rem var(--sapFontHeaderFamily); color: var(--sapTitleColor) }
+.margin { padding: .375rem 0 .125rem }
+.card-lead { margin-top: .25rem }
+.footnote { text-align: center; margin-top: 1.25rem }
+.band-lead { margin-top: 1rem }

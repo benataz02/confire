@@ -512,7 +512,7 @@ export function ChatView({ thread, route, kind, page = false, head }: {
       {head?.({ busy, projectId, empty })}
       {page && empty ? (
         <FlexBox direction="Column" justifyContent="Center"
-          style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBlock: "1.5rem", paddingInline: inline }}>
+          style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBlock: "1.5rem clamp(1.5rem, 18vh, 10rem)", paddingInline: inline }}>
           <HeroBanner style={BANNER} headerText={t("ASSISTANT_HELLO", firstName)} overlineText={t("ASSISTANT_PAGE_TITLE")}>
             <FlexBox direction="Column" gap="1rem">
               <Text style={{ color: "inherit" }}>{t(kind === "configure" ? "ASSISTANT_WELCOME_CONFIGURE" : "ASSISTANT_WELCOME_START")}</Text>

@@ -1,30 +1,24 @@
 import type { ReactNode } from "react";
-import { AuthLayout as Frame, revealDelay as delay } from "@confire/ui/auth/AuthLayout.tsx";
-import { useI18n } from "../i18n.ts";
+import { AuthLayout as Frame } from "@confire/ui/auth/AuthLayout.tsx";
+import { siteUrl } from "@confire/ui/host.ts";
+import { useLanguage, useUiI18n } from "@confire/ui/i18n.ts";
 
-// Confire's split screen for login / signup / onboarding: the brand panel is pure presentation
-// (the cloud -> agent -> B1 sync motif); the frame and its CSS are shared with the customer portal.
-export function AuthLayout({ children }: { children: ReactNode }) {
-  const i18n = useI18n();
+// Confire's frame for login / signup / password / setup: the logo goes home to confire.ai, and the
+// footer is the site's legal pages, both in the app's language.
+export function AuthLayout({ wide, children }: { wide?: boolean; children: ReactNode }) {
+  const ui = useUiI18n();
+  const { language } = useLanguage();
+  const site = (path: string) => siteUrl(path, language);
   return (
     <Frame
-      brand={
+      wide={wide}
+      brand={<a className="auth-brand" href={site("/")}><img src="/confire-logo.png" alt="" /><span>Confire</span></a>}
+      foot={
         <>
-          <h1 className="auth-brand__mark reveal" style={delay(0)}>Confire</h1>
-          <p className="auth-brand__tagline reveal" style={delay(90)}>
-            {i18n.getText("SHELL_AUTH_TAGLINE")}<br />
-            <em>{i18n.getText("SHELL_AUTH_TAGLINE_EMPH")}</em>
-          </p>
-          <div className="auth-brand__pulse reveal" style={delay(180)} aria-hidden="true">
-            <span className="node">{i18n.getText("SHELL_AUTH_CLOUD")}</span>
-            <span className="wire"><i className="dot" /></span>
-            <span className="node">{i18n.getText("SHELL_AUTH_AGENT")}</span>
-            <span className="wire"><i className="dot dot--2" /></span>
-            <span className="node">SAP&nbsp;B1</span>
-          </div>
-          <p className="auth-brand__foot reveal" style={delay(260)}>
-            {i18n.getText("SHELL_AUTH_FOOT")}
-          </p>
+          <span>© {new Date().getFullYear()} Confire</span>
+          <a href={site("/privacy/")}>{ui.getText("UI_AUTH_PRIVACY")}</a>
+          <a href={site("/legal-notice/")}>{ui.getText("UI_AUTH_LEGAL")}</a>
+          <a href={site("/cookies/")}>{ui.getText("UI_AUTH_COOKIES")}</a>
         </>
       }
     >

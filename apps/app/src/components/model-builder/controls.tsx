@@ -29,7 +29,8 @@ const shown = (v: unknown) => (v === null || v === undefined ? "" : String(v));
 export const UI_META: Record<Param["ui"], { text: string; icon: string; hint: string }> = {
   input: { text: "MODEL_UI_INPUT", icon: "edit", hint: "MODEL_UI_INPUT_HINT" },
   textarea: { text: "MODEL_UI_TEXTAREA", icon: "document-text", hint: "MODEL_UI_TEXTAREA_HINT" },
-  select: { text: "MODEL_UI_SELECT", icon: "slim-arrow-down", hint: "MODEL_UI_SELECT_HINT" },
+  dropdown: { text: "MODEL_UI_DROPDOWN", icon: "slim-arrow-down", hint: "MODEL_UI_DROPDOWN_HINT" },
+  select: { text: "MODEL_UI_SELECT", icon: "value-help", hint: "MODEL_UI_SELECT_HINT" },
   radio: { text: "MODEL_UI_RADIO", icon: "circle-task-2", hint: "MODEL_UI_RADIO_HINT" },
   checkbox: { text: "MODEL_UI_CHECK", icon: "accept", hint: "MODEL_UI_CHECK_HINT" },
   multicombo: { text: "MODEL_UI_MULTI", icon: "multiselect-all", hint: "MODEL_UI_MULTI_HINT" },
@@ -91,7 +92,6 @@ export function builderControls(o: { scope: (c: ControlContext) => ModelDef; tab
     expr: expr(e, none),
     exprArea: expr(e, none, 3),
     lineExpr: expr(e, qty),
-    priceExpr: expr(e, () => ["qty", "unitCost"]),
     // A grid row's formula: the model's names plus this table's own columns.
     rowExpr: expr(e, (c) => rowVars((c.formData.columns as TableColumn[] | undefined) ?? [], o.tables), 2),
     batches: (c) => (

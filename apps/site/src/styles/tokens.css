@@ -1,0 +1,80 @@
+/* The site's base, ported from the approved mockup (spec 2026-10-30 §5). Every colour is a SAP
+   variable or a color-mix() of them: scripts/prebuild.ts fails the build on anything else. The SAP
+   variables themselves come from src/generated/sap.css, inlined by Base.astro. */
+
+/* 72, self-hosted (scripts/prebuild.ts copies it from SAP's theming package). "72-Bold" is the
+   header stack's first family: declared at 700, so a 700 heading is 72 Bold, never a faked bold. */
+@font-face { font-family: "72"; src: url(/fonts/72-Light.woff2) format("woff2"); font-weight: 300; font-display: swap }
+@font-face { font-family: "72"; src: url(/fonts/72-Regular.woff2) format("woff2"); font-weight: 400; font-display: swap }
+@font-face { font-family: "72"; src: url(/fonts/72-Bold.woff2) format("woff2"); font-weight: 700; font-display: swap }
+@font-face { font-family: "72"; src: url(/fonts/72-Black.woff2) format("woff2"); font-weight: 900; font-display: swap }
+@font-face { font-family: "72-Bold"; src: url(/fonts/72-Bold.woff2) format("woff2"); font-weight: 700; font-display: swap }
+/* The swap's stand-in: Arial reshaped to 72 (CLS < 0.05, spec §12). Named "72full" because every
+   Horizon font stack already lists it right after "72". size-adjust is 72's width over Arial's,
+   measured in Chromium on headline and body text (2026-10-30): Regular
+   98.7% of Arial, Bold 99.1% and Black 104.1% of Arial Bold. The overrides are 72's hhea metrics
+   (1854/434/67 on a 2048 em) divided by it.
+   ponytail: calibrated on Liberation Sans (Arial's metric twin); Roboto on Android is close, not
+   exact. Re-measure if the 72 files or the fallback change. */
+@font-face { font-family: "72full"; font-weight: 300 400; src: local("Arial"), local("ArialMT"), local("Liberation Sans"), local("Helvetica"), local("Roboto");
+  size-adjust: 98.7%; ascent-override: 91.7%; descent-override: 21.5%; line-gap-override: 3.3% }
+@font-face { font-family: "72full"; font-weight: 700; src: local("Arial Bold"), local("Arial-BoldMT"), local("Liberation Sans Bold"), local("Helvetica Bold"), local("Roboto Bold");
+  size-adjust: 99.1%; ascent-override: 91.4%; descent-override: 21.4%; line-gap-override: 3.3% }
+@font-face { font-family: "72full"; font-weight: 900; src: local("Arial Bold"), local("Arial-BoldMT"), local("Liberation Sans Bold"), local("Helvetica Bold"), local("Roboto Bold");
+  size-adjust: 104.1%; ascent-override: 87%; descent-override: 20.4%; line-gap-override: 3.1% }
+
+:root {
+  --pad: 1rem; --max: 76rem;
+  --display: clamp(2.5rem, 1.25rem + 4.6vw, 4.75rem);
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --loop: 10s;
+  interpolate-size: allow-keywords;
+}
+@media (min-width: 600px) { :root { --pad: 2rem } }
+@media (min-width: 1440px) { :root { --pad: 3rem } }
+/* Recomputed per scope: a custom property holding var() resolves where it is declared (§5.2). */
+body, .evening {
+  --glow-brand: color-mix(in oklab, var(--sapBrandColor) 30%, transparent);
+  --glow-ai: color-mix(in oklab, var(--sapAssistant_Background) 24%, transparent);
+  --dot: color-mix(in oklab, var(--sapContent_LabelColor) 26%, transparent);
+  --hairline: color-mix(in oklab, var(--sapList_BorderColor) 80%, transparent);
+  --ai-ink: color-mix(in oklab, var(--sapAssistant_Background) 62%, var(--sapTitleColor));
+  --ai-wash: color-mix(in oklab, var(--sapAssistant_Background) 14%, transparent);
+  --brand-wash: color-mix(in oklab, var(--sapBrandColor) 12%, transparent);
+  --glass: color-mix(in oklab, var(--sapGroup_ContentBackground) 72%, transparent);
+}
+
+* { box-sizing: border-box }
+html { scroll-behavior: smooth; scroll-padding-top: 5rem }
+body { margin: 0; background: var(--sapBackgroundColor); color: var(--sapTextColor); font-family: var(--sapFontFamily);
+  font-size: var(--sapFontLargeSize); line-height: 1.55; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; overflow-x: clip;
+  overflow-wrap: break-word }
+h1, h2, h3, h4 { color: var(--sapTitleColor); margin: 0; text-wrap: balance }
+h1 { font: 900 var(--display)/1.03 var(--sapFontFamily); letter-spacing: -0.03em }
+h2 { font: 700 clamp(1.75rem, 1rem + 2.2vw, 2.75rem)/1.1 var(--sapFontHeaderFamily); letter-spacing: -0.025em }
+h3 { font: 700 1.125rem/1.3 var(--sapFontHeaderFamily); letter-spacing: -0.01em }
+p { margin: 0; text-wrap: pretty }
+a { color: var(--sapLinkColor) }
+:focus-visible { outline: var(--sapContent_FocusWidth) solid var(--sapContent_FocusColor); outline-offset: 2px }
+.wrap { max-width: var(--max); margin: 0 auto; padding: 0 var(--pad) }
+.ico { width: 1rem; height: 1rem; fill: currentColor; flex: none }
+.muted { color: var(--sapContent_LabelColor) }
+.small { font-size: var(--sapFontSize) }
+.tiny { font-size: var(--sapFontSmallSize) }
+.eyebrow { display: inline-block; font: 700 var(--sapFontSmallSize)/1 var(--sapFontFamily); letter-spacing: .14em; text-transform: uppercase; color: var(--sapHighlightColor); margin-bottom: 1rem }
+.lead { font-size: clamp(1.0625rem, 1rem + .3vw, 1.25rem); color: var(--sapContent_LabelColor); line-height: 1.6 }
+.ai-text { background: var(--sapAssistant_BackgroundGradient); -webkit-background-clip: text; background-clip: text; color: transparent; padding-bottom: .06em }
+.sec-head { max-width: 46rem; margin: 0 auto 3.5rem; text-align: center }
+.sec-head .lead { margin-top: 1rem }
+section { padding: clamp(4.5rem, 3rem + 6vw, 8rem) 0; position: relative; overflow-x: clip }
+.skip { position: absolute; left: .75rem; top: -10rem; z-index: 100; padding: .75rem 1rem; border-radius: .5rem; background: var(--sapGroup_ContentBackground); color: var(--sapLinkColor); box-shadow: var(--sapContent_Shadow2) }
+.skip:focus { top: .75rem }
+
+/* ---------- Scroll reveal: CSS only, where the browser supports it ---------- */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .rv { animation: rise linear both; animation-timeline: view(); animation-range: entry 5% cover 28% }
+  }
+}
+@keyframes rise { from { opacity: 0; translate: 0 2rem; filter: blur(4px) } to { opacity: 1; translate: 0; filter: none } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto } }

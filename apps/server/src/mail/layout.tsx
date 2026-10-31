@@ -43,7 +43,12 @@ const FOOTER: Record<MailLang, { sentWith: string; noReply: string }> = {
 const DEFAULT_ACCENT = "#0a6ed1";
 const font = '-apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 
-export function Layout({ brand, preview, lang = "en", children }: { brand: Brand; preview: string; lang?: MailLang; children: ReactNode }) {
+export function Layout({ brand, preview, lang = "en", replyable = false, children }: {
+  brand: Brand; preview: string; lang?: MailLang;
+  /** Reply-To is set (only the demo request's), so the no-reply line would be false */
+  replyable?: boolean;
+  children: ReactNode;
+}) {
   return (
     <Html lang={lang}>
       <Head />
@@ -64,11 +69,10 @@ export function Layout({ brand, preview, lang = "en", children }: { brand: Brand
           </Section>
           <Section style={{ padding: "8px 32px 24px" }}>{children}</Section>
         </Container>
-        {/* Every mail is a no-reply notification: mail.<domain> receives nothing (mailer.ts). */}
+        {/* Every mail but the demo request is a no-reply notification: mail.<domain> receives nothing (mailer.ts). */}
         <Text style={{ color: "#8a97b8", fontSize: 12, lineHeight: "18px", textAlign: "center", margin: "16px 0 0" }}>
           {brand.name === CONFIRE.name ? "Confire" : `${brand.name} · ${FOOTER[lang].sentWith}`}
-          <br />
-          {FOOTER[lang].noReply}
+          {replyable ? null : <><br />{FOOTER[lang].noReply}</>}
         </Text>
       </Body>
     </Html>

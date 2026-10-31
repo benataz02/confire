@@ -76,7 +76,7 @@ async function main(): Promise<void> {
   let estimate = 0;
   const cases = [];
   for (const p of projects) {
-    const { model, lookups } = await liveEngine(p.tenantId, { modelId: p.modelId, entries: {} });
+    const { model, lookups } = await liveEngine(p.tenantId, { modelId: p.modelId, entries: {}, margin: null });
     const form = formState(model.definition, lookups, propagate(model.definition, lookups, {}, {}), {});
     const pages = byProject.get(p.id)!.reduce((n, f) => n + pagesOf(f.data), 0);
     // twice: the intake proposal reads the same pages

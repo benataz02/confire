@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Confire auth pages: every page in layout A</title>
+<link rel="icon" href="/files/confire-logo.png">
+<link rel="stylesheet" href="/files/horizon.css">
+<link rel="stylesheet" href="/files/evening-scoped.css">
+<style>
+@font-face { font-family: "72"; src: url(/files/72-Light.woff2) format("woff2"); font-weight: 300 }
+@font-face { font-family: "72"; src: url(/files/72-Regular.woff2) format("woff2"); font-weight: 400 }
+@font-face { font-family: "72"; src: url(/files/72-Bold.woff2) format("woff2"); font-weight: 700 }
+@font-face { font-family: "72"; src: url(/files/72-Black.woff2) format("woff2"); font-weight: 900 }
+@font-face { font-family: "72-Bold"; src: url(/files/72-Bold.woff2) format("woff2") }
+
+body, .frame {
+  --glow-brand: color-mix(in oklab, var(--sapBrandColor) 30%, transparent);
+  --glow-ai: color-mix(in oklab, var(--sapAssistant_Background) 24%, transparent);
+  --dot: color-mix(in oklab, var(--sapContent_LabelColor) 26%, transparent);
+  --hairline: color-mix(in oklab, var(--sapList_BorderColor) 80%, transparent);
+  --ai-ink: color-mix(in oklab, var(--sapAssistant_Background) 62%, var(--sapTitleColor));
+  --ai-wash: color-mix(in oklab, var(--sapAssistant_Background) 14%, transparent);
+  --brand-wash: color-mix(in oklab, var(--sapBrandColor) 12%, transparent);
+  --glass: color-mix(in oklab, var(--sapGroup_ContentBackground) 72%, transparent);
+  --ease: cubic-bezier(.2, .7, .2, 1);
+}
+* { box-sizing: border-box }
+body { margin: 0; background: var(--sapBackgroundColor); color: var(--sapTextColor); font: 400 var(--sapFontSize)/1.5 var(--sapFontFamily); -webkit-font-smoothing: antialiased; padding: 2rem 1.5rem 4rem }
+.ico { width: 1rem; height: 1rem; fill: currentColor; flex: none }
+
+/* ---------- companion chrome ---------- */
+.top { max-width: 90rem; margin: 0 auto 1.5rem; display: flex; flex-wrap: wrap; gap: 1rem; align-items: end; justify-content: space-between }
+.top h1 { margin: 0; font: 700 1.5rem/1.2 var(--sapFontHeaderFamily); color: var(--sapTitleColor) }
+.top p { margin: .25rem 0 0; color: var(--sapContent_LabelColor) }
+.seg { display: inline-flex; padding: .1875rem; border-radius: .75rem; background: var(--sapGroup_ContentBackground); border: 1px solid var(--hairline) }
+.seg button { font: 700 var(--sapFontSize) var(--sapFontFamily); border: 0; background: transparent; color: var(--sapButton_Lite_TextColor); padding: .375rem .875rem; border-radius: .5625rem; cursor: pointer }
+.seg button[aria-pressed="true"] { background: var(--sapButton_Selected_Background); color: var(--sapButton_Selected_TextColor) }
+.opt-head { max-width: 90rem; margin: 2.5rem auto .75rem; display: flex; gap: .75rem; align-items: center; cursor: pointer; padding: .75rem 1rem; border-radius: 1rem; border: 2px solid transparent; background: var(--sapGroup_ContentBackground) }
+.opt-head.selected { border-color: var(--sapSelectedColor) }
+.opt-head .letter { width: 2rem; height: 2rem; border-radius: 50%; display: grid; place-items: center; background: var(--sapBrandColor); color: var(--sapButton_Emphasized_TextColor); font-weight: 900 }
+.opt-head b { color: var(--sapTitleColor); font-size: var(--sapFontLargeSize) }
+.opt-head span.d { color: var(--sapContent_LabelColor) }
+
+/* ---------- a browser window ---------- */
+.win { max-width: 90rem; margin: 0 auto; border-radius: 1rem; overflow: hidden; border: 1px solid var(--hairline); box-shadow: var(--sapContent_Shadow2) }
+.bar { display: flex; align-items: center; gap: .5rem; padding: .5rem .875rem; background: var(--sapGroup_ContentBackground); border-bottom: 1px solid var(--hairline) }
+.bar i { width: .625rem; height: .625rem; border-radius: 50%; background: var(--sapContent_ForegroundBorderColor) }
+.bar .url { margin-left: .75rem; padding: .25rem .875rem; border-radius: 1rem; background: var(--sapBackgroundColor); color: var(--sapContent_LabelColor); font-size: var(--sapFontSmallSize) }
+
+/* ---------- the page inside: the site's own parts ---------- */
+.frame { container-type: inline-size; height: 50rem; position: relative; isolation: isolate; overflow: hidden; display: flex; flex-direction: column;
+  background: var(--sapShellColor); color: var(--sapTextColor); font-size: var(--sapFontLargeSize) }
+.frame::before { content: ""; position: absolute; inset: 0; z-index: -2; background-image: radial-gradient(var(--dot) 1px, transparent 1.4px); background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 70% 65% at 50% 45%, black 20%, transparent 75%) }
+.glow { position: absolute; z-index: -1; border-radius: 50%; filter: blur(10px); pointer-events: none }
+.glow.b { background: radial-gradient(closest-side, var(--glow-brand), transparent) }
+.glow.a { background: radial-gradient(closest-side, var(--glow-ai), transparent) }
+
+.shell { flex: none; background: color-mix(in oklab, var(--sapShellColor) 78%, transparent); backdrop-filter: saturate(1.6) blur(16px); border-bottom: 1px solid var(--hairline) }
+.shell .in { display: flex; align-items: center; gap: .5rem; height: 3.5rem; padding: 0 2rem; max-width: 76rem; margin: 0 auto }
+.brand { display: flex; align-items: center; gap: .625rem; font: 900 1.1875rem var(--sapFontFamily); letter-spacing: -0.02em; color: var(--sapShell_InteractiveTextColor); text-decoration: none; margin-right: auto }
+.mark { width: 1.875rem; height: 1.875rem; border-radius: .625rem; background: var(--sapBrandColor); display: grid; place-items: center; color: var(--sapButton_Emphasized_TextColor); font: 900 1rem var(--sapFontFamily);
+  box-shadow: inset 0 -2px 0 color-mix(in oklab, var(--sapTitleColor) 18%, transparent) }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; height: 2.25rem; padding: 0 1rem; border-radius: var(--sapButton_BorderCornerRadius);
+  font: 700 var(--sapFontSize) var(--sapFontFamily); text-decoration: none; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--sapButton_BorderColor); background: var(--sapButton_Background); color: var(--sapButton_TextColor); transition: background .2s, box-shadow .2s }
+.btn:hover { background: var(--sapButton_Hover_Background) }
+.btn.em { background: var(--sapButton_Emphasized_Background); border-color: var(--sapButton_Emphasized_BorderColor); color: var(--sapButton_Emphasized_TextColor); box-shadow: 0 .5rem 1.5rem -.5rem var(--glow-brand) }
+.btn.em:hover { background: var(--sapButton_Emphasized_Hover_Background) }
+.btn.lite { border-color: transparent; background: transparent; color: var(--sapButton_Lite_TextColor) }
+.btn.lite:hover { background: var(--sapButton_Lite_Hover_Background) }
+.btn.lg { height: 2.75rem; font-size: var(--sapFontLargeSize); border-radius: .75rem; width: 100% }
+.btn svg.g { width: 1.0625rem; height: 1.0625rem }
+
+h2.disp { margin: 0; color: var(--sapTitleColor); font: 900 clamp(2.25rem, 1.5rem + 2.4cqi, 3.5rem)/1.03 var(--sapFontFamily); letter-spacing: -0.03em; text-wrap: balance }
+.lead { margin: 0; color: var(--sapContent_LabelColor); font-size: 1.0625rem; line-height: 1.55; text-wrap: pretty }
+.eyebrow { display: inline-block; font: 700 var(--sapFontSmallSize)/1 var(--sapFontFamily); letter-spacing: .14em; text-transform: uppercase; color: var(--sapHighlightColor) }
+
+/* the Fiori card: glass rim around a solid pane, like the site's stage */
+.rim { padding: .625rem; border-radius: 1.75rem; background: var(--glass); border: 1px solid var(--hairline); backdrop-filter: blur(6px);
+  box-shadow: 0 2rem 4rem -2rem color-mix(in oklab, var(--sapTitleColor) 25%, transparent) }
+.pane { background: var(--sapGroup_ContentBackground); border-radius: 1.25rem; box-shadow: var(--sapContent_Shadow0); padding: 1.75rem; display: grid; gap: 1rem }
+.f { display: grid; gap: .375rem }
+.f .lab { display: flex; justify-content: space-between; font-size: var(--sapFontSize); color: var(--sapContent_LabelColor) }
+.f .lab a { color: var(--sapLinkColor); text-decoration: none; font-weight: 700 }
+.inp { font: inherit; font-size: var(--sapFontLargeSize); color: var(--sapTextColor); background: var(--sapField_Background); border: 1px solid var(--sapField_BorderColor);
+  border-radius: .625rem; padding: 0 .75rem; height: 2.75rem; display: flex; align-items: center }
+.inp.focus { border-color: var(--sapField_Focus_BorderColor); box-shadow: 0 0 0 3px var(--brand-wash) }
+.inp .ph { color: var(--sapField_PlaceholderTextColor, var(--sapContent_LabelColor)) }
+.or { display: flex; align-items: center; gap: .75rem; color: var(--sapContent_LabelColor); font-size: var(--sapFontSmallSize); letter-spacing: .08em; text-transform: uppercase }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--hairline) }
+.alt { font-size: var(--sapFontSize); color: var(--sapContent_LabelColor); text-align: center }
+.alt a { color: var(--sapLinkColor); font-weight: 700; text-decoration: none }
+.legal { font-size: var(--sapFontSmallSize); color: var(--sapContent_LabelColor); display: flex; gap: 1.25rem; justify-content: center; flex-wrap: wrap }
+.legal a { color: inherit }
+
+/* ---------- A: centred on the hero ---------- */
+.a-main { flex: 1; display: grid; place-items: center; padding: 2rem }
+.a-col { width: min(27rem, 100%); display: grid; gap: 1.75rem; text-align: center }
+.a-col .pane { text-align: left }
+.a .glow.b { width: 46rem; height: 32rem; left: 50%; top: 50%; translate: -85% -45% }
+.a .glow.a { width: 40rem; height: 30rem; left: 50%; top: 50%; translate: -10% -30% }
+
+/* ---------- B: the form beside the product ---------- */
+.b-main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); padding: 2rem; max-width: 76rem; width: 100%; margin: 0 auto; gap: 4rem; align-items: center }
+@container (min-width: 64rem) { .b-main { grid-template-columns: minmax(0, 25rem) minmax(0, 1fr) } }
+.b-form { display: grid; gap: 1.5rem }
+.b-form .pane { padding: 0; background: none; box-shadow: none }
+.b-side { position: relative; display: none }
+@container (min-width: 64rem) { .b-side { display: grid; gap: 1.25rem } }
+.b .glow.b { width: 40rem; height: 30rem; right: -6rem; top: 12%; }
+.b .glow.a { width: 36rem; height: 28rem; right: 10rem; top: 35% }
+.b-side .rim { padding: 1rem }
+.mini { display: grid; gap: .75rem }
+.mp { background: var(--sapGroup_ContentBackground); border-radius: 1.125rem; box-shadow: var(--sapContent_Shadow0); font-size: var(--sapFontSize); overflow: hidden }
+.mp-h { display: flex; align-items: center; gap: .5rem; padding: .625rem 1rem; border-bottom: 1px solid var(--hairline); color: var(--sapContent_LabelColor); font-size: var(--sapFontSmallSize); font-weight: 700; letter-spacing: .04em; text-transform: uppercase }
+.mp-h .ico { width: .875rem; height: .875rem }
+.mp-b { padding: .875rem 1rem }
+.hl { background: var(--ai-wash); border-radius: .25rem; padding: 0 .125rem; box-shadow: inset 0 -1.5px 0 color-mix(in oklab, var(--sapAssistant_Background) 70%, transparent) }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem }
+.field { display: grid; grid-template-columns: 1fr auto; padding: .375rem 0; border-bottom: 1px solid var(--hairline) }
+.field:last-child { border: 0 }
+.field > span:first-child { color: var(--sapContent_LabelColor) }
+.val { display: inline-flex; gap: .3125rem; align-items: center; font-weight: 700; color: var(--sapTitleColor) }
+.val .ico { width: .75rem; height: .75rem; fill: var(--ai-ink) }
+.os { display: inline-flex; align-items: center; gap: .3125rem; padding: .1875rem .5rem; border-radius: 1rem; font-size: var(--sapFontSmallSize); font-weight: 700 }
+.os .ico { width: .75rem; height: .75rem }
+.st-ai { color: var(--ai-ink); background: var(--ai-wash) } .st-ai .ico { fill: var(--ai-ink) }
+.st-pos { color: var(--sapPositiveTextColor); background: color-mix(in oklab, var(--sapPositiveElementColor) 14%, transparent) } .st-pos .ico { fill: var(--sapPositiveElementColor) }
+.doc { font: 700 1.375rem/1 var(--sapFontHeaderFamily); color: var(--sapTitleColor); letter-spacing: -0.02em; margin: .25rem 0 .5rem }
+.num { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--sapTitleColor) }
+.cap { text-align: center; color: var(--sapContent_LabelColor); font-size: var(--sapFontSize) }
+@media (prefers-reduced-motion: no-preference) {
+  .fill { animation: fill 9s var(--ease) infinite both }
+  .f2 { animation-delay: .35s } .f3 { animation-delay: .7s } .f4 { animation-delay: 1.05s } .f5 { animation-delay: 1.8s }
+  @keyframes fill { 0%, 8% { opacity: 0; filter: blur(4px); translate: .5rem 0 } 16%, 88% { opacity: 1; filter: none; translate: 0 } 96%, 100% { opacity: 0 } }
+}
+</style>
+<style>
+.grid { max-width: 100rem; margin: 0 auto; display: grid; gap: 2.5rem 1.5rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 40rem), 1fr)) }
+.cell > .cap2 { display: flex; gap: .625rem; align-items: baseline; margin: 0 0 .625rem .25rem }
+.cell > .cap2 b { color: var(--sapTitleColor); font-size: var(--sapFontLargeSize) }
+.cell > .cap2 span { color: var(--sapContent_LabelColor) }
+.group-h { max-width: 100rem; margin: 3rem auto 1.25rem; font: 700 var(--sapFontSmallSize)/1 var(--sapFontFamily); letter-spacing: .14em; text-transform: uppercase; color: var(--sapHighlightColor) }
+.win { max-width: none }
+.frame { height: auto; min-height: 47rem }
+.brand img { width: 1.875rem; height: 1.875rem; display: block }
+.a-col { width: min(27rem, 100%) }
+.a-col.wide { width: min(31rem, 100%) }
+.icon-svg { width: 1rem; height: 1rem; fill: currentColor; flex: none }
+
+/* the supplier's mark, portal pages */
+.sup { width: 1.875rem; height: 1.875rem; border-radius: .5rem; display: grid; place-items: center; font: 900 .75rem var(--sapFontFamily); background: var(--sapAvatar_1_Background); color: var(--sapAvatar_1_TextColor) }
+.powered { display: inline-flex; gap: .375rem; align-items: center }
+.powered img { width: 1rem; height: 1rem }
+
+/* steps of workspace setup */
+.steps { display: flex; justify-content: center; align-items: center; gap: .625rem; font-size: var(--sapFontSize); color: var(--sapContent_LabelColor) }
+.steps .n { width: 1.5rem; height: 1.5rem; border-radius: 50%; display: inline-grid; place-items: center; font-weight: 700; font-size: var(--sapFontSmallSize); border: 1.5px solid var(--sapContent_ForegroundBorderColor); margin-right: .375rem }
+.steps .on { color: var(--sapTitleColor); font-weight: 700 }
+.steps .on .n { background: var(--sapBrandColor); border-color: var(--sapBrandColor); color: var(--sapButton_Emphasized_TextColor) }
+.steps .done .n { background: var(--sapPositiveElementColor); border-color: var(--sapPositiveElementColor); color: var(--sapButton_Emphasized_TextColor) }
+.steps .line { width: 2.5rem; height: 2px; background: var(--hairline) }
+
+/* "check your inbox": the Fiori illustrated message, made of an icon */
+.ill { justify-self: center; width: 4.5rem; height: 4.5rem; border-radius: 1.5rem; display: grid; place-items: center; background: var(--brand-wash); color: var(--sapBrandColor); box-shadow: 0 0 0 .5rem color-mix(in oklab, var(--sapBrandColor) 6%, transparent) }
+.ill svg { width: 2rem; height: 2rem }
+.ill.neg { background: color-mix(in oklab, var(--sapNegativeElementColor) 12%, transparent); color: var(--sapNegativeElementColor); box-shadow: 0 0 0 .5rem color-mix(in oklab, var(--sapNegativeElementColor) 5%, transparent) }
+.ill.lock { background: var(--ai-wash); color: var(--ai-ink); box-shadow: 0 0 0 .5rem color-mix(in oklab, var(--sapAssistant_Background) 6%, transparent) }
+.center { text-align: center }
+.body { color: var(--sapTextColor); font-size: var(--sapFontLargeSize); line-height: 1.55 }
+.body b { color: var(--sapTitleColor) }
+.note { font-size: var(--sapFontSize); color: var(--sapContent_LabelColor) }
+
+/* field value states (UI5's) */
+.inp.neg { border-color: var(--sapField_InvalidColor); background: var(--sapField_InvalidBackground); box-shadow: inset 0 -1px 0 var(--sapField_InvalidColor) }
+.vs { font-size: var(--sapFontSmallSize); color: var(--sapNegativeTextColor); display: flex; gap: .375rem; align-items: center }
+.vs svg { width: .75rem; height: .75rem; fill: var(--sapNegativeElementColor) }
+.prefix { display: flex; align-items: stretch }
+.prefix .pre { display: flex; align-items: center; padding: 0 .75rem; border: 1px solid var(--sapField_BorderColor); border-right: 0; border-radius: .625rem 0 0 .625rem; background: var(--sapBackgroundColor); color: var(--sapContent_LabelColor); font-size: var(--sapFontSize) }
+.prefix .inp { flex: 1; border-radius: 0 .625rem .625rem 0 }
+.hint { display: flex; justify-content: space-between; align-items: center; gap: .5rem }
+
+/* "where to?" list */
+.places { display: grid; gap: .375rem; padding: .375rem }
+.pane.list { padding: .375rem; gap: 0 }
+.place { display: grid; grid-template-columns: auto 1fr auto auto; gap: .875rem; align-items: center; padding: .75rem .875rem; border-radius: .875rem; color: inherit; text-decoration: none; transition: background .2s }
+.place:hover { background: var(--sapList_Hover_Background) }
+.place + .place { border-top: 1px solid var(--hairline); border-radius: 0 }
+.place .av { width: 2.5rem; height: 2.5rem; border-radius: .75rem; display: grid; place-items: center }
+.place .av svg { width: 1.125rem; height: 1.125rem }
+.av.ws { background: var(--brand-wash); color: var(--sapBrandColor) }
+.av.p2 { background: var(--sapAvatar_6_Background); color: var(--sapAvatar_6_TextColor); font-weight: 900; font-size: .8125rem }
+.av.p3 { background: var(--sapAvatar_3_Background); color: var(--sapAvatar_3_TextColor); font-weight: 900; font-size: .8125rem }
+.place b { display: block; color: var(--sapTitleColor); font-size: var(--sapFontLargeSize) }
+.place small { color: var(--sapContent_LabelColor); font-size: var(--sapFontSize) }
+.place .chev { color: var(--sapContent_IconColor) }
+.st-inf { color: var(--sapInformationColor); background: color-mix(in oklab, var(--sapInformativeElementColor) 13%, transparent) }
+.st-neu { color: var(--sapContent_LabelColor); background: color-mix(in oklab, var(--sapContent_LabelColor) 10%, transparent) }
+
+/* pairing */
+.ol { display: grid; gap: 1.25rem; margin: 0; padding: 0; list-style: none; counter-reset: s }
+.ol > li { display: grid; grid-template-columns: auto 1fr; gap: .875rem; counter-increment: s }
+.ol > li::before { content: counter(s); width: 1.625rem; height: 1.625rem; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: var(--sapFontSmallSize); background: var(--brand-wash); color: var(--sapBrandColor) }
+.ol b { color: var(--sapTitleColor); display: block; margin-bottom: .375rem }
+.dl { display: flex; align-items: center; gap: .5rem; padding: .5rem .5rem .5rem .75rem; border: 1px solid var(--hairline); border-radius: .625rem; font-size: var(--sapFontSize); background: var(--sapBackgroundColor) }
+.dl code { flex: 1; font-family: var(--sapFontFamily); color: var(--sapLinkColor); overflow-wrap: anywhere }
+.btn.sm { height: 1.75rem; padding: 0 .625rem; font-size: var(--sapFontSmallSize) }
+.code { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap }
+.code .c { font: 900 2rem/1 var(--sapFontFamily); letter-spacing: .14em; color: var(--sapTitleColor); font-variant-numeric: tabular-nums; padding: .75rem 1rem; border-radius: .875rem; background: var(--brand-wash) }
+.wait { display: flex; align-items: center; gap: .75rem; padding: .875rem 1rem; border-radius: .875rem; background: var(--sapBackgroundColor); font-size: var(--sapFontSize); color: var(--sapContent_LabelColor) }
+.pulse { position: relative; width: .75rem; height: .75rem; border-radius: 50%; background: var(--sapAssistant_BackgroundGradient); flex: none }
+@media (prefers-reduced-motion: no-preference) {
+  .pulse::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--sapAssistant_Background); animation: ping 1.6s var(--ease) infinite }
+  @keyframes ping { from { opacity: .6; scale: 1 } to { opacity: 0; scale: 2.6 } }
+}
+
+/* invitation */
+.who { display: flex; gap: .875rem; align-items: center; padding: .875rem; border-radius: .875rem; background: var(--sapBackgroundColor) }
+.who .av { width: 2.75rem; height: 2.75rem; border-radius: .75rem; display: grid; place-items: center; font-weight: 900; background: var(--sapAvatar_6_Background); color: var(--sapAvatar_6_TextColor) }
+.who b { color: var(--sapTitleColor); display: block }
+.who small { color: var(--sapContent_LabelColor) }
+.who .os { margin-left: auto }
+</style>
+</head>
+<body>
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="g" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.6 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6.1C12.2 13.5 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.4 28.3c-.5-1.4-.8-2.9-.8-4.3s.3-2.9.8-4.3l-7.8-6.1C.9 16.7 0 20.2 0 24s.9 7.3 2.6 10.4l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.5-2 15.3-5.5l-7.5-5.8c-2 1.4-4.7 2.3-7.8 2.3-6.4 0-11.8-4-13.6-9.7l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></symbol>
+  <symbol id="ms" viewBox="0 0 23 23"><path fill="#F25022" d="M1 1h10v10H1z"/><path fill="#7FBA00" d="M12 1h10v10H12z"/><path fill="#00A4EF" d="M1 12h10v10H1z"/><path fill="#FFB900" d="M12 12h10v10H12z"/></symbol>
+</svg>
+
+<div class="top" style="max-width:100rem">
+  <div>
+    <h1>Every auth page, in layout A</h1>
+    <p>The same frame everywhere: header, glow, display headline, one Fiori card. Portal pages wear the supplier in the header.</p>
+  </div>
+  <div class="seg" role="group" aria-label="Theme">
+    <button type="button" data-theme="morning" aria-pressed="true">Morning</button>
+    <button type="button" data-theme="evening" aria-pressed="false">Evening</button>
+  </div>
+</div>
+
+<h2 class="group-h">Staff app · app.confire.ai</h2>
+<div class="grid">
+
+  <div class="cell pg" data-url="app.confire.ai/login" data-label="1 · Sign in" data-note="Errors (wrong password, unconfirmed address) show as a strip at the top of the card.">
+    <div class="a-col">
+      <div style="display:grid;gap:.75rem"><h2 class="disp">Welcome back.</h2><p class="lead">Sign in to your workspace or your supplier's portal.</p></div>
+      <div class="rim"><div class="pane">
+        <div class="row2"><button class="btn lg"><svg class="g"><use href="#g"/></svg>Google</button><button class="btn lg"><svg class="g"><use href="#ms"/></svg>Microsoft</button></div>
+        <div class="or">or</div>
+        <div class="f"><span class="lab">Email</span><div class="inp focus">ana@talleres-ibarra.es</div></div>
+        <div class="f"><span class="lab">Password <a href="#">Forgot password?</a></span><div class="inp"><span class="ph">••••••••••</span></div></div>
+        <button class="btn em lg">Sign in</button>
+      </div></div>
+      <p class="alt">New to Confire? <a href="#">Create an account</a></p>
+    </div>
+  </div>
+
+  <div class="cell pg" data-url="app.confire.ai/signup" data-label="2 · Create account" data-note="An invited address arrives filled in and locked.">
+    <div class="a-col">
+      <div style="display:grid;gap:.75rem"><h2 class="disp">Create your account.</h2><p class="lead">Use your work email address.</p></div>
+      <div class="rim"><div class="pane">
+        <div class="row2"><button class="btn lg"><svg class="g"><use href="#g"/></svg>Google</button><button class="btn lg"><svg class="g"><use href="#ms"/></svg>Microsoft</button></div>
+        <div class="or">or</div>
+        <div class="f"><span class="lab">Name</span><div class="inp">Ana Etxeberria</div></div>
+        <div class="f"><span class="lab">Work email</span><div class="inp">ana@talleres-ibarra.es</div></div>
+        <div class="row2">
+          <div class="f"><span class="lab">Password</span><div class="inp"><span class="ph">••••••••</span></div></div>
+          <div class="f"><span class="lab">Repeat it</span><div class="inp focus"><span class="ph">••••••••</span></div></div>
+        </div>
+        <button class="btn em lg">Create account</button>
+      </div></div>
+      <p class="alt">Already have an account? <a href="#">Sign in</a></p>
+    </div>
+  </div>
+
+  <div class="cell pg" data-url="app.confire.ai/signup" data-label="3 · Check your inbox" data-note="After sign-up, and after Forgot password (same card, its own sentence).">
+    <div class="a-col">
+      <div style="display:grid;gap:.75rem"><h2 class="disp">Check your inbox.</h2></div>
+      <div class="rim"><div class="pane center">
+        <span class="ill"><svg><use href="/files/icons2.svg#email-read"/></svg></span>
+        <p class="body">We've sent a link to <b>ana@talleres-ibarra.es</b>. Open it to confirm your address and finish setting up your account.</p>
+        <p class="note">Nothing arrived? Signing in sends a new link.</p>
+        <button class="btn lg">Back to sign in</button>
+      </div></div>
+    </div>
+  </div>
+
+  <div class="cell pg" data-url="app.confire.ai/forgot-password" data-label="4 · Forgot password">
+    <div class="a-col">
+      <div style="display:grid;gap:.75rem"><h2 class="disp">Reset your password.</h2><p class="lead">We'll email you a link to choose a new one.</p></div>
+      <div class="rim"><div class="pane">
+        <div class="f"><span class="lab">Email</span><div class="inp focus">ana@talleres-ibarra.es</div></div>
+        <button class="btn em lg">Send link</button>
+      </div></div>
+      <p class="alt">Remembered it? <a href="#">Sign in</a></p>
+    </div>
+  </div>
+
+  <div class="cell pg" data-url="app.confire.ai/reset-password?token=…" data-label="5 · New password" data-note="Shown with a mistake, so you can see UI5's error state in this look.">
+    <div class="a-col">
+      <div style="display:grid;gap:.75rem"><h2 class="disp">Choose a new password.</h2><p class="lead">At least 8 characters.</p></div>
+      <div class="rim"><div class="pane">
+        <div class="f"><span class="lab">New password</span><div class="inp"><span class="ph">••••••••••</span></div></div>
+        <div class="f"><span class="lab">Repeat it</span><div class="inp neg"><span class="ph">•••••••••</span></div><span class="vs"><svg><use href="/files/icons2.svg#error"/></svg>The two passwords differ</span></div>
+        <button class="btn em lg" style="opacity:.5">Change password</button>
+      </div></div>
+    </div>
+  </div>
+
+  <div class="cell pg" data-url="app.confire.ai/reset-password?error=INVALID_TOKEN" data-label="6 · Dead link" data-note="Also: Password changed (a check icon, then Sign in).">
+    <div class="a-col">
+      <div style="display:grid;gap:.75rem"><h2 class="disp">This link no longer works.</h2></div>
+      <div class="rim"><div class="pane center">
+        <span class="ill neg"><svg><use href="/files/icons2.svg#message-error"/></svg></span>
+        <p class="body">Reset links work once, for one hour. Ask for a new one.</p>
+        <button class="btn em lg">Send a new link</button>
+      </div></div>
+      <p class="alt"><a href="#">Back to sign in</a></p>
+    </div>
+  </div>
+
+  <div class="cell pg" data-url="app.confire.ai/login?choose" data-label="7 · Where to?" data-note="Only with more than one place. Each row is a full page load into that app.">
+    <div class="a-col wide">
+      <div style="display:grid;gap:.75rem"><h2 class="disp">Where to?</h2><p class="lead">Signed in as ana@talleres-ibarra.es</p></div>
+      <div class="rim"><div class="pane list">
+        <a class="place" href="#"><span class="av ws"><svg><use href="/files/icons2.svg#building"/></svg></span><span><b>Talleres Ibarra</b><small>Your workspace</small></span><span class="os st-inf">Last used</span><svg class="icon-svg chev"><use href="/files/icons2.svg#slim-arrow-right"/></svg></a>
+        <a class="place" href="#"><span class="av p2">HG</span><span><b>Hidráulica Goierri</b><small>Talleres Ibarra · customer portal</small></span><span class="os st-neu">Buyer</span><svg class="icon-svg chev"><use href="/files/icons2.svg#slim-arrow-right"/></svg></a>
+        <a class="place" href="#"><span class="av p3">AL</span><span><b>Aceros Lur</b><small>Talleres Ibarra · customer portal</small></span><span class="os st-neu">Viewer</span><svg class="icon-svg chev"><use href="/files/icons2.svg#slim-arrow-right"/></svg></a>
+      </div></div>
+      <p class="alt">Not you? <a href="#">Sign out</a></p>
+    </div>
+  </div>
+
+  <div class="cell pg" data-url="app.confire.ai/onboarding" data-label="8 · Workspace setup, step 1" data-note="The URL fills itself from the name; availability is checked as you type.">
+    <div class="a-col">
+      <div class="steps"><span class="on"><span class="n">1</span>Company</span><span class="line"></span><span><span class="n">2</span>SAP server</span></div>
+      <div style="display:grid;gap:.75rem"><h2 class="disp">Set up your workspace.</h2><p class="lead">Create your company to get started.</p></div>
+      <div class="rim"><div class="pane">
+        <div class="f"><span class="lab">Company name</span><div class="inp">Talleres Ibarra S.L.</div></div>
+        <div class="f"><span class="lab">Workspace URL</span>
+          <div class="prefix"><span class="pre">app.confire.ai/</span><div class="inp focus">talleres-ibarra</div></div>
+          <span class="hint"><span class="note">Your team's permanent address.</span><span class="os st-pos"><svg class="ico"><use href="/files/icons.svg#sys-enter-2"/></svg>Available</span></span>
+        </div>
+        <button class="btn em lg">Create company</button>
+      </div></div>
+      <p class="alt">Not now? <a href="#">Sign out</a></p>
+    </div>
+  </div>
+
+  <div class="cell pg" data-url="app.confire.ai/onboarding" data-label="9 · Workspace setup, step 2" data-note="Moves on by itself once SAP answers through the agent. A refused SAP login shows as a warning strip.">
+    <div class="a-col wide">
+      <div class="steps"><span class="done"><span class="n">✓</span>Company</span><span class="line"></span><span class="on"><span class="n">2</span>SAP server</span></div>
+      <div style="display:grid;gap:.75rem"><h2 class="disp">Connect your SAP server.</h2><p class="lead">A small agent on your SAP server connects it to Confire. Your SAP passwords never leave that server.</p></div>
+      <div class="rim"><div class="pane">
+        <ol class="ol">
+          <li><div><b>On the SAP server, download the agent</b>
+            <div class="dl"><svg class="icon-svg" style="color:var(--sapContent_IconColor)"><use href="/files/icons2.svg#download"/></svg><code>app.confire.ai/download/confire-agent.exe</code><button class="btn sm"><svg class="icon-svg" style="width:.75rem;height:.75rem"><use href="/files/icons2.svg#copy"/></svg>Copy</button></div>
+            <p class="note" style="margin-top:.375rem">Windows may warn about a new app: More info → Run anyway.</p></div></li>
+          <li><div><b>Run it. It asks for your SAP login, then this code</b>
+            <div class="code"><span class="c">K7QM-4XPA</span><button class="btn"><svg class="icon-svg"><use href="/files/icons2.svg#refresh"/></svg>New code</button></div>
+            <p class="note" style="margin-top:.375rem">Valid until 14:30.</p></div></li>
+        </ol>
+        <div class="wait"><span class="pulse"></span>Waiting for the agent… This page moves on by itself.</div>
+      </div></div>
+      <p class="alt">Not now? <a href="#">Sign out</a></p>
+    </div>
+  </div>
+</div>
+
+<h2 class="group-h">Customer portal · portal.confire.ai/&lt;supplier&gt;</h2>
+<div class="grid">
+  <div class="cell pg" data-portal data-url="portal.confire.ai/ibarra/accept/…" data-label="10 · Accept an invitation" data-note="The supplier's logo and name in the header; Confire only in the footer.">
+    <div class="a-col">
+      <div style="display:grid;gap:.75rem"><h2 class="disp">Join Acero Norte.</h2><p class="lead">Mikel Arana invited you to Talleres Ibarra's customer portal.</p></div>
+      <div class="rim"><div class="pane">
+        <div class="who"><span class="av">AN</span><span><b>Acero Norte S.A.</b><small>on Talleres Ibarra's portal</small></span><span class="os st-inf">Buyer</span></div>
+        <p class="note">As a buyer you can request quotes, follow them and place orders for Acero Norte.</p>
+        <button class="btn em lg">Accept invitation</button>
+      </div></div>
+      <p class="alt">Signed in as iker@aceronorte.es · <a href="#">Use another account</a></p>
+    </div>
+  </div>
+
+  <div class="cell pg" data-portal data-url="portal.confire.ai/ibarra/onboarding" data-label="11 · No invitation" data-note="Signed in, but the address belongs to no company on this portal.">
+    <div class="a-col">
+      <div style="display:grid;gap:.75rem"><h2 class="disp">Ask for an invitation.</h2></div>
+      <div class="rim"><div class="pane center">
+        <span class="ill lock"><svg><use href="/files/icons2.svg#locked"/></svg></span>
+        <p class="body"><b>iker@gmail.com</b> isn't linked to a company on Talleres Ibarra's portal yet. Ask your contact at Talleres Ibarra to invite you.</p>
+        <p class="note">Invited at another address? <a href="#" style="color:var(--sapLinkColor);font-weight:700;text-decoration:none">Sign out</a>, then open the invitation again.</p>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Wrap each page's content in the frame: window, header, glow, footer.
+document.querySelectorAll(".pg").forEach((pg) => {
+  const portal = pg.hasAttribute("data-portal");
+  const main = pg.innerHTML;
+  const brand = portal
+    ? `<a class="brand" href="#"><span class="sup">TI</span>Talleres Ibarra</a>`
+    : `<a class="brand" href="#"><img src="/files/confire-logo.png" alt="">Confire</a>`;
+  const foot = portal
+    ? `<span class="powered">Powered by <img src="/files/confire-logo.png" alt="">Confire</span><a href="#">Privacy</a>`
+    : `<span>© 2026 Confire</span><a href="#">Privacy</a><a href="#">Legal notice</a><a href="#">Cookies</a>`;
+  pg.innerHTML = `
+    <div class="cap2"><b>${pg.dataset.label}</b>${pg.dataset.note ? `<span>${pg.dataset.note}</span>` : ""}</div>
+    <div class="win">
+      <div class="bar"><i></i><i></i><i></i><span class="url">${pg.dataset.url}</span></div>
+      <div class="frame a">
+        <span class="glow b"></span><span class="glow a"></span>
+        <header class="shell"><div class="in">${brand}<button class="btn lite"><svg class="ico"><use href="/files/icons.svg#globe"/></svg>EN</button></div></header>
+        <main class="a-main">${main}</main>
+        <div class="legal" style="padding:0 0 1.25rem">${foot}</div>
+      </div>
+    </div>`;
+});
+const setTheme = (t) => {
+  document.querySelectorAll(".frame").forEach((f) => f.classList.toggle("evening", t === "evening"));
+  document.body.classList.toggle("evening", t === "evening");
+  document.querySelectorAll("[data-theme]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.theme === t)));
+};
+document.querySelectorAll("[data-theme]").forEach((b) => b.addEventListener("click", () => setTheme(b.dataset.theme)));
+if (matchMedia("(prefers-color-scheme: dark)").matches) setTheme("evening");
+</script>
+</body>
+</html>

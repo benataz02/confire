@@ -1,0 +1,16 @@
+---
+import Icon from "../Icon.astro";
+import { dict, type Lang } from "../../i18n/index.ts";
+
+// Each answer's first sentence answers the question outright: that is what assistants quote (§6.7).
+interface Props { lang: Lang }
+const d = dict[Astro.props.lang], t = d.faq;
+---
+<section id="faq">
+  <div class="wrap faq-split">
+    <div class="sticky rv"><span class="eyebrow">{t.eyebrow}</span><h2>{t.title}</h2><p class="lead band-lead">{t.lead}</p><a class="btn lg" href="#demo">{d.nav.demo}</a></div>
+    <div class="faq rv">
+      {t.items.map((f, i) => <details open={i === 0}><summary>{f.q}<span class="tw"><Icon name="navigation-down-arrow" /></span></summary><p>{f.a}</p></details>)}
+    </div>
+  </div>
+</section>

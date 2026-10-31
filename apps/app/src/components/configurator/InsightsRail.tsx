@@ -1,5 +1,5 @@
 import { ObjectStatus, Text, Title } from "@ui5/webcomponents-react";
-import { ITEM_COL, type CostBreakdown, type CostElement, type CostLine, type Val } from "@confire/config-engine";
+import { ITEM_COL, type CostBreakdown, type CostLine, type Val } from "@confire/config-engine";
 import { money } from "@confire/ui/money.ts";
 import { useI18n } from "../../i18n.ts";
 import { percent } from "./runView.ts";
@@ -28,7 +28,7 @@ function MoneyRow({ label, amount, cur, total }: { label: string; amount: number
 }
 
 /** What the cost is made of, what it sells for, and where it lands — with one total, not one per
- *  block. Materials and Operations add up to Total cost; Cost by item is that same total on the
+ *  block. Materials, Operations and Other costs add up to Total cost; Cost by item is that same total on the
  *  other axis, in line totals because a cost element is an amount (the grid shows it per unit).
  *  `rows` are the items grid's evaluated rows, for the item codes. */
 export function CostBody({ rows, cost: c, cur }: {
@@ -52,6 +52,7 @@ export function CostBody({ rows, cost: c, cur }: {
     <>
       {group(c.materials, t("CONFIG_MATERIALS"))}
       {group(c.operations, t("CONFIG_OPERATIONS"))}
+      {group(c.other, t("CONFIG_OTHER_COSTS"))}
       <div style={SECTION}>
         <MoneyRow label={t("CONFIG_TOTAL_COST", String(c.batchQty))} amount={c.cost} cur={cur} total />
         {/* A typed grid price wins here as it does on the quotation: the same money unit. */}
@@ -70,20 +71,5 @@ export function CostBody({ rows, cost: c, cur }: {
         </div>
       ) : null}
     </>
-  );
-}
-
-/** The per-field price badges, summed. Informational: the calculated price comes from BOM and
- *  routing and never reads these (see paramPrices in config-engine), so they keep their own total. */
-export function OptionPrices({ rows, total, cur }: { rows: CostElement[]; total: number; cur?: string }) {
-  const i18n = useI18n();
-  const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
-  return (
-    <div style={SECTION}>
-      <Title level="H6">{t("CONFIG_OPTION_PRICES")}</Title>
-      <Text style={{ color: "var(--sapContent_LabelColor)" }}>{t("CONFIG_OPTION_NOTE")}</Text>
-      {rows.map((r) => <MoneyRow key={r.key} label={r.label} amount={r.amount} cur={cur} />)}
-      <MoneyRow label={t("CONFIG_TOTAL")} amount={total} cur={cur} total />
-    </div>
   );
 }

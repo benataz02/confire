@@ -19,14 +19,16 @@ export type RowMoney = {
   typed?: true;
 };
 /** One element of what the cost is made of: a BOM line under its description, an operation under
- *  its resource. Batch totals, so they add up to the same cost the items rows split. */
-export type CostLine = { kind: "material" | "operation"; label: string; amount: number };
+ *  its resource, a priced parameter under its label. Batch totals, so they add up to the same cost
+ *  the items rows split. */
+export type CostLine = { kind: "material" | "operation" | "other"; label: string; amount: number };
 
 /** What the process page shows for one batch quantity. */
 export type CostBreakdown = {
   batchQty: number;
   materials: CostLine[];
   operations: CostLine[];
+  other: CostLine[];
   cost: number;
   /** what the quotation would total — a typed price wins, each line in whole cents */
   price: number;
@@ -135,6 +137,7 @@ export function costBreakdown(
       const pm = pairMoney(model, lookups, cand.assignment, batchQty, tableRows, outputs);
       for (const b of outputs.bom) addLine(lines, "material", b.desc.trim() || b.itemCode, b.lineTotal);
       for (const o of outputs.ops) addLine(lines, "operation", o.resource, o.cost);
+      for (const o of outputs.other) addLine(lines, "other", o.label, o.amount * batchQty);
       cost += pm.cost;
       price += pm.value;
       for (const l of pm.lines) {
@@ -147,6 +150,7 @@ export function costBreakdown(
       batchQty,
       materials: all.filter((l) => l.kind === "material"),
       operations: all.filter((l) => l.kind === "operation"),
+      other: all.filter((l) => l.kind === "other"),
       cost, price, margin: marginOf(price, cost),
       // several candidates at this quantity -> a quantity-weighted per-unit figure, which is what
       // the document averages to

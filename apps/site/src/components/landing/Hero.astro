@@ -1,0 +1,69 @@
+---
+import Icon from "../Icon.astro";
+import { dict, money, type Lang } from "../../i18n/index.ts";
+
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+const t = dict[lang].hero, s = t.stage;
+// `[…]` in the copy marks a value the AI picks out of the email.
+const body = s.body.split(/(\[[^\]]+\])/).filter(Boolean);
+const values = [["", "4"], ["f2", s.lengthValue], ["f3", s.beltValue], ["f4", s.motorValue]] as const;
+const labels = [s.quantity, s.length, s.belt, s.motor];
+const options = [[s.standard, 18450], [s.heavy, 21120], [s.variable, 23980]] as const;
+---
+<section class="hero">
+  <span class="glow b" aria-hidden="true"></span><span class="glow a" aria-hidden="true"></span>
+  <div class="wrap hero-copy">
+    <a class="pill" href="#product"><span class="new"><Icon name="ai" />{t.pillNew}</span>{t.pill}<Icon name="arrow-right" /></a>
+    <h1>{t.title} <span class="ai-text">{t.titleAi}</span></h1>
+    <p class="lead">{t.lead}</p>
+    <div class="ctas">
+      <a class="btn em lg" href="#demo">{t.demo}<Icon name="arrow-right" class="arrow" /></a>
+      <a class="btn lg" href="#how">{t.how}</a>
+    </div>
+    <div class="works"><span>{t.worksWith}</span><b>SAP Business One</b><b>Beas Manufacturing</b><b>SAP HANA</b><b>Microsoft SQL Server</b></div>
+  </div>
+
+  <div class="stage" role="img" aria-label={s.label}>
+    <div class="pane">
+      <div class="pane-h"><Icon name="email" />{s.request}</div>
+      <div class="pane-b">
+        <div class="mail-from"><span class="avatar">IZ</span><div><b>Iñaki Zubia</b><div class="tiny muted">Talleres Ibarra S.L. · 09:12</div></div></div>
+        <div class="mail-subj">{s.subject}</div>
+        <p class="mail-body">{body.map((p) => p.startsWith("[") ? <span class="hl">{p.slice(1, -1)}</span> : p)}</p>
+        <span class="attach"><Icon name="document-text" />layout-CV.pdf</span>
+      </div>
+    </div>
+
+    <div class="conn"><span class="spark s1"><Icon name="ai" /></span><span class="lbl">{s.aiReads}</span></div>
+
+    <div class="pane">
+      <div class="pane-h"><Icon name="product" />{s.configuration}</div>
+      <div class="cfg-title"><div><span class="cfg-name">{s.product}</span><span class="tiny muted">Talleres Ibarra S.L.</span></div><span class="os st-ai"><Icon name="ai" />{s.filled}</span></div>
+      <div class="cfg-grid">
+        <div class="box">
+          <div class="box-t">{s.parameters}</div>
+          {values.map(([f, v], i) => <div class="field"><span>{labels[i]}</span><span class:list={["val fill", f]}>{v} <Icon name="ai" /></span></div>)}
+        </div>
+        <div class="box">
+          <div class="box-t">{s.options}</div>
+          {options.map(([label, price], i) => <div class:list={["opt", i === 0 && "pick sel"]}><span class="radio"></span><span>{label}</span><span class="num">{money(lang, price)}</span></div>)}
+          <div class="tiny muted margin">{s.margin}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="conn"><span class="spark blue s2"><Icon name="sales-quote" /></span><span class="lbl">{s.posted}</span></div>
+
+    <div class="pane quote">
+      <div class="pane-h"><Icon name="it-host" />SAP Business One</div>
+      <div class="pane-b">
+        <div class="doc-h"><span class="tiny muted">{s.quotation}</span><span class="os st-pos"><Icon name="sys-enter-2" />{s.posted}</span></div>
+        <div class="doc-no">{s.docNo}</div>
+        <div class="line"><span>{s.line}</span><span class="num">4 ×</span></div>
+        <div class="line"><span class="muted">{s.validUntil}</span><span>{s.validDate}</span></div>
+        <div class="total"><span class="muted">{s.total}</span><span class="num">{money(lang, 73800)}</span></div>
+      </div>
+    </div>
+  </div>
+</section>

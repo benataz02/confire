@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  Bar, BusyIndicator, Button, FlexBox, IllustratedMessage, Input, Menu, MenuItem, MessageStrip, Search, SearchItem, SearchItemGroup,
+  Bar, BusyIndicator, Button, FlexBox, Input, Menu, MenuItem, MessageStrip,
   type InputDomRef,
 } from "@ui5/webcomponents-react";
-import "@ui5/webcomponents-fiori/dist/illustrations/NoEntries.js";
-import "@ui5/webcomponents-fiori/dist/illustrations/NoSearchResults.js";
 import { confirm } from "@confire/ui/confirm.ts";
-import { ago } from "@confire/ui/format.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { useI18n } from "../i18n.ts";
 import { client, orpc } from "../orpc.ts";
@@ -16,9 +13,9 @@ import { useAssistantShell } from "./AssistantProvider.tsx";
 import { ChatView, refusalText, useRoute, type HeadState } from "./ChatView.tsx";
 import type { Thread } from "./useAssistant.ts";
 
-// The AI page (assistant spec §4.2): one chat, its bar above it. The bar's search is the user's chats —
-// pinned first, then the latest — opened by a click and searched as one types; the chat's title opens
-// its menu (pin, rename, delete). `/assistant` is a new chat (the user's blank thread, `blankThread`),
+// The AI page (assistant spec §4.2): one chat, its bar above it. The user's chats are found with the
+// shell's search, which this page scopes to them (GlobalSearch); the chat's title opens its menu (pin,
+// rename, delete). `/assistant` is a new chat (the user's blank thread, `blankThread`),
 // `/assistant/<chat>` one of theirs. The panel is not drawn here (AssistantProvider), so leaving
 // mid-answer stops the answer, as Stop does.
 
@@ -42,26 +39,14 @@ export function AssistantPage({ threadId }: { threadId: string | null }) {
   }, [threadId]); // eslint-disable-line react-hooks/exhaustive-deps
   const thread = useQuery({ ...orpc.assistant.thread.queryOptions({ input: { id: threadId ?? "" } }), enabled: !!threadId, staleTime: Infinity });
 
-  // The list unfiltered (it also names the open chat, whatever is searched), and the search's.
-  const [q, setQ] = useState("");
-  const [search, setSearch] = useState("");
-  useEffect(() => { const id = setTimeout(() => setSearch(q.trim()), 250); return () => clearTimeout(id); }, [q]);
+  // The user's chats: what names the open one and says whether it is pinned.
   const all = useQuery(orpc.assistant.threads.queryOptions({ input: undefined }));
-  const found = useQuery({ ...orpc.assistant.threads.queryOptions({ input: { q: search } }), enabled: !!search, placeholderData: keepPreviousData });
-  const list = search ? found : all;
-  const rows: Row[] = list.data ?? [];
   const label = (r: Row) => r.title || r.projectName || t("ASSISTANT_UNTITLED");
   const current = all.data?.find((r) => r.id === threadId);
-  const [listOpen, setListOpen] = useState(false);
   const [menu, setMenu] = useState<HTMLElement | null>(null);
   const picked = useRef<Action | null>(null);
   const [renaming, setRenaming] = useState(false);
 
-  const go = (id: string) => {
-    setListOpen(false);
-    setQ("");
-    if (id !== threadId) void navigate({ to: "/$slug/assistant/$id", params: { id } });
-  };
   const act = async (fn: () => Promise<unknown>) => {
     try { await fn(); } catch (e) { toast(refusalText(i18n, e)); }
     void qc.invalidateQueries({ queryKey: orpc.assistant.threads.key() });
@@ -97,14 +82,8 @@ export function AssistantPage({ threadId }: { threadId: string | null }) {
     void navigate({ to: "/$slug/configs/$id", params: { id } });
   };
 
-  const item = (r: Row) => (
-    <SearchItem key={r.id} data-id={r.id} text={label(r)} icon={r.projectId ? "sales-quote" : "discussion"}
-      description={[r.projectName && r.projectName !== label(r) ? r.projectName : null, ago(r.updatedAt)].filter(Boolean).join(" · ")}
-      deletable onDelete={() => void remove(r)} />
-  );
-  const pinned = rows.filter((r) => r.pinned), rest = rows.filter((r) => !r.pinned);
-
-  const bar = ({ busy, projectId, empty }: HeadState = { busy: false, projectId: null, empty: true }) => (
+  // A new chat has nothing to put on the bar, so it has none.
+  const bar = ({ busy, projectId, empty }: HeadState) => (empty && !projectId ? null : (
     <Bar
       startContent={!empty && current ? (renaming
         ? <RenameField value={label(current)} label={t("ASSISTANT_RENAME")} onDone={(v) => rename(current, v)} />
@@ -122,31 +101,9 @@ export function AssistantPage({ threadId }: { threadId: string | null }) {
           ) : null}
           {!empty ? <Button design="Transparent" icon="write-new" onClick={() => void navigate({ to: "/$slug/assistant" })}>{t("ASSISTANT_NEW_CHAT")}</Button> : null}
         </>
-      }>
-      {/* The chat list opens on a click in the field (a click on an item is the item's, not the field's).
-          An item picked is the search event's: prevented, so the field keeps what was typed. */}
-      <Search value={q} open={listOpen} showClearIcon noTypeahead style={{ width: "min(36rem, 50vw)" }}
-        placeholder={t("ASSISTANT_SEARCH")} accessibleName={t("ASSISTANT_SEARCH")}
-        loading={list.isLoading} fieldLoading={found.isFetching}
-        onClick={(e) => { if (e.target === e.currentTarget) setListOpen(true); }}
-        onKeyDown={(e) => { if (e.key === "ArrowDown") setListOpen(true); }}
-        onOpen={() => setListOpen(true)} onClose={() => setListOpen(false)}
-        onInput={(e) => setQ(e.target.value)}
-        onSearch={(e) => {
-          e.preventDefault();
-          const id = (e.detail as unknown as { item?: HTMLElement }).item?.dataset.id;
-          if (id) go(id);
-        }}
-        illustration={!rows.length && !list.isLoading ? (
-          <IllustratedMessage name={search ? "NoSearchResults" : "NoEntries"} design="ExtraSmall"
-            titleText={t(search ? "ASSISTANT_NO_CHATS_FOUND" : "ASSISTANT_NO_CHATS")} />
-        ) : undefined}>
-        {pinned.length ? <SearchItemGroup headerText={t("ASSISTANT_PINNED")}>{pinned.map(item)}</SearchItemGroup> : null}
-        {pinned.length && rest.length ? <SearchItemGroup headerText={t("ASSISTANT_CHATS")}>{rest.map(item)}</SearchItemGroup> : rest.map(item)}
-      </Search>
-    </Bar>
-  );
-  const error = thread.error ?? newError ?? list.error;
+      } />
+  ));
+  const error = thread.error ?? newError ?? all.error;
 
   return (
     <FlexBox direction="Column" style={{ height: "100%", background: "var(--sapBackgroundColor)" }}>
@@ -154,11 +111,8 @@ export function AssistantPage({ threadId }: { threadId: string | null }) {
         <ChatView key={thread.data.id} thread={thread.data} route={route} page
           kind={thread.data.projectId ? "configure" : "general"} head={bar} />
       ) : (
-        <>
-          {bar()}
-          {error ? <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem", width: "auto" }}>{refusalText(i18n, error)}</MessageStrip>
-            : <BusyIndicator active style={{ margin: "auto" }} />}
-        </>
+        error ? <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem", width: "auto" }}>{refusalText(i18n, error)}</MessageStrip>
+          : <BusyIndicator active style={{ margin: "auto" }} />
       )}
       <Menu open={!!menu} opener={menu ?? undefined} onClose={onMenuClosed}
         onItemClick={(e) => { picked.current = (e.detail.item as HTMLElement).dataset.action as Action; }}>

@@ -27,7 +27,7 @@ const model: ModelDef = {
   constraints: [],
   bom: [{ id: "body", itemCode: '"BODY"', qty: 'size == "S" ? 1 : 2' }],
   routing: [{ id: "cut", resource: "SAW", setupMin: "10", runMinPerUnit: "1", ratePerHour: "60" }],
-  pricing: { priceExpr: "unitCost * 2", quoteItemCode: "BOX", priceList: 1, itemTable: "catalog" },
+  pricing: { margin: 50, quoteItemCode: "BOX", priceList: 1, itemTable: "catalog" },
   batchDefaults: [10],
 };
 
@@ -150,7 +150,7 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
     expect(project.candidates).toHaveLength(4);
 
     // Hand-check one candidate (size S, batch 10): material 1×3=3;
-    // labor ((10/10+1)/60)×60=2; unitCost 5; priceExpr ×2 → unitPrice 10; batchTotal 100.
+    // labor ((10/10+1)/60)×60=2; unitCost 5; margin 50% → unitPrice 10; batchTotal 100.
     const idx = project.candidates.findIndex((c) => c.assignment.size === "S");
     const outputs = project.candidates[idx]!.perBatch[0]!.outputs;
     expect(project.candidates[idx]!.perBatch[0]!.batchQty).toBe(10);
@@ -179,7 +179,7 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
       constraints: [],
       bom: [{ id: "body", itemCode: "material", qty: "1" }],
       routing: [],
-      pricing: { priceExpr: "unitCost", quoteItemCode: "BOX", priceList: 1, itemTable: "catalog" },
+      pricing: { margin: 0, quoteItemCode: "BOX", priceList: 1, itemTable: "catalog" },
       batchDefaults: [1],
     };
     await seedQueryTable("priced", ["ItemCode", "Price"]);
@@ -325,7 +325,7 @@ describe("config tables (integration)", () => {
     bom: [{ id: "sheet", itemCode: '"SHEET"', qty: "1" }],
     // the table's sum is the whole point: drilling time comes from the rows, not from a parameter
     routing: [{ id: "drill", resource: "CNC", setupMin: "5", runMinPerUnit: "holes_minutes", ratePerHour: "60" }],
-    pricing: { priceExpr: "unitCost * 2", quoteItemCode: "SHEET-CFG", priceList: 1, itemTable: "catalog" },
+    pricing: { margin: 50, quoteItemCode: "SHEET-CFG", priceList: 1, itemTable: "catalog" },
     batchDefaults: [3],
   };
 
@@ -644,7 +644,7 @@ describe.skipIf(!process.env.DATABASE_URL)("calculating with no agent at all", (
       }],
       structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["grade"] }] }] },
       bom: [],
-      pricing: { priceExpr: "unitCost", quoteItemCode: "BOX", priceList: 1 },
+      pricing: { margin: 0, quoteItemCode: "BOX", priceList: 1 },
     };
     const [m] = await db.insert(configModel)
       .values({ tenantId: offlineTenant, name: def.name, definition: def })

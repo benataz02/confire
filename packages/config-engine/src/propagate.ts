@@ -21,8 +21,29 @@ export function domainOf(model: ModelDef, lookups: ResolvedLookups, key: string)
   return [];
 }
 
+/** A hidden parameter (`visibleWhen` false) is null — its entry and its default ignored — so every
+ *  formula, rule and candidate reads it as unset. Hiding one can show or hide another, so this
+ *  reruns until the hidden set settles; a model whose visibility rules chase each other stops at a
+ *  pass per parameter, its hidden ones still nulled. */
 export function bindings(model: ModelDef, lookups: ResolvedLookups, entries: Entries, tableRows: TableRows = {}): Bindings {
+  let hidden = new Set<string>();
+  for (let pass = 0; ; pass++) {
+    const b = settle(model, lookups, entries, tableRows, hidden);
+    const next = new Set(model.parameters.filter((p) => !b.visible[p.key]).map((p) => p.key));
+    if ((next.size === hidden.size && [...next].every((k) => hidden.has(k))) || pass >= model.parameters.length) {
+      for (const k of next) b.values[k] = null;
+      return b;
+    }
+    hidden = next;
+  }
+}
+
+function settle(
+  model: ModelDef, lookups: ResolvedLookups, entries: Entries, tableRows: TableRows, hidden: Set<string>,
+): Bindings {
+  // A present key also keeps the default off.
   const values: Record<string, Val> = { ...entries };
+  for (const k of hidden) values[k] = null;
   const defaulted = new Set<string>();
   const visible: Record<string, boolean> = {};
   const tryEval = (src: string): Val | undefined => {
@@ -121,12 +142,13 @@ export function propagate(
   const conflicts: Propagation["conflicts"] = [];
   const domains: Record<string, DomainOption[]> = {};
   for (const p of model.parameters) {
-    if (p.excludeFromDomains) continue;
+    if (p.excludeFromDomains || !b.visible[p.key]) continue;
     const d = domainOf(model, lookups, p.key);
     if (d.length) domains[p.key] = d.map((o) => ({ ...o }));
     else if (p.key in lookups.domains) domains[p.key] = [];
   }
-  const isBound = (k: string) => k in b.values;
+  // A hidden parameter's null is no answer: unbound and domainless, a table rule's wildcard.
+  const isBound = (k: string) => k in b.values && b.visible[k] !== false;
   const paramKeys = new Set(model.parameters.map((p) => p.key));
   /** evaluate expr with a candidate binding merged in; recomputes defaults/computed */
   const evalWith = (src: string, extra: Entries): Val => {
@@ -256,7 +278,7 @@ export function propagate(
   }
 
   const open = model.parameters
-    .filter((p) => domains[p.key] && !(p.key in b.values) && b.visible[p.key])
+    .filter((p) => domains[p.key] && !(p.key in b.values))
     .map((p) => p.key);
   for (const k of open) {
     if (live(domains[k]!).length === 0)
@@ -319,14 +341,15 @@ export function missingInputs(
   return out;
 }
 
-/** One parameter's informational price: what its `priceExpr` says for the current value. */
+/** One parameter's per-unit cost: what its `priceExpr` says for the current value. */
 export type CostElement = { key: string; label: string; amount: number };
 
 /** Priced, visible parameters with an evaluable numeric priceExpr, in model order. The single
- *  source the per-field price badges and the process page's Costs card read — and, on the portal,
- *  what the server evaluates so the expression never leaves it (spec §7.2). Informational only:
- *  the calculated price still comes from computeOutputs (BOM + routing), untouched by this. */
-export function paramPrices(model: ModelDef, prop: Propagation, tables: ResolvedLookups["tables"]): CostElement[] {
+ *  source the per-field price badges read and computeOutputs adds to the unit cost (`other`) — and,
+ *  on the portal, what the server evaluates so the expression never leaves it (spec §7.2). */
+export function paramPrices(
+  model: ModelDef, prop: Pick<Bindings, "values" | "visible">, tables: ResolvedLookups["tables"],
+): CostElement[] {
   const out: CostElement[] = [];
   for (const p of model.parameters) {
     // a field the rules have switched off must not bill for itself

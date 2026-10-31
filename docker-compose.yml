@@ -10,7 +10,7 @@
 #   BETTER_AUTH_SECRET=...            openssl rand -base64 32
 #   POSTGRES_PASSWORD=...             openssl rand -hex 32 (set before the volume is first created)
 #   RESEND_API_KEY=re_...             a sending_access key; unset = mail is printed to the server log
-# DNS: A records for app and portal (and the apex, which redirects to sign-in). Every *.<DOMAIN>
+# DNS: A records for the apex (the marketing site), app and portal, optionally www. Every *.<DOMAIN>
 # host receives the session cookie: never point a name at a service you don't control.
 # Resend: verify mail.<DOMAIN> (SPF, DKIM, MX for the return path). Its region is fixed when the
 # domain is added, so pick EU vs US first.
@@ -59,6 +59,9 @@ services:
       # Mail (apps/server/src/mail): from mail.<DOMAIN> — notify@ for Confire's own, <slug>@ for a
       # tenant's client mail. No key = the console mailer.
       RESEND_API_KEY: ${RESEND_API_KEY:-}
+      # Where the marketing site's demo requests are mailed (portal process, demo-request.ts), Reply-To
+      # the requester. Unset = every request is refused with the site's error page and logged in full.
+      DEMO_INBOX: ${DEMO_INBOX:-}
       # Errors and traces from both processes to Sentry (apps/server/src/instrument.ts). Unset = none sent.
       SENTRY_DSN: ${SENTRY_DSN:-}
       # SAP agents (DEPLOY.md §8): pairing creates each tenant's tunnel and its name under AGENT_DOMAIN
@@ -108,6 +111,9 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
+      # The marketing site (apps/site): /home/deploy/site beside the checkout, filled by its own
+      # workflow (.github/workflows/site.yml -> deploy/site.sh). Read-only: Caddy only serves it.
+      - ../site:/srv/site:ro
     depends_on:
       - server
       - portal

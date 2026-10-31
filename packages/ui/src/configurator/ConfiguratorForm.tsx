@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   CheckBox, Form, FormGroup, FormItem, Icon, Input, Label, MultiComboBox, MultiComboBoxItem, MultiInput,
   ObjectPageSection, ObjectStatus, Option, RadioButton, SegmentedButton, SegmentedButtonItem, Select, Slider, Text, TextArea, Token,
@@ -196,7 +197,7 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
         </div>
       );
 
-    if (p.ui === "checkbox" || (p.type === "boolean" && p.ui !== "select")) {
+    if (p.ui === "checkbox" || (p.type === "boolean" && p.ui !== "select" && p.ui !== "dropdown")) {
       // a checkbox can only be toggled if flipping it isn't eliminated — that reason is also the tooltip.
       const blocked = dom.find((o) => o.value === (v !== true))?.unavailable;
       return (
@@ -221,6 +222,9 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
         </MultiComboBox>
       );
 
+    if (p.ui === "slider" && dom.length)
+      return <OptionSlider options={dom} value={v} label={p.label} disabled={disabled} onPick={(nv) => set(key, nv)} />;
+
     if (p.ui === "slider") {
       const r = p.domain?.kind === "range" ? p.domain : undefined;
       const shown = typeof v === "number" ? v : r?.min;
@@ -244,7 +248,7 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
           onChange={(e) => set(key, e.target.value || undefined)} />
       );
 
-    if (p.domain?.kind === "options" && p.domain.ref.source === "query") {
+    if (p.ui !== "dropdown" && p.domain?.kind === "options" && p.domain.ref.source === "query") {
       const ref: LookupRef = p.domain.ref;
       const canonical = tables[ref.table];
       // Label mode: the option's label shows, its key is the entry. The server binds the picked
@@ -257,7 +261,7 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
       );
     }
 
-    if (dom.length) { // select (and boolean-with-select)
+    if (dom.length) { // dropdown, a manual select (and boolean-with-select)
       return (
         <Select value={v === undefined ? "" : JSON.stringify(v)} style={{ width: "100%" }} disabled={disabled}
           {...reqProps}
@@ -341,7 +345,7 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
             // RadioButton and CheckBox take a valueState but have no valueStateMessage slot, and
             // Slider has neither, so the broken rule's message is spelled out under them instead.
             const ruleNote = !readOnly && !p.readonly && f.conflicts
-              && (p.ui === "radio" || p.ui === "checkbox" || p.ui === "slider" || (p.type === "boolean" && p.ui !== "select"));
+              && (p.ui === "radio" || p.ui === "checkbox" || p.ui === "slider" || (p.type === "boolean" && p.ui !== "select" && p.ui !== "dropdown"));
             return (
               <FormItem key={k} labelContent={
                 <Label required={f.required && !readOnly && !p.readonly} showColon>
@@ -428,6 +432,44 @@ export function BatchInput({ batches, onChange, label, valueState }: {
 
 /** ✦ (the AI colour, SAP blue) or 💬, pressable: its tip is the source (XAI level 1), a press opens
  *  the quote (level 2) or the question. */
+/** A slider over a list: one stop per option, in order, so uneven keys (4, 8, 16, 32) sit evenly —
+ *  the handle's position is the option's index, and the pick is that option's value. The picked
+ *  option's label sits under the handle and follows it while dragged. Not UI5's labelled
+ *  tickmarks: an empty label falls back to the stop's number, and a crowded track labels only its
+ *  ends; nor its tooltip, which would show the index. */
+function OptionSlider({ options, value, label, disabled, onPick }: {
+  options: FieldOption[];
+  value: Val | undefined;
+  label: string;
+  disabled?: boolean;
+  onPick: (v: Val) => void;
+}) {
+  const at = options.findIndex((o) => o.value === value);
+  const [dragged, setDragged] = useState<number>();
+  const shown = options[dragged ?? at]; // unset: the handle rests on the first stop, unlabelled
+  const pct = options.length > 1 ? ((dragged ?? Math.max(at, 0)) / (options.length - 1)) * 100 : 0;
+  return (
+    <div style={{ width: "100%" }}>
+      {/* The handle announces an index, so the label rides in the accessible name. */}
+      <Slider value={Math.max(at, 0)} min={0} max={options.length - 1} step={1} showTickmarks
+        accessibleName={shown ? `${label}, ${shown.label}` : label} style={{ width: "100%" }} disabled={disabled}
+        onInput={(e) => setDragged(e.target.value)}
+        onChange={(e) => {
+          setDragged(undefined);
+          const o = options[e.target.value];
+          if (o) onPick(o.value);
+        }} />
+      {/* The slider's own side padding insets its track, so the same padding puts 0% and 100% under
+          the track's ends; shifting the text by its own pct keeps it from running past either. */}
+      <div style={{ padding: "var(--_ui5_slider_root_side_padding)" }}>
+        <Text style={{ display: "block", width: "max-content", marginInlineStart: `${pct}%`, transform: `translateX(-${pct}%)` }}>
+          {shown?.label ?? ""}
+        </Text>
+      </div>
+    </div>
+  );
+}
+
 function MarkIcon({ mark, label, onPress }: { mark: FieldMark; label: string; onPress: (el: HTMLElement) => void }) {
   const tip = mark.kind === "assistant" ? mark.tip : label;
   return (

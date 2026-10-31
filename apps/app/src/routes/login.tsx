@@ -1,20 +1,20 @@
 import { createFileRoute, redirect, useRouter, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Input, Button, MessageStrip, List, ListItemStandard } from "@ui5/webcomponents-react";
+import { Icon, MessageStrip } from "@ui5/webcomponents-react";
 import { authClient, sessionQuery } from "../auth-client.ts";
 import { lobbyQuery } from "../orpc.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { SocialButtons } from "../components/SocialButtons.tsx";
 import { authUrl, hardRedirect, currentSlug, safeRedirect } from "@confire/ui/host.ts";
 import { authErrorMessage, notVerifiedMessage } from "@confire/ui/auth/messages.ts";
+import { AuthCard, AuthChip, AuthField, AuthHead, initials } from "@confire/ui/auth/AuthLayout.tsx";
 import { useI18n } from "../i18n.ts";
 
 type Place = {
   url: string;
   active: boolean;
   title: string;
-  icon: string;
   kind: "workspace" | "portal";
   cardName?: string;
   role?: string;
@@ -42,16 +42,16 @@ export const Route = createFileRoute("/login")({
   beforeLoad: async ({ context, search, location }) => {
     if (currentSlug()) return hardRedirect(authUrl(`/login${location.searchStr}`));
     const data = await context.queryClient.ensureQueryData(sessionQuery);
-    if (!data?.session) return { places: null };
+    if (!data?.session) return { places: null, email: "" };
     const to = safeRedirect(search.redirect);
     if (to) return hardRedirect(to);
     const { workspace, portals } = await context.queryClient.fetchQuery(lobbyQuery);
     if (!workspace && !portals.length) throw redirect({ to: "/onboarding" });
     if (workspace?.needsAgent) throw redirect({ to: "/onboarding" });
     const places: Place[] = [
-      ...(workspace ? [{ url: workspace.url, active: workspace.active, title: workspace.name, icon: "building", kind: "workspace" as const }] : []),
+      ...(workspace ? [{ url: workspace.url, active: workspace.active, title: workspace.name, kind: "workspace" as const }] : []),
       ...portals.map((p) => ({
-        url: p.url, active: p.active, title: p.tenantName, icon: "supplier", kind: "portal" as const,
+        url: p.url, active: p.active, title: p.tenantName, kind: "portal" as const,
         cardName: p.cardName, role: p.role,
       })),
     ];
@@ -59,14 +59,14 @@ export const Route = createFileRoute("/login")({
       const next = places.length === 1 ? places[0] : places.find((p) => p.active);
       if (next) return hardRedirect(next.url);
     }
-    return { places };
+    return { places, email: data.user.email };
   },
   component: Login,
 });
 
 function Login() {
-  const { places } = Route.useRouteContext();
-  return places ? <WhereTo places={places} /> : <SignIn />;
+  const { places, email } = Route.useRouteContext();
+  return places ? <WhereTo places={places} email={email} /> : <SignIn />;
 }
 
 function SignIn() {
@@ -102,28 +102,24 @@ function SignIn() {
 
   return (
     <AuthLayout>
-      <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_WELCOME")}</h2>
-      <p className="auth-sub">{i18n.getText("SHELL_AUTH_SIGN_IN_SUB")}</p>
-      {error ? <MessageStrip design="Negative" hideCloseButton>{error}</MessageStrip> : null}
-      <label className="auth-field">
-        <span>{i18n.getText("SHELL_AUTH_EMAIL")}</span>
-        <Input type="Email" value={email} onInput={(e) => setEmail(e.target.value)} />
-      </label>
-      <label className="auth-field">
-        <span>{i18n.getText("SHELL_AUTH_PASSWORD")}</span>
-        <Input
-          type="Password"
-          value={password}
-          onInput={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
+      <AuthHead title={i18n.getText("SHELL_AUTH_WELCOME")} lead={i18n.getText("SHELL_AUTH_SIGN_IN_SUB")} />
+      <AuthCard onSubmit={submit}>
+        {error ? <MessageStrip design="Negative" hideCloseButton>{error}</MessageStrip> : null}
+        <SocialButtons redirect={redirectTo} />
+        <div className="auth-or">{i18n.getText("SHELL_AUTH_OR")}</div>
+        <AuthField
+          label={i18n.getText("SHELL_AUTH_EMAIL")} type="email" name="email" autoComplete="username" required
+          value={email} onChange={(e) => setEmail(e.target.value)}
         />
-      </label>
-      <Button design="Emphasized" disabled={signIn.isPending} onClick={submit}>
-        {signIn.isPending ? i18n.getText("SHELL_AUTH_SIGN_IN_PENDING") : i18n.getText("SHELL_AUTH_SIGN_IN")}
-      </Button>
-      <p className="auth-alt"><Link to="/forgot-password">{i18n.getText("SHELL_AUTH_FORGOT")}</Link></p>
-      <div className="auth-or">{i18n.getText("SHELL_AUTH_OR")}</div>
-      <SocialButtons redirect={redirectTo} />
+        <AuthField
+          label={i18n.getText("SHELL_AUTH_PASSWORD")} type="password" name="password" autoComplete="current-password" required
+          aside={<Link to="/forgot-password">{i18n.getText("SHELL_AUTH_FORGOT")}</Link>}
+          value={password} onChange={(e) => setPassword(e.target.value)}
+        />
+        <button type="submit" className="auth-btn auth-btn--em" disabled={signIn.isPending}>
+          {signIn.isPending ? i18n.getText("SHELL_AUTH_SIGN_IN_PENDING") : i18n.getText("SHELL_AUTH_SIGN_IN")}
+        </button>
+      </AuthCard>
       <p className="auth-alt">
         {i18n.getText("SHELL_AUTH_NEW")} <Link to="/signup" search={{ redirect: redirectTo, email: invited }}>{i18n.getText("SHELL_AUTH_CREATE_ACCOUNT_LINK")}</Link>
       </p>
@@ -131,8 +127,9 @@ function SignIn() {
   );
 }
 
-/** More than one place (spec S6): the workspace first, then each supplier portal. */
-function WhereTo({ places }: { places: Place[] }) {
+/** More than one place (spec S6): the workspace first, then each supplier portal. Rows are plain links:
+ *  each is a full page load into its app, and open-in-new-tab works. */
+function WhereTo({ places, email }: { places: Place[]; email: string }) {
   const i18n = useI18n();
   const queryClient = useQueryClient();
   const signOut = async () => {
@@ -141,33 +138,33 @@ function WhereTo({ places }: { places: Place[] }) {
     window.location.assign("/login");
   };
   return (
-    <AuthLayout>
-      <h2 className="auth-h1">{i18n.getText("SHELL_AUTH_WHERE")}</h2>
-      <List
-        onItemClick={(e) => {
-          const url = (e.detail.item as HTMLElement).dataset.url;
-          if (url) void hardRedirect(url);
-        }}
-      >
+    <AuthLayout wide>
+      <AuthHead title={i18n.getText("SHELL_AUTH_WHERE")} lead={i18n.getText("SHELL_AUTH_SIGNED_IN_AS", email)} />
+      <AuthCard list>
         {places.map((p) => {
           const roleKey = p.role ? ROLE_KEY[p.role] : undefined;
           return (
-            <ListItemStandard
-              key={p.url}
-              data-url={p.url}
-              icon={p.icon}
-              description={p.kind === "workspace"
-                ? i18n.getText("SHELL_AUTH_YOUR_WORKSPACE")
-                : i18n.getText("SHELL_AUTH_CUSTOMER_PORTAL", p.cardName ?? "")}
-              additionalText={roleKey ? i18n.getText(roleKey) : p.role}
-            >
-              {p.title}
-            </ListItemStandard>
+            <a key={p.url} className="auth-place" href={p.url}>
+              {p.kind === "workspace"
+                ? <span className="auth-avatar auth-avatar--ws"><Icon name="building" /></span>
+                : <span className="auth-avatar">{initials(p.title)}</span>}
+              <span>
+                <b>{p.title}</b>
+                <small>{p.kind === "workspace"
+                  ? i18n.getText("SHELL_AUTH_YOUR_WORKSPACE")
+                  : i18n.getText("SHELL_AUTH_CUSTOMER_PORTAL", p.cardName ?? "")}</small>
+              </span>
+              <span className="auth-place__chips">
+                {p.role ? <AuthChip tone="neutral">{roleKey ? i18n.getText(roleKey) : p.role}</AuthChip> : null}
+                {p.active ? <AuthChip tone="info">{i18n.getText("SHELL_AUTH_LAST_USED")}</AuthChip> : null}
+              </span>
+              <Icon name="slim-arrow-right" />
+            </a>
           );
         })}
-      </List>
+      </AuthCard>
       <p className="auth-alt">
-        <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("SHELL_AUTH_SIGN_OUT")}</a>
+        {i18n.getText("SHELL_AUTH_NOT_YOU")} <a href="/login" onClick={(e) => { e.preventDefault(); void signOut(); }}>{i18n.getText("SHELL_AUTH_SIGN_OUT")}</a>
       </p>
     </AuthLayout>
   );

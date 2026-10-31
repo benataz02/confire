@@ -1,0 +1,96 @@
+/* Fiori components as plain HTML and CSS (spec §5.4), on every page. */
+
+/* ---------- Buttons ---------- */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; height: 2.25rem; padding: 0 1rem; border-radius: var(--sapButton_BorderCornerRadius);
+  font: 700 var(--sapFontSize) var(--sapFontFamily); text-decoration: none; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--sapButton_BorderColor); background: var(--sapButton_Background); color: var(--sapButton_TextColor);
+  transition: background .2s, transform .2s var(--ease), box-shadow .2s }
+.btn:hover { background: var(--sapButton_Hover_Background) }
+.btn:active { transform: scale(.98) }
+.btn.em { background: var(--sapButton_Emphasized_Background); border-color: var(--sapButton_Emphasized_BorderColor); color: var(--sapButton_Emphasized_TextColor);
+  box-shadow: 0 .5rem 1.5rem -.5rem var(--glow-brand) }
+.btn.em:hover { background: var(--sapButton_Emphasized_Hover_Background); box-shadow: 0 .75rem 2rem -.5rem var(--glow-brand) }
+.btn.lite { border-color: transparent; background: transparent; color: var(--sapButton_Lite_TextColor) }
+.btn.lite:hover { background: var(--sapButton_Lite_Hover_Background) }
+.btn.lg { height: 3rem; padding: 0 1.5rem; font-size: var(--sapFontLargeSize); border-radius: .75rem }
+.btn .arrow { transition: transform .2s var(--ease) }
+.btn:hover .arrow { transform: translateX(3px) }
+
+/* ---------- Shell bar ---------- */
+.shell { position: sticky; top: 0; z-index: 50; background: color-mix(in oklab, var(--sapShellColor) 78%, transparent);
+  backdrop-filter: saturate(1.6) blur(16px); -webkit-backdrop-filter: saturate(1.6) blur(16px); border-bottom: 1px solid var(--hairline) }
+.shell .wrap { display: flex; align-items: center; gap: .5rem; height: 3.5rem }
+.brand { display: flex; align-items: center; gap: .625rem; font: 900 1.1875rem var(--sapFontFamily); letter-spacing: -0.02em; color: var(--sapShell_InteractiveTextColor); text-decoration: none; margin-right: auto }
+.mark { width: 1.875rem; height: 1.875rem; flex: none }
+.nav { display: none; gap: .125rem; margin-right: .75rem }
+.nav a { color: var(--sapShell_InteractiveTextColor); text-decoration: none; font-size: var(--sapFontSize); padding: .5rem .75rem; border-radius: var(--sapButton_BorderCornerRadius); transition: background .2s }
+.nav a:hover { background: var(--sapButton_Lite_Hover_Background) }
+.desk { display: none }
+@media (min-width: 1024px) { .nav, .desk { display: inline-flex } .phone { display: none } }
+[popover] { border: 1px solid var(--hairline); padding: .375rem; border-radius: .75rem; background: var(--sapGroup_ContentBackground); color: var(--sapTextColor); box-shadow: var(--sapContent_Shadow2) }
+#menu { inset: 4rem .75rem auto auto; width: min(19rem, calc(100vw - 1.5rem)) }
+#lang { inset: 4rem 9rem auto auto; min-width: 11rem }
+[popover] a { display: flex; justify-content: space-between; padding: .75rem; color: var(--sapTextColor); text-decoration: none; border-radius: .5rem }
+[popover] a:hover { background: var(--sapButton_Lite_Hover_Background) }
+[popover] hr { border: 0; border-top: 1px solid var(--hairline); margin: .375rem 0 }
+
+/* ---------- Object status and chips ---------- */
+.os { display: inline-flex; align-items: center; gap: .3125rem; padding: .1875rem .5rem; border-radius: 1rem; font-size: var(--sapFontSmallSize); font-weight: 700; white-space: nowrap }
+.os .ico { width: .75rem; height: .75rem }
+.st-pos { color: var(--sapPositiveTextColor); background: color-mix(in oklab, var(--sapPositiveElementColor) 14%, transparent) }
+.st-pos .ico { fill: var(--sapPositiveElementColor) }
+.st-inf { color: var(--sapInformationColor); background: color-mix(in oklab, var(--sapInformativeElementColor) 13%, transparent) }
+.st-crit { color: var(--sapCriticalTextColor, var(--sapCriticalElementColor)); background: color-mix(in oklab, var(--sapCriticalElementColor) 14%, transparent) }
+.st-neg { color: var(--sapNegativeTextColor); background: color-mix(in oklab, var(--sapNegativeElementColor) 13%, transparent) }
+.st-ai { color: var(--ai-ink); background: var(--ai-wash) }
+.st-ai .ico { fill: var(--ai-ink) }
+
+/* ---------- Form ---------- */
+form { display: grid; gap: 1.125rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); align-content: start }
+.f { display: grid; gap: .375rem; min-width: 0 }
+.f.full { grid-column: 1 / -1 }
+.f label { font-size: var(--sapFontSize); color: var(--sapContent_LabelColor) }
+.f label i { color: var(--sapNegativeTextColor); font-style: normal }
+input, select, textarea { font: inherit; font-size: var(--sapFontLargeSize); color: var(--sapTextColor); background: var(--sapField_Background);
+  border: 1px solid var(--sapField_BorderColor); border-radius: .625rem; padding: .625rem .75rem; min-height: 2.75rem; width: 100%; transition: border-color .2s, box-shadow .2s }
+input:hover, select:hover, textarea:hover { border-color: var(--sapField_Hover_BorderColor) }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--sapField_Focus_BorderColor); box-shadow: 0 0 0 3px var(--brand-wash) }
+textarea { min-height: 6rem; resize: vertical }
+.trap { position: absolute; left: -9999px }
+.submit-row { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between }
+
+/* ---------- Plain pages: legal texts, thanks, errors ---------- */
+.page { padding: clamp(3rem, 2rem + 4vw, 6rem) 0; background: var(--sapShellColor); min-height: 60vh }
+.page .wrap { max-width: 46rem }
+.page h1 { font-size: clamp(2rem, 1.25rem + 3vw, 3.25rem); margin-bottom: 1.5rem }
+.page .lead { margin-bottom: 2rem }
+.crumbs { font-size: var(--sapFontSize); color: var(--sapContent_LabelColor); margin-bottom: 1.5rem }
+.crumbs a { color: inherit }
+.prose { color: var(--sapTextColor) }
+.prose h2 { font-size: 1.5rem; margin: 2.5rem 0 .75rem }
+.prose h3 { margin: 1.75rem 0 .5rem }
+.prose p, .prose ul, .prose ol, .prose table { margin: 0 0 1rem }
+.prose li { margin-bottom: .375rem }
+.prose table { width: 100%; border-collapse: collapse; font-size: var(--sapFontSize); display: block; overflow-x: auto }
+.prose th, .prose td { text-align: left; padding: .5rem; border-bottom: 1px solid var(--hairline); vertical-align: top }
+.prose th { color: var(--sapContent_LabelColor); font-weight: 700 }
+
+/* ---------- Footer ---------- */
+footer { border-top: 1px solid var(--hairline); padding: 4rem 0 2rem; font-size: var(--sapFontSize); background: var(--sapShellColor) }
+.foot { display: grid; gap: 2.5rem; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)) }
+.foot .about { grid-column: 1 / -1; max-width: 22rem }
+@media (min-width: 900px) { .foot { grid-template-columns: 2fr 1fr 1fr 1fr } .foot .about { grid-column: auto } }
+.foot h2 { font: 700 var(--sapFontSmallSize) var(--sapFontFamily); letter-spacing: .1em; text-transform: uppercase; color: var(--sapContent_LabelColor); margin-bottom: 1rem }
+.foot ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .625rem }
+.foot a, .foot .linkish { color: var(--sapTextColor); text-decoration: none } .foot a:hover, .foot .linkish:hover { color: var(--sapLinkColor) }
+.linkish { font: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left }
+.legal { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--hairline); display: flex; flex-wrap: wrap; gap: .75rem 2rem; justify-content: space-between; color: var(--sapContent_LabelColor); font-size: var(--sapFontSmallSize) }
+.legal a { color: inherit }
+
+/* ---------- Consent ---------- */
+.consent { position: fixed; right: 1rem; bottom: 1rem; left: 1rem; z-index: 60; max-width: 26rem; margin-left: auto; background: var(--glass); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--hairline); border-radius: 1.25rem; box-shadow: var(--sapContent_Shadow2); padding: 1.125rem 1.25rem; display: grid; gap: .875rem; font-size: var(--sapFontSize) }
+.consent[hidden] { display: none }
+.consent b { color: var(--sapTitleColor) }
+.consent .row { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem }
+.consent .btn { height: 2.75rem }

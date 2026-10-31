@@ -11,7 +11,7 @@ const model = {
   structure: { sections: [] },
   computed: [{ key: "area", expr: "1" }],
   constraints: [], bom: [], routing: [],
-  pricing: { priceExpr: "unitCost", quoteItemCode: "X", priceList: 1 },
+  pricing: { margin: 0, quoteItemCode: "X", priceList: 1 },
   batchDefaults: [1],
 } as ModelDef;
 

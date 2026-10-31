@@ -1,0 +1,55 @@
+<!doctype html>
+<!-- The placeholder brand assets (spec §13.1), rendered by scripts/assets.ts: share images, the logo
+     and the touch icon. Redone when the brand arrives. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="/src/generated/sap.css">
+<style>
+@font-face { font-family: "72"; src: url(/public/fonts/72-Regular.woff2) format("woff2"); font-weight: 400 }
+@font-face { font-family: "72"; src: url(/public/fonts/72-Bold.woff2) format("woff2"); font-weight: 700 }
+@font-face { font-family: "72"; src: url(/public/fonts/72-Black.woff2) format("woff2"); font-weight: 900 }
+* { box-sizing: border-box; margin: 0 }
+html, body { width: 100%; height: 100% }
+body { font-family: "72", sans-serif; -webkit-font-smoothing: antialiased; overflow: hidden }
+.mark { display: grid; place-items: center; background: var(--sapBrandColor); color: var(--sapButton_Emphasized_TextColor); font-weight: 900 }
+
+/* logo / touch: the "C" mark alone */
+[data-kind=logo] .og, [data-kind=touch] .og { display: none }
+[data-kind=logo] .solo { width: 100%; height: 100%; border-radius: 22%; font-size: 64vw; line-height: 1 }
+[data-kind=touch] .solo { width: 100%; height: 100%; font-size: 60vw; line-height: 1 }
+[data-kind=og] .solo { display: none }
+
+/* og: 1200×630, the hero in a frame */
+.og { position: relative; width: 100%; height: 100%; padding: 64px 80px; background: var(--sapShellColor); display: grid; align-content: space-between; isolation: isolate; overflow: hidden }
+.og::before { content: ""; position: absolute; inset: 0; z-index: -2; background-image: radial-gradient(color-mix(in oklab, var(--sapContent_LabelColor) 26%, transparent) 1.4px, transparent 1.8px); background-size: 26px 26px;
+  mask-image: radial-gradient(ellipse 80% 80% at 70% 40%, black 20%, transparent 80%) }
+.glow { position: absolute; z-index: -1; border-radius: 50%; filter: blur(20px) }
+.glow.b { width: 900px; height: 600px; left: -200px; bottom: -380px; background: radial-gradient(closest-side, color-mix(in oklab, var(--sapBrandColor) 30%, transparent), transparent) }
+.glow.a { width: 800px; height: 560px; right: -260px; bottom: -300px; background: radial-gradient(closest-side, color-mix(in oklab, var(--sapAssistant_Background) 26%, transparent), transparent) }
+.brand { display: flex; align-items: center; gap: 18px; font-size: 40px; font-weight: 900; letter-spacing: -0.02em; color: var(--sapTitleColor) }
+.brand .mark { width: 60px; height: 60px; border-radius: 18px; font-size: 34px }
+h1 { font-size: 76px; line-height: 1.03; font-weight: 900; letter-spacing: -0.03em; color: var(--sapTitleColor); max-width: 1000px; text-wrap: balance }
+.ai { background: var(--sapAssistant_BackgroundGradient); -webkit-background-clip: text; background-clip: text; color: transparent }
+.works { display: flex; gap: 32px; font-size: 24px; font-weight: 700; color: var(--sapTitleColor) }
+.works span { display: inline-flex; align-items: center; gap: 12px }
+.works span::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--sapPositiveElementColor) }
+</style>
+</head>
+<body>
+<div class="mark solo">C</div>
+<div class="og">
+  <span class="glow b"></span><span class="glow a"></span>
+  <div class="brand"><span class="mark">C</span>Confire</div>
+  <h1><span id="t"></span> <span class="ai" id="ai"></span></h1>
+  <div class="works"><span>SAP Business One</span><span>Beas Manufacturing</span><span>SAP HANA</span><span>Microsoft SQL Server</span></div>
+</div>
+<script>
+const q = new URLSearchParams(location.search);
+document.body.dataset.kind = q.get("kind");
+document.documentElement.lang = q.get("lang") || "en";
+document.getElementById("t").textContent = q.get("t") || "";
+document.getElementById("ai").textContent = q.get("ai") || "";
+</script>
+</body>
+</html>

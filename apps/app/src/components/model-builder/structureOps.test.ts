@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { checkModel, isTableGroup, placedTables, type ModelDef } from "@confire/config-engine";
 import { starterModel } from "./starterModel.ts";
+import { commitParam } from "../../features/model/parameter.ts";
 
 // The starter cannot name a price list — only the admin can pick one. Every other issue would be
 // a real structural problem, which is what these assertions are watching for.
@@ -113,16 +114,47 @@ test("deleteNodes takes several positions at once without one shifting the next"
   expect(gone.parameters).toEqual([]);
 });
 
+test("a formula goes with its parameter, however the parameter went; an untied one stays", () => {
+  const m = model();
+  m.computed = [{ key: "a", expr: "width", param: "width" }, { key: "b", expr: "1" }];
+  expect(deleteNodes(m, [{ kind: "group", s: 0, g: 0 }]).computed.map((c) => c.key)).toEqual(["b"]);
+  expect(deleteNodes(m, [{ kind: "param", key: "width" }]).computed.map((c) => c.key)).toEqual(["b"]);
+});
+
+test("a copied formula is tied to its parameter's copy when that is copied too", () => {
+  const m = model();
+  m.computed = [{ key: "a", expr: "width", param: "width" }];
+  const both = [{ kind: "param", key: "width" }, { kind: "formula", i: 0 }] as const;
+  expect(duplicateNodes(m, [...both], copyKeys(m, [...both])).computed[1]).toEqual({ key: "a2", expr: "width2", param: "width2" });
+  const alone = [{ kind: "formula", i: 0 }] as const;
+  expect(duplicateNodes(m, [...alone], copyKeys(m, [...alone])).computed[1]).toEqual({ key: "a2", expr: "width", param: "width" });
+});
+
 test("a row inside a picked section or group is not acted on twice", () => {
   const refs = outermost(model(), [{ kind: "section", s: 0 }, { kind: "group", s: 0, g: 0 }, { kind: "param", key: "width" }, { kind: "group", s: 1, g: 0 }]);
   expect(refs).toEqual([{ kind: "section", s: 0 }, { kind: "group", s: 1, g: 0 }]);
 });
 
-test("a formula row is addressed by index and never dragged", () => {
+test("a formula row is addressed by index", () => {
   expect(parseRowKey("c:2")).toEqual({ kind: "formula", i: 2 });
   expect(rowKeyOf({ kind: "formula", i: 2 })).toBe("c:2");
-  expect(canDrop(model(), "c:0", "p:width", "After")).toBe(false);
-  expect(canDrop(model(), "p:width", "c:0", "Before")).toBe(false);
+});
+
+test("a formula drags onto a parameter, which ties it, or beside a formula, whose tie it takes", () => {
+  const m = model();
+  m.parameters.push({ key: "depth", label: "Depth", type: "number", ui: "input" });
+  (m.structure.sections[1]!.groups[0] as { params: string[] }).params.push("depth");
+  m.computed = [{ key: "a", expr: "1", param: "width" }, { key: "b", expr: "2", param: "depth" }, { key: "c", expr: "3" }];
+  expect(canDrop(m, "c:0", "p:depth", "Before")).toBe(false);
+  expect(canDrop(m, "c:0", "c:1", "On")).toBe(false);
+  expect(canDrop(m, "c:0", "g:1.0", "On")).toBe(false);
+  expect(canDrop(m, "p:width", "c:0", "Before")).toBe(false);
+  const ties = (d: typeof m) => d.computed.map((c) => `${c.key}:${c.param ?? "-"}`);
+  // On: its last formula; just below it: its first.
+  expect(ties(applyMove(m, "c:0", "p:depth", "On"))).toEqual(["b:depth", "c:-", "a:depth"]);
+  expect(ties(applyMove(m, "c:0", "p:depth", "After"))).toEqual(["a:depth", "b:depth", "c:-"]);
+  expect(ties(applyMove(m, "c:2", "c:1", "Before"))).toEqual(["a:width", "c:depth", "b:depth"]);
+  expect(ties(applyMove(m, "c:0", "c:2", "After"))).toEqual(["b:depth", "c:-", "a:-"]);
 });
 
 test("the items grid is the one row that is neither deleted nor copied", () => {
@@ -182,4 +214,16 @@ test("placeParam lands in a field group, not a table group", () => {
   const m = placeParam(model(), "width", 1, 0);
   expect(m.structure.sections[1]!.groups[0]).toEqual({ key: "g2", title: "G2", params: ["width"] });
   expect(groupKinds(m, 0)).toEqual(["group:g", "table:items"]);
+});
+
+// The parameter page's position is the URL's, and a reload drops a group added unsaved: a new
+// parameter still lands in a group, never in none.
+test("a new parameter whose position holds no field group lands in the last one", () => {
+  const p = { key: "len", label: "Len", type: "number" as const, ui: "input" as const };
+  for (const place of [undefined, { s: 0, g: 1 }, { s: 5, g: 0 }]) {
+    const m = commitParam(model(), p, undefined, place);
+    expect(m.structure.sections[1]!.groups[0]).toEqual({ key: "g2", title: "G2", params: ["len"] });
+  }
+  const noGroup = { ...model(), structure: { sections: [{ key: "main", title: "Main", groups: [{ table: "items" }] }] } };
+  expect(commitParam(noGroup, p, undefined, { s: 0, g: 0 })).toBe(noGroup);
 });

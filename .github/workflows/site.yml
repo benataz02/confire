@@ -1,0 +1,39 @@
+# The marketing site (apps/site, spec 2026-10-30 §11.2) ships on its own: a copy fix is never an app
+# release, and an app release never waits for the site. Build, run the site's gates, then stream dist
+# to the server, where deploy/site.sh (the forced command of SITE_SSH_KEY) switches ~/site/current.
+# Repo settings (DEPLOY.md §6): secrets SITE_SSH_KEY and DEPLOY_KNOWN_HOSTS, variable DEPLOY_HOST.
+name: site
+# Manual for now, like deploy.yml. Once push-to-deploy returns, add:
+#   push: { branches: [main], paths: ["apps/site/**"] }
+on:
+  workflow_dispatch:
+concurrency: site
+permissions:
+  contents: read
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Astro's CLI runs on Node; everything else is Bun, the image's version.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4"
+      - run: bun install --frozen-lockfile
+      # The prebuild fails on a raw colour or an unknown SAP variable; astro build on a missing key.
+      - run: bun run build:site
+      # Built HTML, SEO, budgets, consent, deploy script, and the browser checks on the runner's Chrome.
+      - run: CHROME=$(which google-chrome) bun test apps/site
+      - name: Deploy
+        env:
+          SSH_KEY: ${{ secrets.SITE_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          tar -C apps/site/dist -czf - . | ssh deploy@"$HOST" "$GITHUB_SHA"

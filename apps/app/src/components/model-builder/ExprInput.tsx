@@ -102,12 +102,17 @@ export function ExprInput({
           growingMaxRows={rows + 5}
           value={text}
           placeholder={placeholder}
-          valueState={error ? "Negative" : "None"}
+          // Not while the list is open: the half-typed token is "unknown" by definition, and the
+          // message's popup would sit over the list (Input hides it the same way).
+          valueState={error && !shown ? "Negative" : "None"}
           valueStateMessage={<div>{errorText}</div>}
           onInput={(e) => {
             // Escape reverts the whole edit unless its input event is cancelled: with the list
             // open, Escape only means "close the list". A keystroke's detail is null, typings aside.
-            if (e.detail?.escapePressed && shown) { e.preventDefault(); setOpen(false); return; }
+            // The list itself is closed by UI5's popup registry, which shuts the topmost popup on
+            // the same keydown (onClose below): closing it here first hands that Escape on to
+            // whatever is under it — a Dialog round the box closed too.
+            if (e.detail?.escapePressed && shown) { e.preventDefault(); return; }
             const v = e.target.value;
             // Completion replaces the trailing token, so it is only offered with the caret at the end.
             // ponytail: caret-aware completion mid-formula needs the caret restored after the write.

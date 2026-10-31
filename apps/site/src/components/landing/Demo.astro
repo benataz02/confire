@@ -1,0 +1,32 @@
+---
+import Icon from "../Icon.astro";
+import { dict, type Lang } from "../../i18n/index.ts";
+import { localePath } from "../../lib/urls.ts";
+
+// A plain form POST, so it works with JavaScript off (spec §9). Caddy sends it to the portal process.
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+const t = dict[lang].demo;
+---
+<section id="demo">
+  <div class="wrap cta-wrap">
+    <span class="glow b" aria-hidden="true"></span><span class="glow a" aria-hidden="true"></span>
+    <div class="cta rv">
+      <div>
+        <span class="eyebrow">{t.eyebrow}</span>
+        <h2>{t.title}</h2>
+        <ol class="next">{t.next.map((n) => <li><div><b>{n.title}</b>{n.text}</div></li>)}</ol>
+      </div>
+      <form method="post" action="/api/demo-request">
+        <input type="hidden" name="lang" value={lang}>
+        <div class="f"><label for="n">{t.name} <i aria-hidden="true">*</i></label><input id="n" name="name" required maxlength="200" autocomplete="name"></div>
+        <div class="f"><label for="e">{t.email} <i aria-hidden="true">*</i></label><input id="e" name="email" type="email" required maxlength="254" autocomplete="email"></div>
+        <div class="f"><label for="c">{t.company} <i aria-hidden="true">*</i></label><input id="c" name="company" required maxlength="200" autocomplete="organization"></div>
+        <div class="f"><label for="s">{t.setup}</label><select id="s" name="setup">{t.setups.map((o) => <option>{o}</option>)}</select></div>
+        <div class="f full"><label for="msg">{t.message}</label><textarea id="msg" name="message" maxlength="5000" placeholder={t.placeholder}></textarea></div>
+        <input class="trap" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <div class="submit-row"><span class="tiny muted">{t.privacy} <a href={localePath(lang, "/privacy/")}>{t.privacyLink}</a></span><button class="btn em lg" type="submit">{t.submit}<Icon name="arrow-right" class="arrow" /></button></div>
+      </form>
+    </div>
+  </div>
+</section>

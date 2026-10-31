@@ -1,0 +1,27 @@
+---
+import Icon from "../Icon.astro";
+import { dict, type Lang } from "../../i18n/index.ts";
+
+interface Props { lang: Lang }
+const t = dict[Astro.props.lang].why;
+const oldIcons = ["email", "list", "document-text"] as const;
+const newIcons = ["ai", "decision", "sales-quote"] as const;
+---
+<section>
+  <div class="wrap">
+    <div class="sec-head rv"><span class="eyebrow">{t.eyebrow}</span><h2>{t.title}</h2></div>
+    <div class="ba">
+      <div class="ba-card ba-old rv">
+        <div><h3>{t.today}</h3><p class="small muted card-lead">{t.todayLead}</p></div>
+        <ol class="ba-steps">{t.todaySteps.map((s, i) => <li><span class="ba-dot"><Icon name={oldIcons[i]!} /></span><div><b>{s.title}</b><span>{s.text}</span></div></li>)}</ol>
+        <div class="ba-time"><strong>{t.todayTime}</strong><span class="small muted">{t.todayTimeNote}</span></div>
+      </div>
+      <div class="ba-card ba-new rv">
+        <div><h3>{t.with}</h3><p class="small muted card-lead">{t.withLead}</p></div>
+        <ol class="ba-steps">{t.withSteps.map((s, i) => <li><span class:list={["ba-dot", i === 0 && "ai"]}><Icon name={newIcons[i]!} /></span><div><b>{s.title}</b><span>{s.text}</span></div></li>)}</ol>
+        <div class="ba-time"><strong class="ai-text">{t.withTime}</strong><span class="small muted">{t.withTimeNote}</span></div>
+      </div>
+    </div>
+    <p class="tiny muted footnote">{t.footnote}</p>
+  </div>
+</section>

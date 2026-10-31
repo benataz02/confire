@@ -33,7 +33,7 @@ const PRICED: ModelDef = {
   constraints: [],
   bom: [{ id: "body", itemCode: '"BODY"', qty: 'size == "S" ? 1 : 2' }],
   routing: [],
-  pricing: { priceExpr: "unitCost * 2", quoteItemCode: "BOX", priceList: 1, itemTable: "catalog" },
+  pricing: { margin: 50, quoteItemCode: "BOX", priceList: 1, itemTable: "catalog" },
   batchDefaults: [10, 20],
 };
 const ITEMS = [{ itemcode: "P1", itemname: "Part 1", quantity: 1 }, { itemcode: "P2", itemname: "Part 2", quantity: 2 }];
@@ -165,14 +165,27 @@ describe.skipIf(!process.env.DATABASE_URL)("the configuration process", () => {
     await s.sync(5);
     expect(price(await call(router.configs.get, { id }, s.ctx))).toBeCloseTo(10);
 
-    await db.update(configModel).set({ definition: { ...PRICED, pricing: { ...PRICED.pricing, priceExpr: "unitCost * 3" } }, updatedAt: later(2) })
+    await db.update(configModel).set({ definition: { ...PRICED, pricing: { ...PRICED.pricing, margin: 75 } }, updatedAt: later(2) })
       .where(eq(configModel.id, s.modelId));
-    expect(price(await call(router.configs.get, { id }, s.ctx))).toBeCloseTo(15);
+    expect(price(await call(router.configs.get, { id }, s.ctx))).toBeCloseTo(20);
 
     await db.update(configProject).set({ status: "quoted" }).where(eq(configProject.id, id));
     await s.sync(7);
     const v = await call(router.configs.get, { id }, s.ctx);
-    expect([v.project.status, price(v)]).toEqual(["quoted", 15]);
+    expect([v.project.status, price(v)]).toEqual(["quoted", 20]);
+  });
+
+  test("a configuration's margin prices over the model's, recalculates, and is the staff's alone", async () => {
+    const s = await setup(PRICED, 3);
+    const id = await s.create();
+    const v = await s.calc({ id, set: { size: "S" }, tables: { items: ITEMS } });
+    expect([v.margin, v.candidates.rows[0]!.perBatch[0]!.unitPrice]).toEqual([50, 6]); // cost 3
+    const own = await s.calc({ id, margin: 75 });
+    expect([own.margin, own.candidates.rows[0]!.perBatch[0]!.unitPrice]).toEqual([75, 12]);
+    expect((await load(id)).margin).toBe(75);
+    const back = await s.calc({ id, margin: null });
+    expect([back.margin, back.candidates.rows[0]!.perBatch[0]!.unitPrice]).toEqual([50, 6]);
+    await expect(s.calc({ id, margin: 100 })).rejects.toThrow();
   });
 
   test("the calculation's write: a patch landing between its read and its write is not undone", async () => {

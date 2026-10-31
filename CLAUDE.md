@@ -14,7 +14,8 @@ docker compose up -d db                 # Postgres 17 on :5432 (dev runs server/
 bun install
 bun run dev                             # sign in at http://localhost:5173/login; staff app
                                         # localhost:5173/<slug>/ (server :3000), portal
-                                        # localhost:5180/<slug>/ (server :3001), agent :4000
+                                        # localhost:5180/<slug>/ (server :3001), the marketing
+                                        # site localhost:4321, agent :4000
                                         # (Go: `go run . run` in apps/agent — Go must be installed)
 bun run dev:pair                        # pair a real SAP server's agent with dev: a public quick
                                         # tunnel to :3000; on that server run `confire-agent.exe
@@ -25,6 +26,9 @@ bun run dev:pair                        # pair a real SAP server's agent with de
 bun run db:push                         # drizzle-kit push: dev's schema sync, never production's
 bun run db:generate                     # a schema change's migration SQL — commit it with the change
 bun run auth:generate                   # regenerate schema/auth.ts after a Better Auth config change
+bun run build:site                      # apps/site → apps/site/dist (its prebuild first, see below)
+bun run test:site                       # the site's tests; the dist ones need build:site first,
+                                        # the browser ones CHROME=<a Chromium executable>
 ```
 
 The Better Auth CLI is the `auth` package (`@better-auth/cli` stopped at 1.4). Its version is pinned
@@ -35,7 +39,8 @@ tsconfig that covers everything, so a change can typecheck in one package and br
 
 ```bash
 bunx tsc -p apps/server/tsconfig.json --noEmit
-# projects: packages/{b1,config-engine,db,ui}, apps/{server,app,portal}
+# projects: packages/{b1,config-engine,db,ui}, apps/{server,app,portal,site}
+# (apps/site: `bun --cwd apps/site astro sync` first, which writes the content collections' types)
 bun --cwd apps/app build                # also regenerates routeTree.gen.ts (gitignored)
 bun --cwd apps/portal build             # same, for the portal's route tree
 ```
@@ -220,7 +225,17 @@ fields in Settings → Portal (`portalSettings`, one jsonb `portal_settings` doc
 `docFields`). The portal plugs `docs.*` into `UiSource`, so the shells run unchanged. Print is Preview
 only, in both apps (`@confire/ui/PrintActions.tsx`).
 
-There is no bot check and no supplier branding on sign-in: account mail is always Confire's. Host
+There is no bot check and no supplier branding on sign-in: account mail is always Confire's. The pages
+before an app (sign-in, sign-up, password, Where to?, setup, the portal's invitation pages) share one
+frame, `@confire/ui/auth/AuthLayout.tsx` (`docs/superpowers/specs/2026-10-31-auth-pages-redesign-design.md`):
+the marketing site's look over UI5's theme, every colour a Horizon variable, fields native in a real
+`<form>` so password managers fill them (UI5's Input has no `autocomplete`). The theme follows the OS
+(Horizon Auto) until a user picks one in the user menu (`appearance.ts`). Each `main.tsx` awaits it
+before its first render: UI5 always boots in Morning, because the bundle runs UI5's shared chunks
+before main.tsx's own imports register the other themes (and UI5 drops a theme registered mid-boot).
+Until then `index.html` paints Horizon's shell colour by the OS, and the build preloads the 72 fonts
+UI5's `@font-face` names (`preloadFonts.ts`) — together, the step from confire.ai has no white, grey or
+textless frame. Host
 rules for both SPAs (the path's slug, the two origins, `safeRedirect` — an absolute URL on one of the
 two origins) are `@confire/ui/host.ts`. The SPAs carry no build setting: each reads its origins off
 its own location (`app.<domain>` / `portal.<domain>`, any other host = dev's `:5173` / `:5180`), so
@@ -228,17 +243,43 @@ one image serves any domain.
 
 **`DOMAIN` is the whole deployment** (`tenant.ts`): `DOMAIN=confire.ai` puts the staff app and sign-in
 on `https://app.confire.ai`, the portal on `https://portal.confire.ai`, the cookie on `confire.ai` and
-Confire's mail on `mail.confire.ai`; the apex only redirects to sign-in. Unset is dev: `localhost:5173`
+Confire's mail on `mail.confire.ai`; the apex is the marketing site (below), static files Caddy serves. Unset is dev: `localhost:5173`
 and `localhost:5180`. **Every `*.confire.ai` host receives the session cookie: never point a name
 under it at a service this stack does not control** (a subdomain takeover would collect sessions).
 There is no exception: customer agents live on a separate registrable domain (`AGENT_DOMAIN`,
 `confire.app`) behind one wildcard Access *Service Auth* application, so the cookie can never reach a
 customer's machine — and nothing that sets a cookie is ever served under `confire.app`. The production runbook (first deploy, shipping a change, migrations, backup and restore, agents) is `DEPLOY.md`;
 `deploy/update.sh` ships a version and the compose `backup` service dumps Postgres to R2 nightly.
-Caddy has two fixed sites plus the apex redirect, certificates from Let's Encrypt over the HTTP
+Caddy has two fixed sites plus the apex (the site's files) and its `www` redirect, certificates from Let's Encrypt over the HTTP
 challenge (Caddy's automatic HTTPS) — no wildcard, no DNS API. There is no local full stack: dev is
 `bun run dev` on localhost, and compose has no `DOMAIN` default (unset = localhost URLs, which no
 deployment serves).
+
+## The marketing site
+
+`apps/site` is `confire.ai` (`docs/superpowers/specs/2026-10-30-marketing-site-design.md`): Astro,
+static HTML and CSS with no framework runtime and **no UI5** (its components render only in a browser,
+so a crawler would see empty tags). The Fiori look comes from SAP's own files:
+`scripts/prebuild.ts` prunes Horizon's variables (`sap_horizon` / `sap_horizon_dark`) to the ones the
+site's CSS uses. It writes them into `src/generated/sap.css`, which `Base.astro` inlines, following
+`prefers-color-scheme`, with `.evening` for the dark security band. It also copies the 72 fonts and
+inlines the icons' SVG paths. **Every colour is a SAP variable or a `color-mix()` of them.** The
+prebuild fails the build on a raw colour, and the variable list it writes (`brand-contract.txt`) is
+what a future `brand.css` overrides. Copy is one typed dictionary per language (`src/i18n/{en,es,eu}.ts`,
+English's shape is the type, so a missing key is a type error); long pages are Markdown per language
+(`src/content/legal/<lang>/`). English at `/`, `/es/`, `/eu/`, paths English in every language, never
+an `Accept-Language` redirect. Unlike the SPAs it has a build setting (`site`): canonicals, hreflang
+and the sitemap are absolute. `src/site.config.ts` holds the undecided values (contact address,
+Plausible, pixel IDs); empty renders nothing. Ad pixels load only after consent (`Consent.astro`,
+`lib/consent.ts`); the only JS is that and Plausible.
+
+It **deploys on its own** (`.github/workflows/site.yml` → `deploy/site.sh`, DEPLOY.md §16): Caddy
+serves `~/site/current`, a link each deploy switches, so a copy fix is never an app release. The demo
+form is the one server part: `POST /api/demo-request` on the **portal** process (`demo-request.ts`),
+which **awaits** the mail to `DEMO_INBOX` (the request's only record, unlike every other mail) and
+answers 303 to `/<lang>/thanks/` or `/<lang>/demo-error/`. Because the apex is same-site with `app.`
+and runs ad scripts, `serve.ts` refuses any non-GET whose `Origin` is not the process's own (Better
+Auth and the demo form aside).
 
 ## Mail
 
@@ -340,8 +381,9 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   minute per user. Env read with `||`, not `??`: compose passes an unset variable as `""`.
 - **The panel** (`AssistantPanel.tsx`) is shell state (`AssistantProvider` around `AppShell`), floating
   over the page's right edge. **AI configuration** (`AssistantPage.tsx`, the home tile) is a page of its
-  own: one chat under a `Bar` whose UI5 `Search` is the user's chats (a click opens the list; the
-  title's menu pins, renames, deletes), `/assistant` = a new one, `/assistant/$id` = the chat's id,
+  own: one chat under a `Bar` (the title's menu pins, renames, deletes); its chats are found with the
+  shell's search, which the page scopes to Chats and pulses on arrival (`GlobalSearch`),
+  `/assistant` = a new one, `/assistant/$id` = the chat's id,
   never a configuration's. Both draw `ChatView.tsx`. The page's empty chat is a `HeroBanner` with the
   greeting and the chat box inside, the first send moving the box to the chat's foot (a view transition);
   the panel keeps Joule's gradient head, whose greeting collapses once the chat starts. The panel is not
@@ -383,7 +425,10 @@ propagation into the plain-JSON form both pages draw (and the preview builds the
 
 A `ModelDef` (one jsonb document) → `propagate` (iterate defaults/computed/visibility to a fixed
 point, eliminate impossible options) → `enumerate` (DFS over open parameters, capped at 200
-candidates) → `computeOutputs` (BOM, routing, cost, price). `dsl.ts` is a small hand-written
+candidates) → `computeOutputs` (BOM, routing, cost, price: material + operations + the visible
+parameters' `priceExpr` — "other" — are the unit cost, and the price is that cost ÷ (1 − margin);
+the margin is a share of the price, `pricing.margin` unless the configuration's own
+`config_project.margin` is set, laid over the model by `liveEngine`/`liveProject`). `dsl.ts` is a small hand-written
 expression language; `check.ts` validates a whole model and is the gate on save, so a model that
 saves cannot produce a parse/unknown-ref error at runtime.
 

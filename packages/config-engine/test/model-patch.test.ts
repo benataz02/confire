@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { applyModelPatch, diffModel, isEmptyPatch, ModelPatchZ } from "../src/model-patch";
 import type { ModelDef } from "../src/model";
-import { model } from "./fixture";
+import { fieldGroup, model } from "./fixture";
 
 const roundTrip = (a: ModelDef, b: ModelDef) => applyModelPatch(a, ModelPatchZ.parse(diffModel(a, b)));
 /** Every object's keys in reverse, as a jsonb read hands them back in an order of its own. */
@@ -31,6 +31,8 @@ describe("diffModel", () => {
       next.parameters[0]!,
       { ...next.parameters[1]!, key: "crossSection" },
     ];
+    fieldGroup(next, 0, 0).params = ["material", "crossSection"];
+    fieldGroup(next, 0, 1).params = ["coated", "length"];
     next.computed = [];
     const p = diffModel(model, next);
     expect(p.parameters?.remove?.sort()).toEqual(["color", "section"]);
@@ -63,6 +65,7 @@ describe("applyModelPatch", () => {
     const theirs = structuredClone(model);
     theirs.parameters[2] = { ...theirs.parameters[2]!, label: "Coating" };
     theirs.parameters.push({ key: "length", label: "Length", type: "number", ui: "input" });
+    fieldGroup(theirs, 0, 1).params.push("length");
     const out = applyModelPatch(theirs, diffModel(model, mine));
     expect(out.parameters.map((x) => x.label)).toEqual(["Material", "Cross-section", "Coating", "Coating color", "Length"]);
   });
@@ -80,7 +83,45 @@ describe("applyModelPatch", () => {
     mine.parameters = [mine.parameters[1]!, mine.parameters[0]!, mine.parameters[2]!, mine.parameters[3]!];
     const theirs = structuredClone(model);
     theirs.parameters.push({ key: "length", label: "Length", type: "number", ui: "input" });
+    fieldGroup(theirs, 0, 1).params.push("length");
     const out = applyModelPatch(theirs, diffModel(model, mine));
     expect(out.parameters.map((x) => x.key)).toEqual(["section", "material", "coated", "color", "length"]);
+  });
+
+  // Parameters merge per key, the structure goes whole: a save diffed against a copy older than
+  // another tab's save sends a structure that never heard of the parameter added there.
+  test("a parameter added meanwhile stays in its group when a stale save rewrites the structure", () => {
+    const theirs = structuredClone(model);
+    theirs.parameters.push({ key: "length", label: "Length", type: "number", ui: "input" });
+    fieldGroup(theirs, 0, 1).params.push("length");
+    const mine = structuredClone(model);
+    fieldGroup(mine, 0, 0).title = "Wire";
+    const out = applyModelPatch(theirs, diffModel(model, mine));
+    expect(out.parameters.map((x) => x.key)).toContain("length");
+    expect(out.structure).toEqual({
+      sections: [{ ...mine.structure.sections[0]!, groups: [fieldGroup(mine, 0, 0), { ...fieldGroup(mine, 0, 1), params: ["coated", "color", "length"] }] }],
+    });
+  });
+
+  test("a stale save deleting the group a parameter was added to deletes the parameter and its formulas", () => {
+    const theirs = structuredClone(model);
+    theirs.parameters.push({ key: "length", label: "Length", type: "number", ui: "input" });
+    theirs.computed.push({ key: "twice", expr: "length * 2", param: "length" });
+    fieldGroup(theirs, 0, 1).params.push("length");
+    const mine = structuredClone(model);
+    mine.structure.sections[0]!.groups.pop();
+    mine.parameters = mine.parameters.filter((p) => p.key !== "coated" && p.key !== "color");
+    const out = applyModelPatch(theirs, diffModel(model, mine));
+    expect(out.parameters.map((x) => x.key)).toEqual(["material", "section"]);
+    expect(out.computed.map((c) => c.key)).toEqual(["weight"]);
+    expect(out.structure).toEqual(mine.structure);
+  });
+
+  test("a parameter stored in no group goes on the next save", () => {
+    const stored = structuredClone(model);
+    stored.parameters.push({ key: "lost", label: "Lost", type: "string", ui: "input" });
+    const mine = structuredClone(stored);
+    mine.description = "x";
+    expect(applyModelPatch(stored, diffModel(stored, mine)).parameters.map((x) => x.key)).not.toContain("lost");
   });
 });

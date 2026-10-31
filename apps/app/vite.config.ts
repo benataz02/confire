@@ -1,11 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import { preloadFonts } from "../../packages/ui/src/preloadFonts.ts";
 
 // Dev proxy keeps the SPA same-origin with the API, so Better Auth cookies just work
 // and there's no CORS to configure. ponytail: proxy over CORS.
 export default defineConfig({
-  plugins: [tanstackRouter({ target: "react", autoCodeSplitting: true }), react()],
+  plugins: [tanstackRouter({ target: "react", autoCodeSplitting: true }), react(), preloadFonts()],
   // @confire/ui is a workspace package with its own node_modules. Bun links equal versions to one
   // store entry, but a drifted range would give the shells a second React or QueryClient context
   // (and UI5 a second custom-element registry) — dedupe makes that impossible rather than unlikely.

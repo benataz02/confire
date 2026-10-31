@@ -1,0 +1,88 @@
+---
+import Icon from "../Icon.astro";
+import { dict, money, type Lang } from "../../i18n/index.ts";
+
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+const d = dict[lang], t = d.product, s = d.hero.stage;
+// Illustrative figures (spec §15): material / operations / margin shares per quantity break.
+const bars = [[1, 21900, [52, 30, 18]], [4, 18450, [50, 24, 26]], [10, 16980, [49, 19, 32]]] as const;
+const lines = [["CV-FR-12", 9200], ["DR-55", 5150], ["BT-800", 4100]] as const;
+const statuses = ["st-inf", "st-crit", "st-pos"];
+---
+<section id="product">
+  <div class="wrap">
+    <div class="sec-head rv"><span class="eyebrow">{t.eyebrow}</span><h2>{t.title}</h2><p class="lead">{t.lead}</p></div>
+    <div class="bento">
+
+      <article class="tile t-a ai-tile rv">
+        <div><span class="os st-ai badge"><Icon name="ai" />{t.ai.badge}</span><h3>{t.ai.title}</h3><p>{t.ai.text}</p></div>
+        <div class="split2">
+          <div class="ui">
+            <div class="ui-row"><span class="muted">{t.ai.product}</span><span class="val">{s.product} <Icon name="ai" /></span></div>
+            <div class="ui-row"><span class="muted">{t.ai.customer}</span><span class="val">Talleres Ibarra <Icon name="ai" /></span></div>
+            <div class="ui-row"><span class="muted">{t.ai.length}</span><span class="val">{s.lengthValue} <Icon name="ai" /></span></div>
+            <div class="ui-row"><span class="muted">{t.ai.finish}</span><span class="os st-crit">{t.ai.notInRequest}</span></div>
+          </div>
+          <div class="ui ask">
+            <span class="tiny muted">{t.ai.assistant}</span>
+            <div class="bubble">{t.ai.question}</div>
+            <div class="bubble-q"><span class="qchip">{t.ai.stainless}</span><span class="qchip">{t.ai.painted}</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="tile t-b rv">
+        <div><h3>{t.rules.title}</h3><p>{t.rules.text}</p></div>
+        <div class="ui">
+          <div class="box-t">{t.rules.belt}</div>
+          <div class="opt sel"><span class="radio"></span><span>{t.rules.pvc}</span><span></span></div>
+          <div class="opt"><span class="radio"></span><span>{t.rules.food}</span><span></span></div>
+          <div class="opt"><span class="radio off"></span><span><span class="dis">{t.rules.wide}</span><span class="why">{t.rules.why}</span></span><span></span></div>
+        </div>
+      </article>
+
+      <article class="tile t-c rv">
+        <div><h3>{t.costs.title}</h3><p>{t.costs.text}</p></div>
+        <div class="ui">
+          <div class="bars">
+            {bars.map(([q, price, [a, b, c]]) => (
+              <div class="bar-row"><span class="muted">{q} ×</span><span class="bar"><i class="c1" style={`width:${a}%`}></i><i class="c2" style={`width:${b}%`}></i><i class="c3" style={`width:${c}%`}></i></span><span class="num">{money(lang, price)}</span></div>
+            ))}
+          </div>
+          <div class="legend"><span><i class="c1"></i>{t.costs.material}</span><span><i class="c2"></i>{t.costs.operations}</span><span><i class="c3"></i>{t.costs.margin}</span></div>
+        </div>
+      </article>
+
+      <article class="tile t-d rv">
+        <div><h3>{t.sap.title}</h3><p>{t.sap.text}</p></div>
+        <div class="doc">
+          <div class="ui">
+            <div class="doc-h"><b>{t.sap.doc}</b><span class="os st-pos"><Icon name="sys-enter-2" />{t.sap.posted}</span></div>
+            <table class="tbl">
+              <thead><tr><th>{t.sap.item}</th><th>{t.sap.description}</th><th class="r">{t.sap.qty}</th><th class="r">{t.sap.price}</th></tr></thead>
+              <tbody>{lines.map(([code, price], i) => <tr><td class="code">{code}</td><td>{t.sap.lines[i]}</td><td class="r">4</td><td class="r">{money(lang, price)}</td></tr>)}</tbody>
+            </table>
+          </div>
+          <div class="once"><Icon name="shield" /><b>{t.sap.once}</b><span class="small muted">{t.sap.onceText}</span></div>
+        </div>
+      </article>
+
+      <article class="tile t-e rv">
+        <div><h3>{t.offline.title}</h3><p>{t.offline.text}</p></div>
+        <div class="ui">
+          <div class="ui-row"><span class="sys"><span class="pulse neg"></span>SAP Business One</span><span class="os st-neg">{t.offline.offline}</span></div>
+          <div class="ui-row"><span class="sys"><span class="pulse pos"></span>Confire</span><span class="os st-pos">{t.offline.cache}</span></div>
+          <div class="ui-row"><span class="muted tiny">{t.offline.synced}</span><span></span></div>
+        </div>
+      </article>
+
+      <article class="tile t-f rv">
+        <div><h3>{t.portal.title}</h3><p>{t.portal.text}</p></div>
+        <div class="ui">
+          {t.portal.rows.map((r, i) => <div class="ui-row"><span><b>{r.doc}</b><br><span class="tiny muted">{r.what}</span></span><span class:list={["os", statuses[i]]}>{r.status}</span></div>)}
+        </div>
+      </article>
+    </div>
+  </div>
+</section>

@@ -3,11 +3,15 @@ import { z } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, configMasterdata, configMasterdataRow, configModel } from "@confire/db";
 import { ODataQueryZ, QuerySourceZ, ValZ, syncTables } from "@confire/config-engine";
+import { isYesNo, type B1Field } from "@confire/b1";
 import { adminProcedure } from "../base.ts";
 import { bumpMasterdata, DEFAULT_PAGE, fetchQueryTable, queryRowOf, withSearch, type MasterdataRow } from "../../lookups.ts";
 import { syncNow } from "../../masterdata-sync.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
-import { runnerFor, tenantConnector } from "../../b1.ts";
+import { runnerFor, tenantConnector, viaB1 } from "../../b1.ts";
+import { beasSchemas, entityList, entitySchema } from "../../entity-meta.ts";
+import { scalarFields } from "../../entity-list.ts";
+import { bad } from "../../entity-read.ts";
 import { copyName } from "../../copy-name.ts";
 import { masterdataRows } from "../../config-project.ts";
 
@@ -33,6 +37,15 @@ const MasterdataQueryZ = QuerySourceZ.extend({
 });
 
 const base = { id: z.uuid().optional(), name: z.string().min(1) };
+const TargetZ = QuerySourceZ.shape.target;
+
+/** What a filter compares a field with, as typed: B1 sends an enum as its member name and a
+ *  BoYesNoEnum as 'tYES'/'tNO'; a real boolean (every Beas one) is bare true/false — Beas refuses
+ *  anything else ("in boolean fields only true or false allowed"). */
+const valuesOf = (f: B1Field): string[] | undefined =>
+  isYesNo(f) ? ["'tYES'", "'tNO'"]
+  : f.kind === "boolean" ? ["true", "false"]
+  : f.options?.map((o) => `'${o.label}'`);
 const SaveZ = z.discriminatedUnion("kind", [
   z.object({ ...base, kind: z.literal("table"), columns: z.array(ColumnZ).min(1), rows: z.array(z.array(ValZ)) }),
   z.object({ ...base, kind: z.literal("query"), query: MasterdataQueryZ }),
@@ -222,6 +235,27 @@ export const masterdataRouter = {
     if (!md) throw new ORPCError("BAD_REQUEST", { message: "Only a query table can be synced" });
     return syncNow(context.tenantId, md);
   }),
+
+  // The editor's suggestions: a source's entity sets, and one set's scalar fields (a collection
+  // cannot be selected — B1 rejects `$select=ItemPrices`). Both come off the metadata caches, so
+  // only a cold one costs an agent call.
+  entities: adminProcedure.input(z.object({ target: TargetZ })).handler(async ({ input, context }) => {
+    const c = await tenantConnector(context.tenantId);
+    const list = await viaB1(() =>
+      input.target === "beas" ? beasSchemas(context.tenantId, c.beas) : entityList(context.tenantId, c.b1));
+    return list.map((e) => ({ name: e.name, label: e.label }));
+  }),
+
+  fields: adminProcedure
+    .input(z.object({ target: TargetZ, entitySet: ODataQueryZ.shape.entitySet }))
+    .handler(async ({ input, context }) => {
+      const c = await tenantConnector(context.tenantId);
+      const schema = await viaB1(async () => input.target === "beas"
+        ? (await beasSchemas(context.tenantId, c.beas)).find((s) => s.name === input.entitySet)
+        : entitySchema(context.tenantId, c.b1, input.entitySet)).catch(bad);
+      if (!schema) throw new ORPCError("NOT_FOUND", { message: `Unknown entity set '${input.entitySet}'` });
+      return scalarFields(schema).map((f) => ({ name: f.name, kind: f.kind, label: f.label, values: valuesOf(f) }));
+    }),
 
   // One page of an ad-hoc query: the editor's "Test fetch" (columns come from the response, never
   // hand-typed) and the builder's value help both live here. Admin-only, because unlike

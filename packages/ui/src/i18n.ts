@@ -87,11 +87,12 @@ export const LANGUAGES = [
 
 /** The user menu's language, remembered per browser like theme and density (appearance.ts). */
 export function useLanguage() {
-  const [language, setState] = useState(() => getLocale().getLanguage());
+  // Read off UI5 on every render, not kept in this hook's own state: a second caller (the sign-in
+  // frame's footer beside its language menu) re-renders through its bundle hook and sees the switch.
+  const [, rerender] = useState(0);
   const setLanguage = (id: string) => {
     localStorage.setItem("language", id);
-    setState(id);
-    void applyLanguage(id);
+    void applyLanguage(id).then(() => rerender((n) => n + 1));
   };
-  return { language, setLanguage };
+  return { language: getLocale().getLanguage(), setLanguage };
 }

@@ -9,6 +9,11 @@ describe("enumerate", () => {
     expect(e.candidates).toEqual([{ material: "steel", section: 16 }]);
   });
 
+  test("a hidden parameter's stale entry stays out of the candidate", () => {
+    const e = enumerate(model, lookups, { material: "alu", section: 16, coated: false, color: "red" });
+    expect(e.candidates).toEqual([{ material: "alu", section: 16, coated: false }]);
+  });
+
   test("one open param -> one candidate per live value", () => {
     const e = enumerate(model, lookups, { material: "alu" }); // section open, 25 eliminated
     expect(e.candidates.map((c) => c.section).sort()).toEqual([10, 16]);

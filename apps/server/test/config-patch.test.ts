@@ -24,7 +24,7 @@ const model: ModelDef = {
       { key: "double", label: "Double", type: "number", cell: { kind: "formula", expr: "quantity * 2" } },
     ],
   }],
-  pricing: { priceExpr: "0", quoteItemCode: "X" },
+  pricing: { margin: 0, quoteItemCode: "X" },
   batchDefaults: [1],
 };
 const check = (patch: Parameters<typeof patchProblems>[1], side: "internal" | "external" = "internal") => patchProblems(model, patch, side);

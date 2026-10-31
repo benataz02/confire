@@ -108,6 +108,6 @@ export const TEST_MODEL: ModelDef = {
   // ones that must resolve without an agent. BOM pricing is covered in config-engine's own tests.
   bom: [],
   routing: [{ id: "cut", resource: "SAW", setupMin: "10", runMinPerUnit: "0.5", ratePerHour: "60" }],
-  pricing: { priceExpr: "unitCost * 1.4", quoteItemCode: "CFG", priceList: 1 },
+  pricing: { margin: 50, quoteItemCode: "CFG", priceList: 1 },
   batchDefaults: [100, 500],
 };

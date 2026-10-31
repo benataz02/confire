@@ -1,0 +1,8 @@
+---
+import { ICON_PATHS, type IconName } from "../generated/icons.ts";
+
+// A Horizon icon inlined as SVG (spec §5.1): decorative, so hidden from assistive technology.
+interface Props { name: IconName; class?: string }
+const { name, class: cls } = Astro.props;
+---
+<svg class:list={["ico", cls]} viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d={ICON_PATHS[name]} /></svg>

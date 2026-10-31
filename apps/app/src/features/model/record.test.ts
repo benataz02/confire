@@ -6,7 +6,7 @@ import { fromRecord, toRecord, withDef, type ModelRow } from "./record.ts";
 const model: ModelDef = {
   ...starterModel("Cable"),
   description: "A cable",
-  pricing: { priceExpr: "unitCost * 1.2", quoteItemCode: "CAB", priceList: 3, itemTable: "items" },
+  pricing: { margin: 20, quoteItemCode: "CAB", priceList: 3, itemTable: "items" },
   constraints: [
     { kind: "expr", assert: "a > 0", message: "positive" },
     { kind: "table", params: ["a", "b"], rows: [[1, 2]], mode: "allow" },

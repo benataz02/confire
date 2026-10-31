@@ -1,0 +1,19 @@
+---
+import Base from "../../layouts/Base.astro";
+import { dict, LANGS, type Lang } from "../../i18n/index.ts";
+import { localePath } from "../../lib/urls.ts";
+
+// Caddy's handle_errors serves the language's copy by path prefix (Caddyfile).
+export const getStaticPaths = () => LANGS.map((lang) => ({ params: { lang: lang === "en" ? undefined : lang }, props: { lang } }));
+const { lang } = Astro.props as { lang: Lang };
+const t = dict[lang].notFound;
+---
+<Base lang={lang} path="/404/" title={`${t.title} · Confire`} description={t.description} noindex>
+  <section class="page">
+    <div class="wrap">
+      <h1>{t.heading}</h1>
+      <p class="lead">{t.text}</p>
+      <a class="btn em lg" href={localePath(lang, "/")}>{t.back}</a>
+    </div>
+  </section>
+</Base>

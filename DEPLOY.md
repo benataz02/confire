@@ -1,6 +1,7 @@
 # Deploying Confire
 
-The runbook for production: `app.confire.ai` (staff), `portal.confire.ai` (customers), one Hetzner VPS,
+The runbook for production: `app.confire.ai` (staff), `portal.confire.ai` (customers), `confire.ai` (the
+marketing site), one Hetzner VPS,
 Cloudflare for DNS, tunnels and backups, Resend for mail, GitHub Actions for builds.
 
 | You want to… | Read |
@@ -9,14 +10,17 @@ Cloudflare for DNS, tunnels and backups, Resend for mail, GitHub Actions for bui
 | Ship a feature or a fix to the running app | [Part 2](#part-2-shipping-changes), §9–§10 |
 | Change the schema, back up, restore, or look inside the database | [Part 3](#part-3-the-database), §11–§14 |
 | Check on things | [§15](#15-day-to-day) |
+| Launch, ship or roll back the marketing site (`confire.ai`) | [Part 4](#part-4-the-marketing-site), §16 |
 
 ```
  app.confire.ai    ─┐   Cloudflare DNS only (grey cloud)
  portal.confire.ai ─┼─▶ Hetzner VPS: Caddy :443 (Let's Encrypt) ─┬─▶ server :3000  staff app + sign-in
- confire.ai        ─┘                                            └─▶ portal :3001  customer portal
+ confire.ai        ─┘                                            ├─▶ portal :3001  customer portal + the site's demo form
+                                                                 └─▶ ~/site/current  the marketing site's files
                         Postgres (both servers) ─▶ backup ─▶ Cloudflare R2, nightly
 
  git push main ─▶ GitHub Actions: build image ─▶ ghcr.io/benataz02/confire ─▶ ssh: deploy/update.sh
+ site workflow ─▶ GitHub Actions: build apps/site ─▶ ssh: deploy/site.sh (no image, no restart)
 
  server ─HTTPS─▶ <label>.confire.app ─▶ Cloudflare Access ─▶ Tunnel ─▶ confire-agent (customer's Windows box) ─▶ SAP B1
 ```
@@ -111,6 +115,7 @@ Cloudflare dashboard → `confire.ai` → **DNS → Records**. Every record is *
 | A | `@`, `app`, `portal` (three records) | `<IPv4>` |
 | AAAA | `@`, `app`, `portal` (three records) | `<IPv6>` |
 | CAA | `@` | `0 issue "letsencrypt.org"` |
+| A / AAAA (optional) | `www` | `<IPv4>` / `<IPv6>`: Caddy redirects it to the apex ([§16](#16-the-marketing-site)) |
 
 The records are grey because with the proxy off, Caddy gets its own Let's Encrypt certificates over
 HTTP. It also sees each visitor's real IP, which Better Auth's sign-in rate limiting is keyed on. With
@@ -120,7 +125,8 @@ Cloudflare adds its own certificate authorities to the CAA set. That does no har
 `letsencrypt.org` stays in it.
 
 **No wildcard record (`*`), ever.** Every `*.confire.ai` host receives the session cookie. The only
-other names under `confire.ai` are the mail records ([§3](#3-mail-resend)). Customer agents live on
+other names under `confire.ai` are the mail records ([§3](#3-mail-resend)) and the optional `www`, which
+only redirects. Customer agents live on
 the separate domain `confire.app` ([§8](#8-connecting-a-customers-sap-agent)), and Confire writes their
 DNS records there itself.
 
@@ -171,6 +177,9 @@ DOMAIN=confire.ai
 BETTER_AUTH_SECRET=<base64 from above>
 POSTGRES_PASSWORD=<hex from above>
 RESEND_API_KEY=re_...
+# The marketing site's demo requests are mailed here (§16). Unset = every request gets the site's
+# error page, and the request is only in the portal's log
+DEMO_INBOX=
 
 # Server errors to Sentry (project confire-server → Settings → Client Keys). Unset = none sent
 SENTRY_DSN=https://...@....ingest.de.sentry.io/...
@@ -243,6 +252,18 @@ Then set these on GitHub (*Settings → Secrets and variables → Actions*), and
 | Secret | `DEPLOY_SSH_KEY` | the contents of `ci_key` |
 | Secret | `DEPLOY_KNOWN_HOSTS` | the output of `ssh-keyscan -t ed25519 <IP>` |
 | Variable | `DEPLOY_HOST` | `<IP>` |
+
+**The site's key** is a second one, forced to `deploy/site.sh` the same way. The marketing site deploys
+on its own ([§16](#16-the-marketing-site)), and this key can do nothing but that:
+
+```bash
+ssh-keygen -t ed25519 -N "" -C github-site -f site_key       # on your machine
+# appended to /home/deploy/.ssh/authorized_keys:
+command="/home/deploy/confire/deploy/site.sh",restrict ssh-ed25519 AAAA… github-site
+```
+
+On GitHub, add the secret `SITE_SSH_KEY` (the contents of `site_key`); the workflow reuses
+`DEPLOY_KNOWN_HOSTS` and `DEPLOY_HOST`. Delete `site_key` afterwards.
 
 The GHCR package needs no login. The image's `org.opencontainers.image.source` label links it to the
 repository, and the package inherits the repository's public visibility.
@@ -437,7 +458,7 @@ The run takes a few minutes, and each restart means a few seconds of downtime. N
 |---|---|
 | A new environment variable the code reads | Add it to `docker-compose.yml`. A container receives only the variables named in its `environment:` block, and `server`'s block is `portal`'s too. Put the value in the server's `.env` **before** you push. |
 | A changed `.env` value (rotated key, OAuth credentials, `BACKUP_AT`) | `docker compose up -d`. It recreates only the containers whose settings changed. |
-| `Caddyfile` | After the deploy, run `docker compose up -d --force-recreate caddy`. The file is bind-mounted, and `git pull` swaps in a new file, so the running Caddy keeps the old one. `up -d` does not notice the change, and `caddy reload` would re-read the stale copy. |
+| `Caddyfile` (all three hosts, the apex's site included) | After the deploy, run `docker compose up -d --force-recreate caddy`. The file is bind-mounted, and `git pull` swaps in a new file, so the running Caddy keeps the old one. `up -d` does not notice the change, and `caddy reload` would re-read the stale copy. |
 | Better Auth configuration (plugins, extra fields in `auth.ts`) | `bun run auth:generate`. It is then a schema change ([§11](#11-schema-migrations)). |
 | The Postgres version | [§14](#14-access-and-housekeeping). |
 
@@ -612,3 +633,72 @@ docker compose exec db psql -U confire -c "select tenant_id, sum(cost) from ai_u
 `assistant-eval` in `tenant_id` is Confire's own eval runs (`scripts/assistant-eval.ts`). A workspace
 at `ASSISTANT_MONTHLY_LIMIT_USD` is refused until the month turns; raising the limit is an `.env`
 change plus `docker compose up -d`.
+
+---
+
+# Part 4: The marketing site
+
+## 16. The marketing site
+
+`confire.ai` is `apps/site`: static HTML that Caddy serves from `~/site/current` itself, so a
+restarting app never takes it down. Its only dynamic part is the demo form, `POST /api/demo-request`,
+which Caddy sends to the `portal` process. That mails `DEMO_INBOX`, Reply-To the requester. The design
+record is `docs/superpowers/specs/2026-10-30-marketing-site-design.md`.
+
+**It deploys on its own.** The *site* workflow (`.github/workflows/site.yml`, *Run workflow* in the
+Actions tab) builds `apps/site` and runs its gates. It then streams `dist` over the site's key
+([§6](#6-the-ci-deploy-key)) to `deploy/site.sh`. That script unpacks the build into
+`~/site/releases/<sha>` and switches the `current` link in one rename, with no image and no restart.
+The `Caddyfile`, the compose mount and the demo route are app changes, and they ship with an app
+release ([§9](#9-updating)).
+
+### First launch
+
+1. Set `DEMO_INBOX` in `.env` (§5). It must be an address that receives mail.
+2. Deploy the app release that carries the site's `Caddyfile`, compose mount and demo route (§9).
+   `update.sh` creates `~/site` as `deploy` (Docker would create a missing mount source as root).
+3. Run the *site* workflow once. It prints `site <sha> live`.
+4. `docker compose up -d --force-recreate caddy` (§10). If Caddy refuses the file,
+   `docker compose logs caddy` names the line. The new `Caddyfile` was never validated against a live
+   Caddy before this step.
+5. Check it:
+   ```bash
+   curl -sI https://confire.ai/ | grep -i -e '^HTTP' -e content-security -e cache-control   # 200, CSP, no-cache
+   curl -sI https://confire.ai/es/nope/ | head -1                                           # 404 (the Spanish 404 page)
+   curl -sI https://www.confire.ai/ | grep -i location                                      # https://confire.ai/
+   ```
+   Then send a test request from the form and check that it arrives in `DEMO_INBOX`.
+
+### Shipping a change
+
+Edit `apps/site`, check it locally (`bun run dev:site`, then `bun run build:site && bun run test:site`),
+merge, and run the *site* workflow. A copy fix takes a few minutes and touches nothing else.
+
+### Rolling back
+
+The last five builds stay in `~/site/releases`, listed oldest first in `~/site/deploys`. Re-running the
+workflow for an older commit switches straight back to its build. By hand, on the server:
+
+```bash
+cd ~/site && ln -sfn releases/<old sha> current.tmp && mv -T current.tmp current
+```
+
+### Once, at launch
+
+- **Search engines:** verify `confire.ai` in Google Search Console and Bing Webmaster Tools with a DNS
+  TXT record (§2's records page), then submit `https://confire.ai/sitemap-index.xml` in both.
+  ChatGPT's search leans on Bing, so don't skip Bing.
+- **Plausible:** add `confire.ai`, put its script URL in `apps/site/src/site.config.ts`
+  (`plausibleScript`), and add a goal *Demo request*: a pageview of `/*thanks/`. If you proxy the
+  script through Caddy instead, the CSP's `plausible.io` entries become `'self'`.
+- **Ad pixels:** the Meta Pixel ID and the LinkedIn partner and conversion IDs also go in
+  `site.config.ts`. Nothing loads until a visitor accepts.
+- **Link previews:** paste `https://confire.ai/`, `/es/` and `/eu/` into LinkedIn Post Inspector and
+  Meta Sharing Debugger before the first ad.
+- **The release check, each time the page changes a lot:**
+  `bunx lighthouse https://confire.ai/ --form-factor=mobile --only-categories=performance,accessibility,best-practices,seo`
+  for `/`, `/es/` and `/eu/`. The bar is Performance ≥ 95, and 100 in the other three.
+- **Still open before launch** (spec §15): the public contact address (`contactEmail` in
+  `site.config.ts`; `confire.ai` has no MX yet), the legal notice's company data (each
+  `[TO COMPLETE: …]` in `apps/site/src/content/legal/`), and the final copy, Basque reviewed by a
+  native speaker.

@@ -2,8 +2,8 @@ import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import type { Row, Section } from "@confire/ui/types.ts";
 
 // The model builder's object page, declared like a B1 record's (features/b1/documents.tsx): what is
-// a plain field or grid is data here; the structure tree, the preview and the combination list are
-// templates (ModelBuilderPage). Expressions, the masterdata pickers and the batch quantities are
+// a plain field or grid is data here; the structure tree and the combination list are templates
+// (ModelBuilderPage). Expressions, the masterdata pickers and the batch quantities are
 // control kinds (controls.tsx), named by `controlType`. The record is record.ts's.
 
 type Translate = (key: string, ...params: string[]) => string;
@@ -43,7 +43,11 @@ export const modelSections = (t: Translate): Section[] => [
           // Where those prices are cached: an `Items` masterdata query with no columns selected, so
           // B1 returns whole rows and the nested ItemPrices collection survives the sync.
           { key: "pricing.itemTable", label: t("MODEL_ITEM_SOURCE"), required: true, controlType: "masterdataQuery" },
-          { key: "pricing.priceExpr", label: t("MODEL_PRICE_EXPR"), required: true, controlType: "priceExpr" },
+          // A share of the price; each configuration may set its own in its Candidates section.
+          {
+            key: "pricing.margin", label: t("MODEL_MARGIN"), type: "number", required: true, help: t("MODEL_MARGIN_HELP"),
+            onChange: (v) => ({ "pricing.margin": v === null || v === undefined || v === "" ? undefined : Number(v) }),
+          },
           {
             key: "pricing.quoteItemCode", label: t("MODEL_QUOTE_ITEM"), required: true, help: t("MODEL_QUOTE_ITEM_ERR"),
             cfl: { dialogConfig: cfl.items() }, link: true,
@@ -67,8 +71,8 @@ export const modelSections = (t: Translate): Section[] => [
       },
     ],
   },
-  // The structure tree and the live preview (a template). fitContent: the section fills what the
-  // title and tab bar leave, the only way the splitter's panes get a height to split and scroll.
+  // The structure tree (a template). fitContent: the section fills what the title and tab bar leave,
+  // so the tree's toolbar and column header stay put while its rows scroll.
   { id: MODEL_SECTIONS.params, label: t("MODEL_SECTION_PARAMS"), fitContent: true },
   {
     id: MODEL_SECTIONS.rules, label: t("MODEL_SECTION_RULES"),

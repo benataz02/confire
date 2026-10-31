@@ -24,6 +24,27 @@ describe("bindings", () => {
     expect(bindings(model, lookups, { coated: true }).visible.color).toBe(true);
   });
 
+  test("a hidden parameter is null: its entry and its default are both ignored", () => {
+    const b = bindings(model, lookups, { coated: false, color: "red" });
+    expect(b.visible.color).toBe(false);
+    expect(b.values.color).toBeNull();
+    const m = structuredClone(model);
+    m.parameters.find((p) => p.key === "color")!.defaultExpr = '"black"';
+    expect(bindings(m, lookups, {}).values.color).toBeNull();
+    expect(bindings(m, lookups, {}).defaulted.has("color")).toBe(false);
+    expect(bindings(m, lookups, { coated: true }).values.color).toBe("black");
+  });
+
+  test("hiding cascades: a field shown by a hidden one's value hides too", () => {
+    const m = structuredClone(model);
+    m.parameters.push({ key: "shade", label: "Shade", type: "string", ui: "input", visibleWhen: 'color == "red"' });
+    fieldGroup(m, 0, 1).params.push("shade");
+    expect(bindings(m, lookups, { coated: true, color: "red", shade: "dark" }).values.shade).toBe("dark");
+    const b = bindings(m, lookups, { coated: false, color: "red", shade: "dark" });
+    expect(b.visible.shade).toBe(false);
+    expect(b.values.shade).toBeNull();
+  });
+
   test("entry beats default", () => {
     const b = bindings(model, lookups, { coated: true });
     expect(b.values.coated).toBe(true);
@@ -97,6 +118,14 @@ describe("propagate", () => {
     // material(2) × section(3); color no longer multiplies
     expect(p.candidateEstimate).toBe(6);
     expect(p.values.coated).toBe(true);
+  });
+
+  test("a hidden parameter has no domain, and its stale entry breaks no rule", () => {
+    // color "red" is not allowed with alu — but color is hidden while uncoated
+    const p = propagate(model, lookups, { material: "alu", coated: false, color: "red" });
+    expect(p.domains.color).toBeUndefined();
+    expect(p.conflicts).toEqual([]);
+    expect(p.domains.material!.every((o) => !o.eliminatedBy)).toBe(true);
   });
 
   test("2-unbound support check keeps values that have some support", () => {
@@ -173,7 +202,7 @@ describe("derived lookup columns", () => {
     structure: { sections: [{ key: "s", title: "S", groups: [{ key: "g", title: "G", params: ["mat"] }] }] },
     computed: [{ key: "dbl", expr: "mat_density * 2" }],
     constraints: [], bom: [], routing: [],
-    pricing: { priceExpr: "0", quoteItemCode: "X" },
+    pricing: { margin: 0, quoteItemCode: "X" },
     batchDefaults: [1],
   };
   const dLookups: ResolvedLookups = {

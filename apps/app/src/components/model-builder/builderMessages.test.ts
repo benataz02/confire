@@ -8,8 +8,6 @@ import { anchorOf, builderMessages, modelIssues, type Translate } from "./builde
 const EN: Record<string, string> = {
   MODEL_NAME_REQUIRED: "Enter a model name",
   MODEL_LOOKUPS_FAILED: "Option lists could not be loaded",
-  MODEL_PREVIEW_STALE: "Preview shows the last valid version — fix {0} error to preview the current draft.",
-  MODEL_PREVIEW_STALE_N: "Preview shows the last valid version — fix {0} errors to preview the current draft.",
   MODEL_ACTION_FAILED: "Action failed",
   MODEL_GROUP_MODEL: "Model",
   MODEL_EXPR_AT: " at '{0}'",
@@ -63,17 +61,16 @@ test("anchors point at the tree row that opens a parameter or table", () => {
   const draft = { ...named(), parameters: [{ key: "width", label: "Width", type: "number", ui: "input" }] } as ModelDef;
   expect(anchorOf("parameters[0].defaultExpr", draft)).toBe('[data-key="p:width"]');
   expect(anchorOf("tables[0].columns[1]", draft)).toBe('[data-key="t:0.0"]');
-  expect(anchorOf("computed[2].expr", draft)).toBe('[id="expr-computed[2].expr"]');
+  expect(anchorOf("computed[2].expr", draft)).toBe('[data-key="c:2"]');
   // Structure-level problems have nowhere to jump — the section is the answer.
   expect(anchorOf("model", draft)).toBeUndefined();
   expect(anchorOf("structure", draft)).toBeUndefined();
 });
 
-test("the stale preview is said only while the record's issues are on screen; failures always", () => {
-  const issues: Issue[] = [{ path: "model", message: "x" }];
+test("failures are messages: option lists under Rules, a refused action under Model", () => {
   const title = (s: string) => s;
-  expect(builderMessages({ issues, shown: false, t, title })).toEqual([]);
-  const shown = builderMessages({ issues, shown: true, t, title, actionError: new Error("still in use") });
-  expect(shown.find((m) => m.id === "preview")?.type).toBe("Critical");
-  expect(shown.find((m) => m.id === "action")?.group).toBe("Model");
+  expect(builderMessages({ t, title })).toEqual([]);
+  const out = builderMessages({ t, title, lookupsError: new Error("agent offline"), actionError: new Error("still in use") });
+  expect(out.find((m) => m.id === "lookups")?.section).toBe("rules");
+  expect(out.find((m) => m.id === "action")?.group).toBe("Model");
 });

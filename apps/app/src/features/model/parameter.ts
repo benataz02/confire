@@ -1,4 +1,4 @@
-import { checkModel, type ModelDef, type Param } from "@confire/config-engine";
+import { checkModel, isTableGroup, type ModelDef, type Param } from "@confire/config-engine";
 import type { RecordIssues, RecordMessage } from "@confire/ui/object-page/useObjectRecord.ts";
 import type { Row, Section } from "@confire/ui/types.ts";
 import { issueText, modelWithParam, type TableCols } from "../../components/model-builder/exprHelpers.ts";
@@ -14,9 +14,11 @@ type Translate = (key: string, ...params: string[]) => string;
 export const CONTROL_TYPE: Partial<Record<Param["ui"], Param["type"]>> = { textarea: "string", checkbox: "boolean", slider: "number" };
 
 /** Switching control: its type, and a slider gets a range plus a default at its min — the handle
- *  always shows a position, so an empty value would draw as the min while the quote still waits. */
+ *  always shows a position, so an empty value would draw as the min while the quote still waits.
+ *  A list domain stays: the slider steps through its options. */
 export function withControl(p: Param, ui: Param["ui"]): Partial<Param> {
   const type = CONTROL_TYPE[ui] ?? p.type;
+  if (ui === "slider" && p.domain?.kind === "options") return { ui, type };
   if (ui === "slider") {
     const domain = p.domain?.kind === "range" ? p.domain : { kind: "range" as const, min: 0, max: 100, step: 1 };
     return { ui, type, domain, defaultExpr: p.defaultExpr || String(domain.min) };
@@ -54,7 +56,7 @@ export const paramSections = (t: Translate): Section[] => [
     fields: [
       { key: "help", label: t("MODEL_HELP"), controlType: "note" },
       { key: "readonly", label: t("MODEL_READONLY"), type: "boolean", onChange: flag("readonly") },
-      { key: "priceExpr", label: t("MODEL_PRICE_FORMULA"), controlType: "exprArea" },
+      { key: "priceExpr", label: t("MODEL_COST_FORMULA"), help: t("MODEL_COST_FORMULA_HELP"), controlType: "exprArea" },
       { key: "visibleWhen", label: t("MODEL_VISIBLE_WHEN"), controlType: "exprArea", placeholder: t("MODEL_VISIBLE_PH") },
       { key: "mandatory", label: t("MODEL_MANDATORY"), type: "boolean", onChange: flag("mandatory") },
       { key: "requiredWhen", label: t("MODEL_REQUIRED_WHEN"), controlType: "exprArea", placeholder: t("MODEL_REQUIRED_PH") },
@@ -70,9 +72,9 @@ export const emptyParam = (): Param => ({ key: "", label: "", type: "string", ui
 /** The domain is missing or half-built, so a list control would list nothing. A source with no
  *  columns is checkModel's to report — the key column is convention, not a field here. */
 function domainIssue(p: Param, t: Translate): string | undefined {
-  if (p.ui === "slider" && p.domain?.kind !== "range") return t("MODEL_SLIDER_RANGE");
+  if (p.ui === "slider" && !p.domain) return t("MODEL_SLIDER_RANGE");
   if (!p.domain)
-    return (p.ui === "select" || p.ui === "radio" || p.ui === "multicombo") && p.type !== "boolean"
+    return (p.ui === "dropdown" || p.ui === "select" || p.ui === "radio" || p.ui === "multicombo") && p.type !== "boolean"
       ? t("MODEL_CONTROL_DOMAIN") : undefined;
   if (p.domain.kind !== "options") return undefined;
   const ref = p.domain.ref;
@@ -110,9 +112,13 @@ export function paramIssues(r: Row, draft: ModelDef, tables: TableCols[], isNew:
   return { fields, other };
 }
 
-/** The parameter written back over the one the page opened, or appended (and placed) when new. */
+/** The parameter written back over the one the page opened, or appended (and placed) when new.
+ *  A parameter exists only placed, and the position is the URL's, which a reload can leave behind
+ *  (a group added unsaved is gone): a position holding no field group means the last one. With no
+ *  field group at all there is nowhere to put it, so nothing is added — Add is disabled then. */
 export function commitParam(d: ModelDef, p: Param, openedAs: string | undefined, place?: { s: number; g: number }): ModelDef {
   if (openedAs !== undefined) return { ...d, parameters: d.parameters.map((x) => (x.key === openedAs ? p : x)) };
-  const out = { ...d, parameters: [...d.parameters, p] };
-  return place ? placeParam(out, p.key, place.s, place.g) : out;
+  const groups = d.structure.sections.flatMap((s, si) => s.groups.flatMap((g, gi) => (isTableGroup(g) ? [] : [{ s: si, g: gi }])));
+  const at = groups.find((x) => x.s === place?.s && x.g === place.g) ?? groups.at(-1);
+  return at ? placeParam({ ...d, parameters: [...d.parameters, p] }, p.key, at.s, at.g) : d;
 }

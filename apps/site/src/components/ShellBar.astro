@@ -1,0 +1,31 @@
+---
+import Icon from "./Icon.astro";
+import { dict, LANG_NAMES, type Lang } from "../i18n/index.ts";
+import { appUrl, localePath } from "../lib/urls.ts";
+
+// The Fiori shell bar (spec §6.1). The phone menu and the language menu are native popovers: no JS.
+interface Props { lang: Lang; path: string; langs: readonly Lang[] }
+const { lang, path, langs } = Astro.props;
+const t = dict[lang].nav;
+const home = localePath(lang, "/");
+const links = [["#how", t.how], ["#product", t.product], ["#security", t.security], ["#faq", t.faq]] as const;
+const signIn = `${appUrl()}/login`;
+---
+<header class="shell">
+  <div class="wrap">
+    <a class="brand" href={home} aria-label={t.home}><img class="mark" src="/confire-logo.png" alt="" width="30" height="30">Confire</a>
+    <nav class="nav" aria-label={t.main}>{links.map(([h, l]) => <a href={home + h}>{l}</a>)}</nav>
+    <button class="btn lite desk" popovertarget="lang" aria-label={`${t.language}: ${LANG_NAMES[lang]}`}><Icon name="globe" />{lang.toUpperCase()}</button>
+    <a class="btn lite desk" href={signIn}>{t.signIn}</a>
+    <a class="btn em" href={`${home}#demo`}>{t.demo}</a>
+    <button class="btn lite phone" popovertarget="menu" aria-label={t.menu}><Icon name="menu2" /></button>
+    <div id="lang" popover>
+      {langs.map((l) => <a href={localePath(l, path)} hreflang={l} lang={l} aria-current={l === lang ? "page" : undefined}>{LANG_NAMES[l]}{l === lang && <Icon name="sys-enter-2" />}</a>)}
+    </div>
+    <div id="menu" popover>
+      {links.map(([h, l]) => <a href={home + h}>{l}</a>)}
+      <hr><a href={signIn}>{t.signIn}</a><hr>
+      {langs.map((l) => <a href={localePath(l, path)} hreflang={l} lang={l} aria-current={l === lang ? "page" : undefined}>{LANG_NAMES[l]}{l === lang && <Icon name="sys-enter-2" />}</a>)}
+    </div>
+  </div>
+</header>

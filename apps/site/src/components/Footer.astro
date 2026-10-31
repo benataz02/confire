@@ -1,0 +1,34 @@
+---
+import { dict, LANG_NAMES, LANGS, type Lang } from "../i18n/index.ts";
+import { appUrl, localePath } from "../lib/urls.ts";
+import { SITE } from "../site.config.ts";
+
+interface Props { lang: Lang; path: string; langs: readonly Lang[]; consent: boolean }
+const { lang, path, langs, consent } = Astro.props;
+const d = dict[lang], t = d.footer, home = localePath(lang, "/");
+---
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div class="about"><a class="brand" href={home}><img class="mark" src="/confire-logo.png" alt="" width="30" height="30">Confire</a><p class="muted" style="margin-top:1rem">{t.about}</p></div>
+      <div><h2>{t.product}</h2><ul>
+        <li><a href={`${home}#how`}>{d.nav.how}</a></li><li><a href={`${home}#product`}>{t.features}</a></li>
+        <li><a href={`${home}#security`}>{d.nav.security}</a></li><li><a href={`${home}#faq`}>{d.nav.faq}</a></li>
+      </ul></div>
+      <div><h2>{t.company}</h2><ul>
+        <li><a href={`${home}#demo`}>{d.nav.demo}</a></li><li><a href={`${appUrl()}/login`}>{d.nav.signIn}</a></li>
+        {SITE.contactEmail && <li><a href={`mailto:${SITE.contactEmail}`}>{t.contact}</a></li>}
+        {SITE.social.linkedin && <li><a href={SITE.social.linkedin} rel="me">LinkedIn</a></li>}
+        {SITE.social.instagram && <li><a href={SITE.social.instagram} rel="me">Instagram</a></li>}
+      </ul></div>
+      <div><h2>{t.legal}</h2><ul>
+        {(["privacy", "legal-notice", "cookies"] as const).map((k) => <li><a href={localePath(lang, `/${k}/`)}>{d.legal[k]}</a></li>)}
+        {consent && <li><button class="linkish" type="button" data-consent-open hidden>{d.consent.settings}</button></li>}
+      </ul></div>
+    </div>
+    <div class="legal">
+      <span>© 2026 Confire · {LANGS.filter((l) => langs.includes(l)).map((l, i) => <>{i > 0 && " · "}<a href={localePath(l, path)} hreflang={l} lang={l}>{LANG_NAMES[l]}</a></>)}</span>
+      <span>{t.trademark}</span>
+    </div>
+  </div>
+</footer>

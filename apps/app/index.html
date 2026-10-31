@@ -5,13 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Confire</title>
     <link rel="icon" type="image/png" href="/confire-logo.png" />
-    <!-- Display serif for the auth brand panel only; UI5 "72" stays the app/control font. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400&display=swap"
-      rel="stylesheet"
-    />
+    <!-- The page's colour until React draws it: Horizon's --sapShellColor, Morning or Evening by the OS —
+         the sign-in frame's background, so the step from confire.ai shows no white or grey frame. Fixed
+         values on purpose: UI5 boots in Morning before main.tsx sets the real theme (appearance.ts), and a
+         var() here would paint that interim Morning. -->
+    <meta name="color-scheme" content="light dark" />
+    <style>
+      html { background: #fff; }
+      @media (prefers-color-scheme: dark) { html { background: #1d232a; } }
+    </style>
   </head>
   <body>
     <div id="root"></div>

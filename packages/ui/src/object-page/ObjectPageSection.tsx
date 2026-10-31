@@ -73,7 +73,7 @@ function fieldItem(f: Field, ctx: SectionContext): ReactNode {
   const required = children.some((x) => ctx.isEditable(x) && !!evalDyn(x.required, ctx.formData, ctx.isEditMode, ctx.isNew));
   // data-field is what a message in the page's popover scrolls to.
   return (
-    <FormItem key={f.key} data-field={f.key} labelContent={
+    <FormItem key={f.key} data-field={f.key} className={f.wide ? "confire-wide-item" : undefined} labelContent={
       <Label required={required} showColon>
         {f.label ?? f.key}
         {f.help ? <Icon name="message-information" title={f.help} accessibleName={f.help} style={HELP} /> : null}

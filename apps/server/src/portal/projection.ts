@@ -46,7 +46,7 @@ export function toPortalModelDef(model: ModelDef): ModelDef {
     structure: model.structure,
     ...(model.tables ? { tables: model.tables.map(portalTable) } : {}),
     computed: [], constraints: [], bom: [], routing: [],
-    pricing: { priceExpr: "", quoteItemCode: "" },
+    pricing: { margin: 0, quoteItemCode: "" },
     batchDefaults: [],
   };
 }

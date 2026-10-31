@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db, entityMeta } from "@confire/db";
 import {
-  parseEntityList, parseEntitySchema,
+  parseEntityList, parseEntitySchemas,
   type B1EntityRef, type B1EntitySchema, type B1Field, type B1FieldKind, type B1Transport,
 } from "@confire/b1";
 import type { EntityProfile } from "./entity-profiles.ts";
@@ -27,22 +27,30 @@ const PARSER_EPOCH = Math.min(Date.parse("2026-10-24T14:00:00Z"), Date.now());
 
 /** The entity list is small and shared by every browse page — a per-process cache is enough,
  *  and it self-heals on restart. The per-entity schemas go to Postgres because there are ~420
- *  of them and they outlive a deploy. */
-const listCache = new Map<string, { at: number; list: Promise<B1EntityRef[]> }>();
+ *  of them and they outlive a deploy. Beas' whole schema set sits here too: its $metadata has no
+ *  scoped read, so one ~220 KB document is every schema at once (`b1:`/`beas:` keys). */
+const cache = new Map<string, { at: number; value: Promise<unknown> }>();
 
-/** A company switch (b1.ts adoptCompany): the list belongs to the old company. */
-export const forgetEntityList = (tenantId: string) => { listCache.delete(tenantId); };
-
-export function entityList(tenantId: string, b1: B1Transport, refresh = false): Promise<B1EntityRef[]> {
-  const hit = listCache.get(tenantId);
-  if (!refresh && hit && Date.now() - hit.at < LIST_TTL_MS) return hit.list;
-  const list = b1
-    .metadata({ scope: "entityset", annotation: "labelWithTable" })
-    .then(parseEntityList);
-  list.catch(() => listCache.delete(tenantId)); // a failed fetch must not poison the key for a day
-  listCache.set(tenantId, { at: Date.now(), list });
-  return list;
+function daily<T>(key: string, refresh: boolean, load: () => Promise<T>): Promise<T> {
+  const hit = cache.get(key);
+  if (!refresh && hit && Date.now() - hit.at < LIST_TTL_MS) return hit.value as Promise<T>;
+  const value = load();
+  // A failed fetch must not poison the key for a day — nor drop a newer one that replaced it.
+  value.catch(() => { if (cache.get(key)?.value === value) cache.delete(key); });
+  cache.set(key, { at: Date.now(), value });
+  return value;
 }
+
+/** A company switch (b1.ts adoptCompany): both belong to the old company — Beas maps fields onto
+ *  the company's own UDF columns. */
+export const forgetEntityList = (tenantId: string) => { cache.delete(`b1:${tenantId}`); cache.delete(`beas:${tenantId}`); };
+
+export const entityList = (tenantId: string, b1: B1Transport, refresh = false): Promise<B1EntityRef[]> =>
+  daily(`b1:${tenantId}`, refresh, () => b1.metadata({ scope: "entityset", annotation: "labelWithTable" }).then(parseEntityList));
+
+/** Every Beas entity set's schema: no labels, enums or navigations — Beas' EDMX carries none. */
+export const beasSchemas = (tenantId: string, beas: B1Transport, refresh = false): Promise<B1EntitySchema[]> =>
+  daily(`beas:${tenantId}`, refresh, () => beas.metadata().then(parseEntitySchemas));
 
 /** Reject an entity name the tenant's B1 does not expose, before it can reach a URL. */
 export async function assertEntity(tenantId: string, b1: B1Transport, name: string): Promise<B1EntityRef> {
@@ -165,7 +173,8 @@ export async function entitySchema(
     entityset: name,
     dependency: true,
   });
-  const schema = parseEntitySchema(xml, name, await entityList(tenantId, b1, refresh));
+  const schema = parseEntitySchemas(xml, await entityList(tenantId, b1, refresh)).find((s) => s.name === name);
+  if (!schema) throw new Error(`EntitySet '${name}' not found in metadata`);
   const fetchedAt = new Date();
   await db
     .insert(entityMeta)

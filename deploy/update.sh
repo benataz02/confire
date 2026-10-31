@@ -14,6 +14,9 @@ docker compose build backup
 # The schema before the new code starts (CLAUDE.md: committed migrations, never `push` here). The old
 # containers keep serving meanwhile; a failed migration rolls back and stops the deploy here.
 docker compose run --rm -T server bun --cwd packages/db drizzle-kit migrate
+# Caddy bind-mounts ../site (the marketing site, deploy/site.sh). Made here, as deploy: a missing bind
+# source is created by Docker as root, and the site's deploys could never write to it.
+mkdir -p ../site
 docker compose up -d
 docker image prune -f
 docker compose ps
