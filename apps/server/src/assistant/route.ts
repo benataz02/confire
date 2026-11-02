@@ -16,7 +16,7 @@ import { errorStatus } from "../serve.ts";
 import { TENANT_HEADER } from "../tenant.ts";
 import { modelBlock } from "./extract.ts";
 import { modelOptions, textAdapter } from "./model.ts";
-import { CONFIGURE_CHAT, GENERAL, languageLine, LANGUAGES, pageFor, SYSTEM } from "./pages.ts";
+import { CONFIGURE_CHAT, GENERAL, languageLine, LANGUAGES, pageFor, SYSTEM, todayLine } from "./pages.ts";
 import { appendMessages, dehydrate, hydrate, ownThread, releaseLease, takeLease, withoutThinking } from "./threads.ts";
 import { unlabeled } from "./files.ts";
 import { ASK_USER, B1_WRITES, toolsFor } from "./tools.ts";
@@ -30,6 +30,12 @@ import { localizeError, t } from "../i18n/index.ts";
 
 const MAX_TEXT = 20_000;
 const CACHE = { cache_control: { type: "ephemeral" as const } };
+// The conversation's own breakpoint: the request's last block (top-level automatic caching), so each
+// agent-loop call reads the history and the tool results before it from the cache. Not `promptCache`:
+// the adapter adds its markers only to a request that has none of its own, and the two system blocks
+// above carry theirs — with them, `promptCache: "short"` was a no-op and every call re-sent the whole
+// history at the full input price. Three markers of the four allowed.
+const CACHE_HISTORY = { cache_control: { type: "ephemeral" as const } };
 
 const PropsZ = z.object({
   route: z.object({ routeId: z.string(), params: z.record(z.string(), z.string()) }),
@@ -147,7 +153,12 @@ export function assistantRoutes(): Hono {
     };
     const saver: ChatMiddleware = {
       name: "save",
-      onFinish: (ctx) => save([user, ...ctx.messages.slice(hydrated.length + 1)]),
+      onFinish: (ctx, info) => {
+        // A safety classifier declined and the server-side fallback did not serve it: the run ends
+        // without an answer (the panel says so). Logged, as it may be a false positive worth a look.
+        if (info.finishReason === "content_filter") Sentry.captureMessage("assistant: model declined", { extra: { threadId: thread.id } });
+        return save([user, ...ctx.messages.slice(hydrated.length + 1)]);
+      },
       onError: () => save([user]),
       onAbort: () => save([user]),
     };
@@ -163,14 +174,13 @@ export function assistantRoutes(): Hono {
         { content: SYSTEM, metadata: CACHE },
         ...(block ? [{ content: block, metadata: CACHE }] : []),
         page.section({ projectId: thread.projectId ?? undefined, name, dirty: props.dirty }),
-        languageLine(props.language),
+        `${languageLine(props.language)} ${todayLine()}`,
       ],
       tools: toolsFor(page, { headers, tenantId, userId, thread, meter: m }),
-      modelOptions: modelOptions(),
+      modelOptions: { ...modelOptions(), ...CACHE_HISTORY },
       agentLoopStrategy: untilAsked,
       // The model's default effort, with its thinking summarized so the panel can show it.
       reasoning: { level: "high", summary: true },
-      promptCache: "short",
       middleware: [meter(m), saver],
       abortController,
     });

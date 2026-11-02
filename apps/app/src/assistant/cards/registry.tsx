@@ -1,8 +1,8 @@
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import type { UIMessage } from "@tanstack/ai-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { AnalyticalCardHeader, Button, Card, Link, ObjectStatus, Text } from "@ui5/webcomponents-react";
+import { AnalyticalCardHeader, BusyIndicator, Button, Card, Link, ObjectStatus, Text } from "@ui5/webcomponents-react";
 import { useCanOpen } from "@confire/ui/EntityLink.tsx";
 import { formatLocale, formatValue } from "@confire/ui/format.ts";
 import { useUiI18n } from "@confire/ui/i18n.ts";
@@ -19,6 +19,7 @@ import { ExtractionCard, type ExtractResult } from "./ExtractionCard.tsx";
 import { QuoteCard, type QuoteDraft } from "./QuoteCard.tsx";
 import { ChoiceCard, type Ask } from "./ChoiceCard.tsx";
 import { B1WriteCard, type B1WriteOut } from "./B1WriteCard.tsx";
+import type { ReportOut } from "./chart.ts";
 
 // Tool name → card (plan "The look"). The tool's name picks the card, never the model, and the card
 // draws the tool's output, so its figures are the server's. A decision tool's card (steps.ts DECISION)
@@ -53,13 +54,15 @@ export type CardCtx = {
 type Ctx = CardCtx;
 
 const MUTED = { color: "var(--sapContent_LabelColor)" } as const;
+/** The charts library loads with the first chart, not with the panel every page carries. */
+const ChartCard = lazy(() => import("./ChartCard.tsx").then((m) => ({ default: m.ChartCard })));
 const DOC_TITLE: Record<string, string> = { Quotations: "NAV_QUOTATIONS", Orders: "NAV_ORDERS", BusinessPartners: "NAV_BP" };
 
 /** The tools that have a card of their own (the switch below), opened from their step. */
 export const CARDS: ReadonlySet<string> = new Set([
   "configs_rows", "requests_rows", "entities_rows", "configs_get", "configs_select", "configs_calculate",
   "configs_queryPage", "configs_similar", "configs_models", "configs_create", "home_overview", "read_request",
-  "extract_values", "propose_quotation", "timeline_list", "ask_user", "b1_write", "b1_copy",
+  "extract_values", "propose_quotation", "timeline_list", "ask_user", "b1_write", "b1_copy", "reports_sap", "reports_configs",
 ]);
 
 export function renderTool(part: ToolPart, ctx: Ctx): ReactNode {
@@ -189,6 +192,16 @@ function ToolCard({ part, ctx }: { part: ToolPart; ctx: Ctx }) {
     case "b1_write":
     case "b1_copy":
       return <B1WriteCard out={out as B1WriteOut} ctx={ctx} />;
+    case "reports_sap":
+    case "reports_configs":
+      return (
+        <Suspense fallback={<BusyIndicator active size="M" style={{ width: "100%", minHeight: "8rem" }} />}>
+          <ChartCard out={out as ReportOut} input={input} tool={part.name} t={t} label={(field, v) =>
+            field === "DocumentStatus" ? documentStatus(v, t)
+            : part.name === "reports_configs" && field === "status" && v in PROJECT_STATUS ? projectStatusLabel(v as keyof typeof PROJECT_STATUS, t)
+            : v} />
+        </Suspense>
+      );
     case "propose_quotation":
       return <QuoteCard projectId={String(input.projectId ?? "")} d={out as QuoteDraft} />;
     case "timeline_list":

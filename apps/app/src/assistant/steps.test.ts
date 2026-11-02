@@ -23,6 +23,10 @@ test("a decision tool is a card of its own and splits the run", () => {
   expect(kinds([tool("b1_find"), tool("b1_read"), tool("b1_write"), tool("b1_copy")])).toEqual(["steps:2", "card", "card"]);
 });
 
+test("a chart is the answer itself: drawn in the chat, its reads stay steps", () => {
+  expect(kinds([tool("b1_schema"), tool("reports_sap"), text("Beta leads."), tool("reports_configs")])).toEqual(["steps:1", "card", "text", "card"]);
+});
+
 test("empty texts, file labels and empty thinking draw nothing and split nothing", () => {
   expect(kinds([tool("configs_get"), text("  "), think(""), text("RFQ.pdf", { fileLabel: true }), tool("configs_calculate")]))
     .toEqual(["steps:2"]);
@@ -42,4 +46,5 @@ test("a step says what it found", () => {
   expect(stepSummary("b1_read", {}, { rows: [{}], total: 40 }, t)).toBe("ASSISTANT_STEP_FOUND 40");
   expect(stepSummary("b1_read", { key: 5 }, { row: {}, etag: "x" }, t)).toBe("ASSISTANT_STEP_FOUND 1");
   expect(stepSummary("b1_schema", {}, { fields: [{}, {}, {}] }, t)).toBe("ASSISTANT_STEP_FIELDS 3");
+  expect(stepSummary("reports_sap", {}, { rows: [], scanned: 812 }, t)).toBe("ASSISTANT_STEP_CHART 812");
 });

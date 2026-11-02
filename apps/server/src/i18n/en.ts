@@ -236,4 +236,11 @@ export const en = {
   CHAT_EMPTY: "Send a message",
   CHAT_TOO_LONG: "A message can be up to {0} characters",
   EXTRACT_NOTHING: "Nothing to read: drop a PDF, PNG or JPEG, or paste the text",
+  REPORT_OTHER: "Other",
+  REPORT_EMPTY: "(none)",
+  REPORT_COUNT: "Count",
+  REPORT_SUM: "Sum",
+  REPORT_AVG: "Average",
+  REPORT_MIN: "Minimum",
+  REPORT_MAX: "Maximum",
 };

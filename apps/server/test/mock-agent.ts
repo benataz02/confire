@@ -42,6 +42,7 @@ function operationOf(method: string, path: string, headers: Record<string, strin
     ...(params.$orderby ? { orderby: params.$orderby } : {}),
     ...(params.$top ? { top: Number(params.$top) } : {}),
     ...(params.$skip ? { skip: Number(params.$skip) } : {}),
+    ...(params.$count === "true" ? { count: true } : {}),
     ...(/odata\.maxpagesize=(\d+)/.test(headers.Prefer ?? "") ? { maxPageSize: Number(/odata\.maxpagesize=(\d+)/.exec(headers.Prefer!)![1]) } : {}),
   };
   if (target.startsWith("$metadata")) return { route: "/metadata", body: {} };
@@ -105,7 +106,12 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
             return fail(400, -1000, `Property '${/U_[A-Za-z0-9_]+/.exec(filter)![0]}' of '${body.entitySet}' is invalid`);
           // B1's paging: `Prefer: odata.maxpagesize` (0 = none, default 20) per page, `$top` over all.
           const page = body.query?.maxPageSize === 0 ? Infinity : body.query?.maxPageSize ?? 20;
-          return Response.json({ status: 200, data: { value: applyFilter(rows, filter).slice(0, Math.min(page, body.query?.top ?? Infinity)) } });
+          const matched = applyFilter(rows, filter);
+          // `$count=true` answers the match count beside the page, as B1 does.
+          return Response.json({ status: 200, data: {
+            value: matched.slice(0, Math.min(page, body.query?.top ?? Infinity)),
+            ...(body.query?.count ? { "@odata.count": matched.length } : {}),
+          } });
         }
         case "/create": {
           // A service action (SeriesService_GetDocumentSeries) answers with its fixture rows.

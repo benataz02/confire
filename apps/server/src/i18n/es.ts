@@ -223,4 +223,11 @@ export const es: Partial<Record<keyof typeof en, string>> = {
   CHAT_EMPTY: "Escriba un mensaje",
   CHAT_TOO_LONG: "Un mensaje puede tener hasta {0} caracteres",
   EXTRACT_NOTHING: "No hay nada que leer: suelte un PDF, PNG o JPEG, o pegue el texto",
+  REPORT_OTHER: "Otros",
+  REPORT_EMPTY: "(sin valor)",
+  REPORT_COUNT: "Cantidad",
+  REPORT_SUM: "Suma",
+  REPORT_AVG: "Media",
+  REPORT_MIN: "Mínimo",
+  REPORT_MAX: "Máximo",
 };

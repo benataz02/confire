@@ -380,6 +380,16 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   no tool set — the model cannot approve its own proposal — and it re-runs the checks with the
   proposal's ETag, so a record changed since is `CONFLICT`. `entities_rows` stays the configuration's
   customer lookup.
+- **Charts** (`report.ts`, `orpc/routers/reports.ts`, spec `2026-11-02-assistant-charts.md`): `reports_sap` and
+  `reports_configs` are the `reports` router's procedures, in the general tool sets and over MCP. The model
+  names a chart (groupBy — a date with a `bucket` — series, measures, filter); the server reads the rows
+  (SAP: narrow pages through `readRows`, at most `MAX_SCAN`, a plain count is `$count`; Confire: SQL) and
+  counts them in the one pure `aggregate`, so a chart's figures are the server's. `ChartCard` draws the
+  answer in the chat (`steps.ts` `SHOWN`) with UI5's own charts, lazy-loaded: switch chart or table, a
+  bar opens its list (only an app page, only by a filter field that list has), CSV.
+- **Caching**: the two system blocks carry manual breakpoints and the chat request adds a top-level
+  `cache_control` (`CACHE_HISTORY`, `route.ts`) for the history. Not `promptCache`: the adapter adds
+  nothing to a request that already has a marker of its own.
 - **Threads** (`threads.ts`) are server-owned and append-only (Sonnet 5.5 refuses edited history): the
   route takes only the last user message's text from the client. One run per thread under a lease
   (`takeLease`/`withThread`, `THREAD_BUSY`); one thread per (user, configuration) plus general ones.

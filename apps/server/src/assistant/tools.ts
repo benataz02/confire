@@ -12,6 +12,7 @@ import { internalVisible } from "../project-lifecycle.ts";
 import { configsRouter } from "../orpc/routers/configs.ts";
 import { entitiesRouter } from "../orpc/routers/entities.ts";
 import { b1Router, type Proposal } from "../orpc/routers/b1.ts";
+import { reportsRouter } from "../orpc/routers/reports.ts";
 import { QUOTE_HEADER, type quoteDraft } from "../config-quote.ts";
 import { ToolInputRequiredError } from "@tanstack/ai-mcp/server";
 import { homeRouter } from "../orpc/routers/home.ts";
@@ -244,6 +245,8 @@ function allTools(ctx: ToolCtx): Record<string, AnyServerTool> {
     timeline_list: t("timeline.list", timelineRouter.list),
     entities_rows: readSap(ctx),
     ...Object.fromEntries(B1_TOOLS.map((n) => [n, t(`b1.${n.slice(3)}`, b1Router[n.slice(3) as keyof typeof b1Router])])),
+    reports_sap: t("reports.sap", reportsRouter.sap),
+    reports_configs: t("reports.configs", reportsRouter.configs),
     propose_quotation: proposeQuotation(ctx),
     [ASK_USER]: askUser,
     ...rerunTools(ctx),
@@ -257,7 +260,7 @@ export function procedureOf(name: string): AnyProcedure | undefined {
     configs_similar: configsRouter.similar, configs_select: configsRouter.select, configs_models: configsRouter.models,
     configs_rows: configsRouter.rows, configs_create: configsRouter.create, requests_rows: requestsRouter.rows,
     home_overview: homeRouter.overview, timeline_list: timelineRouter.list, entities_rows: entitiesRouter.rows,
-    propose_quotation: configsRouter.quoteDraft,
+    propose_quotation: configsRouter.quoteDraft, reports_sap: reportsRouter.sap, reports_configs: reportsRouter.configs,
     ...Object.fromEntries(B1_TOOLS.map((n) => [n, b1Router[n.slice(3) as keyof typeof b1Router]])),
   };
   return map[name] as AnyProcedure | undefined;
@@ -297,6 +300,8 @@ export function mcpTools(ctx: (call: unknown) => CallCtx): AnyServerTool[] {
     t("b1.find", b1Router.find),
     t("b1.schema", b1Router.schema),
     t("b1.read", b1Router.read),
+    t("reports.sap", reportsRouter.sap),
+    t("reports.configs", reportsRouter.configs),
     confirmedB1("b1_write", b1Router.write as AnyProcedure, ctx),
     confirmedB1("b1_copy", b1Router.copy as AnyProcedure, ctx),
     postQuotation(ctx),
@@ -307,7 +312,7 @@ export function mcpTools(ctx: (call: unknown) => CallCtx): AnyServerTool[] {
 export const MCP_TOOL_NAMES = [
   "configs_models", "configs_rows", "configs_get", "configs_create", "configs_calculate", "configs_queryPage",
   "configs_similar", "configs_select", "requests_rows", "timeline_list", "home_overview", "entities_rows",
-  "b1_find", "b1_schema", "b1_read", "b1_write", "b1_copy", "post_quotation",
+  "b1_find", "b1_schema", "b1_read", "reports_sap", "reports_configs", "b1_write", "b1_copy", "post_quotation",
 ] as const;
 
 const CONFIRM_NOTE = "It posts nothing by itself: Confire asks the user to confirm in this client, showing exactly what will be written, and posts only when they accept. Tell the user in one sentence what you are about to propose before you call it, and never say it was posted unless the answer has `written`.";

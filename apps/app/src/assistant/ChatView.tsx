@@ -313,6 +313,10 @@ export function ChatView({ thread, route, kind, page = false, head }: {
     || ((p.name === "b1_write" || p.name === "b1_copy") && !!(p.output ?? parse(results.get(p.id)?.content) as { proposal?: unknown } | undefined)?.proposal)));
   const lastUser = [...chat.messages].reverse().find((m) => m.role === "user");
   const failed = !busy && (!!chat.error || !!refusal) && last?.role === "user";
+  // A run that ended with no words and no tool call: the model declined (a safety classifier, with no
+  // fallback that served it). Said, rather than an answer that never comes.
+  const declined = !busy && !failed && last?.role === "assistant"
+    && !last.parts.some((p) => (p.type === "text" && p.content.trim()) || p.type === "tool-call");
 
   // The files on this configuration the chat has not read yet (a client's request comes with its
   // drawing on the timeline): offered as one "Read files" step.
@@ -518,7 +522,7 @@ export function ChatView({ thread, route, kind, page = false, head }: {
   );
 
   const prompts = kind === "configure" ? ["ASSISTANT_PROMPT_MISSING", "ASSISTANT_PROMPT_UNAVAILABLE"]
-    : page ? [] : ["ASSISTANT_PROMPT_WAITING", "ASSISTANT_PROMPT_MONTH"];
+    : page ? [] : ["ASSISTANT_PROMPT_WAITING", "ASSISTANT_PROMPT_MONTH", "ASSISTANT_PROMPT_SALES_CHART"];
   const firstName = (me.data?.user?.name || me.data?.user?.email || "").split(/[ @]/)[0] ?? "";
   const inline = page ? READING : "1rem";
 
@@ -587,6 +591,7 @@ export function ChatView({ thread, route, kind, page = false, head }: {
                 {lastUser ? <Link onClick={() => send(textOf(lastUser))}>{t("ASSISTANT_RETRY")}</Link> : null}
               </MessageStrip>
             ) : null}
+            {declined ? <MessageStrip design="Information" hideCloseButton>{t("ASSISTANT_NO_ANSWER")}</MessageStrip> : null}
             {live && questions.length && !asked && !busy ? (
               <QuestionCard projectId={projectId!} view={live} questions={questions} here={formHere === projectId}
                 onAnswer={(said) => answered.current.push(said)}

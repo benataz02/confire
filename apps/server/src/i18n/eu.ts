@@ -223,4 +223,11 @@ export const eu: Partial<Record<keyof typeof en, string>> = {
   CHAT_EMPTY: "Idatzi mezu bat",
   CHAT_TOO_LONG: "Mezu batek gehienez {0} karaktere izan ditzake",
   EXTRACT_NOTHING: "Ez dago irakurtzeko ezer: jaregin PDF, PNG edo JPEG bat, edo itsatsi testua",
+  REPORT_OTHER: "Besteak",
+  REPORT_EMPTY: "(baliorik gabe)",
+  REPORT_COUNT: "Kopurua",
+  REPORT_SUM: "Batura",
+  REPORT_AVG: "Batez bestekoa",
+  REPORT_MIN: "Minimoa",
+  REPORT_MAX: "Maximoa",
 };

@@ -17,6 +17,9 @@ export type Block =
  *  read's values, each with its source, so a wrong one is corrected): their card is drawn in the chat. */
 export const DECISION: ReadonlySet<string> = new Set(["read_request", "extract_values", "ask_user", "propose_quotation", "b1_write", "b1_copy"]);
 
+/** The tools whose card is the answer itself, drawn in the chat rather than behind a step: a chart. */
+export const SHOWN: ReadonlySet<string> = new Set(["reports_sap", "reports_configs"]);
+
 // A drop's file label rides on the text part's metadata, which the client type does not declare.
 const shown = (p: Extract<Part, { type: "text" }>) =>
   !!p.content.trim() && !(p as { metadata?: { fileLabel?: boolean } }).metadata?.fileLabel;
@@ -26,7 +29,7 @@ export function blocks(parts: readonly Part[]): Block[] {
   const out: Block[] = [];
   for (const p of parts) {
     if (p.type === "text") { if (shown(p)) out.push({ kind: "text", part: p }); continue; }
-    if (p.type === "tool-call" && DECISION.has(p.name)) { out.push({ kind: "card", part: p }); continue; }
+    if (p.type === "tool-call" && (DECISION.has(p.name) || SHOWN.has(p.name))) { out.push({ kind: "card", part: p }); continue; }
     if (p.type !== "tool-call" && (p.type !== "thinking" || !p.content.trim())) continue;
     const last = out.at(-1);
     if (last?.kind === "steps") last.steps.push(p);
@@ -63,6 +66,8 @@ export function stepSummary(name: string, input: unknown, output: unknown, t: (k
     case "configs_create": return typeof i.name === "string" ? i.name : "";
     case "b1_find": return Array.isArray(o.entities) ? t("ASSISTANT_STEP_FOUND", String(o.total ?? o.entities.length)) : "";
     case "b1_read": return o.row ? t("ASSISTANT_STEP_FOUND", "1") : Array.isArray(o.rows) ? t("ASSISTANT_STEP_FOUND", String(o.total ?? o.rows.length)) : "";
+    case "reports_sap":
+    case "reports_configs": return Array.isArray(o.rows) ? t("ASSISTANT_STEP_CHART", String(o.scanned ?? 0)) : "";
     case "b1_schema": return Array.isArray(o.fields) ? t("ASSISTANT_STEP_FIELDS", count(o.fields)) : "";
     default: return "";
   }

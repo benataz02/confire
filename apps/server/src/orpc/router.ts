@@ -5,6 +5,7 @@ import { configsRouter } from "./routers/configs.ts";
 import { entitiesRouter } from "./routers/entities.ts";
 import { sapRouter } from "./routers/sap.ts";
 import { b1Router } from "./routers/b1.ts";
+import { reportsRouter } from "./routers/reports.ts";
 import { portalCompaniesRouter, portalInvitationsRouter, portalSettingsRouter } from "./routers/portal.ts";
 import { requestsRouter, timelineRouter } from "./routers/requests.ts";
 import { notificationsRouter } from "./routers/notifications.ts";
@@ -38,6 +39,8 @@ export const router = {
   sap: sapRouter,
   // The assistant's SAP tools (b1-tools spec); `sap` is pairing and status.
   b1: b1Router,
+  // The assistant's charts (report.ts): SAP's records and Confire's configurations, counted here.
+  reports: reportsRouter,
   portalInvitations: portalInvitationsRouter,
   portalCompanies: portalCompaniesRouter,
   portalSettings: portalSettingsRouter,

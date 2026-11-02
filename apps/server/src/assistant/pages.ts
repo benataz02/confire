@@ -13,6 +13,9 @@ const ALWAYS = ["read_request", "extract_values", "ask_user"];
 /** SAP itself (b1-tools spec §5.6): read anything, write the curated records — proposals unless auto. */
 const B1 = ["b1_find", "b1_schema", "b1_read", "b1_write", "b1_copy"];
 
+/** Charts of SAP's records and of Confire's configurations, drawn as a card in the chat. */
+const REPORTS = ["reports_sap", "reports_configs"];
+
 /** Working on one configuration: every set has them, so a chat that creates one goes straight on with it. */
 const CONFIG_TOOLS = ["configs_get", "configs_calculate", "configs_queryPage", "configs_similar", "configs_select", "propose_quotation"];
 
@@ -39,8 +42,8 @@ const model: Page = {
 
 export const GENERAL: Page = {
   kind: "general",
-  tools: ["configs_models", "configs_create", "configs_rows", "requests_rows", "home_overview", "timeline_list", "entities_rows", ...B1, ...CONFIG_TOOLS, ...ALWAYS],
-  section: () => "The user is in the staff app, outside any one configuration: on the home page or a list. You can start a configuration from the files dropped in this chat or from what the user tells you, answer about configurations, clients' requests and anything in SAP, and create, change or copy SAP records. Once you create a configuration, this chat is that configuration's: go on with it here, the user need not open it.",
+  tools: ["configs_models", "configs_create", "configs_rows", "requests_rows", "home_overview", "timeline_list", "entities_rows", ...B1, ...REPORTS, ...CONFIG_TOOLS, ...ALWAYS],
+  section: () => "The user is in the staff app, outside any one configuration: on the home page or a list. You can start a configuration from the files dropped in this chat or from what the user tells you, answer about configurations, clients' requests and anything in SAP, chart them, and create, change or copy SAP records. Once you create a configuration, this chat is that configuration's: go on with it here, the user need not open it.",
 };
 
 /** The AI configuration page (the staff app's /assistant): the chat alone, no form on screen. */
@@ -95,9 +98,13 @@ How you take a configuration to its quotation — you lead, one step at a time, 
 
 How you answer:
 - The user sees your tool calls as short steps, collapsed once you answer; their results are not shown. Say what matters in your answer. For a look-up, name at most 5 rows, one per line, by their name or number and the one figure that matters; the user can open the step for the rest. Never write a table.
+- When the user asks how something is going, for a comparison, a ranking, a trend, a breakdown or a report — sales by month, top customers, open orders by status, quotes won — draw it with reports_sap (SAP's records) or reports_configs (Confire's configurations and requests) instead of listing figures. Pick the chart that answers the question: line or column over time (a date field with a bucket), bar for a ranking, donut for shares of one total with few slices, kpi for a single number. Filter to the period asked (dates as YYYY-MM-DD) and label measures in the user's language. The chart card shows every figure, so never repeat them: say in one or two sentences what stands out (the leader, the trend, an outlier). A truncated answer means the period was too wide: say so and offer a narrower one.
 - When the user must choose between known options (which customer, which option of a field, which of two readings, which model), call ask_user and stop. Never list the options in text.
 - When the user is unsure of a value, read what similar past quotes used with configs_similar, and offer it through ask_user.
 - Keep answers short and plain. Name fields by their labels, not their keys.`;
 
 export const LANGUAGES = { en: "English", es: "Spanish", eu: "Basque" } as const;
 export const languageLine = (l: keyof typeof LANGUAGES) => `Answer in ${LANGUAGES[l]}.`;
+/** "This month", "last quarter": a report's period needs the day. After the cache breakpoints, so it
+ *  costs the history's cache once a day at most. */
+export const todayLine = (now = new Date()) => `Today is ${now.toISOString().slice(0, 10)}.`;

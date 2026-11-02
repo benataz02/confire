@@ -80,7 +80,7 @@ export function ListCard({ title, subtitle, items, total, openAll, openAllText, 
   );
 }
 
-export function TableCard({ title, subtitle, columns, rows, footer, label, selected, onSelect }: {
+export function TableCard({ title, subtitle, columns, rows, footer, label, selected, onSelect, bare }: {
   title: string;
   subtitle?: string;
   columns: { key: string; label: string; end?: boolean }[];
@@ -90,9 +90,10 @@ export function TableCard({ title, subtitle, columns, rows, footer, label, selec
   /** With `onSelect`, rows are selectable (UI5's own selector column): the ids of the selected rows. */
   selected?: string[];
   onSelect?: (ids: string[]) => void;
+  /** the table alone, inside a card of the caller's (a chart card's table view) */
+  bare?: boolean;
 }) {
-  return (
-    <Card header={<CardHeader titleText={title} subtitleText={subtitle} />}>
+  const table = (
       <Table overflowMode="Popin" accessibleName={label ?? title}
         features={onSelect ? (
           <TableSelectionMulti selected={(selected ?? []).join(" ")} onChange={(e) => onSelect([...e.target.getSelectedAsSet()])} />
@@ -113,6 +114,11 @@ export function TableCard({ title, subtitle, columns, rows, footer, label, selec
           </TableRow>
         ))}
       </Table>
+  );
+  if (bare) return table;
+  return (
+    <Card header={<CardHeader titleText={title} subtitleText={subtitle} />}>
+      {table}
       {footer ? <div style={FOOTER}>{footer}</div> : null}
     </Card>
   );
