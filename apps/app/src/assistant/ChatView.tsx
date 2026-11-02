@@ -22,7 +22,7 @@ import { progressText, renderTool, type CardCtx } from "./cards/registry.tsx";
 import { blocks, type ToolCall } from "./steps.ts";
 import { Steps, type StepResult } from "./Steps.tsx";
 import { READABLE, refuseFile, sendDrop } from "./intake.ts";
-import { openQuestions } from "./questions.ts";
+import { openQuestions, readAwaitsChat } from "./questions.ts";
 import { assistantToggle } from "./toggle.ts";
 import { QuestionCard } from "./cards/QuestionCard.tsx";
 import { CandidatesCard } from "./cards/CandidatesCard.tsx";
@@ -352,17 +352,20 @@ export function ChatView({ thread, route, kind, page = false, head }: {
   const projectKey = projectId;
   useEffect(() => { if (projectKey) setQuestionKeys(projectKey, questionKeys); }, [projectKey, questionKeys.join("\u0000"), setQuestionKeys]);
   // The question card writes without the model. Once the user has been through every question (none
-  // is left but what they skipped), the answers go to the chat as the user's message: the model knows
-  // they are the user's and goes on with what the card does not ask (a broken rule, a table, the
-  // candidates, what was skipped) instead of standing still.
+  // is left but what they skipped), the chat takes over: with the answers as the user's message, so the
+  // model knows they are the user's, or — a read that left the card nothing to ask, or answers given on
+  // the page — once per read with nothing to report. Either way it goes on with what the card does not
+  // ask (a table's cells, a broken rule, the candidates, what was skipped) instead of standing still.
   const answered = useRef<string[]>([]);
   const [skipped, setSkipped] = useState<string[]>([]);
+  const awaits = readAwaitsChat(chat.messages);
   useEffect(() => {
-    if (!live || !questions.every((q) => skipped.includes(q.key)) || !answered.current.length || busy || disabled) return;
+    if (!live || !questions.every((q) => skipped.includes(q.key)) || busy || disabled) return;
+    if (!answered.current.length && !awaits) return;
     const said = answered.current.join(" · ");
     answered.current = [];
-    send(t("ASSISTANT_ANSWERED", said));
-  }, [live, questionKeys.join("\u0000"), skipped, busy]); // eslint-disable-line react-hooks/exhaustive-deps
+    send(said ? t("ASSISTANT_ANSWERED", said) : t("ASSISTANT_GO_ON"));
+  }, [live, questionKeys.join("\u0000"), skipped, busy, awaits]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A started configuration's chat is this thread: the chat works on it from here, and the panel on the
   // configuration's page opens this same chat.

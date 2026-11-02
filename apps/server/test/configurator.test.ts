@@ -377,6 +377,26 @@ describe("config tables (integration)", () => {
     expect(Math.abs(cents(lines[1]!) - total / 3)).toBeLessThanOrEqual(1);
   });
 
+  test("a code that is a SAP item is the line's item; a new part rides on the generic item", async () => {
+    await seedQueryTable("catalog", []);
+    const items: ModelDef = {
+      ...tableModel,
+      tables: tableModel.tables!.map((t) => (t.role === "items"
+        ? { ...t, map: { itemcode: "U_CF_ItemCode" }, columns: t.columns.map((c) => (c.key === "code" ? { ...c, key: "itemcode" } : c)) }
+        : t)),
+    };
+    const projectId = await seed("sap-items", items, { thickness: 3 }, [3]);
+    await db.update(configProject).set({ tables: { holes: rows.holes, parts: rows.parts.map(({ code, ...r }) => ({ ...r, itemcode: code })) } })
+      .where(eq(configProject.id, projectId));
+    await calculateProject(tenantId, projectId, noFetch);
+    const [project] = await db.select().from(configProject).where(eq(configProject.id, projectId));
+    const { lines } = buildQuoteLines(
+      { ...project!, customer: { cardCode: "C1", cardName: "Acme" }, selection: [{ candidateIdx: 0, batchQty: 3 }] },
+      items, SHEET_LOOKUPS, new Map([["PART-A", "PART-A"]]),
+    );
+    expect(lines.map((l) => [l.ItemCode, l.U_CF_ItemCode])).toEqual([["PART-A", undefined], ["SHEET-CFG", "PART-B"]]);
+  });
+
   // An empty grid is missing (the calculation waits for a row), so the case left is rows that ship
   // nothing: the split has nobody to divide over, and the pair is one line again.
   test("an item matrix that ships nothing is the pre-feature single line", async () => {

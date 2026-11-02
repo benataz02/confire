@@ -244,6 +244,9 @@ export type DetailFeature = {
   /** one section at a time behind a tab bar, the open one in the URL (`?section=`); default is one
    *  scrolling page */
   mode?: "tabs";
+  /** no messages button in the title. Field and cell errors stay on the controls; a save the server
+   *  refused without naming a field is a strip above the sections. */
+  noMessages?: boolean;
   /** what a new record starts with in create mode */
   createDefaults?: () => Row;
   /** section/field templates, keyed by id — a section drawn by the app (the BP's Portal section) */

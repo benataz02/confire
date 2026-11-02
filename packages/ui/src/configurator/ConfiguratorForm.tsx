@@ -362,6 +362,7 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
           disabled={disabled || !onRowsChange} readOnly={readOnly} formulaOverride={formulaOverride}
           money={def.role === "items" ? itemMoney : undefined}
           actions={def.role === "items" ? batchPick : undefined}
+          cellMark={(ri, col) => marks?.[`${key}:${ri}:${col}`]}
           onChange={(next) => onRowsChange?.(key, next)} />
       </FormItem>
     </FormGroup>

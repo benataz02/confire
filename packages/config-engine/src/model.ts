@@ -251,6 +251,9 @@ export const ModelDefZ = z.object({
   name: z.string(),
   /** free text, shown as the builder's page subtitle. */
   description: z.string().optional(),
+  /** free text for the assistant: how to configure a product on this model. Prompt only, the
+   *  engine never reads it. */
+  instructions: z.string().optional(),
   parameters: z.array(ParamZ),
   structure: z.object({
     sections: z.array(
@@ -351,9 +354,10 @@ export function displayColumns(ref: LookupRef, all: string[] | undefined): strin
 /** Derived value key for a param's source column, e.g. material_density. */
 export const derivedKey = (paramKey: string, col: string) => `${paramKey}_${col}`;
 
-/** The one mandatory item grid every model carries. `itemcode` rides to SAP as a UDF rather than
- *  DocumentLine.ItemCode: the generic configurator item stays the B1 item (config-quote.ts, and
- *  RESERVED_LINE_FIELDS enforces it), and the Crystal Report layouts read U_CF_ItemCode.
+/** The one mandatory item grid every model carries. An `itemcode` that is a SAP item is the line's
+ *  ItemCode; any other is a part with no item yet, quoted on the model's generic item with the code
+ *  in its mapped UDF (config-quote.ts; RESERVED_LINE_FIELDS keeps a map off ItemCode itself), which
+ *  the Crystal Report layouts read.
  *  Basis defaults to 1: the split is then weighted by `quantity` alone, which is the sane answer
  *  before the author says what their shop actually costs by. */
 export const itemsTable = (): ItemsTable => ({

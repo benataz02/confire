@@ -51,7 +51,10 @@ const condition = (cond: FilterCond, f: B1Field): string => {
 
 /**
  * `query` -> `QueryOptions`. Rules:
- *  - $select is the key fields plus the visible columns, so a row can always be opened.
+ *  - $select is the key fields plus the named columns, so a row can always be opened.
+ *    An empty select sends none: naming every scalar field (the old way to keep a
+ *    collection off the page) exceeds the Service Layer's query-string limit. readRows
+ *    drops collections from that answer instead.
  *  - paging is server-driven (Prefer: odata.maxpagesize) and continued via @odata.nextLink.
  *  - a filter naming a field the entity does not have is an error: silently dropping it would
  *    show MORE rows than were asked for.
@@ -68,8 +71,12 @@ export function compileList(
   const fields = scalarFields(schema);
   const byName = new Map(fields.map((f) => [f.name, f]));
 
-  const visible = query.select.length ? query.select : fields.map((f) => f.name);
-  const select = [...new Set([...schema.keys, ...visible])].filter((n) => byName.has(n));
+  // Empty stays empty. `fields.map(f => f.name)` here is what put every scalar on `$select`.
+  // ponytail: B1 then returns the whole row (lines included, dropped in readRows). A short
+  // default column list per entity if that response gets heavy.
+  const select = query.select.length
+    ? [...new Set([...schema.keys, ...query.select])].filter((n) => byName.has(n))
+    : undefined;
 
   let filter: string | undefined;
   for (const cond of query.filter) {
@@ -83,9 +90,8 @@ export function compileList(
     const fn = query.searchMode === "startswith" ? "startswith" : "contains";
     // Without searchFields: the visible string columns, so a search cannot match on a field the
     // user cannot see.
-    const candidates = query.searchFields?.length
-      ? fields
-      : fields.filter((f) => !query.select.length || select.includes(f.name));
+    const candidates = query.searchFields?.length ? fields
+      : select ? fields.filter((f) => select.includes(f.name)) : fields;
     const ors = searchTargets(candidates.map((f) => [f.name, f] as [string, B1Field]), (f) => f.kind === "string", query.searchFields)
       .map((f) => `${fn}(${f.name},'${escapeLiteral(q)}')`);
     if (ors.length) filter = andFilter(filter, ors.join(" or "));
@@ -93,7 +99,7 @@ export function compileList(
 
   const ord = query.orderby.filter((o) => byName.has(o.field));
   return {
-    select,
+    ...(select?.length ? { select } : {}),
     ...(filter ? { filter } : {}),
     ...(ord.length ? { orderby: ord.map((o) => `${o.field}${o.dir === "desc" ? " desc" : ""}`).join(",") } : {}),
     // The page size is `Prefer: odata.maxpagesize`, never `$top`. `$top` bounds the whole result

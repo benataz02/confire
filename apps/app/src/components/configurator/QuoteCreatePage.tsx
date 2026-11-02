@@ -85,6 +85,7 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
       data={d.data}
       sections={quotations.detail.sections}
       header={{ ...quotations.detail.header, createTitle: t("CONFIG_NEW_QUOTATION") }}
+      noMessages={quotations.detail.noMessages}
       lockedFields={d.portal ? LOCKED_REQUEST : LOCKED}
       localViews
       createLabel={d.replaces ? t("CONFIG_UPDATE_IN_SAP") : t("CONFIG_CREATE_IN_SAP")}

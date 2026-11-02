@@ -1,13 +1,14 @@
 import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Button, CheckBox, Input, Option, Select, Text } from "@ui5/webcomponents-react";
 import {
-  cellDefault, columnOptions, requiredColumn, COST_COL, PRICE_COL,
+  cellDefault, columnOptions, requiredColumn, COST_COL, ITEM_COL, PRICE_COL,
   type ResolvedTable, type RowMoney, type TableColumn, type TableDef, type Val,
 } from "@confire/config-engine";
 import { CflField } from "../cfl/CflField.tsx";
 import { cfl, type QueryScope } from "../cfl/cfl-configs.ts";
 import { Grid, type CellTemplate, type GridState } from "../list-report/Grid.tsx";
 import type { ListColumn } from "../types.ts";
+import type { FieldMark } from "./ConfiguratorForm.tsx";
 import { displayValue } from "./formHelpers.ts";
 import { addRow, pasteRows, removeRows, setCell, type Row } from "./configTableOps.ts";
 import { money as fmtMoney } from "../money.ts";
@@ -42,7 +43,7 @@ const header = (c: TableColumn) => c.label + (c.unit ? ` (${c.unit})` : "");
  * ConfiguratorForm.control()'s branch order so a column and a parameter of the same type look and
  * behave the same.
  */
-export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, readOnly, querySource, money, formulaOverride, actions }: {
+export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, readOnly, querySource, money, formulaOverride, actions, cellMark }: {
   def: TableDef;
   /** the stored rows — what the user typed, a pending edit included */
   rows: Row[];
@@ -62,6 +63,8 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
   formulaOverride?: boolean;
   /** toolbar controls before Add/Delete, kept when read-only: the items grid's batch picker */
   actions?: ReactNode;
+  /** the staff app's assistant mark on a cell (ConfiguratorForm's `marks`, by `<table>:<row>:<column>`) */
+  cellMark?: (row: number, col: string) => FieldMark | undefined;
 }) {
   // Off `me`, not off a prop: the currency is the tenant's, identical for every table on the page,
   // so threading it down from the model was carrying a constant through four components.
@@ -123,6 +126,8 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
     // The column's own flag and the cell's emptiness: the asterisk and the red, as on a field.
     const req = requiredColumn(def, c);
     const blank = req && (value === undefined || value === null || value === "");
+    const mark = cellMark?.(ri, c.key);
+    const ai = mark?.kind === "assistant" ? mark : undefined;
 
     if (readOnly || (computed && !formulaOverride)) {
       if (computed) return <Text>{show(value ?? null)}</Text>;
@@ -148,10 +153,13 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
       const ref = c.cell.ref;
       const canonical = tables[ref.table];
       // An items grid shows the code (plain mode): the stored code is what rides to SAP. The server
-      // binds the picked row's other columns from the stored cell, even off the first page.
+      // binds the picked row's other columns from the stored cell, even off the first page. Its item
+      // code may be a part with no SAP item yet (quoted on the model's quote item, config-quote.ts),
+      // so a code the list lacks is not an error there.
       return (
         <CflField
           config={{ dialogConfig: cfl.masterdataQuery(querySource, ref, canonical, { title: header(c), showValue: def.role === "items" }) }}
+          mustExist={!(def.role === "items" && c.key === ITEM_COL)}
           value={stored ?? null} disabled={disabled} required={req} accessibleName={header(c)} commitOnly
           onValueChange={(nv) => {
             const next = nv === undefined || nv === "" ? null : (nv as Val);
@@ -186,9 +194,12 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
         accessibleName={header(c)} required={req}
         value={value === undefined || value === null ? "" : computed ? show(value) : String(value)}
         // The clear icon IS the revert, and the value state is how a hand-typed number is told
-        // apart from a calculated one at a glance.
-        showClearIcon={overridden} valueState={overridden ? "Information" : blank ? "Negative" : "None"}
-        valueStateMessage={<div>{overridden ? i18n.getText("UI_HAND_FORMULA") : i18n.getText("UI_REQUIRED", header(c))}</div>}
+        // apart from a calculated one at a glance. A cell the assistant wrote and nobody changed
+        // since says so, with its source, rather than "by hand".
+        // ponytail: input and formula cells only; a value-help or select cell carries no mark yet.
+        showClearIcon={overridden} valueState={overridden || ai ? "Information" : blank ? "Negative" : "None"}
+        valueStateMessage={<div>{ai ? i18n.getText(overridden ? "UI_AI_FORMULA" : "UI_AI_CELL", ai.tip)
+          : overridden ? i18n.getText("UI_HAND_FORMULA") : i18n.getText("UI_REQUIRED", header(c))}</div>}
         disabled={disabled}
         onChange={(e) => {
           const raw = e.target.value ?? "";

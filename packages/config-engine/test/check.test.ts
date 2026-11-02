@@ -57,6 +57,15 @@ describe("checkModel", () => {
       expect(checkModel({ ...model, pricing: { ...model.pricing, margin } }, PRICES).map((i) => i.path)).toEqual(["pricing.margin"]);
   });
 
+  test("a multi-select default is comma-separated keys, not a formula", () => {
+    const ok = structuredClone(model);
+    ok.parameters.push({ key: "finish", label: "Finish", type: "string", ui: "multicombo", defaultExpr: "gloss, matte" });
+    expect(checkModel(ok, PRICES).filter((i) => i.path.includes("defaultExpr"))).toEqual([]);
+    const bad = structuredClone(model);
+    bad.parameters[0]!.defaultExpr = "gloss, matte";
+    expect(checkModel(bad, PRICES).some((i) => i.path === "parameters[0].defaultExpr")).toBe(true);
+  });
+
   test("parse error surfaces with span", () => {
     const bad = structuredClone(model);
     bad.computed[0]!.expr = "1 + ";

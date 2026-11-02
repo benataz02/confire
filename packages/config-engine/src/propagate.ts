@@ -15,6 +15,20 @@ export type Bindings = {
 
 const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((k) => b.has(k));
 
+/** Option keys for a multi-select default. The formula language has no list literal, so the author
+ *  writes `gloss, matte`. A surrounding quote pair is stripped: a default saved while this field
+ *  was still a formula is `"gloss"` or `"gloss, matte"`.
+ *  ponytail: no quoted commas inside a key; a key that itself contains a comma needs a real list syntax. */
+function multiKeys(src: string): string[] {
+  let s = src.trim();
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"') && !s.slice(1, -1).includes('"')) s = s.slice(1, -1);
+  return s.split(",").flatMap((part) => {
+    const t = part.trim();
+    const key = t.length >= 2 && t.startsWith('"') && t.endsWith('"') ? t.slice(1, -1) : t;
+    return key === "" ? [] : [key];
+  });
+}
+
 export function domainOf(model: ModelDef, lookups: ResolvedLookups, key: string): Option[] {
   const p = model.parameters.find((x) => x.key === key);
   if (!p) return [];
@@ -73,8 +87,8 @@ function settle(
     let changed = false;
     for (const p of model.parameters) {
       if (!(p.key in values) && p.defaultExpr !== undefined) {
-        const v = tryEval(p.defaultExpr);
-        if (v !== undefined) {
+        const v = p.ui === "multicombo" ? multiKeys(p.defaultExpr) : tryEval(p.defaultExpr);
+        if (v !== undefined && !(Array.isArray(v) && v.length === 0)) {
           values[p.key] = v;
           defaulted.add(p.key);
           changed = true;

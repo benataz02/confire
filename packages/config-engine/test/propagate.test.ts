@@ -24,6 +24,25 @@ describe("bindings", () => {
     expect(bindings(model, lookups, { coated: true }).visible.color).toBe(true);
   });
 
+  test("a multi-select default is comma-separated keys, shown as the selection", () => {
+    const m = structuredClone(model);
+    m.parameters.push(
+      { key: "finish", label: "Finish", type: "string", ui: "multicombo", defaultExpr: "gloss, matte", domain: { kind: "options", ref: { source: "manual", options: [{ value: "gloss" }, { value: "matte" }] } } },
+      { key: "note", label: "Note", type: "string", ui: "input", visibleWhen: 'HAS(finish, "gloss")' },
+    );
+    const b = bindings(m, lookups, {});
+    expect(b.values.finish).toEqual(["gloss", "matte"]);
+    expect(b.defaulted.has("finish")).toBe(true);
+    expect(b.visible.note).toBe(true);
+    // A quote pair is what the expression field used to store; the keys inside are the selection.
+    m.parameters[m.parameters.length - 2]!.defaultExpr = '"gloss, matte"';
+    expect(bindings(m, lookups, {}).values.finish).toEqual(["gloss", "matte"]);
+    // What the user picked stands; the default fills only an absent key.
+    const picked = bindings(m, lookups, { finish: ["matte"] });
+    expect(picked.values.finish).toEqual(["matte"]);
+    expect(picked.defaulted.has("finish")).toBe(false);
+  });
+
   test("HAS on an empty multi-select is false, so the rule hides", () => {
     const m = structuredClone(model);
     m.parameters.push(

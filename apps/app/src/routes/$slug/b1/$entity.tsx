@@ -107,8 +107,8 @@ function EntityList({ feature }: { feature: EntityFeature }) {
           const docEntry = rows.length === 1 ? Number((rows[0] as Row).DocEntry) : NaN;
           return (
             <>
-              {/* Keyed by the selected document: a new selection remounts it, which drops a stale
-                  error and closes any open preview — PrintActions releases the blob URL in its own
+              {/* Keyed by the selected document: a new selection remounts it, which closes any open
+                  preview — PrintActions releases the blob URL in its own
                   cleanup. No single row selected is NaN, which draws it disabled. */}
               <PrintActions key={docEntry} entity={entity} docEntry={docEntry} />
               <CopyTo entity={entity} flows={meta.data.flows.filter((f) => b1Feature(f.target))} rows={rows as Row[]} />
@@ -136,7 +136,7 @@ function EntityCreate({ feature }: { feature: EntityFeature }) {
   if (!constraints.writable) return <PageError error={new Error(i18n.getText("ADMIN_READONLY", constraints.label))} />;
   return (
     <ObjectPage key={d.createEpoch} isNew entity={feature.entity} constraints={constraints} data={seed}
-      sections={feature.detail.sections} header={feature.detail.header}
+      sections={feature.detail.sections} header={feature.detail.header} noMessages={feature.detail.noMessages}
       onSave={d.save} onLeave={() => open(route)}
       breadcrumbs={[{ text: b1Label(feature.entity, (k) => i18n.getText(k)), to: route }]} />
   );
@@ -178,7 +178,7 @@ function EntityCopy({ feature }: { feature: EntityFeature }) {
   if (draft.error) return <PageError error={draft.error} />;
   return (
     <ObjectPage isNew entity={feature.entity} constraints={draft.data.constraints} data={draft.data.draft}
-      sections={sections} header={feature.detail.header} createLabel={ui.getText("UI_CREATE")}
+      sections={sections} header={feature.detail.header} noMessages={feature.detail.noMessages} createLabel={ui.getText("UI_CREATE")}
       onSave={async (diff) => {
         // The diff holds what changed: header fields, and the lines whole once any was edited or
         // deleted. Lines left alone are all of them (an emptied grid never gets here: lines are required).

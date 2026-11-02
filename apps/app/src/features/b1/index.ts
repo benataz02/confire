@@ -10,6 +10,8 @@ import type { EntityFeature } from "@confire/ui/types.ts";
 // Read at render, once the registry below exists: Copy to offers only the documents declared here.
 const hasPage = (entity: string) => entity in B1_FEATURES;
 
+// Problems stay on the fields. The title's messages button is for pages whose problems are not a
+// field (the model builder, the configurator).
 export const B1_FEATURES: Record<string, EntityFeature> = Object.fromEntries(
   [
     documentFeature("Quotations", { label: "Sales quotations", one: "sales quotation", icon: "sales-quote", hasPage }),
@@ -18,7 +20,7 @@ export const B1_FEATURES: Record<string, EntityFeature> = Object.fromEntries(
     //documentFeature("Invoices", { label: "A/R invoices", one: "A/R invoice", icon: "monitor-payments", hasPage }),
     businessPartners,
     items,
-  ].map((f) => [f.entity, f]),
+  ].map((f) => [f.entity, { ...f, detail: { ...f.detail, noMessages: true } }]),
 );
 
 export const b1Feature = (entity: string): EntityFeature | undefined => B1_FEATURES[entity];

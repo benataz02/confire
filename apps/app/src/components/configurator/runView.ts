@@ -38,6 +38,14 @@ export function projectStatusText(t: TextFn, status: string): string {
 export const candidateLabel = (t: TextFn, keys: string[], assignment: Entries): string =>
   keys.length ? keys.map((k) => String(assignment[k] ?? "—")).join(" · ") : t("CONFIG_CANDIDATE");
 
+/** A boolean parameter as the caller's yes/no. `"true"`/`"false"` are `String(boolean)` from a
+ *  filter token; anything else is not a boolean and the caller keeps its own text. */
+export function boolText(v: unknown, yes: string, no: string): string | undefined {
+  if (v === true || v === "true") return yes;
+  if (v === false || v === "false") return no;
+  return undefined;
+}
+
 /** A price line's grid row id: the pair a Sel names. */
 export const lineKey = (s: Sel): string => `${s.candidateIdx}:${s.batchQty}`;
 

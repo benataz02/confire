@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { candidateLabel, mergeSelection, projectStatusText, sortRows, statusUi } from "./runView.ts";
+import { boolText, candidateLabel, mergeSelection, projectStatusText, sortRows, statusUi } from "./runView.ts";
 
 /** English sentences, not the properties file — `{n}` is filled in order. */
 const EN: Record<string, string> = {
@@ -22,6 +22,14 @@ describe("labels", () => {
     expect(candidateLabel(t, [], {})).toBe("Configuration");
     expect(candidateLabel(t, ["width"], { width: 12 })).toBe("12");
     expect(candidateLabel(t, ["width"], {})).toBe("—");
+  });
+  test("a boolean reads as the caller's yes or no, including the filter's string form", () => {
+    expect(boolText(true, "Yes", "No")).toBe("Yes");
+    expect(boolText(false, "Bai", "Ez")).toBe("Ez");
+    expect(boolText("true", "Sí", "No")).toBe("Sí");
+    expect(boolText("false", "Yes", "No")).toBe("No");
+    expect(boolText("wide", "Yes", "No")).toBeUndefined();
+    expect(boolText(null, "Yes", "No")).toBeUndefined();
   });
   test("list statuses and the request tag read as sentences", () => {
     expect(statusUi(t).draft).toEqual({ state: "None", text: "Draft" });

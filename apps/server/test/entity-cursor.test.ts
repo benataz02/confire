@@ -78,6 +78,23 @@ describe("list paging cursor", () => {
     ).rejects.toThrow("does not belong to this list");
   });
 
+  test("an empty select is not sent, and a collection on the row is dropped", async () => {
+    const withLines = {
+      ...schema,
+      fields: [...schema.fields, { name: "DocumentLines", kind: "collection", edmType: "Collection(DocumentLine)" }],
+    } as never;
+    let sent: { select?: string[] } | undefined;
+    const b1 = {
+      readEntitySet: async (_entity: string, query: { select?: string[] }) => {
+        sent = query;
+        return { status: 200, data: { value: [{ DocEntry: 1, CardCode: "C1", DocumentLines: [{ LineNum: 0 }] }] } };
+      },
+    } as never;
+    const page = await readRows(b1, withLines, "Orders", { query, pageSize: 20 }, internal);
+    expect(sent?.select).toBeUndefined();
+    expect(page.rows[0]).toEqual({ DocEntry: 1, CardCode: "C1" });
+  });
+
   test("a forged or tampered cursor fails closed", async () => {
     const { b1 } = fake("Orders?$skip=100");
     await expect(

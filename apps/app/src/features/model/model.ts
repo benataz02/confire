@@ -29,6 +29,11 @@ export const modelSections = (t: Translate): Section[] => [
           { key: "description", label: t("MODEL_DESCRIPTION"), controlType: "text", placeholder: t("MODEL_DESCRIPTION_PH") },
           { key: "batchDefaults", label: t("MODEL_BATCHES"), required: true, controlType: "batches" },
         ],
+        // A group of its own: the form's second column, the whole of it.
+        groups: [{
+          id: "assistant", label: t("MODEL_ASSISTANT"),
+          fields: [{ key: "instructions", label: t("MODEL_INSTRUCTIONS"), controlType: "prompt", help: t("MODEL_INSTRUCTIONS_HINT"), placeholder: t("MODEL_INSTRUCTIONS_PH") }],
+        }],
       },
       {
         id: "pricing", label: t("MODEL_PRICING"),

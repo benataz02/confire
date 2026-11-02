@@ -40,7 +40,7 @@ type Head = { name: string; modelId: string; customer: { cardCode: string; cardN
 // The General fields the configurator waits for: the form shows once none is missing.
 const GENERAL = new Set(["name_required", "customer_required", "batches_required"]);
 
-// One scrolling page — General, the model's sections, Similar configurations, Candidates and a
+// One scrolling page — General, the model's sections, Candidates, Similar configurations and a
 // request's Timeline — with the cost rail beside every section, and one finalizing action in the
 // footer once everything the quote needs is filled. The server computes everything on the page
 // (configs.get's view); this draws it, sends what the user changed, and waits for the answer.
@@ -203,7 +203,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   if (!view || !project || !model || !form) return null;
 
   const sources = (view.project.sources ?? {}) as Sources;
-  const marks = fieldMarks(entries as Record<string, unknown>, sources, assistant.questionKeys[id] ?? [], (s) => sourceTip(s, (k, ...a) => t(k, ...a.map(String))));
+  const marks = fieldMarks(entries as Record<string, unknown>, sources, assistant.questionKeys[id] ?? [], (s) => sourceTip(s, (k, ...a) => t(k, ...a.map(String))), tables);
   const anyRead = Object.values(marks).some((m) => m.kind === "assistant");
   const pressMark = (key: string, opener: HTMLElement) => {
     if (marks[key]?.kind === "question") { if (!assistant.open) assistant.toggle(); return; }
@@ -465,13 +465,6 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
           itemMoney: cost && itemQty !== undefined ? { batchQty: cost.batchQty, rows: cost.items } : null,
           batches, itemBatch: itemQty, onItemBatchChange: setViewQty,
         }) : []),
-        // No mappings means the History tab was never filled in — an empty "not set up" section is
-        // just noise. Copy is an edit, so it waits for General and is gone once the page is locked.
-        headReady && !locked && !!model.definition.history?.mappings.length && (
-          <ObjectPageSection key="similar" id="similar" titleText={t("CONFIG_SIMILAR")}>
-            <SimilarConfigs projectId={id} model={model.definition} entries={entries} tables={tables} onCopy={copyValues} />
-          </ObjectPageSection>
-        ),
         // The count rides in the anchor, like the model builder's issue counts — the Fiori
         // anchor-bar counter.
         <ObjectPageSection key="candidates" id="candidates" titleText={candidates.rows.length ? t("CONFIG_CANDIDATES_COUNT", String(candidates.rows.length)) : t("CONFIG_SECTION_CANDIDATES")}>
@@ -500,6 +493,13 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
             )}
           </div>
         </ObjectPageSection>,
+        // No mappings means the History tab was never filled in — an empty "not set up" section is
+        // just noise. Copy is an edit, so it waits for General and is gone once the page is locked.
+        headReady && !locked && !!model.definition.history?.mappings.length && (
+          <ObjectPageSection key="similar" id="similar" titleText={t("CONFIG_SIMILAR")}>
+            <SimilarConfigs projectId={id} model={model.definition} entries={entries} tables={tables} onCopy={copyValues} />
+          </ObjectPageSection>
+        ),
         !!request && (
           <ObjectPageSection key="timeline" id="timeline" titleText={t("CONFIG_SECTION_TIMELINE")}>
             <RequestTimeline id={id} />

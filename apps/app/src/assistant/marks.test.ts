@@ -28,3 +28,9 @@ test("lists compare by value; the user's own words and an image read the way the
     .toEqual({ colors: { kind: "assistant", tip: "ASSISTANT_SOURCE_CHAT(red and blue)" } });
   expect(sourceTip({ file: "photo.jpg", page: null, quote: "M8" }, t)).toBe("ASSISTANT_MARK_IMAGE(photo.jpg|M8)");
 });
+
+test("a table's cells are marked one by one while they hold what was read", () => {
+  const sources = { items: { value: [{ itemcode: "P-1", length: 146 }], source: FILE } };
+  expect(fieldMarks({}, sources, [], tip, { items: [{ itemcode: "P-1", length: 150, quantity: 1 }] }))
+    .toEqual({ "items:0:itemcode": { kind: "assistant", tip: "ASSISTANT_MARK_FILE(RFQ.pdf|1|W 200)" } });
+});

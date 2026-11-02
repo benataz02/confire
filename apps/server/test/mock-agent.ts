@@ -42,6 +42,7 @@ function operationOf(method: string, path: string, headers: Record<string, strin
     ...(params.$orderby ? { orderby: params.$orderby } : {}),
     ...(params.$top ? { top: Number(params.$top) } : {}),
     ...(params.$skip ? { skip: Number(params.$skip) } : {}),
+    ...(/odata\.maxpagesize=(\d+)/.test(headers.Prefer ?? "") ? { maxPageSize: Number(/odata\.maxpagesize=(\d+)/.exec(headers.Prefer!)![1]) } : {}),
   };
   if (target.startsWith("$metadata")) return { route: "/metadata", body: {} };
   const cj = /^\$crossjoin\((.*)\)$/.exec(target);
@@ -102,7 +103,9 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
           // B1 answers a filter on a UDF that does not exist in the company with a 400.
           if (filter && missingUdf.has(body.entitySet) && /U_[A-Za-z0-9_]+/.test(filter))
             return fail(400, -1000, `Property '${/U_[A-Za-z0-9_]+/.exec(filter)![0]}' of '${body.entitySet}' is invalid`);
-          return Response.json({ status: 200, data: { value: applyFilter(rows, filter).slice(0, body.query?.top ?? 20) } });
+          // B1's paging: `Prefer: odata.maxpagesize` (0 = none, default 20) per page, `$top` over all.
+          const page = body.query?.maxPageSize === 0 ? Infinity : body.query?.maxPageSize ?? 20;
+          return Response.json({ status: 200, data: { value: applyFilter(rows, filter).slice(0, Math.min(page, body.query?.top ?? Infinity)) } });
         }
         case "/create": {
           // A service action (SeriesService_GetDocumentSeries) answers with its fixture rows.

@@ -25,6 +25,19 @@ const optValue = (e: { detail: { selectedOption: { value?: string } } }) => e.de
 
 const shown = (v: unknown) => (v === null || v === undefined ? "" : String(v));
 
+/** Multi-select default: option keys separated by commas. A real component so its i18n hook is
+ *  not FormField's — the control function is called inside the field, not rendered as one. */
+function MultiDefault({ ctx }: { ctx: ControlContext }) {
+  const i18n = useI18n();
+  if (!ctx.editable) return <Text>{shown(ctx.value)}</Text>;
+  return (
+    <Input style={W} value={shown(ctx.value)} placeholder={i18n.getText("MODEL_DEFAULT_KEYS_PH")}
+      accessibleName={ctx.field.label}
+      valueState={ctx.error ? "Negative" : "None"} valueStateMessage={<div>{ctx.error}</div>}
+      onInput={(e) => ctx.onChange(e.target.value || undefined)} />
+  );
+}
+
 // Friendly name, glyph, and the one-line rule that decides when each control is the right one.
 export const UI_META: Record<Param["ui"], { text: string; icon: string; hint: string }> = {
   input: { text: "MODEL_UI_INPUT", icon: "edit", hint: "MODEL_UI_INPUT_HINT" },
@@ -81,6 +94,11 @@ export function builderControls(o: { scope: (c: ControlContext) => ModelDef; tab
       <TextArea rows={3} style={W} value={shown(c.value)} placeholder={c.field.placeholder} accessibleName={c.field.label}
         onInput={(ev) => c.onChange(ev.target.value || undefined)} />
     ),
+    // The assistant's instructions: a page of text, so it opens tall and grows.
+    prompt: (c) => (
+      <TextArea rows={14} growing growingMaxRows={30} style={W} value={shown(c.value)} placeholder={c.field.placeholder} accessibleName={c.field.label}
+        onInput={(ev) => c.onChange(ev.target.value || undefined)} />
+    ),
     count: (c) => (
       <StepInput style={W} min={0} value={(c.value as number | undefined) ?? 0} accessibleName={c.field.label}
         onChange={(ev) => c.onChange(ev.target.value || undefined)} />
@@ -90,6 +108,7 @@ export function builderControls(o: { scope: (c: ControlContext) => ModelDef; tab
         onChange={(ev) => c.onChange(ev.target.value ?? 1)} />
     ),
     expr: expr(e, none),
+    paramDefault: (c) => ((c.formData as Param).ui === "multicombo" ? <MultiDefault ctx={c} /> : expr(e, none)(c)),
     exprArea: expr(e, none, 3),
     lineExpr: expr(e, qty),
     // A grid row's formula: the model's names plus this table's own columns.

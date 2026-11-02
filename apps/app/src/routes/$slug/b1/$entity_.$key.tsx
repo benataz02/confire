@@ -33,7 +33,7 @@ function EntityRecord() {
   if (d.error || !constraints || !d.row) return <PageError error={d.error ?? new Error(i18n.getText("ADMIN_NOT_FOUND"))} />;
   return (
     <ObjectPage {...feature.detail.templates} entity={entity} constraints={constraints} data={d.row}
-      sections={feature.detail.sections} header={feature.detail.header}
+      sections={feature.detail.sections} header={feature.detail.header} noMessages={feature.detail.noMessages}
       // No ETag means B1 gave us nothing to guard the write with; refuse rather than send a blind PATCH.
       editDisabled={!d.etag}
       onSave={d.save} navigation={d.navigation}

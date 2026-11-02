@@ -8,7 +8,7 @@ import { ModelDefZ, ParamZ, TableDefZ, type ModelDef } from "./model";
 // The keyless parts go whole, and only when they changed.
 
 const KEYED = ["parameters", "computed", "tables"] as const;
-const WHOLE = ["name", "description", "structure", "constraints", "bom", "routing", "history", "pricing", "batchDefaults"] as const;
+const WHOLE = ["name", "description", "instructions", "structure", "constraints", "bom", "routing", "history", "pricing", "batchDefaults"] as const;
 // A ModelDef key in neither list would silently stop being saved.
 const _covered: Exclude<keyof ModelDef, (typeof KEYED)[number] | (typeof WHOLE)[number]> extends never ? true : never = true;
 void _covered;
@@ -26,6 +26,7 @@ export const ModelPatchZ = z.object({
   name: S.name.optional(),
   // null removes an optional part: JSON has no way to send `undefined`.
   description: z.string().nullable().optional(),
+  instructions: z.string().nullable().optional(),
   parameters: keyed(ParamZ),
   computed: keyed(S.computed.element),
   tables: keyed(TableDefZ),

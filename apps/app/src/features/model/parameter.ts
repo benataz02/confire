@@ -37,7 +37,8 @@ export const paramSections = (t: Translate): Section[] => [
       { key: "key", label: t("MODEL_KEY"), required: true, controlType: "text", readonly: true, editableOnCreate: true },
       { key: "label", label: t("MODEL_COL_LABEL"), required: true, controlType: "text" },
       // Usually one identifier, so the Input's own suggestion list is enough.
-      { key: "defaultExpr", label: t("MODEL_DEFAULT"), controlType: "expr" },
+      // A multi-select's default is comma-separated keys; every other control's is a formula.
+      { key: "defaultExpr", label: t("MODEL_DEFAULT"), controlType: "paramDefault" },
       {
         key: "type", label: t("MODEL_TYPE"), required: true,
         options: (["string", "number", "boolean"] as const).map((v) => ({ value: v, label: v })),

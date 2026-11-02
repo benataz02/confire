@@ -95,7 +95,14 @@ export async function readRows(
     res = await viaB1(() => b1.readEntitySet(entity, q));
   }
 
-  const rows = rowsOf(res.data);
+  // No $select means B1 sends collections too. Drop them so an empty select still answers
+  // with scalar fields, which is what a list and b1_read mean by it.
+  const drop = !a.wholeRows && !a.query.select.length
+    ? new Set(schema.fields.filter((f) => f.kind === "collection").map((f) => f.name))
+    : undefined;
+  const rows = drop?.size
+    ? rowsOf(res.data).map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !drop.has(k))))
+    : rowsOf(res.data);
   const next = nextLinkOf(res.data);
   return {
     rows,

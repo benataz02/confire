@@ -137,6 +137,21 @@ describe("compileList in", () => {
     const q = compileList(schema, spec({ orderby: [{ field: "Status", dir: "desc" }, { field: "ItemCode", dir: "asc" }] }), { pageSize: 10 });
     expect(q.orderby).toBe("Status desc,ItemCode");
   });
+
+  test("an empty select is omitted, not every scalar field", () => {
+    const fat: B1EntitySchema = {
+      ...schema,
+      fields: [
+        ...schema.fields,
+        ...Array.from({ length: 40 }, (_, i) => ({ name: `U_F${i}`, kind: "string" as const, edmType: "Edm.String" })),
+        { name: "ItemPrices", kind: "collection", edmType: "Collection(ItemPrice)" },
+      ],
+    };
+    const q = compileList(fat, spec(), { pageSize: 20 });
+    expect(q.select).toBeUndefined();
+    // A named column is still that column plus the key.
+    expect(compileList(fat, spec({ select: ["U_F0"] }), { pageSize: 20 }).select).toEqual(["ItemCode", "U_F0"]);
+  });
 });
 
 describe("nextSkipOf", () => {

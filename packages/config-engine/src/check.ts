@@ -141,7 +141,8 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   };
 
   model.parameters.forEach((p, i) => {
-    checkExpr(p.defaultExpr, `parameters[${i}].defaultExpr`, base);
+    // A multi-select default is comma-separated option keys, not a formula (propagate splits them).
+    if (p.ui !== "multicombo") checkExpr(p.defaultExpr, `parameters[${i}].defaultExpr`, base);
     checkExpr(p.visibleWhen, `parameters[${i}].visibleWhen`, base);
     checkExpr(p.requiredWhen, `parameters[${i}].requiredWhen`, base);
     // base, not withQty: the cost is per unit and the badge shows before any batch exists.

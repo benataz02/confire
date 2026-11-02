@@ -67,6 +67,10 @@ function checkQueryNames(schema: B1EntitySchema, q: ListQuery): void {
   if (unique.length) throw unknownNames(schema.name, unique);
 }
 
+/** b1.read's rows per call when the select names scalar fields only. Never 0 (`odata.maxpagesize=0` is
+ *  every row): an unbounded answer would overflow the model's context and the month's budget.
+ *  ponytail: one fixed cap; per-entity widths only if 500 narrow rows ever prove too many tokens. */
+const NARROW_CAP = 500;
 const QueryZ = ListQueryZ.partial();
 const normal = (q: z.infer<typeof QueryZ> | undefined): ListQuery =>
   ({ ...q, select: q?.select ?? [], filter: q?.filter ?? [], orderby: q?.orderby ?? [] });
@@ -200,7 +204,7 @@ export const b1Router = {
   read: userProcedure
     .meta(openapi({
       summary: "Read SAP records",
-      description: `Read SAP Business One records live, by SAP's own names: Quotations, Orders, DeliveryNotes, Invoices (key DocEntry; DocNum is the number people say), BusinessPartners (CardCode), Items (ItemCode), or any other set b1_find finds. With \`key\`: that one record, whole, with its \`etag\`. Else a list: \`query.select\` names fields (empty = every scalar field; a collection such as DocumentLines only when named), \`query.filter\` narrows (eq, ne, gt, ge, lt, le, contains, startswith, in), \`query.orderby\` sorts, \`query.search\` is free text over string fields. Enum values are SAP's member names (bost_Open, cCustomer). At most ${LIST_CAP} rows; \`total\` says how many match and \`nextCursor\` reads the next page. A wrong field name is refused with the closest real ones.`,
+      description: `Read SAP Business One records live, by SAP's own names: Quotations, Orders, DeliveryNotes, Invoices (key DocEntry; DocNum is the number people say), BusinessPartners (CardCode), Items (ItemCode), or any other set b1_find finds. With \`key\`: that one record, whole, with its \`etag\`. Else a list: \`query.select\` names fields (empty = every scalar field; a collection such as DocumentLines only when named), \`query.filter\` narrows (eq, ne, gt, ge, lt, le, contains, startswith, in), \`query.orderby\` sorts, \`query.search\` is free text over string fields. Enum values are SAP's member names (bost_Open, cCustomer). One call answers up to ${NARROW_CAP} rows when \`query.select\` names only scalar fields, else ${LIST_CAP}: to read many records, name the few fields you need. \`total\` says how many match and \`nextCursor\` reads the next page. A wrong field name is refused with the closest real ones.`,
     }))
     .input(z.object({
       entity: EntityZ.describe("SAP's entity set name"),
@@ -217,10 +221,13 @@ export const b1Router = {
       checkQueryNames(schema, query);
       const collections = new Set(schema.fields.filter((f) => f.kind === "collection").map((f) => f.name));
       const wholeRows = query.select.some((n) => collections.has(n));
-      const page = await readRows(c.b1, schema, input.entity, { query, pageSize: LIST_CAP, cursor: input.cursor, count: !input.cursor, wholeRows },
+      // A narrow row is a few tokens, a whole one a few thousand: the cap follows the row's width, and
+      // the page size is the cap, so the model gets its rows in one request instead of 20 at a time.
+      const cap = query.select.length && !wholeRows ? NARROW_CAP : LIST_CAP;
+      const page = await readRows(c.b1, schema, input.entity, { query, pageSize: cap, cursor: input.cursor, count: !input.cursor, wholeRows },
         { tenantId: context.tenantId, key: "b1-tool" });
       const keep = new Set([...schema.keys, ...query.select]);
-      const rows = page.rows.slice(0, LIST_CAP).map((r) => (wholeRows ? Object.fromEntries(Object.entries(r).filter(([k]) => keep.has(k))) : r));
+      const rows = page.rows.slice(0, cap).map((r) => (wholeRows ? Object.fromEntries(Object.entries(r).filter(([k]) => keep.has(k))) : r));
       return { rows, keys: page.keys, total: page.total, nextCursor: page.nextCursor };
     }),
 

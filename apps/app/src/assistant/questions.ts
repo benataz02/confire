@@ -1,4 +1,5 @@
 import type { FieldOption, ModelDef } from "@confire/config-engine";
+import type { UIMessage } from "@tanstack/ai-react";
 import type { ConfigView } from "../components/configurator/useConfigProcess.ts";
 import type { ExtractResult } from "./cards/ExtractionCard.tsx";
 
@@ -77,4 +78,18 @@ export function openQuestions(view: QuestionView, extracts: ExtractResult[], kep
 export function nextQuestion(questions: readonly Q[], skipped: readonly string[]): Q | undefined {
   return questions.find((q) => !skipped.includes(q.key))
     ?? skipped.map((k) => questions.find((q) => q.key === k)).find((q) => q !== undefined);
+}
+
+/** The chat has not taken its turn since the last read: no word of the user's or the model's after
+ *  the read's `extract_values`. The read is a fixed step, not a run, so the chat goes on only when
+ *  handed it — once per read, which is what this keeps from looping. */
+export function readAwaitsChat(messages: readonly UIMessage[]): boolean {
+  const parts = messages.flatMap((m) => m.parts.map((p) => ({ role: m.role, p })));
+  let i = parts.length;
+  while (i-- > 0) {
+    const { role, p } = parts[i]!;
+    if (p.type === "tool-call" && p.name === "extract_values") return true;
+    if (role === "user" || p.type === "text") return false;
+  }
+  return false;
 }

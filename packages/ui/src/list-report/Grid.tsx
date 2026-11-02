@@ -129,6 +129,7 @@ export function Grid({
   title, columns, state, onStateChange, rows, total, loading, hasMore, onLoadMore, loadAll, keyOf,
   selectionMode = "None", selectedIds, onSelectionChange, onRowClick, toolbarActions, cellTemplates,
   exportName, showSettings = true, fill = true, epoch, noDataText, expandGroups, statusRows,
+  visibleRows: visibleRowCount,
 }: {
   title?: string;
   /** every column the view may show, resolved against metadata */
@@ -163,6 +164,9 @@ export function Grid({
   expandGroups?: boolean;
   /** document lines: a row whose first status column says closed reads muted */
   statusRows?: boolean;
+  /** Fixed mode only: viewport size. The body still shrinks to fewer rows, so a list shorter
+   *  than this does not scroll. Omitted, the grid shows its rows, at least 3 and at most 15. */
+  visibleRows?: number;
 }) {
   const canOpen = useCanOpen();
   const i18n = useUiI18n();
@@ -408,7 +412,7 @@ export function Grid({
           loading={loading}
           minRows={1}
           visibleRowCountMode={fill || maximized ? "AutoWithEmptyRows" : "Fixed"}
-          visibleRows={fill || maximized ? undefined : Math.min(Math.max(rows.length, 3), 15)}
+          visibleRows={fill || maximized ? undefined : (visibleRowCount ?? Math.min(Math.max(rows.length, 3), 15))}
           // onLoadMore only fires off a scroll of the table body, and a page that fits has nothing
           // to scroll — so while there is more, a few phantom rows keep the body scrollable. Grouped,
           // the table fires on every scroll to the bottom: a page may only grow existing groups.

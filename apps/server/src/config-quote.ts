@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db, configProject, type ConfigCandidate, type ConfigSelection } from "@confire/db";
 import {
   computeOutputs,
+  ITEM_COL,
   DslError,
   itemsTableOf,
   missingInputs,
@@ -15,7 +16,7 @@ import {
   type TableRows,
   type Val,
 } from "@confire/config-engine";
-import { B1Error, rowsOf, type B1Transport } from "@confire/b1";
+import { B1Error, escapeLiteral, rowsOf, type B1Transport } from "@confire/b1";
 import { ENTITY_PROFILES } from "./entity-profiles.ts";
 import { canonicalJson } from "./canon.ts";
 import { quotationIn, tenantCompany, tenantConnector, tenantCurrency, viaB1 } from "./b1.ts";
@@ -82,7 +83,7 @@ export const QUOTE_HEADER = new Set(ENTITY_PROFILES.Quotations!.editable);
  * agree by construction.
  */
 export function buildQuoteLines(
-  project: ConfigProjectRow, model: ModelDef, lookups: ResolvedLookups,
+  project: ConfigProjectRow, model: ModelDef, lookups: ResolvedLookups, sapItems: SapItems = new Map(),
 ): { lines: Record<string, unknown>[]; value: number; cost: number } {
   const items = itemsTableOf(model);
   const lines: Record<string, unknown>[] = [];
@@ -115,16 +116,19 @@ export function buildQuoteLines(
       continue;
     }
     for (const l of pm.lines) {
+      // A row's code that is a SAP item is the line's item. Any other code is a part with no item
+      // yet: the configurator's generic item is the B1 item and the code rides along in its mapped
+      // UDF, so no article master has to be created per configuration.
+      const item = sapItems.get(itemKey(l.row[ITEM_COL]));
       const line: Record<string, unknown> = {
-        // the configurator's generic item stays the B1 item; the customer-facing code rides along
-        // in a mapped UDF, so no article master has to be created per configuration.
-        ItemCode: model.pricing.quoteItemCode,
+        ItemCode: item ?? model.pricing.quoteItemCode,
         ItemDescription: desc,
         Quantity: l.quantity,
         // the salesperson's price wins over the split: the grid showed it, so the document carries it
         UnitPrice: l.unitPrice,
       };
       for (const [col, field] of Object.entries(items?.map ?? {})) {
+        if (item && col === ITEM_COL) continue;
         const v: Val | undefined = l.row[col];
         if (v !== undefined && v !== null) line[field] = v;
       }
@@ -132,6 +136,26 @@ export function buildQuoteLines(
     }
   }
   return { lines, value, cost };
+}
+
+/** The items grid's codes that are SAP items, by `itemKey`, each as SAP spells it. */
+export type SapItems = ReadonlyMap<string, string>;
+const itemKey = (v: Val | undefined) => (typeof v === "string" ? v.trim().toUpperCase() : "");
+
+/** Which of the grid's codes are SAP items: one `Items` read per distinct code, at quote time, since
+ *  a code may be typed (or read off a drawing) for a part that has no item yet, and the masterdata
+ *  cache is one filtered page of SAP, not its item master. Keyed case-blind, as SQL Server's
+ *  collation matches, and answered in SAP's own spelling.
+ *  ponytail: one call per code — a grid is a handful of parts; one `or` filter if they grow. */
+export async function sapItemsOf(b1: B1Transport, project: ConfigProjectRow, model: ModelDef): Promise<SapItems> {
+  const items = itemsTableOf(model);
+  const codes = new Set((items ? project.tables[items.key] ?? [] : []).map((r) => r[ITEM_COL]).filter((v): v is string => !!itemKey(v)).map((v) => v.trim()));
+  const found = await Promise.all([...codes].map(async (code) => {
+    const res = await b1.readEntitySet("Items", { filter: `ItemCode eq '${escapeLiteral(code)}'`, select: ["ItemCode"], top: 1 });
+    const hit = rowsOf(res.data)[0] as { ItemCode?: unknown } | undefined;
+    return typeof hit?.ItemCode === "string" ? [[itemKey(code), hit.ItemCode] as const] : [];
+  }));
+  return new Map(found.flat());
 }
 
 /** Canonical Quotations draft: the lines above, plus the customer header.
@@ -142,7 +166,7 @@ export function buildQuoteLines(
  *  page's header patch over this seed — so a salesperson quoting a foreign-currency customer can
  *  still pick their currency in the quote page's value help. */
 export function buildQuoteSeed(
-  project: ConfigProjectRow, model: ModelDef, lookups: ResolvedLookups, currency?: string | null,
+  project: ConfigProjectRow, model: ModelDef, lookups: ResolvedLookups, currency?: string | null, sapItems?: SapItems,
 ): Record<string, unknown> {
   if (!project.customer) {
     throw new ORPCError("BAD_REQUEST", { message: t("QUOTE_NEEDS_CUSTOMER") });
@@ -166,7 +190,7 @@ export function buildQuoteSeed(
   const seed: Record<string, unknown> = {
     CardCode: project.customer.cardCode,
     CardName: project.customer.cardName,
-    DocumentLines: buildQuoteLines(project, model, lookups).lines,
+    DocumentLines: buildQuoteLines(project, model, lookups, sapItems).lines,
   };
   if (currency) seed.DocCurrency = currency;
   return seed;
@@ -245,9 +269,10 @@ export async function quoteDraft(tenantId: string, projectId: string) {
   const { model, lookups } = await liveEngine(tenantId, project);
   const here = quotationIn(project, await tenantCompany(tenantId));
   const done = project.status === "quoted" && here;
+  const sapItems = await viaB1(async () => sapItemsOf((await tenantConnector(tenantId)).b1, project, model.definition));
   return {
     commandId: commandIdOf(tenantId, project, here),
-    data: buildQuoteSeed(project, model.definition, lookups, await tenantCurrency(tenantId)),
+    data: buildQuoteSeed(project, model.definition, lookups, await tenantCurrency(tenantId), sapItems),
     totals: quotedTotals(project, model.definition, lookups),
     quoted: done ? { docEntry: project.b1DocEntry!, quotedAt: project.quotedAt } : null,
     // A reopened project re-quotes its quotation (§7.3): the page says so before the user posts.
@@ -306,9 +331,9 @@ export async function createQuote(
     throw new ORPCError("CONFLICT", { message: t("QUOTE_STATE_CHANGED"), data: { reason: "STATE_CHANGED" } });
 
   const { model, lookups } = await liveEngine(tenantId, project);
-  const seed = buildQuoteSeed(project, model.definition, lookups, await tenantCurrency(tenantId));
-  const totals = quotedTotals(project, model.definition, lookups);
   const { b1 } = conn;
+  const seed = buildQuoteSeed(project, model.definition, lookups, await tenantCurrency(tenantId), await viaB1(() => sapItemsOf(b1, project, model.definition)));
+  const totals = quotedTotals(project, model.definition, lookups);
 
   const posted = await viaB1(async () => {
     const current = here ? await readQuotation(b1, project.b1DocEntry!) : null;

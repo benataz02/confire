@@ -148,7 +148,14 @@ describe.skipIf(!process.env.DATABASE_URL)("b1 tools", () => {
     const page = await read({});
     expect(page.rows).toHaveLength(20);
     const sent = agent.calls.filter((c) => c.route === "/entity-set").at(-1)!.body as { query: { select?: string[] } };
-    expect(sent.query.select).not.toContain("DocumentLines"); // an empty select is the scalar fields
+    // An empty select must not name every scalar: that $select exceeds the Service Layer query-string limit.
+    expect(sent.query.select).toBeUndefined();
+    expect(page.rows[0]).not.toHaveProperty("DocumentLines");
+    expect(page.rows[0]).toMatchObject({ DocEntry: 1, DocNum: 905 });
+    // Named scalar fields: narrow rows, all 25 in one request.
+    const before = agent.calls.length;
+    expect((await read({ select: ["DocNum"] })).rows).toHaveLength(25);
+    expect(agent.calls.length - before).toBe(1);
 
     // A collection named: whole rows read (B1 refuses some collections in $select), then projected.
     const lines = await read({ select: ["DocNum", "DocumentLines"] });

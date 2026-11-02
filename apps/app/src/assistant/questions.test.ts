@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { nextQuestion, openQuestions, type Q, type QuestionView } from "./questions.ts";
+import type { UIMessage } from "@tanstack/ai-react";
+import { nextQuestion, openQuestions, readAwaitsChat, type Q, type QuestionView } from "./questions.ts";
 import type { ExtractResult } from "./cards/ExtractionCard.tsx";
 
 // The open questions of a configuration, from its live view and every read in its chat (pure): what
@@ -78,4 +79,13 @@ test("one question at a time: Skip sends it last, and skipping them all cycles",
   // an answered question drops out of the list, skipped or not
   expect(nextQuestion(qs.slice(2), skipped)?.key).toBe("c");
   expect(nextQuestion([], skipped)).toBeUndefined();
+});
+
+test("a read waits for the chat until anyone speaks after it", () => {
+  const read = { id: "a", role: "assistant", parts: [{ type: "tool-call", id: "c", name: "extract_values", arguments: "{}", state: "input-complete" }] } as unknown as UIMessage;
+  const said = (role: "user" | "assistant") => ({ id: role, role, parts: [{ type: "text", content: "hi" }] }) as unknown as UIMessage;
+  expect(readAwaitsChat([said("user"), read])).toBe(true);
+  expect(readAwaitsChat([read, said("user")])).toBe(false); // handed over
+  expect(readAwaitsChat([read, said("assistant")])).toBe(false);
+  expect(readAwaitsChat([said("user"), said("assistant")])).toBe(false); // no read at all
 });

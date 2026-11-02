@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  Bar, Button, Dialog, FlexBox, Menu, MenuItem, ObjectPage as Ui5ObjectPage, SplitButton, Tab, TabContainer,
+  Bar, Button, Dialog, FlexBox, Menu, MenuItem, MessageStrip, ObjectPage as Ui5ObjectPage, SplitButton, Tab, TabContainer,
   ToolbarButton, ToolbarItem, type ObjectPageDomRef,
 } from "@ui5/webcomponents-react";
 import { useUiI18n } from "../i18n.ts";
@@ -21,7 +21,7 @@ import type { FormField, HeaderConfig, ObjectViewState, Section } from "../types
 // app-object-page (LIST-REPORT-OBJECT-PAGE.md §4): a declared section tree over one record, merged
 // with the entity's metadata when there is one. The record's lifecycle is useObjectRecord's; this
 // draws it — title, sections (one scrolling page, or tabs), the footer, and every problem the record
-// has as one messages button in the title.
+// has as one messages button in the title (`noMessages` leaves field errors on the controls).
 
 export type { CreateAction } from "./useObjectRecord.ts";
 
@@ -47,6 +47,8 @@ type PageProps = Templates & {
   notice?: ReactNode;
   /** the caller's own messages beside the record's: a failed read, a refused Delete */
   messages?: PageMessage[];
+  /** no messages button. A save the server refused without naming a field is a strip instead. */
+  noMessages?: boolean;
 };
 
 /** A record made outside (kept alive across routes), or the options the page makes one from. */
@@ -158,8 +160,12 @@ function Page({ record: r, ...p }: PageProps & { record: ObjectRecord }) {
     },
   };
 
-  const banner = p.notice ? (
-    <FlexBox direction="Column" style={{ gap: "0.5rem", marginBottom: "0.5rem" }}>{p.notice}</FlexBox>
+  // With the button gone, this is the only place a refusal that names no field can land.
+  const saveStrip = p.noMessages && r.saveError
+    ? <MessageStrip design="Negative" hideCloseButton>{r.saveError}</MessageStrip>
+    : null;
+  const banner = saveStrip || p.notice ? (
+    <FlexBox direction="Column" style={{ gap: "0.5rem", marginBottom: "0.5rem" }}>{saveStrip}{p.notice}</FlexBox>
   ) : null;
 
   const layoutControl = p.localViews ? undefined : (
@@ -184,7 +190,7 @@ function Page({ record: r, ...p }: PageProps & { record: ObjectRecord }) {
           editDisabled: p.editDisabled,
           navigation: p.navigation,
           breadcrumbs: p.breadcrumbs,
-          messages: (
+          messages: p.noMessages ? undefined : (
             <ToolbarItem overflowPriority="NeverOverflow">
               <PageMessages messages={messages} onSection={goSection} openOn={r.refused} />
             </ToolbarItem>

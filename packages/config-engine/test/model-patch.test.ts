@@ -44,7 +44,8 @@ describe("diffModel", () => {
     const next = structuredClone(model);
     next.routing = next.routing.slice(0, 1);
     next.description = "Cables";
-    expect(diffModel(model, next)).toEqual({ routing: next.routing, description: "Cables" });
+    next.instructions = "Ask the length first.";
+    expect(diffModel(model, next)).toEqual({ routing: next.routing, description: "Cables", instructions: "Ask the length first." });
     expect(roundTrip(model, next)).toEqual(next);
   });
 

@@ -181,6 +181,8 @@ test("modelBlock is stable and names help, rules and allowed values", () => {
   // a rule eliminating an option changes the form, not the block: it stays cacheable
   const ruled = { ...FORM, fields: { ...FORM.fields, size: { ...FORM.fields.size!, options: [{ value: "S", label: "Small", unavailable: "No S in steel" }, { value: "L", label: "Large" }] } } };
   expect(modelBlock(DEF, ruled)).toBe(b);
+  expect(b).not.toContain("How to configure");
+  expect(modelBlock({ ...DEF, instructions: "Ask the steel grade first." }, FORM)).toContain("## How to configure this model\nAsk the steel grade first.");
 });
 
 test("fromWire: real pages, table cells as records of the table's columns, obvious types fixed", () => {
@@ -194,6 +196,40 @@ test("fromWire: real pages, table cells as records of the table's columns, obvio
   expect(e.set.map((r) => [r.value, r.source.page])).toEqual([[120, null], [42, 2]]); // a query value stays as read
   expect(e.batches!.source.page).toBeNull();
   expect(e.tables[0]!.rows).toEqual([{ itemcode: "A", quantity: 2 }]);
+});
+
+// ALUMIGRAF's shape: the code is a pick over an SAP list, the name and size follow from the pick.
+const PICKED_ITEMS: ModelDef = {
+  ...DEF,
+  tables: [{
+    ...itemsTable(),
+    columns: [
+      { key: "itemcode", label: "Item", type: "string", cell: { kind: "options", ref: { source: "query", table: "items_q" } } },
+      { key: "itemname", label: "Name", type: "string", cell: { kind: "formula", expr: "itemcode_ItemName" } },
+      { key: "quantity", label: "Qty", type: "number", cell: { kind: "input" } },
+      { key: "length", label: "Length", type: "number", unit: "mm", cell: { kind: "formula", expr: "itemcode_Length" } },
+    ],
+  }, { role: "calc", key: "cut", title: "Cut", columns: [{ key: "len", label: "Len", type: "number", cell: { kind: "formula", expr: "1" } }] }],
+};
+
+test("a drawn part fills the items grid: a new code, its name and size over the formulas", () => {
+  const b = modelBlock(PICKED_ITEMS, FORM);
+  expect(b).toContain("- itemname — Name (text; computed from itemcode_ItemName unless written");
+  expect(b).toContain("- length — Length (number, mm; computed from");
+  expect(b).toContain("else the part number or reference the drawing gives");
+  expect(b).not.toContain("- len — Len"); // a calc table's formula stays computed
+  const src = { file: "RFQ.pdf", page: 1, quote: "00-461-39-00-11 NAME PLATE 146" };
+  const e = fromWire(PICKED_ITEMS, {
+    set: [], batches: null, notes: [],
+    tables: [{ table: "items", rows: [[
+      { column: "itemcode", value: 46139 }, { column: "itemname", value: "NAME PLATE" }, { column: "length", value: "146" },
+    ]], source: src }],
+    unsure: [{ key: "items", why: "no SAP item", candidates: [] }],
+  });
+  expect(e.tables[0]!.rows).toEqual([{ itemcode: "46139", itemname: "NAME PLATE", length: 146 }]);
+  const p = planApply(PICKED_ITEMS, view(), e, all);
+  expect(p.patch.tables).toEqual({ items: [{ itemcode: "46139", itemname: "NAME PLATE", length: 146 }] });
+  expect(p.questions).toEqual([]); // written for review in its grid, not asked as well
 });
 
 test("a short list is written out with every column, so a row is picked by what the drawing says", () => {

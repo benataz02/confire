@@ -1,17 +1,18 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import {
-  Label, MultiComboBox, MultiComboBoxItem, Tag, Text, Title,
+  Label, MultiComboBox, MultiComboBoxItem, ObjectStatus, Tag, Text, Title,
 } from "@ui5/webcomponents-react";
 import { BarChart } from "@ui5/webcomponents-react-charts";
-import type { ModelDef } from "@confire/config-engine";
+import type { Entries, ModelDef } from "@confire/config-engine";
 import type { client } from "../../orpc.ts";
 import {
-  candidateLabel, fmt, lineKey, mergeSelection, sortRows, type Sel,
+  boolText, candidateLabel, fmt, lineKey, mergeSelection, sortRows, type Sel,
 } from "./runView.ts";
+import { useUiI18n } from "@confire/ui/i18n.ts";
+import { Grid, type CellTemplate, type GridState } from "@confire/ui/list-report/Grid.tsx";
 import { money } from "@confire/ui/money.ts";
 import { useCurrency } from "../../orpc.ts";
 import { useI18n } from "../../i18n.ts";
-import { Grid, type CellTemplate, type GridState } from "@confire/ui/list-report/Grid.tsx";
 import type { ListColumn, Row } from "@confire/ui/types.ts";
 
 // The line's own fields. Not identifiers, so no parameter key — a column of its own — collides.
@@ -29,6 +30,26 @@ const BAR = 14;
 /** Bars the chart draws: the grid's first rows. Each bar is several SVG paths and a label, and 200
  *  candidates × every quantity is a chart nobody reads. */
 const CHART_MAX = 10;
+/** Half of the previous 56rem box. The table scrolls inside this, and only once its rows pass it. */
+const GRID_MAX = "28rem";
+
+/** How many body rows fit under `maxRem`, from the theme's row, header and toolbar heights.
+ *  Cozy is 44px / 2.75rem; compact is the `.ui5-content-density-compact` override on `body`. */
+function rowsWithin(maxRem: number): number {
+  const root = getComputedStyle(document.documentElement);
+  const body = getComputedStyle(document.body);
+  const font = parseFloat(root.fontSize) || 16;
+  const px = (raw: string, fallback: number) => {
+    const n = parseFloat(raw);
+    if (!Number.isFinite(n) || n <= 0) return fallback;
+    return raw.trim().endsWith("rem") ? n * font : n;
+  };
+  const row = px(body.getPropertyValue("--_ui5wcr-AnalyticalTableRowHeight"), 44);
+  const header = px(body.getPropertyValue("--_ui5wcr-AnalyticalTableHeaderRowHeight"), row);
+  const bar = px(body.getPropertyValue("--_ui5wcr-BarHeight"), 2.75 * font);
+  // A couple of pixels for the table's own border, so the cap is not itself a scrollbar.
+  return Math.max(1, Math.floor((maxRem * font - header - bar - 2) / row));
+}
 
 const toSel = (r: Row): Sel => ({ candidateIdx: r[IDX] as number, batchQty: r[QTY] as number });
 const keyOf = (r: Row) => lineKey(toSel(r));
@@ -53,10 +74,29 @@ export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, s
 }) {
   const currency = useCurrency();
   const i18n = useI18n();
+  const ui = useUiI18n();
   const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
+  const yes = ui.getText("UI_YES");
+  const no = ui.getText("UI_NO");
+  // Viewport rows that fit under GRID_MAX. Fewer rendered rows (group headers included) shrink the
+  // body, so a short list has no scrollbar; past the cap, the table scrolls and the header stays.
+  const [gridRows, setGridRows] = useState(() => rowsWithin(parseFloat(GRID_MAX)));
+  useLayoutEffect(() => {
+    const apply = () => setGridRows(rowsWithin(parseFloat(GRID_MAX)));
+    apply();
+    const obs = new MutationObserver(apply);
+    obs.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
   const [filters, setFilters] = useState<Record<string, string[]>>({});
   const batches = candidates[0]?.perBatch.map((b) => b.batchQty) ?? [];
   const paramLabel = (k: string) => model.parameters.find((p) => p.key === k)?.label ?? k;
+  // Open parameters whose cells are yes/no. The value stays a boolean on the row so a group
+  // header's option label and the status agree; everything else is still its string.
+  const boolKeys = useMemo(
+    () => new Set(keys.filter((k) => model.parameters.some((p) => p.key === k && p.type === "boolean"))),
+    [keys.join(), model.parameters],
+  );
 
   // Keyed on the keys' contents: a new view is a new array.
   const qtyText = t("CONFIG_QUANTITY");
@@ -64,11 +104,14 @@ export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, s
   const totalText = t("CONFIG_TOTAL");
   const lowestText = t("CONFIG_LOWEST");
   const columns = useMemo<ListColumn[]>(() => [
-    ...keys.map((k) => ({ key: k, label: paramLabel(k), groupable: true })),
+    ...keys.map((k) => ({
+      key: k, label: paramLabel(k), groupable: true,
+      ...(boolKeys.has(k) ? { options: [{ value: true, label: yes }, { value: false, label: no }] } : {}),
+    })),
     { key: QTY, label: qtyText, type: "number" as const, groupable: true },
     { key: PRICE, label: priceText, type: "number" as const },
     { key: TOTAL, label: totalText, type: "number" as const },
-  ], [keys.join(), model.parameters, qtyText, priceText, totalText]);
+  ], [keys.join(), model.parameters, qtyText, priceText, totalText, boolKeys, yes, no]);
   // Sort, grouping and widths are the user's until the column set changes under them (a
   // recalculation that leaves other parameters open), then they start over.
   const sig = columns.map((c) => c.key).join();
@@ -80,18 +123,38 @@ export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, s
 
   // A grid template must outlive the render (a new one is a new component type), so it reads only
   // its row and the currency.
-  const cellTemplates = useMemo<Record<string, CellTemplate>>(() => ({
-    [PRICE]: (r) => (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", width: "100%" }}>
-        {r[LOWEST] ? <Tag design="Positive">{lowestText}</Tag> : null}
-        <Text>{money(r[PRICE] as number, currency)}</Text>
-      </div>
-    ),
-    [TOTAL]: (r) => <Text>{money(r[TOTAL] as number, currency)}</Text>,
-  }), [currency, lowestText]);
+  const cellTemplates = useMemo<Record<string, CellTemplate>>(() => {
+    const templates: Record<string, CellTemplate> = {
+      [PRICE]: (r) => (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", width: "100%" }}>
+          {r[LOWEST] ? <Tag design="Positive">{lowestText}</Tag> : null}
+          <Text>{money(r[PRICE] as number, currency)}</Text>
+        </div>
+      ),
+      [TOTAL]: (r) => <Text>{money(r[TOTAL] as number, currency)}</Text>,
+    };
+    for (const k of boolKeys) {
+      templates[k] = (r) => {
+        const text = boolText(r[k], yes, no);
+        // "Error"/"Success" is the wrong announcement for a plain no/yes.
+        if (!text) return <Text>—</Text>;
+        return (
+          <ObjectStatus inverted state={r[k] === true ? "Positive" : "Negative"} stateAnnouncementText={text}>
+            {text}
+          </ObjectStatus>
+        );
+      };
+    }
+    return templates;
+  }, [currency, lowestText, boolKeys, yes, no]);
+
+  const labelled = (assignment: Entries): Entries =>
+    Object.fromEntries(keys.map((k) => [k, boolKeys.has(k) ? (boolText(assignment[k], yes, no) ?? "—") : (assignment[k] ?? "—")]));
 
   const all = candidates.flatMap((c, i) => c.perBatch.map((b): Row => ({
-    ...Object.fromEntries(keys.map((k) => [k, String(c.assignment[k] ?? "—")])),
+    ...Object.fromEntries(keys.map((k) => [k, boolKeys.has(k)
+      ? (c.assignment[k] === true || c.assignment[k] === false ? c.assignment[k] : "—")
+      : String(c.assignment[k] ?? "—")])),
     [IDX]: i, [QTY]: b.batchQty, [PRICE]: b.unitPrice, [TOTAL]: b.total, [LOWEST]: b.lowest,
     "#mat": b.material, "#ops": b.operations, "#oth": b.other, "#mrg": b.unitPrice - b.unitCost,
   })));
@@ -120,7 +183,7 @@ export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, s
   const parts = SEGMENTS.filter(([k]) => charted.some((r) => r[k] !== 0));
   const dataset = charted.map((r) => ({
     row: r,
-    label: [candidateLabel(t, keys, candidates[r[IDX] as number]!.assignment),
+    label: [candidateLabel(t, keys, labelled(candidates[r[IDX] as number]!.assignment)),
       ...(batches.length > 1 ? [t("CONFIG_QTY_AXIS", fmt(r[QTY] as number))] : [])].join(" · "),
     ...Object.fromEntries(parts.map(([k]) => [k, (r[k] as number) / ((r[PRICE] as number) || 1)])),
   }));
@@ -145,7 +208,8 @@ export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, s
                 onSelectionChange={(e) =>
                   setFilters((f) => ({ ...f, [d.key]: e.detail.items.map((it) => it.value ?? "") }))}>
                 {d.values.map((v) => (
-                  <MultiComboBoxItem key={v} value={v} text={d.key === QTY ? fmt(Number(v)) : v} />
+                  <MultiComboBoxItem key={v} value={v}
+                    text={d.key === QTY ? fmt(Number(v)) : boolKeys.has(d.key) ? (boolText(v, yes, no) ?? v) : v} />
                 ))}
               </MultiComboBox>
             </div>
@@ -153,14 +217,17 @@ export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, s
         </div>
       ) : null}
       <Text>{t("CONFIG_LINES_HINT")}</Text>
-      <Grid title={t("CONFIG_LINES")} columns={columns} state={state} rows={rows} keyOf={keyOf} fill={false}
-        onStateChange={(patch) => setView({ sig, state: { ...state, ...patch } })}
-        cellTemplates={cellTemplates} noDataText={t("CONFIG_NO_LINES")}
-        selectionMode="Multiple" selectedIds={selectedIds} expandGroups
-        onSelectionChange={(picked) => {
-          if (disabled) setResync((n) => n + 1);
-          else onSelect(mergeSelection(selection, new Set(rows.map(keyOf)), picked.map(toSel)));
-        }} />
+      <div style={{ maxHeight: GRID_MAX }}>
+        <Grid title={t("CONFIG_LINES")} columns={columns} state={state} rows={rows} keyOf={keyOf} fill={false}
+          visibleRows={gridRows}
+          onStateChange={(patch) => setView({ sig, state: { ...state, ...patch } })}
+          cellTemplates={cellTemplates} noDataText={t("CONFIG_NO_LINES")}
+          selectionMode="Multiple" selectedIds={selectedIds} expandGroups
+          onSelectionChange={(picked) => {
+            if (disabled) setResync((n) => n + 1);
+            else onSelect(mergeSelection(selection, new Set(rows.map(keyOf)), picked.map(toSel)));
+          }} />
+      </div>
 
       {/* The grid above is this chart's table view — same rows, same order, exact figures — so the
           bars stay a shape: no axis, no data labels; the tooltip and the legend name the parts.
