@@ -12,12 +12,13 @@ import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../
 import { scoreRows } from "../../similarity.ts";
 import { copyName } from "../../copy-name.ts";
 import {
-  cachedLookups, calculateProject, liveEngine, loadModel, masterdataRows, QueryPageZ, queryTablePage,
+  cachedLookups, calculateProject, keepsCandidates, liveEngine, loadModel, masterdataRows, QueryPageZ, queryTablePage,
 } from "../../config-project.ts";
 import { PatchZ, SourcesZ, defaultQuantities, patchColumns, patchProblems, touchesEngine, writtenOf } from "../../config-patch.ts";
 import { configView } from "../../config-view.ts";
 import { applySelection, createQuote, quoteDraft, validateSelectionPairs } from "../../config-quote.ts";
 import { assertWritable, internalVisible, recordCreated, writableBy } from "../../project-lifecycle.ts";
+import { t } from "../../i18n/index.ts";
 // The configuration process API: any member drives a project (draft -> quoted), and staff work a
 // client's request here once it is submitted (spec §10). The engine itself lives in
 // config-project.ts, shared with the portal process.
@@ -257,7 +258,7 @@ export const configsRouter = {
     .input(z.object({ id: z.uuid().describe("The configuration's id"), modelId: z.uuid().describe("The model to switch to") }))
     .handler(async ({ input, context }) => {
       const p = await assertWritable(context.tenantId, input.id, { userId: context.userId, side: "internal" });
-      if (p.portalCardCode !== null) throw new ORPCError("BAD_REQUEST", { message: "A request's model is the client's" });
+      if (p.portalCardCode !== null) throw new ORPCError("BAD_REQUEST", { message: t("REQUEST_MODEL_IS_CLIENTS") });
       const [cur] = await db
         .select({ modelId: configProject.modelId })
         .from(configProject)
@@ -277,7 +278,7 @@ export const configsRouter = {
           })
           .where(and(eq(configProject.id, input.id), eq(configProject.tenantId, context.tenantId), writableBy("internal")))
           .returning({ id: configProject.id });
-        if (!updated.length) throw new ORPCError("CONFLICT", { message: "The configuration changed hands meanwhile — reload it" });
+        if (!updated.length) throw new ORPCError("CONFLICT", { message: t("CONFIG_CHANGED_RELOAD") });
       }
       return fullView(context.tenantId, input.id);
     }),
@@ -302,7 +303,7 @@ export const configsRouter = {
       .limit(1);
     if (locked.length)
       throw new ORPCError("CONFLICT", {
-        message: locked[0]!.portal ? "A client's request can't be deleted — decline it instead" : "Configuration is quoted and locked",
+        message: t(locked[0]!.portal ? "REQUEST_DELETE_DECLINE" : "CONFIG_QUOTED_LOCKED"),
       });
     await db.delete(configProject).where(and(inArray(configProject.id, input.ids), eq(configProject.tenantId, context.tenantId), isNull(configProject.portalCardCode)));
     return { ok: true };
@@ -396,25 +397,34 @@ export const configsRouter = {
       const other = customer !== undefined ? { customer } : {};
       const written = writtenOf(patch, other);
       for (const k of Object.keys(sources ?? {}))
-        if (!(k in written)) throw new ORPCError("BAD_REQUEST", { message: `sources: ${k} is not written by this call` });
+        if (!(k in written)) throw new ORPCError("BAD_REQUEST", { message: t("SOURCES_NOT_WRITTEN", k) });
       const p = await assertWritable(context.tenantId, id, { userId: context.userId, side: "internal" });
       // The customer is the company (spec §7).
       if (p.portalCardCode !== null && customer !== undefined)
-        throw new ORPCError("BAD_REQUEST", { message: "A request's customer is the client's" });
+        throw new ORPCError("BAD_REQUEST", { message: t("REQUEST_CUSTOMER_IS_CLIENTS") });
       const engine = touchesEngine(patch) || margin !== undefined;
+      // A broken rule, with nothing else missing, keeps the last calculation. The prices stay; the
+      // rule is the message. Every other engine edit drops the candidates in this same write.
+      let keep = false;
       if (engine) {
-        const [row] = await db.select({ modelId: configProject.modelId }).from(configProject)
+        const [row] = await db.select({
+          modelId: configProject.modelId, name: configProject.name, customer: configProject.customer,
+          batches: configProject.batches, entries: configProject.entries, tables: configProject.tables,
+          margin: configProject.margin,
+        }).from(configProject)
           .where(and(eq(configProject.id, id), eq(configProject.tenantId, context.tenantId))).limit(1);
         const def = (await loadModel(context.tenantId, row!.modelId)).definition;
         const problems = patchProblems(def, patch, "internal");
-        if (problems.length) throw new ORPCError("BAD_REQUEST", { message: `Not accepted: ${problems.join("; ")}` });
+        if (problems.length) throw new ORPCError("BAD_REQUEST", { message: t("PATCH_NOT_ACCEPTED", problems.join("; ")) });
         defaultQuantities(def, patch);
+        if (customer !== null) keep = await keepsCandidates(context.tenantId, row!, patch, { name, customer });
       }
       if (engine || name !== undefined || customer !== undefined || sources !== undefined) {
         // Inputs and candidates move in ONE statement: a reader sees the old inputs with their
         // candidates or the new inputs with none, never a mismatched pair. Name and customer feed no
         // figure, so they keep the candidates and the picks — except clearing the customer, which
-        // leaves something mandatory missing, and candidates never outlive the gate.
+        // leaves something mandatory missing, and candidates never outlive the gate. A broken rule
+        // is the exception: the last calculation stays.
         const written = await db
           .update(configProject)
           .set({
@@ -422,12 +432,12 @@ export const configsRouter = {
             ...(name !== undefined ? { name } : {}),
             ...(customer !== undefined ? { customer } : {}),
             ...(margin !== undefined ? { margin } : {}),
-            ...(engine || customer === null ? { candidates: [], selection: null, calculatedAt: null } : {}),
+            ...((engine || customer === null) && !keep ? { candidates: [], selection: null, calculatedAt: null } : {}),
             updatedAt: new Date(),
           })
           .where(and(eq(configProject.id, id), eq(configProject.tenantId, context.tenantId), writableBy("internal")))
           .returning({ id: configProject.id });
-        if (!written.length) throw new ORPCError("CONFLICT", { message: "The configuration changed hands meanwhile — reload it" });
+        if (!written.length) throw new ORPCError("CONFLICT", { message: t("CONFIG_CHANGED_RELOAD") });
       }
       return partial(context.tenantId, id);
     }),
@@ -491,7 +501,7 @@ export const configsRouter = {
   createQuote: userProcedure
     .meta(openapi({
       summary: "Post the quotation to SAP",
-      description: "Create the SAP Sales Quotation for the current picks, or update the open one of a reopened request. Idempotent: a retry with the same `commandId` finds the document already posted. Refused with STATE_CHANGED when the picks moved since `configs.quoteDraft`.",
+      description: "Create the SAP Sales Quotation for the current picks, or update the open one of a reopened request. Idempotent: a retry with the same `commandId` finds the document already posted. Refused (CONFLICT, `data.reason` STATE_CHANGED) when the picks moved since `configs.quoteDraft`.",
     }))
     .input(z.object({
       projectId: z.uuid().describe("The configuration's id"),

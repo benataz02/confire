@@ -4,6 +4,7 @@ import { and, desc, eq, ilike, isNull, or, lt, sql } from "drizzle-orm";
 import { db, assistantFile, assistantThread, configProject } from "@confire/db";
 import { internalVisible } from "../project-lifecycle.ts";
 import { fileBytes, type Fence, type FileMeta, type FileRef } from "./files.ts";
+import { t as text } from "../i18n/index.ts";
 
 // The assistant's threads (assistant spec §4.7): server-owned history, loaded by id and never taken
 // from the client. Append-only — Sonnet 5.5 refuses edited history (preserved thinking), so nothing
@@ -124,7 +125,7 @@ export async function takeLease(threadId: string): Promise<void> {
     .set({ busyUntil: sql`now() + interval '5 minutes'` })
     .where(and(eq(assistantThread.id, threadId), or(isNull(assistantThread.busyUntil), lt(assistantThread.busyUntil, sql`now()`))))
     .returning({ id: assistantThread.id });
-  if (!taken.length) throw new ORPCError("THREAD_BUSY", { message: "This chat is still answering — wait for it to finish" });
+  if (!taken.length) throw new ORPCError("THREAD_BUSY", { message: text("CHAT_BUSY") });
 }
 
 export async function releaseLease(threadId: string): Promise<void> {

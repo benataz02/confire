@@ -6,6 +6,7 @@ import {
   type NotificationChannel, type NotificationParams,
 } from "@confire/db";
 import { sendMails, type Mail, type SendResult } from "./mail/mailer.ts";
+import { t } from "./i18n/index.ts";
 
 // Notifications (spec docs/superpowers/specs/2026-10-22-notifications-design.md): the catalog of
 // events a user can hear of, and the one way to tell them — a bell row and a mail, each unless that
@@ -119,7 +120,7 @@ export async function preferences(tenantId: string, userId: string, audience: Au
 }
 
 export async function setPreference(tenantId: string, userId: string, audience: Audience, p: z.infer<typeof PreferenceZ>) {
-  if (!typesOf(audience).some((t) => t.id === p.type)) throw new ORPCError("BAD_REQUEST", { message: `No notification ${p.type} here` });
+  if (!typesOf(audience).some((t) => t.id === p.type)) throw new ORPCError("BAD_REQUEST", { message: t("NOTIFICATION_UNKNOWN", p.type) });
   if (p.enabled) {
     await db.delete(notificationOptout).where(and(
       eq(notificationOptout.userId, userId), eq(notificationOptout.tenantId, tenantId),

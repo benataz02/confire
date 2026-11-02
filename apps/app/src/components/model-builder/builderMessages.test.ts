@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { checkModel, type Issue, type ModelDef } from "@confire/config-engine";
 import { toRecord } from "../../features/model/record.ts";
 import { starterModel } from "./starterModel.ts";
-import { anchorOf, builderMessages, modelIssues, type Translate } from "./builderMessages.ts";
+import { anchorOf, builderMessages, modelIssues, rowOf, type Translate } from "./builderMessages.ts";
 
 // The sentences the page shows. Not the properties file: a test must not depend on the bundle.
 const EN: Record<string, string> = {
@@ -49,7 +49,7 @@ test("an issue lands on its field, a grid's on its cell, the rest under its sect
   expect(combo.section).toBe("rules");
   const param = out.other!.find((m) => m.detail === "parameters[0].defaultExpr")!;
   expect(param.section).toBe("params");
-  expect(param.anchor).toBe('[data-key="p:width"]');
+  expect(param.anchor).toBe('.confire-params-struct [row-key="p:width"]');
 });
 
 test("the starter's one issue is the price list, a Settings field", () => {
@@ -57,13 +57,16 @@ test("the starter's one issue is the price list, a Settings field", () => {
   expect(modelIssues(record(d), checkModel(d), t).fields).toEqual({ "pricing.priceList": expect.any(String) });
 });
 
-test("anchors point at the tree row that opens a parameter or table", () => {
+test("an issue's row is the tree row that opens its parameter, table, formula or heading", () => {
   const draft = { ...named(), parameters: [{ key: "width", label: "Width", type: "number", ui: "input" }] } as ModelDef;
-  expect(anchorOf("parameters[0].defaultExpr", draft)).toBe('[data-key="p:width"]');
-  expect(anchorOf("tables[0].columns[1]", draft)).toBe('[data-key="t:0.0"]');
-  expect(anchorOf("computed[2].expr", draft)).toBe('[data-key="c:2"]');
+  expect(rowOf("parameters[0].defaultExpr", draft)).toBe("p:width");
+  expect(rowOf("tables[0].columns[1]", draft)).toBe("t:0.0");
+  expect(rowOf("computed[2].expr", draft)).toBe("c:2");
+  expect(rowOf("structure.sections[1].visibleWhen", draft)).toBe("s:1");
+  expect(rowOf("structure.sections[1].groups[2].visibleWhen", draft)).toBe("g:1.2");
+  expect(anchorOf("computed[2].expr", draft)).toBe('.confire-params-struct [row-key="c:2"]');
   // Structure-level problems have nowhere to jump — the section is the answer.
-  expect(anchorOf("model", draft)).toBeUndefined();
+  expect(rowOf("model", draft)).toBeUndefined();
   expect(anchorOf("structure", draft)).toBeUndefined();
 });
 

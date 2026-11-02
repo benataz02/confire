@@ -14,7 +14,7 @@ export type Block =
   | { kind: "steps"; steps: Step[] };
 
 /** The tools whose result asks the user for a decision: their card is drawn in the chat. */
-export const DECISION: ReadonlySet<string> = new Set(["read_request", "ask_user", "propose_quotation"]);
+export const DECISION: ReadonlySet<string> = new Set(["read_request", "ask_user", "propose_quotation", "b1_write", "b1_copy"]);
 
 // A drop's file label rides on the text part's metadata, which the client type does not declare.
 const shown = (p: Extract<Part, { type: "text" }>) =>
@@ -60,6 +60,9 @@ export function stepSummary(name: string, input: unknown, output: unknown, t: (k
     case "configs_models": return t("ASSISTANT_STEP_MODELS", count(output));
     case "timeline_list": return t("ASSISTANT_STEP_EVENTS", count(o.events));
     case "configs_create": return typeof i.name === "string" ? i.name : "";
+    case "b1_find": return Array.isArray(o.entities) ? t("ASSISTANT_STEP_FOUND", String(o.total ?? o.entities.length)) : "";
+    case "b1_read": return o.row ? t("ASSISTANT_STEP_FOUND", "1") : Array.isArray(o.rows) ? t("ASSISTANT_STEP_FOUND", String(o.total ?? o.rows.length)) : "";
+    case "b1_schema": return Array.isArray(o.fields) ? t("ASSISTANT_STEP_FIELDS", count(o.fields)) : "";
     default: return "";
   }
 }

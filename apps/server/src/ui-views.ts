@@ -5,6 +5,7 @@ import {
   db, uiUserState, uiView, user, ObjectViewStateZ, OBJECT_TABLE_SUFFIX, ViewStateZ,
   type ObjectViewState, type ViewState,
 } from "@confire/db";
+import { t } from "./i18n/index.ts";
 
 // Saved views, a copy of the Beas GridViews API (list / create / update / delete) plus the
 // UserGridStates half: the active view per table, and the value-help dialog layouts. System views
@@ -28,13 +29,13 @@ export const TableIdZ = z.string().min(1).max(200);
  *  saved with an object page's layout and the other way round. */
 function parseState(tableId: string, state: unknown): ViewState | ObjectViewState {
   const r = (tableId.endsWith(OBJECT_TABLE_SUFFIX) ? ObjectViewStateZ : ViewStateZ).safeParse(state);
-  if (!r.success) throw new ORPCError("BAD_REQUEST", { message: `Invalid view state: ${r.error.message}` });
+  if (!r.success) throw new ORPCError("BAD_REQUEST", { message: t("VIEW_STATE_INVALID", r.error.message) });
   return r.data;
 }
 
 const activeKey = (tableId: string) => `${tableId}::activeView`;
 
-async function getUserState(tenantId: string, userId: string, key: string): Promise<unknown> {
+export async function getUserState(tenantId: string, userId: string, key: string): Promise<unknown> {
   const [row] = await db
     .select({ value: uiUserState.value })
     .from(uiUserState)
@@ -67,7 +68,7 @@ async function editable(id: string, ctx: ViewCtx) {
     .limit(1);
   if (!row) throw new ORPCError("NOT_FOUND");
   const canEdit = row.visibility === "shared" ? ctx.isAdmin : row.userId === ctx.userId;
-  if (!canEdit) throw new ORPCError("FORBIDDEN", { message: "Not allowed to change this view" });
+  if (!canEdit) throw new ORPCError("FORBIDDEN", { message: t("VIEW_NOT_YOURS") });
   return row;
 }
 
@@ -84,7 +85,7 @@ async function assertNameFree(
   const key = v.name.trim().toLowerCase();
   if (peers.some((p) => p.id !== v.id && p.name.trim().toLowerCase() === key))
     throw new ORPCError("CONFLICT", {
-      message: v.visibility === "shared" ? "A shared view with this name already exists" : "A personal view with this name already exists",
+      message: t(v.visibility === "shared" ? "VIEW_SHARED_NAME_TAKEN" : "VIEW_PERSONAL_NAME_TAKEN"),
     });
 }
 
@@ -151,7 +152,7 @@ export const views = {
 
   async create(ctx: ViewCtx, input: z.infer<typeof CreateInputZ>) {
     if (input.visibility === "shared" && !ctx.isAdmin)
-      throw new ORPCError("FORBIDDEN", { message: "Only admins can publish shared views" });
+      throw new ORPCError("FORBIDDEN", { message: t("VIEW_SHARED_ADMINS") });
     const state = parseState(input.tableId, input.state);
     await assertNameFree(ctx, input);
     const [ins] = await db
@@ -171,7 +172,7 @@ export const views = {
     const row = await editable(input.id, ctx);
     const visibility = input.visibility ?? row.visibility;
     if (visibility === "shared" && !ctx.isAdmin)
-      throw new ORPCError("FORBIDDEN", { message: "Only admins can publish shared views" });
+      throw new ORPCError("FORBIDDEN", { message: t("VIEW_SHARED_ADMINS") });
     const name = input.name ?? row.name;
     await assertNameFree(ctx, { tableId: row.tableId, name, visibility, id: row.id });
     await db.update(uiView).set({
@@ -203,10 +204,10 @@ export const views = {
   /** `null` deletes the entry, so a layout reset to the defaults leaves nothing behind. */
   async setState(ctx: ViewCtx, input: z.infer<typeof SetStateInputZ>) {
     if (input.key.endsWith("::activeView"))
-      throw new ORPCError("BAD_REQUEST", { message: "Use setActive for the active view" });
+      throw new ORPCError("BAD_REQUEST", { message: t("VIEW_USE_SET_ACTIVE") });
     // ponytail: one jsonb blob per key, size-capped here rather than modelled.
     if (JSON.stringify(input.value ?? null).length > 64_000)
-      throw new ORPCError("BAD_REQUEST", { message: "State too large" });
+      throw new ORPCError("BAD_REQUEST", { message: t("VIEW_STATE_TOO_LARGE") });
     await setUserState(ctx.tenantId, ctx.userId, input.key, input.value ?? null);
     return { ok: true };
   },

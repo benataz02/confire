@@ -246,6 +246,8 @@ export const FieldGroupZ = z.object({
   title: z.string(),
   /** The group's fields in render order. Parameter keys only — a table is a group of its own now. */
   params: z.array(KeyZ),
+  /** false hides every field in it, exactly as each field's own `visibleWhen` would */
+  visibleWhen: z.string().optional(),
 });
 export const GroupZ = z.union([TableGroupZ, FieldGroupZ]);
 export type TableGroup = z.infer<typeof TableGroupZ>;
@@ -255,6 +257,10 @@ export type Group = z.infer<typeof GroupZ>;
 /** The one type guard for the group union. `"table" in g` inlined everywhere would work, but this
  *  narrows in .filter()/.map() callbacks where TypeScript loses the `in` narrowing. */
 export const isTableGroup = (g: Group): g is TableGroup => "table" in g;
+
+/** A section's (`key`) or field group's (`section/group`) id in FormState.hidden. Keys are
+ *  identifiers, so the slash never collides; a group key alone is only unique in its section. */
+export const structureId = (section: string, group?: string) => (group === undefined ? section : `${section}/${group}`);
 
 export const ModelDefZ = z.object({
   name: z.string(),
@@ -267,6 +273,9 @@ export const ModelDefZ = z.object({
         key: KeyZ,
         title: z.string(),
         groups: z.array(GroupZ),
+        /** false hides everything in it: its groups' fields, and its tables, whose rows then count
+         *  for nothing. checkModel refuses one on the section holding the items grid. */
+        visibleWhen: z.string().optional(),
       }),
     ),
   }),
@@ -340,11 +349,11 @@ export function refKeyCols(ref: LookupRef, all: string[] | undefined): { valueCo
   return { valueCol: ref.valueCol || (all?.[0] ?? ""), labelCol: ref.labelCol ?? all?.[1] };
 }
 
-/** Extra source columns bound as `<param>_<col>`; ignores `ref.columns`. */
+/** Source columns bound as `<param>_<col>`, the key column included (it is the code an author
+ *  sees in the source, so `<param>_<key>` must resolve too); ignores `ref.columns`. */
 export function derivedColumns(ref: LookupRef, all: string[] | undefined): string[] {
   if (ref.source === "manual") return [];
-  const { valueCol } = refKeyCols(ref, all);
-  return (all ?? []).filter((c) => c !== valueCol);
+  return all ?? [];
 }
 
 /** Extra columns shown in pickers; `ref.columns` is the visibility subset. */

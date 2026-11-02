@@ -634,6 +634,21 @@ docker compose exec db psql -U confire -c "select tenant_id, sum(cost) from ai_u
 at `ASSISTANT_MONTHLY_LIMIT_USD` is refused until the month turns; raising the limit is an `.env`
 change plus `docker compose up -d`.
 
+### Assistant writes to SAP
+
+The assistant can create, change and copy SAP records (Quotations, Orders, BusinessPartners, Items,
+and the document copies), as the agent's one SAP user — every write in SAP's own log is that user's,
+whoever asked. By default each write is a proposal a person posts with a click in the chat. A
+workspace's admin may allow **auto mode** (Settings → Assistant), after which each user may switch it on
+for themselves beside the chat box; even then a chat holding a client's files and a copy to an invoice
+still ask. To see who has it on:
+
+```bash
+docker compose exec db psql -U confire -c "select s.tenant_id, s.b1_auto_write, count(u.user_id) as users_on from assistant_settings s left join ui_user_state u on u.tenant_id = s.tenant_id and u.key = 'assistant:autoWrite' group by 1, 2"
+```
+
+Turning the workspace switch off stops auto mode at once for everyone in it.
+
 ---
 
 # Part 4: The marketing site

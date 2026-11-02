@@ -4,6 +4,7 @@ import type {
   TableRows, Val,
 } from "@confire/config-engine";
 import { andFilter, escapeLiteral } from "@confire/b1";
+import { t as text } from "./i18n/index.ts";
 
 // Resolve a model's external references (manual lists, and the tenant's masterdata) into the
 // engine's ResolvedLookups.
@@ -119,16 +120,16 @@ export const queryRowOf = (rows: MasterdataRow[], name: string): MasterdataQuery
 
 function project(t: ResolvedTable, name: string, valueCol: string, labelCol?: string): Option[] {
   const vi = t.columns.indexOf(valueCol);
-  if (vi < 0) throw new Error(`Table '${name}' has no column '${valueCol}'`);
+  if (vi < 0) throw new Error(text("TABLE_NO_COLUMN", name, valueCol));
   const li = labelCol === undefined ? vi : t.columns.indexOf(labelCol);
-  if (li < 0) throw new Error(`Table '${name}' has no column '${labelCol}'`);
+  if (li < 0) throw new Error(text("TABLE_NO_COLUMN", name, String(labelCol)));
   return t.rows.map((r) => ({ value: r[vi] ?? null, label: String(r[li] ?? r[vi] ?? "") }));
 }
 
 export function optionsFromRef(ref: LookupRef, tables: Record<string, ResolvedTable>): Option[] {
   if (ref.source === "manual") return ref.options.map((o) => ({ value: o.value, label: o.label ?? String(o.value) }));
   const t = tables[ref.table];
-  if (!t) throw new Error(`Unknown lookup table '${ref.table}'`);
+  if (!t) throw new Error(text("LOOKUP_TABLE_UNKNOWN", ref.table));
   const { valueCol, labelCol } = refKeyCols(ref, t.columns);
   return project(t, ref.table, valueCol, labelCol);
 }
@@ -170,7 +171,7 @@ export function queryPageSource(
   },
 ): { row: MasterdataQueryRow; q: RowQuery } {
   const row = queryRowOf(rows, input.table);
-  if (!row) throw new Error(`Unknown query table '${input.table}'`);
+  if (!row) throw new Error(text("QUERY_TABLE_UNKNOWN", input.table));
   const searchCols = input.searchCols ?? [];
   const declared = row.query.columns;
   // Only enforced when the masterdata declares its columns: an `Items` query declares none on
@@ -179,9 +180,9 @@ export function queryPageSource(
   const unknownCol = declared.length
     ? [...searchCols, ...(input.match ? [input.match.col] : [])].find((c) => !declared.includes(c))
     : undefined;
-  if (unknownCol) throw new Error(`Search column '${unknownCol}' is not declared by query table '${row.name}'`);
+  if (unknownCol) throw new Error(text("SEARCH_COLUMN_UNDECLARED", unknownCol, row.name));
   if (input.cursor !== undefined && (!Number.isInteger(input.cursor) || input.cursor < 0))
-    throw new Error("Cursor must be a non-negative row offset");
+    throw new Error(text("CURSOR_OFFSET"));
   return {
     row,
     q: {

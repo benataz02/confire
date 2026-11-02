@@ -8,6 +8,7 @@ import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIReferenceHandlerPlugin } from "@orpc/openapi/plugins";
 import * as Sentry from "@sentry/bun";
 import type { auth as Auth } from "./auth.ts";
+import { langOf, localizeError, withLang } from "./i18n/index.ts";
 import { TENANT_HEADER } from "./tenant.ts";
 
 /** The HTTP status an ORPCError answers with: the handlers' default map (v2 dropped `error.status`;
@@ -54,17 +55,28 @@ export function serve({ auth, router, title, routes, spaDist, port, origin }: {
     }
     await next();
   });
+  // Every message below is in the language the page shows (i18n/index.ts): the SPAs send theirs as
+  // Accept-Language, and anything else gets what its browser asks for.
+  app.use("*", (c, next) => withLang(langOf(c.req.header("accept-language")), next));
   // The raw error, before oRPC flattens it into a response that logs nothing. An ORPCError below 500
   // is an answer (UNAUTHORIZED, NOT_FOUND, a validation BAD_REQUEST); anything else is a bug or an
   // outage — B1/agent failures arrive as BAD_GATEWAY/SERVICE_UNAVAILABLE (b1.ts toOrpcError).
   const report = (e: unknown) => {
     if (!(e instanceof ORPCError) || errorStatus(e) >= 500) Sentry.captureException(e);
   };
+  // Outermost, so `report` still sees the raw error: oRPC's own English said in the request's language.
+  const localize = async <T>({ next }: { next: () => Promise<T> }): Promise<T> => {
+    try {
+      return await next();
+    } catch (e) {
+      throw localizeError(e);
+    }
+  };
   // Streams the body and rejects (PAYLOAD_TOO_LARGE) as soon as the running byte count
   // crosses the cap — before the request body is ever fully buffered/parsed. One per handler.
   const rpc = new RPCHandler(router, {
     plugins: [new RequestLimitHandlerPlugin({ maxBodySize: MAX_BODY })],
-    interceptors: [onError(report)],
+    interceptors: [localize, onError(report)],
   });
 
   // The same procedures as plain HTTP, for people reading or trying the API: `configs.calculate` is
@@ -103,7 +115,7 @@ export function serve({ auth, router, title, routes, spaDist, port, origin }: {
         providerScriptUrl: "https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.76.0/dist/browser/standalone.js",
       }),
     ],
-    interceptors: [onError(report)],
+    interceptors: [localize, onError(report)],
   });
 
   // Layer 1 identity — Better Auth owns /api/auth/*.

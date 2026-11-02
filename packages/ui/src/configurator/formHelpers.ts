@@ -13,6 +13,13 @@ export function setEntry(entries: Entries, key: string, v: Val | undefined): Ent
   return { ...entries, [key]: v };
 }
 
+/** One multi-select row. The token and the list show the label (`displayValue`'s word);
+ *  `value` is the key that gets stored. Putting the key in `text` is what made every chip
+ *  render the key — selection used to read that text back. */
+export function multiItem(o: { value: Val; label: string; extra?: string }): { text: string; value: string; additionalText?: string } {
+  return { text: o.label, value: String(o.value), ...(o.extra ? { additionalText: o.extra } : {}) };
+}
+
 /** Display-mode string for a field: option label when the domain has one, else the raw value. */
 export function displayValue(v: Val | undefined, dom: { value: Val; label: string }[]): string {
   if (v === undefined || v === null) return "";

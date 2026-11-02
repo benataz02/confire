@@ -7,10 +7,13 @@ import { bytea, configProject } from "./configurator.ts";
 // apps/server/src/assistant/.
 
 /** The workspace switch, off until an admin turns it on. A column, not a jsonb document: the chat
- *  route filters on it. Phase 3 adds the `mcp` switch beside it. */
+ *  route filters on it. Phase 3 adds the `mcp` switch beside it. `b1AutoWrite` is the workspace's half
+ *  of the assistant's auto mode (b1-tools spec §5.3): off = every SAP write is a proposal the user
+ *  posts with a click, whatever a user chose. */
 export const assistantSettings = pgTable("assistant_settings", {
   tenantId: text("tenant_id").primaryKey(),
   assistant: boolean("assistant").notNull().default(false),
+  b1AutoWrite: boolean("b1_auto_write").notNull().default(false),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

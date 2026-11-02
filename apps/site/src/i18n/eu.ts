@@ -114,9 +114,9 @@ export const eu: Dict = {
     },
     costs: {
       title: "Benetako kostuak, kopuru guztietarako.",
-      text: "Materiala zure SAPeko prezio-zerrendetatik, eragiketak zure Beaseko ibilbidetik, eta marjina bat kopuru-tarte bakoitzeko.",
+      text: "Materiala zure SAPeko prezio-zerrendetatik, operazioak zure Beaseko ibilbidetik, eta marjina bat kopuru-tarte bakoitzeko.",
       material: "Materiala",
-      operations: "Eragiketak",
+      operations: "Operazioak",
       margin: "Marjina",
     },
     sap: {

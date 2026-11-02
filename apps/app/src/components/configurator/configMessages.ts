@@ -92,22 +92,24 @@ export function configMessages(a: {
     });
   });
 
+  // A failure is titled with what failed, in this page's words; why is the server's message (in the
+  // user's language too), the description.
   if (a.calculation?.state === "failed")
-    out.push({ id: "calculation", type: "Negative", text: a.calculation.message ?? t("CONFIG_CALC_FAILED"), detail: t("CONFIG_CALC_FAILED"), ...configure });
+    out.push({ id: "calculation", type: "Negative", text: t("CONFIG_CALC_FAILED"), detail: a.calculation.message, ...configure });
 
   if (a.lookupsError)
-    out.push({ id: "lookups", type: "Negative", text: a.lookupsError.message, detail: t("CONFIG_LOOKUPS_FAILED"), ...configure });
+    out.push({ id: "lookups", type: "Negative", text: t("CONFIG_LOOKUPS_FAILED"), detail: a.lookupsError.message, ...configure });
   if (a.writeError)
     out.push({
-      id: "write", type: "Negative", text: a.writeError.error.message,
-      detail: t(a.writeError.refused ? "CONFIG_CHANGE_REFUSED" : "CONFIG_CHANGE_UNSENT"), ...configure,
+      id: "write", type: "Negative", text: t(a.writeError.refused ? "CONFIG_CHANGE_REFUSED" : "CONFIG_CHANGE_UNSENT"),
+      detail: a.writeError.error.message, ...configure,
     });
   // Each failure its own message: one long-past error must not hide a newer one.
   (a.configErrors ?? []).forEach((e, i) => {
-    if (e) out.push({ id: `config:${i}`, type: "Negative", text: e.message, detail: t("CONFIG_CHANGE_FAILED"), ...configure });
+    if (e) out.push({ id: `config:${i}`, type: "Negative", text: t("CONFIG_CHANGE_FAILED"), detail: e.message, ...configure });
   });
   if (a.syncError)
-    out.push({ id: "sync", type: "Negative", text: a.syncError.message, detail: t("CONFIG_SYNC_ERROR"), ...configure });
+    out.push({ id: "sync", type: "Negative", text: t("CONFIG_SYNC_ERROR"), detail: a.syncError.message, ...configure });
 
   const list = a.model?.pricing?.priceList;
   for (const m of a.issues) {

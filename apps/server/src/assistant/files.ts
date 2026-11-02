@@ -5,6 +5,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db, assistantFile, assistantThread, projectFile } from "@confire/db";
 import { cleanName, FILE_MAX, handle, imageType, readCapped, UUID, whoFor } from "../files.ts";
 import { addFile, type Actor } from "../project-lifecycle.ts";
+import { t as text } from "../i18n/index.ts";
 
 // The files the assistant reads (assistant spec §4.2, §4.9): a configuration's own (`project_file`)
 // and, before a configuration exists, a thread's drop (`assistant_file`). Only PDF, PNG and JPEG,
@@ -44,7 +45,7 @@ export async function fileBytes(tenantId: string, refs: FileRef[], fence: Fence 
   ];
   const total = sizes.reduce((n, r) => n + r.size, 0);
   if (total > REQUEST_FILE_CAP)
-    throw new ORPCError("PAYLOAD_TOO_LARGE", { message: `The files come to ${Math.ceil(total / 2 ** 20)} MB; the assistant reads up to ${REQUEST_FILE_CAP / 2 ** 20} MB at a time` });
+    throw new ORPCError("PAYLOAD_TOO_LARGE", { message: text("ASSISTANT_FILES_TOO_LARGE", Math.ceil(total / 2 ** 20), REQUEST_FILE_CAP / 2 ** 20) });
   const rows = [
     ...(pFence ? await db.select({ id: projectFile.id, data: projectFile.data }).from(projectFile).where(pFence) : []),
     ...(aFence ? await db.select({ id: assistantFile.id, data: assistantFile.data }).from(assistantFile).where(aFence) : []),
@@ -88,9 +89,9 @@ export function assistantFileRoutes(): Hono {
     )).limit(1);
     if (!t) throw new ORPCError("NOT_FOUND");
     const data = await readCapped(c.req.raw, FILE_MAX);
-    if (!data) throw new ORPCError("PAYLOAD_TOO_LARGE", { message: "A file can be up to 10 MB" });
+    if (!data) throw new ORPCError("PAYLOAD_TOO_LARGE", { message: text("FILE_TOO_LARGE") });
     const mime = docType(data);
-    if (!mime) throw new ORPCError("UNSUPPORTED_MEDIA_TYPE", { message: "The assistant reads PDF, PNG and JPEG files" });
+    if (!mime) throw new ORPCError("UNSUPPORTED_MEDIA_TYPE", { message: text("ASSISTANT_FILE_TYPE") });
     const name = cleanName(c.req.query("name"));
     const [row] = await db.insert(assistantFile).values({ tenantId: who.tenantId, threadId, name, mime, size: data.length, data })
       .returning({ id: assistantFile.id });

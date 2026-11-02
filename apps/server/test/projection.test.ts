@@ -60,6 +60,13 @@ describe("toPortalModelDef", () => {
     expect(out.bom).toEqual([]);
     expect(out.routing).toEqual([]);
   });
+
+  test("a section's or group's rule stays home: what it hides arrives as the form's `hidden`", () => {
+    const m = structuredClone(model);
+    m.structure.sections[0]!.visibleWhen = "grade_cost > 1";
+    (m.structure.sections[0]!.groups[0] as { visibleWhen?: string }).visibleWhen = "grade_cost > 2";
+    expect(toPortalModelDef(m).structure).toEqual(model.structure);
+  });
 });
 
 describe("toPortalForm / toPortalLookups", () => {

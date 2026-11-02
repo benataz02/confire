@@ -49,5 +49,8 @@
     "seed:agent": "bun --env-file=.env scripts/seed-agent.ts",
     "dev:agent": "bun --cwd apps/agent dev",
     "dev:pair": "cloudflared tunnel --url http://localhost:3000"
+  },
+  "patchedDependencies": {
+    "@ui5/webcomponents-base@2.27.2": "patches/@ui5%2Fwebcomponents-base@2.27.2.patch"
   }
 }

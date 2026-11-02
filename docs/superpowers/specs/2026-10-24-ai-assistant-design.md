@@ -229,6 +229,9 @@ cannot name a parameter that doesn't exist):
 
 ### 4.5 The chat and its tools
 
+> SAP reads and writes beyond `entities_rows` — `b1_find`/`b1_schema`/`b1_read`/`b1_write`/`b1_copy`,
+> proposals and auto mode — are `2026-11-02-b1-tools-design.md`.
+
 `chat()` from `@tanstack/ai` with `anthropicText()`. The tools are **existing procedures, called
 through a server-side router client built with the request's own headers**, so the builders' middleware
 runs exactly as for the page. Tool names, input schemas and descriptions come from the procedures
@@ -354,6 +357,9 @@ The provider key (`ANTHROPIC_API_KEY`) is server env only, and the test preload 
   (sniffed like `imageType`, not trusted from the name).
 
 ### 4.10 MCP (second phase)
+
+> The SAP tools MCP registers, and what confirm/auto mode means over MCP, are
+> `2026-11-02-b1-tools-design.md` §5.5.
 
 - **Server:** `@orpc/mcp` (pinned to the same `2.0.0-beta.N` as every other `@orpc/*`; `beta.45` exists)
   registers the same procedures as MCP tools, curated with `filter`. Names and descriptions come from

@@ -7,11 +7,16 @@ import type { ListQuery } from "@confire/db";
 import { compileList } from "./entity-list.ts";
 import { decryptSecret, encryptSecret } from "./crypto.ts";
 import { viaB1 } from "./b1.ts";
+import { t } from "./i18n/index.ts";
 
 // The B1 read bodies, once. entities.* calls these; it does not own the implementation.
 //
 // The `schema` is a parameter rather than something these functions fetch, so a caller can hand
 // compileList a schema it already filtered and the existing rules do the fencing.
+
+/** Joule's list card maximum: a card shows these rows and the model reads no more than that — the
+ *  assistant's list tools and b1.read alike. */
+export const LIST_CAP = 20;
 
 /** A modelling error from compileList/coerceKey is the caller's mistake, not a server fault. */
 export const bad = (e: unknown): never => {
@@ -36,11 +41,11 @@ const openCursor = (entity: string, f: CursorFence, cursor: string): string => {
   try {
     parts = JSON.parse(decryptSecret(cursor));
   } catch {
-    throw new ORPCError("BAD_REQUEST", { message: "Invalid page cursor" });
+    throw new ORPCError("BAD_REQUEST", { message: t("CURSOR_INVALID") });
   }
   const [tenantId, ent, key, link] = parts as [string, string, string, string];
   if (tenantId !== f.tenantId || ent !== entity || key !== f.key || typeof link !== "string")
-    throw new ORPCError("BAD_REQUEST", { message: "Page cursor does not belong to this list" });
+    throw new ORPCError("BAD_REQUEST", { message: t("CURSOR_OTHER_LIST") });
   return link;
 };
 
@@ -51,6 +56,9 @@ export type RowsArgs = {
   /** sealed `@odata.nextLink` from the previous page; absent = first page */
   cursor?: string;
   count?: boolean;
+  /** no `$select`: whole rows, collections included. B1 refuses some collections in `$select`
+   *  (`ItemPrices`), so a read that wants one asks for the row and projects it afterwards. */
+  wholeRows?: boolean;
 };
 
 /**
@@ -83,6 +91,7 @@ export async function readRows(
       return bad(e);
     }
     if (extraFilter) q.filter = andFilter(q.filter, extraFilter);
+    if (a.wholeRows) delete q.select;
     res = await viaB1(() => b1.readEntitySet(entity, q));
   }
 

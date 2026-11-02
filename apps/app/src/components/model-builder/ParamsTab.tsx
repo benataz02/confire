@@ -19,10 +19,10 @@ import { FormulaDialog } from "./FormulaDialog.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import {
   applyMove, canDrop, copyKeys, deleteNodes, duplicateNodes, isItemsRow, outermost, parseRowKey, placeTable, rowKeyOf,
-  tableKeyAt, uniqueKey, type CopyKey, type Placement, type RowRef,
+  setHeading, tableKeyAt, uniqueKey, type CopyKey, type Heading, type Placement, type RowRef,
 } from "./structureOps.ts";
 import { useI18n } from "../../i18n.ts";
-import { copy, issueFor, type Translate } from "./builderMessages.ts";
+import { copy, issueFor, rowOf, type Translate } from "./builderMessages.ts";
 
 type Tables = TableCols[];
 type Update = (fn: (d: ModelDef) => ModelDef) => void;
@@ -38,6 +38,9 @@ function paramDetail(p: Param, t: Translate): string {
 
 // UI5 cozy icon-button min width — reserved so leaf labels indent past group labels.
 const TOGGLE = "2.25rem";
+// Table sizes a row to its content (no truncate prop). Text maxLines is the ellipsis, and a flex
+// item's min-content is the full string, so the line has to be allowed to shrink inside the cell.
+const LINE: CSSProperties = { minWidth: 0, flex: "1 1 auto" };
 
 function Gutter({ depth, children, collapse, style }: {
   depth: number;
@@ -47,7 +50,7 @@ function Gutter({ depth, children, collapse, style }: {
 }) {
   const i18n = useI18n();
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", paddingInlineStart: `${depth * 1.5}rem`, ...style }}>
+    <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", boxSizing: "border-box", minWidth: 0, width: "100%", paddingInlineStart: `${depth * 1.5}rem`, ...style }}>
       {collapse ? (
         // Chevron is a real button, indented with the level; stopPropagation so a toggle never enters edit (onRowClick).
         <Button design="Transparent" style={{ flex: "0 0 auto" }}
@@ -63,8 +66,9 @@ function Gutter({ depth, children, collapse, style }: {
   );
 }
 
-// Section and group backgrounds: TableRow has no highlight/background prop, and a document-level
-// rule is the one thing that beats the shadow root's own `:host`.
+// Section and group backgrounds, and a row with an issue in red: TableRow has no highlight/background
+// prop, and a document-level rule is the one thing that beats the shadow root's own `:host`. The
+// error rule comes last, so it wins over a section's or group's background.
 if (typeof document !== "undefined" && !document.getElementById("confire-params-rows")) {
   const el = document.createElement("style");
   el.id = "confire-params-rows";
@@ -72,9 +76,12 @@ if (typeof document !== "undefined" && !document.getElementById("confire-params-
   el.textContent =
     `${R}[row-key^="s:"]{background:var(--sapList_TableGroupHeaderBackground);` +
     `border-block-end:1px solid var(--sapList_TableGroupHeaderBorderColor)}` +
-    `${R}[row-key^="g:"]{background:var(--sapList_Hover_Background)}`;
+    `${R}[row-key^="g:"]{background:var(--sapList_Hover_Background)}` +
+    `${R}[data-error]{background:var(--sapErrorBackground)}`;
   document.head.appendChild(el);
 }
+/** A row with an issue: red, and the issue its tooltip. */
+const issueAttrs = (error?: string) => (error ? { "data-error": "", title: error } : {});
 
 type AddKind = "section" | "group" | "param" | "formula" | "calc" | "items";
 const ADD_LABEL: Record<AddKind, string> = {
@@ -166,9 +173,9 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
   };
   // The formula open in FormulaDialog; no `at` is one not added yet, which only its Save creates.
   const [formula, setFormula] = useState<{ at?: number; initial: ModelDef["computed"][number] } | null>(null);
-  // Section/group whose heading is open in TitleDialog, with the values it opens on; no `ref` is a
+  // Section/group whose heading is open in TitleDialog, with the values it opens on; `adding` is a
   // section not added yet, which only its Save creates.
-  const [titleEdit, setTitleEdit] = useState<{ ref?: RowRef; initial: string } | null>(null);
+  const [titleEdit, setTitleEdit] = useState<{ at: { s: number; g?: number }; adding?: true; initial: Heading } | null>(null);
   // Ids are section/group/parameter keys, not row positions, so a drag does not retarget them.
   const [collapsed, toggle, setCollapsed] = useCollapsed(modelId);
   // Row keys are positions, so every edit that moves rows clears the selection rather than let it
@@ -182,7 +189,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
   /** `at` is the row's place: where an Add lands when this is the one row picked. */
   type StructRow = {
     kind: "struct"; key: string; depth: number; label: string; detail: string; ref: RowRef;
-    at: { s: number; g?: number }; collapseId?: string; param?: Param;
+    at: { s: number; g?: number }; collapseId?: string; param?: Param; error?: string;
   };
   type Row = StructRow | { kind: "formula"; key: string; idx: number; ref: RowRef };
   const rows: Row[] = [];
@@ -212,9 +219,30 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
     ])),
   ]);
 
+  // A row's first issue (the same row the message's link lands on). A collapsed row also shows the
+  // first one it hides, so an issue is never out of sight.
+  const issueAt = new Map<string, string>();
+  for (const i of issues) {
+    const row = rowOf(i.path, draft);
+    if (row && !issueAt.has(row)) issueAt.set(row, i.message);
+  }
+  const errorOf = (ref: RowRef) => issueAt.get(rowKeyOf(ref));
+  const paramError = (k: string) => errorOf({ kind: "param", key: k })
+    ?? formulas.filter((i) => drawnUnder(i) === k).map((i) => errorOf({ kind: "formula", i })).find(Boolean);
+  const groupError = (s: number, g: number) => {
+    const grp = draft.structure.sections[s]!.groups[g]!;
+    return isTableGroup(grp) ? errorOf({ kind: "table", s, g })
+      : errorOf({ kind: "group", s, g }) ?? grp.params.map(paramError).find(Boolean);
+  };
+
+  const ruled = (key: string, rule?: string) => (rule ? `${key} · ${t("MODEL_VISIBLE_WHEN")}: ${rule}` : key);
   draft.structure.sections.forEach((s, si) => {
     const sId = collapseId.section(s.key);
-    rows.push({ kind: "struct", key: rowKeyOf({ kind: "section", s: si }), depth: 0, label: s.title, detail: s.key, ref: { kind: "section", s: si }, at: { s: si }, collapseId: sId });
+    const sRef: RowRef = { kind: "section", s: si };
+    rows.push({
+      kind: "struct", key: rowKeyOf(sRef), depth: 0, label: s.title, detail: ruled(s.key, s.visibleWhen), ref: sRef, at: { s: si }, collapseId: sId,
+      error: errorOf(sRef) ?? (collapsed.has(sId) ? s.groups.map((_, gi) => groupError(si, gi)).find(Boolean) : undefined),
+    });
     if (collapsed.has(sId)) return;
     s.groups.forEach((g, gi) => {
       // A table is a group, so it draws at group depth with no children and no collapse chevron.
@@ -226,23 +254,29 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
         rows.push({
           kind: "struct", key: rowKeyOf({ kind: "table", s: si, g: gi }), depth: 1, label: def?.title || g.table,
           detail: def ? cols : t("MODEL_MISSING_TABLE"),
-          ref: { kind: "table", s: si, g: gi }, at: { s: si },
+          ref: { kind: "table", s: si, g: gi }, at: { s: si }, error: groupError(si, gi),
         });
         return;
       }
       const gId = collapseId.group(s.key, g.key);
-      rows.push({ kind: "struct", key: rowKeyOf({ kind: "group", s: si, g: gi }), depth: 1, label: g.title, detail: g.key, ref: { kind: "group", s: si, g: gi }, at: { s: si, g: gi }, collapseId: gId });
+      const gRef: RowRef = { kind: "group", s: si, g: gi };
+      rows.push({
+        kind: "struct", key: rowKeyOf(gRef), depth: 1, label: g.title, detail: ruled(g.key, g.visibleWhen), ref: gRef, at: { s: si, g: gi }, collapseId: gId,
+        error: collapsed.has(gId) ? groupError(si, gi) : errorOf(gRef),
+      });
       if (collapsed.has(gId)) return;
       g.params.forEach((k) => {
         const p = draft.parameters.find((x) => x.key === k);
         const own = formulas.filter((i) => drawnUnder(i) === k);
         const pId = collapseId.param(k);
+        // Only a parameter that anchors formulas has anything to collapse.
+        const folded = own.length > 0 && collapsed.has(pId);
         rows.push({
           kind: "struct", key: rowKeyOf({ kind: "param", key: k }), depth: 2, label: p?.label || k,
           detail: p ? paramDetail(p, t) : t("MODEL_MISSING_PARAM"),
           ref: { kind: "param", key: k }, at: { s: si, g: gi }, param: p,
-          // Only a parameter that anchors formulas has anything to collapse.
           collapseId: own.length ? pId : undefined,
+          error: folded ? paramError(k) : errorOf({ kind: "param", key: k }),
         });
         if (collapsed.has(pId)) return;
         for (const i of own) rows.push(formulaRow(i));
@@ -302,27 +336,16 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
     update((d) => duplicateNodes(d, refs, keys));
   };
 
-  const saveTitle = (ref: RowRef, title: string) =>
-    update((d) => ({
-      ...d,
-      structure: {
-        sections: d.structure.sections.map((s, si) => {
-          if (ref.kind === "section") return si === ref.s ? { ...s, title } : s;
-          if (ref.kind === "group") return si === ref.s ? { ...s, groups: s.groups.map((g, gi) => (gi === ref.g && !isTableGroup(g) ? { ...g, title } : g)) } : s;
-          return s;
-        }),
-      },
-    }));
-
   // A new section comes with a group of the same name, so a parameter has somewhere to go at once.
-  const addSection = (name: string) => {
-    const title = name.trim() || copy(t, "MODEL_NEW_SECTION", "New section");
+  const addSection = (h: Heading) => {
+    const title = h.title.trim() || copy(t, "MODEL_NEW_SECTION", "New section");
     update((d) => ({
       ...d,
       structure: {
         sections: [...d.structure.sections, {
           key: uniqueKey("section", d.structure.sections.map((s) => s.key)), title,
           groups: [{ key: "group", title, params: [] }],
+          ...(h.visibleWhen === undefined ? {} : { visibleWhen: h.visibleWhen }),
         }],
       },
     }));
@@ -375,7 +398,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
   };
   const add = (what: AddKind) => {
     if (!addable[what]) return;
-    if (what === "section") setTitleEdit({ initial: "" });
+    if (what === "section") setTitleEdit({ at: { s: sections.length }, adding: true, initial: { title: "" } });
     else if (what === "formula") addFormula(formulaParam!);
     else if (what === "param") openParam(intoG!);
     else if (what === "group") addGroup(intoS);
@@ -487,9 +510,10 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
           } else {
             const sec = draft.structure.sections[ref.s];
             const grp = ref.kind === "group" ? sec?.groups[ref.g] : undefined;
+            const node = ref.kind === "section" ? sec : grp && !isTableGroup(grp) ? grp : undefined;
             setTitleEdit({
-              ref,
-              initial: ref.kind === "section" ? sec?.title ?? "" : grp && !isTableGroup(grp) ? grp.title : "",
+              at: ref.kind === "section" ? { s: ref.s } : { s: ref.s, g: ref.g },
+              initial: { title: node?.title ?? "", ...(node?.visibleWhen === undefined ? {} : { visibleWhen: node.visibleWhen }) },
             });
           }
         }}
@@ -505,49 +529,49 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
         {rows.map((r) =>
           r.kind === "formula" ? (
             // Read-only like every row: a click opens FormulaDialog.
-            <TableRow key={r.key} rowKey={r.key} movable interactive>
+            <TableRow key={r.key} rowKey={r.key} movable interactive {...issueAttrs(errorOf(r.ref))}>
               <TableCell>
                 <Gutter depth={3}>
                   <RowIcon name={ADD_ICON.formula} label={t("MODEL_FORMULA")} />
-                  <Text>{draft.computed[r.idx]!.key}</Text>
+                  <Text maxLines={1} style={LINE}>{draft.computed[r.idx]!.key}</Text>
                 </Gutter>
               </TableCell>
               <TableCell />
               <TableCell />
               <TableCell>
-                <Text style={{ color: issueFor(issues, `computed[${r.idx}].expr`) ? "var(--sapNegativeColor)" : undefined }}>
+                <Text maxLines={1} style={{ ...LINE, color: issueFor(issues, `computed[${r.idx}].expr`) ? "var(--sapNegativeColor)" : undefined }}>
                   {`= ${draft.computed[r.idx]!.expr}`}
                 </Text>
               </TableCell>
             </TableRow>
           ) : (
-            <TableRow key={r.key} rowKey={r.key} movable interactive>
+            <TableRow key={r.key} rowKey={r.key} movable interactive {...issueAttrs(r.error)}>
               <TableCell>
                 <Gutter depth={r.depth} collapse={r.collapseId
                   ? { collapsed: collapsed.has(r.collapseId), onToggle: () => toggle(r.collapseId!) }
                   : undefined}>
                   <RowIcon name={ADD_ICON[rowKind(r.ref, draft)]} label={t(ADD_LABEL[rowKind(r.ref, draft)])} />
-                  <Text style={{ fontWeight: r.depth === 0 ? "bold" : "normal" }}>{r.label}</Text>
+                  <Text maxLines={1} style={{ ...LINE, fontWeight: r.depth === 0 ? "bold" : "normal" }}>{r.label}</Text>
                 </Gutter>
               </TableCell>
               <TableCell>
-                {r.param?.mandatory ? <Tag design="Information" hideStateIcon>{t("MODEL_MANDATORY")}</Tag> : null}
+                {r.param?.mandatory ? <Tag design="Information" hideStateIcon wrappingType="None" style={{ maxWidth: "100%" }}>{t("MODEL_MANDATORY")}</Tag> : null}
               </TableCell>
               <TableCell>
-                {r.param?.excludeFromDomains ? <Tag design="Neutral" hideStateIcon>{t("MODEL_EXCLUDED")}</Tag> : null}
+                {r.param?.excludeFromDomains ? <Tag design="Neutral" hideStateIcon wrappingType="None" style={{ maxWidth: "100%" }}>{t("MODEL_EXCLUDED")}</Tag> : null}
               </TableCell>
-              <TableCell><Text>{r.detail}</Text></TableCell>
+              <TableCell><Text maxLines={1} style={LINE}>{r.detail}</Text></TableCell>
             </TableRow>
           ),
         )}
       </Table>
 
       {titleEdit ? (
-        <TitleDialog initial={titleEdit.initial} section={titleEdit.ref?.kind !== "group"}
+        <TitleDialog draft={draft} tables={tables} at={titleEdit.at} initial={titleEdit.initial}
           onCancel={() => setTitleEdit(null)}
-          onOk={(v) => {
-            if (titleEdit.ref) saveTitle(titleEdit.ref, v);
-            else addSection(v);
+          onOk={(h) => {
+            if (titleEdit.adding) addSection(h);
+            else update((d) => setHeading(d, titleEdit.at, h));
             setTitleEdit(null);
           }} />
       ) : null}

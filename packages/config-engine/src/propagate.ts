@@ -1,13 +1,19 @@
 import { evaluate, parse } from "./dsl";
 import type { Entries, ModelDef, Option, ResolvedLookups, TableRows, Val } from "./model";
-import { derivedKey, derivedColumns, refKeyCols, requiredColumn } from "./model";
+import { derivedKey, derivedColumns, isTableGroup, refKeyCols, requiredColumn, structureId } from "./model";
 import { evalTableRows, tableAggregates } from "./tables";
 
 export type Bindings = {
   values: Record<string, Val>;
   defaulted: Set<string>;
   visible: Record<string, boolean>;
+  /** structureIds of the sections and field groups whose `visibleWhen` is false */
+  hiddenStructure: Set<string>;
+  /** tables placed in a hidden section: their rows count for nothing */
+  hiddenTables: Set<string>;
 };
+
+const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((k) => b.has(k));
 
 export function domainOf(model: ModelDef, lookups: ResolvedLookups, key: string): Option[] {
   const p = model.parameters.find((x) => x.key === key);
@@ -21,29 +27,37 @@ export function domainOf(model: ModelDef, lookups: ResolvedLookups, key: string)
   return [];
 }
 
-/** A hidden parameter (`visibleWhen` false) is null — its entry and its default ignored — so every
- *  formula, rule and candidate reads it as unset. Hiding one can show or hide another, so this
- *  reruns until the hidden set settles; a model whose visibility rules chase each other stops at a
- *  pass per parameter, its hidden ones still nulled. */
+/** A hidden parameter (`visibleWhen` false, its own or its group's or section's) is null — its
+ *  entry and its default ignored — so every formula, rule and candidate reads it as unset; a hidden
+ *  section's tables read as empty. Hiding one can show or hide another, so this reruns until the
+ *  hidden sets settle; a model whose visibility rules chase each other stops at a pass per
+ *  parameter and table, its hidden ones still nulled. */
 export function bindings(model: ModelDef, lookups: ResolvedLookups, entries: Entries, tableRows: TableRows = {}): Bindings {
   let hidden = new Set<string>();
+  let hiddenTables = new Set<string>();
+  const cap = model.parameters.length + (model.tables?.length ?? 0);
   for (let pass = 0; ; pass++) {
-    const b = settle(model, lookups, entries, tableRows, hidden);
+    const b = settle(model, lookups, entries, tableRows, hidden, hiddenTables);
     const next = new Set(model.parameters.filter((p) => !b.visible[p.key]).map((p) => p.key));
-    if ((next.size === hidden.size && [...next].every((k) => hidden.has(k))) || pass >= model.parameters.length) {
+    if ((same(next, hidden) && same(b.hiddenTables, hiddenTables)) || pass >= cap) {
       for (const k of next) b.values[k] = null;
       return b;
     }
     hidden = next;
+    hiddenTables = b.hiddenTables;
   }
 }
 
 function settle(
-  model: ModelDef, lookups: ResolvedLookups, entries: Entries, tableRows: TableRows, hidden: Set<string>,
+  model: ModelDef, lookups: ResolvedLookups, entries: Entries, tableRows: TableRows,
+  hidden: Set<string>, hiddenTables: Set<string>,
 ): Bindings {
   // A present key also keeps the default off.
   const values: Record<string, Val> = { ...entries };
   for (const k of hidden) values[k] = null;
+  const rows = hiddenTables.size
+    ? Object.fromEntries(Object.entries(tableRows).filter(([k]) => !hiddenTables.has(k)))
+    : tableRows;
   const defaulted = new Set<string>();
   const visible: Record<string, boolean> = {};
   const tryEval = (src: string): Val | undefined => {
@@ -96,7 +110,7 @@ function settle(
     // table aggregates: <table>_<col> and <table>_count. Inside the loop, like derived columns,
     // because a row formula can read a computed value and a computed value can read an aggregate.
     if (model.tables?.length) {
-      for (const [k, v] of Object.entries(tableAggregates(model, tableRows, values, lookups))) {
+      for (const [k, v] of Object.entries(tableAggregates(model, rows, values, lookups))) {
         if (values[k] !== v) {
           values[k] = v;
           changed = true;
@@ -105,22 +119,33 @@ function settle(
     }
     if (!changed) break;
   }
-  for (const p of model.parameters) {
-    if (p.visibleWhen === undefined) {
-      visible[p.key] = true;
-      continue;
+  // A rule that cannot evaluate yet (an unbound ref) hides nothing yet.
+  const shows = (src: string | undefined) => {
+    if (src === undefined) return true;
+    const v = tryEval(src);
+    return v === undefined ? true : v === true;
+  };
+  const hiddenStructure = new Set<string>();
+  const nextTables = new Set<string>();
+  const inHidden = new Set<string>();
+  for (const s of model.structure.sections) {
+    const on = shows(s.visibleWhen);
+    if (!on) hiddenStructure.add(structureId(s.key));
+    for (const g of s.groups) {
+      if (isTableGroup(g)) {
+        if (!on) nextTables.add(g.table);
+      } else if (!on || !shows(g.visibleWhen)) {
+        hiddenStructure.add(structureId(s.key, g.key));
+        for (const k of g.params) inHidden.add(k);
+      }
     }
-    const v = tryEval(p.visibleWhen);
-    visible[p.key] = v === undefined ? true : v === true;
   }
-  return { values, defaulted, visible };
+  for (const p of model.parameters) visible[p.key] = !inHidden.has(p.key) && shows(p.visibleWhen);
+  return { values, defaulted, visible, hiddenStructure, hiddenTables: nextTables };
 }
 
 export type DomainOption = { value: Val; label: string; eliminatedBy?: string };
-export type Propagation = {
-  values: Record<string, Val>;
-  defaulted: Set<string>;
-  visible: Record<string, boolean>;
+export type Propagation = Bindings & {
   /** `mandatory`, or `requiredWhen` holds — and visible: a hidden field is never required */
   required: Record<string, boolean>;
   domains: Record<string, DomainOption[]>;
@@ -320,6 +345,7 @@ export function missingInputs(
       out.push({ key: p.key, code: "param_required", params: [label], message: `${label} is required` });
   }
   for (const t of model.tables ?? []) {
+    if (prop.hiddenTables.has(t.key)) continue;
     const rows = tableRows[t.key] ?? [];
     const title = t.title || t.key;
     if (t.role === "items" && !rows.length)

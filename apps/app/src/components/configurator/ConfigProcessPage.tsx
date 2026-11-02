@@ -493,7 +493,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
                 is about to replace these candidates, so they stop taking picks. */}
             {candidates.rows.length > 0 ? (
               <PriceAnalysis model={model.definition} candidates={candidates} selection={selection}
-                onSelect={proc.pick} disabled={locked || queue.editing} />
+                onSelect={proc.pick} disabled={locked || queue.editing} loading={queue.editing && queue.sending} />
             ) : (
               <IllustratedMessage name="NoData" design="Medium" titleText={t("CONFIG_NO_CANDIDATES")}
                 subtitleText={t("CONFIG_NO_CANDIDATES_SUB")} />

@@ -36,15 +36,15 @@ describe("LookupRef columns", () => {
     expect(LookupRefZ.safeParse({ source: "table", table: "mats", valueCol: "code", columns: ["density"] }).success).toBe(true);
   });
 
-  test("derivedColumns is every extra column; displayColumns honours the subset", () => {
+  test("derivedColumns is every column, the key included; displayColumns honours the subset", () => {
     const ref = { source: "table", table: "mats", valueCol: "code" } as const;
     const all = ["code", "density", "name"];
-    expect(derivedColumns(ref, all)).toEqual(["density", "name"]);
-    expect(derivedColumns({ ...ref, columns: ["density"] }, all)).toEqual(["density", "name"]);
+    expect(derivedColumns(ref, all)).toEqual(["code", "density", "name"]);
+    expect(derivedColumns({ ...ref, columns: ["density"] }, all)).toEqual(["code", "density", "name"]);
     expect(derivedColumns({ ...ref, columns: ["density"] }, undefined)).toEqual([]);
     expect(derivedColumns(ref, undefined)).toEqual([]);
     expect(derivedColumns({ source: "manual", options: [] }, ["x"])).toEqual([]);
-    expect(displayColumns(ref, all)).toEqual(["density", "name"]);
+    expect(displayColumns(ref, all)).toEqual(["code", "density", "name"]);
     expect(displayColumns({ ...ref, columns: ["density"] }, all)).toEqual(["density"]);
     expect(displayColumns({ ...ref, columns: ["density"] }, undefined)).toEqual(["density"]);
     expect(displayColumns(ref, undefined)).toEqual([]);
@@ -55,11 +55,11 @@ describe("LookupRef columns", () => {
     expect(derivedKey("material", "density")).toBe("material_density");
   });
 
-  test("a query ref derives and displays every column but the key", () => {
+  test("a query ref derives and displays every column, the key included", () => {
     const cols = ["ItemCode", "ItemName", "OnHand"];
     const ref = { source: "query" as const, table: "items" };
-    expect(derivedColumns(ref, cols)).toEqual(["ItemName", "OnHand"]);
-    expect(displayColumns(ref, cols)).toEqual(["ItemName", "OnHand"]);
+    expect(derivedColumns(ref, cols)).toEqual(["ItemCode", "ItemName", "OnHand"]);
+    expect(displayColumns(ref, cols)).toEqual(["ItemCode", "ItemName", "OnHand"]);
   });
 
   test("a model definition no longer carries query definitions", () => {

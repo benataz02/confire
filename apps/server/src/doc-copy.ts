@@ -7,6 +7,7 @@
 
 import { z } from "zod";
 import type { EntityConstraints } from "./entity-meta.ts";
+import { t } from "./i18n/index.ts";
 
 export type DocumentFlow = {
   source: string;
@@ -86,15 +87,15 @@ export function buildCopy(
   opts: { header?: CopyHeader; lines?: CopyLine[] } = {},
 ): Record<string, unknown> {
   const first = sources[0];
-  if (!first) throw new Error("No source document");
+  if (!first) throw new Error(t("COPY_NO_SOURCE"));
   if (sources.some((s) => s.CardCode !== first.CardCode))
-    throw new Error("Documents of different business partners cannot be merged into one");
+    throw new Error(t("COPY_MIXED_PARTNERS"));
 
   const all = sources.flatMap((source) => {
     const docEntry = Number(source.DocEntry);
-    if (!Number.isFinite(docEntry)) throw new Error("Source document has no DocEntry");
+    if (!Number.isFinite(docEntry)) throw new Error(t("COPY_NO_DOCENTRY"));
     const sourceLines = Array.isArray(source.DocumentLines) ? (source.DocumentLines as Record<string, unknown>[]) : [];
-    if (!sourceLines.length) throw new Error(`${flow.source} ${String(source.DocNum ?? docEntry)} has no lines`);
+    if (!sourceLines.length) throw new Error(t("COPY_NO_LINES", flow.source, String(source.DocNum ?? docEntry)));
     return sourceLines.map((src, i) => {
       // BaseLine is the source line's LineNum, not its array position — they diverge as soon as a
       // line is deleted from the source document.
@@ -113,7 +114,7 @@ export function buildCopy(
     const byBase = new Map(all.map((l) => [`${String(l.BaseEntry)}:${String(l.BaseLine)}`, l]));
     DocumentLines = opts.lines.map((o) => {
       const line = byBase.get(`${o.baseEntry}:${o.baseLine}`);
-      if (!line) throw new Error(`Line ${o.baseLine} of document ${o.baseEntry} is not on a source document`);
+      if (!line) throw new Error(t("COPY_LINE_NOT_ON_SOURCE", o.baseLine, o.baseEntry));
       return { ...line, Quantity: o.quantity };
     });
   }

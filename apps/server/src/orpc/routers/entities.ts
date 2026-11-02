@@ -1,57 +1,32 @@
 import { ORPCError } from "@orpc/server";
 import { openapi } from "@orpc/openapi";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
-import { db, ListQueryZ, portalCompany } from "@confire/db";
-import { coerceKey, rowsOf, type Key } from "@confire/b1";
+import { ListQueryZ } from "@confire/db";
+import { rowsOf } from "@confire/b1";
 import { userProcedure } from "../base.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
-import { assertEntity, entitySchema, toConstraints } from "../../entity-meta.ts";
+import { entitySchema, toConstraints } from "../../entity-meta.ts";
 import { compileList } from "../../entity-list.ts";
-import { missingRequired, pickEditable, profileOf, PRINTABLE } from "../../entity-profiles.ts";
-import { buildCopy, COPY_SELECT, CopyHeaderZ, draftConstraints, findFlow, flowsFrom } from "../../doc-copy.ts";
+import { assertReadable, profileOf, PRINTABLE } from "../../entity-profiles.ts";
+import { buildCopy, draftConstraints, flowsFrom } from "../../doc-copy.ts";
+import { copySources, CopyInputZ, CopyZ, EntityZ, KeyZ, postWrite, prepareWrite } from "../../entity-write.ts";
 import { printDocument } from "../../print.ts";
 import { bad, readOne, readRows } from "../../entity-read.ts";
 import { DEFAULT_PAGE } from "../../lookups.ts";
+import { t } from "../../i18n/index.ts";
 
 // The B1 entity surface: read an entity's constraints, page rows, open one row — for any entity
 // set. Which entities a user can *browse* is the web's declared feature registry; this router does
 // not enumerate B1 for them any more. Writing is different: update/create/copy work only on the
-// curated entities in entity-profiles.ts, and only on the fields those profiles name. That rule
-// lives in `curated()` below, not in whether a page happened to draw a button.
+// curated entities in entity-profiles.ts, and only on the fields those profiles name (the `profile`
+// field rule). That rule lives in entity-write.ts, shared with the assistant's b1.* tools, not in
+// whether a page happened to draw a button. Row reads of ADMIN_ONLY_READS are admins' (assertReadable).
 //
 // userProcedure throughout: any staff member may open these pages. A portal customer never reaches
 // them — userProcedure refuses an external role. What may be written is still curated(), below.
 
-const EntityZ = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "must be an entity set name");
-const KeyZ = z.union([z.string(), z.number(), z.record(z.string(), z.union([z.string(), z.number()]))]);
-
 const b1Of = async (tenantId: string) => (await tenantConnector(tenantId)).b1;
-
-/** Writes are curated-only, and the rule lives here rather than in whether the UI drew a button. */
-const curated = (entity: string) => {
-  const p = profileOf(entity);
-  if (!p) throw new ORPCError("FORBIDDEN", { message: `${entity} is read-only in Confire` });
-  return p;
-};
-
-const CopyZ = z.object({
-  sourceEntity: EntityZ,
-  targetEntity: EntityZ,
-  // ponytail: one read per source through the agent; 50 caps the burst, batch if lists merge more.
-  docEntries: z.array(z.number().int()).min(1).max(50),
-});
-
-/** A copy's flow and its source documents, read from B1 — for the draft and for the post alike. */
-async function copySources(tenantId: string, input: z.infer<typeof CopyZ>) {
-  const flow = findFlow(input.sourceEntity, input.targetEntity);
-  if (!flow)
-    throw new ORPCError("BAD_REQUEST", { message: `No document flow from ${input.sourceEntity} to ${input.targetEntity}` });
-  const b1 = await b1Of(tenantId);
-  const read = await Promise.all([...new Set(input.docEntries)].map((n) =>
-    viaB1(() => b1.readEntity(flow.source, n, { select: COPY_SELECT }))));
-  return { flow, b1, sources: read.map((r) => r.data as Record<string, unknown>) };
-}
+const writeCtx = async (tenantId: string) => ({ tenantId, b1: await b1Of(tenantId) });
 
 export const entitiesRouter = {
   /** One entity's field constraints (Beas' /api/metadata/{Entity}), the write rule folded in as
@@ -95,6 +70,7 @@ export const entitiesRouter = {
       count: z.boolean().optional(),
     }))
     .handler(async ({ input, context }) => {
+      assertReadable(input.entity, context.role);
       const b1 = await b1Of(context.tenantId);
       const schema = await viaB1(() => entitySchema(context.tenantId, b1, input.entity)).catch(bad);
       return readRows(b1, schema, input.entity, { ...input, pageSize: DEFAULT_PAGE },
@@ -105,6 +81,7 @@ export const entitiesRouter = {
   one: userProcedure
     .input(z.object({ entity: EntityZ, key: KeyZ }))
     .handler(async ({ input, context }) => {
+      assertReadable(input.entity, context.role);
       const b1 = await b1Of(context.tenantId);
       const schema = await viaB1(() => entitySchema(context.tenantId, b1, input.entity)).catch(bad);
       return readOne(b1, schema, input.entity, input.key);
@@ -116,6 +93,7 @@ export const entitiesRouter = {
   neighbor: userProcedure
     .input(z.object({ entity: EntityZ, key: KeyZ.optional(), dir: z.enum(["first", "prev", "next", "last"]) }))
     .handler(async ({ input, context }) => {
+      assertReadable(input.entity, context.role);
       const b1 = await b1Of(context.tenantId);
       const schema = await viaB1(() => entitySchema(context.tenantId, b1, input.entity)).catch(bad);
       const [field] = schema.keys;
@@ -123,7 +101,7 @@ export const entitiesRouter = {
       const back = input.dir === "prev" || input.dir === "last";
       const from = input.dir === "prev" || input.dir === "next";
       if (from && (input.key === undefined || typeof input.key === "object"))
-        throw new ORPCError("BAD_REQUEST", { message: "prev/next needs the current key" });
+        throw new ORPCError("BAD_REQUEST", { message: t("ENTITY_NEIGHBOUR_NEEDS_KEY") });
       let q;
       try {
         q = compileList(schema, {
@@ -149,47 +127,18 @@ export const entitiesRouter = {
       data: z.record(z.string(), z.unknown()),
     }))
     .handler(async ({ input, context }) => {
-      const profile = curated(input.entity);
-      const { payload, rejected } = pickEditable(profile, input.data, { create: false });
-      if (rejected.length)
-        throw new ORPCError("BAD_REQUEST", { message: `Not editable on ${input.entity}: ${rejected.join(", ")}` });
-      if (!Object.keys(payload).length)
-        throw new ORPCError("BAD_REQUEST", { message: "Nothing to update" });
-
-      const b1 = await b1Of(context.tenantId);
-      const schema = await viaB1(() => entitySchema(context.tenantId, b1, input.entity)).catch(bad);
-      let key: Key;
-      try { key = coerceKey(schema, input.key); } catch (e) { return bad(e); }
-      await viaB1(() => b1.updateEntity(input.entity, key, payload, { etag: input.etag }));
-      // B1's PATCH answers 204; re-read so the caller gets the new ETag rather than a stale one.
-      const fresh = await viaB1(() => b1.readEntity(input.entity, key));
-      const row = fresh.data as Record<string, unknown>;
-      // A portal company keeps its BP's language for its mail: an edit here is one of the reads that
-      // keep the copy current. No row = the BP is not on the portal, and nothing changes.
-      if (input.entity === "BusinessPartners" && typeof row.CardCode === "string") {
-        await db.update(portalCompany)
-          .set({ languageCode: typeof row.LanguageCode === "number" ? row.LanguageCode : null })
-          .where(and(eq(portalCompany.tenantId, context.tenantId), eq(portalCompany.cardCode, row.CardCode)));
-      }
-      return { row, etag: fresh.etag ?? null };
+      const ctx = await writeCtx(context.tenantId);
+      const { row, etag } = await postWrite(ctx, await prepareWrite(ctx, "profile", { op: "update", ...input }));
+      return { row, etag };
     }),
 
   /** Curated create. `prefer: representation` means the created document comes back in one call. */
   create: userProcedure
     .input(z.object({ entity: EntityZ, data: z.record(z.string(), z.unknown()) }))
     .handler(async ({ input, context }) => {
-      const profile = curated(input.entity);
-      const missing = missingRequired(profile, input.data);
-      if (missing.length)
-        throw new ORPCError("BAD_REQUEST", { message: `${input.entity} needs ${missing.join(", ")}` });
-      const { payload, rejected } = pickEditable(profile, input.data, { create: true });
-      if (rejected.length)
-        throw new ORPCError("BAD_REQUEST", { message: `Not settable on ${input.entity}: ${rejected.join(", ")}` });
-
-      const b1 = await b1Of(context.tenantId);
-      await viaB1(() => assertEntity(context.tenantId, b1, input.entity)).catch(bad);
-      const res = await viaB1(() => b1.createEntity(input.entity, payload, { prefer: "representation" }));
-      return { row: res.data as Record<string, unknown>, etag: res.etag ?? null };
+      const ctx = await writeCtx(context.tenantId);
+      const { row, etag } = await postWrite(ctx, await prepareWrite(ctx, "profile", { op: "create", ...input }));
+      return { row, etag };
     }),
 
   /** The copy's draft page: the target document `copy` would post, unposted, and the form it is
@@ -198,7 +147,8 @@ export const entitiesRouter = {
   copyDraft: userProcedure
     .input(CopyZ)
     .handler(async ({ input, context }) => {
-      const { flow, b1, sources } = await copySources(context.tenantId, input);
+      const b1 = await b1Of(context.tenantId);
+      const { flow, sources } = await copySources(b1, input);
       const schema = await viaB1(() => entitySchema(context.tenantId, b1, flow.target)).catch(bad);
       let draft;
       try {
@@ -217,21 +167,11 @@ export const entitiesRouter = {
    *  Several sources of one business partner merge into one target. The draft page's changes ride
    *  along: the header allowlist, and `lines` — the kept lines with their quantities. */
   copy: userProcedure
-    .input(CopyZ.extend({
-      header: CopyHeaderZ.optional(),
-      lines: z.array(z.object({ baseEntry: z.number().int(), baseLine: z.number().int(), quantity: z.number().positive() })).min(1).optional(),
-    }))
+    .input(CopyInputZ)
     .handler(async ({ input, context }) => {
-      const { flow, b1, sources } = await copySources(context.tenantId, input);
-      let payload;
-      try {
-        payload = buildCopy(flow, sources, { header: input.header, lines: input.lines });
-      } catch (e) {
-        return bad(e);
-      }
-      const res = await viaB1(() => b1.createEntity(flow.target, payload, { prefer: "representation" }));
-      const row = res.data as Record<string, unknown>;
-      return { entity: flow.target, docEntry: Number(row.DocEntry), docNum: row.DocNum ?? null, row };
+      const ctx = await writeCtx(context.tenantId);
+      const { entity, row } = await postWrite(ctx, await prepareWrite(ctx, "profile", { op: "copy", input }));
+      return { entity, docEntry: Number(row.DocEntry), docNum: row.DocNum ?? null, row };
     }),
 
   /** Close a quotation (spec §7.3): `POST Quotations(n)/Close`. Quotations only — the one document

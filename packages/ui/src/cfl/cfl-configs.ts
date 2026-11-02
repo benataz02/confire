@@ -161,9 +161,9 @@ export const cfl = {
     const table = ref.source === "manual" ? "" : ref.table;
     const cols = canonical?.columns ?? [];
     const { valueCol, labelCol } = refKeyCols(ref, cols);
-    // The parameter's "Columns shown" (ref.columns) starts the rest hidden; every column is still
-    // fetched (CflDialog's select) and offered in the dialog's settings.
-    const shown = new Set([valueCol, labelCol, ...displayColumns(ref, cols)]);
+    // The parameter's "Columns shown" (ref.columns, the key column among them) starts the rest
+    // hidden; every column is still fetched (CflDialog's select) and offered in the dialog's settings.
+    const shown = new Set([labelCol, ...displayColumns(ref, cols)]);
     return {
       title: table,
       source: { kind: "masterdata", modelId: scope.modelId, table },

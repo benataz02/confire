@@ -18,7 +18,6 @@ import { NotificationsPopover, useUnreadCount } from "@confire/ui/notifications/
 import { B1_FEATURES } from "../features/b1/index.ts";
 import { GlobalSearch, type SearchHit } from "./GlobalSearch.tsx";
 import { useEffect, useRef, useState } from "react";
-import type { MouseEvent } from "react";
 import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 import { LANGUAGES, useLanguage } from "@confire/ui/i18n.ts";
 import { useI18n } from "../i18n.ts";
@@ -66,17 +65,15 @@ function Shell() {
   const pathname = useRouterState({ select: (s) => tenantPath(s.location.pathname) });
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const navLayoutRef = useRef<NavigationLayoutDomRef>(null);
-  const [navMode, setNavMode] = useState<NavigationLayoutPropTypes["mode"]>("Auto");
-  // Read the real collapsed state off the ref so the first click is correct on any screen size,
-  // keeping "Auto" responsiveness until the user takes manual control.
-  const toggleNav = () => setNavMode(navLayoutRef.current?.isSideCollapsed() ? "Expanded" : "Collapsed");
-  // Touching the page content collapses the nav. One delegated listener on the layout rather than a
-  // wrapper around <Outlet /> — the content slot sizes its own child, so an extra div breaks it.
-  // The chrome is excluded by host tag: shadow-DOM retargeting means a click anywhere inside the
-  // side nav / shellbar / user menu surfaces as that host element.
-  const collapseOnContentClick = (e: MouseEvent<HTMLElement>) => {
-    if ((e.target as HTMLElement).closest("ui5-side-navigation, ui5-shellbar, ui5-user-menu")) return;
-    if (!navLayoutRef.current?.isSideCollapsed()) setNavMode("Collapsed");
+  // The user's last choice survives a reload (same localStorage as theme and density); "Auto" —
+  // UI5's responsive default — only until they first press the menu button.
+  const [navMode, setNavMode] = useState<NavigationLayoutPropTypes["mode"]>(
+    () => (localStorage.getItem("navMode") as NavigationLayoutPropTypes["mode"] | null) ?? "Auto");
+  // Read the real collapsed state off the ref so the first click is correct on any screen size.
+  const toggleNav = () => {
+    const next = navLayoutRef.current?.isSideCollapsed() ? "Expanded" : "Collapsed";
+    localStorage.setItem("navMode", next);
+    setNavMode(next);
   };
   const { theme, setTheme: setThemeState, density, setDensity } = useAppearance();
   const i18n = useI18n();
@@ -132,7 +129,6 @@ function Shell() {
     <NavigationLayout
       ref={navLayoutRef}
       mode={navMode}
-      onClick={collapseOnContentClick}
       header={
         <>
           <ShellBar

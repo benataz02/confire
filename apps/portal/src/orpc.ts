@@ -4,17 +4,15 @@ import type { RouterClient } from "@orpc/server";
 import type { PortalRouter } from "@confire/server/portal-router";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { notificationsApi } from "@confire/ui/notifications/api.ts";
-import { currentSlug, hardRedirect, loginUrl, TENANT_HEADER } from "@confire/ui/host.ts";
+import { callHeaders, hardRedirect, loginUrl } from "@confire/ui/host.ts";
 
 // Same-origin (dev proxy / prod static) → the session cookie rides along. The supplier is the page's
-// path segment, sent as x-tenant on every call. No `origin` (a relative URL fetch resolves at call
-// time) and `headers` a function, so the module never touches `window` at import time.
+// path segment, sent as x-tenant on every call beside the UI language the server answers in
+// (callHeaders). No `origin` (a relative URL fetch resolves at call time) and `headers` a function,
+// so the module never touches `window` at import time.
 const link = new RPCLink({
   url: "/rpc",
-  headers: (): Record<string, string> => {
-    const slug = currentSlug();
-    return slug ? { [TENANT_HEADER]: slug } : {};
-  },
+  headers: callHeaders,
   interceptors: [
     onError((error) => {
       if (error instanceof ORPCError && error.code === "UNAUTHORIZED") void hardRedirect(loginUrl());

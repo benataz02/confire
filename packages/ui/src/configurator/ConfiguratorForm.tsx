@@ -4,7 +4,7 @@ import {
   ObjectPageSection, ObjectStatus, Option, RadioButton, SegmentedButton, SegmentedButtonItem, Select, Slider, Text, TextArea, Token,
 } from "@ui5/webcomponents-react";
 import {
-  isTableGroup, placedTables,
+  isTableGroup, placedTables, structureId,
   type FieldOption, type FormState, type Group, type LookupRef, type ModelDef, type ResolvedTable, type RowMoney, type TableRows, type Val,
 } from "@confire/config-engine";
 import { CflField } from "../cfl/CflField.tsx";
@@ -13,15 +13,13 @@ import { TABLE_ITEM } from "../list-report/Grid.tsx";
 import { FORM_LAYOUT } from "../formLayout.ts";
 import { ConfigTable } from "./ConfigTable.tsx";
 import type { Row } from "./configTableOps.ts";
-import { addBatch, BATCHES_PARAM, displayValue } from "./formHelpers.ts";
-import { money } from "../money.ts";
+import { addBatch, BATCHES_PARAM, displayValue, multiItem } from "./formHelpers.ts";
 import { useUiI18n } from "../i18n.ts";
-import { useUiSource } from "../source.tsx";
 
 // The one form the builder preview, the configuration page and the portal render. The pages take
 // one ObjectPageSection per model section, so their anchor bar navigates the model; the builder
 // preview takes the forms alone. It draws a form state (config-engine's formState: values, options,
-// visibility, requiredness, badges, broken rules) and reports each change; it computes nothing.
+// visibility, requiredness, broken rules) and reports each change; it computes nothing.
 // The ObjectPage, its other sections, footers and consistency stay with the caller.
 
 /** The items grid's money at the quantity the section shows. */
@@ -46,12 +44,14 @@ export const UNPLACED_TABLES_SECTION = "__tables";
 /** The sections the form renders: the model's own, plus a trailing one holding any table the
  *  author forgot to place. A table nobody can reach is a table whose sums are permanently zero —
  *  and for an items table it would be the quotation's lines going missing. */
-function formSections(model: ModelDef): { key: string; title: string; groups: Group[] }[] {
+function formSections(model: ModelDef, form: FormState): { key: string; title: string; groups: Group[] }[] {
   const defined = new Set((model.tables ?? []).map((t) => t.key));
+  const hidden = new Set(form.hidden ?? []);
   // A group left behind by a deleted table is dropped, so it is neither an empty titleless
-  // FormGroup nor counted as a second group.
-  const own = model.structure.sections.map((s) => ({
-    key: s.key, title: s.title, groups: s.groups.filter((g) => !isTableGroup(g) || defined.has(g.table)),
+  // FormGroup nor counted as a second group. So is whatever a section's or group's rule hides.
+  const own = model.structure.sections.filter((s) => !hidden.has(structureId(s.key))).map((s) => ({
+    key: s.key, title: s.title,
+    groups: s.groups.filter((g) => (isTableGroup(g) ? defined.has(g.table) : !hidden.has(structureId(s.key, g.key)))),
   }));
   const placed = new Set(placedTables(model));
   const orphans = (model.tables ?? []).filter((t) => !placed.has(t.key));
@@ -108,7 +108,7 @@ export type ConfiguratorProps = {
  *  its sections (ids, titles, the anchor bar) off its own children, so a component in between would
  *  hide them. */
 export function configuratorSections(props: ConfiguratorProps) {
-  return formSections(props.model).map((sec) => (
+  return formSections(props.model, props.form).map((sec) => (
     <ObjectPageSection key={sec.key} id={sec.key} titleText={sec.title}>
       <SectionForm {...props} title={sec.title} groups={sec.groups} />
     </ObjectPageSection>
@@ -118,7 +118,7 @@ export function configuratorSections(props: ConfiguratorProps) {
 /** The same sections as forms, with the section title on the form. The builder preview has no
  *  anchor bar, so it has no ObjectPage to hang a section on. */
 export function configuratorForms(props: ConfiguratorProps) {
-  return formSections(props.model).map((sec) => (
+  return formSections(props.model, props.form).map((sec) => (
     <SectionForm key={sec.key} {...props} title={sec.title} groups={sec.groups} headerText={sec.title} />
   ));
 }
@@ -140,7 +140,6 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
   headerText?: string;
 }) {
   const i18n = useUiI18n();
-  const currency = useUiSource().useCurrency();
   const formMode = {
     accessibleMode: readOnly ? "Display" : "Edit",
     itemSpacing: readOnly ? "Large" : "Normal",
@@ -211,14 +210,18 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
     if (p.ui === "multicombo")
       return (
         // MultiComboBoxItem has no disabled prop -> eliminated options are filtered out.
+        // The chip shows the label. `value` is the key: UI5's selectedValues matches on it,
+        // and reading the chip text back would store the label.
         <MultiComboBox style={{ width: "100%" }} disabled={disabled} {...reqProps}
+          selectedValues={Array.isArray(v) ? v.map(String) : []}
           onSelectionChange={(e) => {
-            const texts = e.detail.items.map((i) => (i as HTMLElement).getAttribute("text")!);
-            set(key, texts.length ? texts : undefined);
+            const values = e.detail.items.flatMap((it) => (it.value !== undefined ? [it.value] : []));
+            set(key, values.length ? values : undefined);
           }}>
-          {dom.filter((o) => !o.unavailable).map((o, i) => (
-            <MultiComboBoxItem key={i} text={String(o.value)} selected={Array.isArray(v) && v.includes(String(o.value))} />
-          ))}
+          {dom.filter((o) => !o.unavailable).map((o, i) => {
+            const item = multiItem(o);
+            return <MultiComboBoxItem key={i} text={item.text} value={item.value} additionalText={item.additionalText} />;
+          })}
         </MultiComboBox>
       );
 
@@ -357,15 +360,11 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
                 {/* data-param is what a conflict message in the page's popover scrolls to —
                     the controls themselves vary too much to each carry an id. */}
                 <div data-param={k} style={{ display: "flex", flexDirection: "column", gap: "0.125rem", width: "100%" }}>
-                  {/* The label sits beside the field, so the option's price closes the control's
-                      own row, after the assistant's mark. */}
+                  {/* The label sits beside the field, so the assistant's mark closes the control's own row. */}
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
                     <div style={{ flex: 1, minInlineSize: 0, display: "flex" }}>{control(k)}</div>
                     {marks?.[k] ? <MarkIcon mark={marks[k]!} label={i18n.getText("UI_MARK_QUESTION")}
                       onPress={(el) => onMarkPress?.(k, el)} /> : null}
-                    {f.price !== undefined ? (
-                      <ObjectStatus style={{ flex: "none", whiteSpace: "nowrap" }}>{money(f.price, currency)}</ObjectStatus>
-                    ) : null}
                   </div>
                   {showEliminatedNote ? (
                     <Text style={{ fontSize: "0.75rem", color: "var(--sapContent_LabelColor)" }}>

@@ -12,7 +12,9 @@ import {
   appendMessages, blankThread, clearThread, deleteThread, dehydrate, lastDrop, linkProject, listThreads, ownThread, setThread,
   threadFor, withThread, type Thread,
 } from "../../assistant/threads.ts";
+import { userAutoWrite, workspaceAutoWrite } from "../../assistant/auto.ts";
 import { assertAssistant, assistantOn, MONTHLY_LIMIT_USD, monthUsage, offReason, rateLimit } from "../../assistant/usage.ts";
+import { t as text } from "../../i18n/index.ts";
 
 // The assistant's fixed steps (spec §4.1), called by the panel: read the request (`intake`), start
 // the configuration it proposes (`start`, no model call), read its values (`extract`). Each step's
@@ -54,7 +56,7 @@ export async function startFromThread(
   ctx: { tenantId: string; userId: string }, t: Thread,
   input: { modelId: string; name: string; customer?: z.infer<typeof Customer> | null },
 ): Promise<{ id: string }> {
-  if (t.projectId) throw new ORPCError("BAD_REQUEST", { message: "This chat already belongs to a configuration" });
+  if (t.projectId) throw new ORPCError("BAD_REQUEST", { message: text("CHAT_HAS_CONFIG") });
   const { id } = await createProject(ctx.tenantId, ctx.userId, input, "assistant");
   await linkProject(t.id, id);
   t.projectId = id;
@@ -73,6 +75,9 @@ export const assistantRouter = {
       reason,
       limitReached: (await monthUsage(context.tenantId)).cost >= MONTHLY_LIMIT_USD,
       isAdminHint: isAdmin(context.role),
+      /** auto mode (b1-tools spec §5.3): whether the workspace allows it (the chat box draws the
+       *  toggle only then), and this user's own switch */
+      autoWrite: { allowed: await workspaceAutoWrite(context.tenantId), on: await userAutoWrite(context.tenantId, context.userId) },
     };
   }),
 
@@ -148,12 +153,12 @@ export const assistantRouter = {
     }))
     .handler(async ({ input, context }) => {
       const t = await ownThread(context.tenantId, context.userId, input.threadId);
-      if (t.projectId !== input.projectId) throw new ORPCError("BAD_REQUEST", { message: "This chat belongs to another configuration" });
+      if (t.projectId !== input.projectId) throw new ORPCError("BAD_REQUEST", { message: text("CHAT_OTHER_CONFIG") });
       return withThread(t.id, async () => {
         rateLimit(context.userId);
         const given = !!input.text?.trim() || !!input.refs?.length;
         const drop = given ? { refs: (input.refs ?? []) as FileRef[], text: input.text ?? "" } : lastDrop(t.messages);
-        if (!drop) throw new ORPCError("BAD_REQUEST", { message: "Nothing to read: drop the client's files first" });
+        if (!drop) throw new ORPCError("BAD_REQUEST", { message: text("CHAT_NO_DROP") });
         const result = await extractInto(
           { headers: context.headers, tenantId: context.tenantId, userId: context.userId, threadId: t.id }, input.projectId, drop,
         );
@@ -163,14 +168,18 @@ export const assistantRouter = {
     }),
 
   /** The switch, and whether this server can call Claude at all (an API key is set). */
-  settings: adminProcedure.handler(async ({ context }) => ({ assistant: await assistantOn(context.tenantId), available: available() })),
+  settings: adminProcedure.handler(async ({ context }) => ({
+    assistant: await assistantOn(context.tenantId), b1AutoWrite: await workspaceAutoWrite(context.tenantId), available: available(),
+  })),
 
+  /** `b1AutoWrite` off stops auto mode at once for everyone: every write is read for it. */
   saveSettings: adminProcedure
-    .input(z.object({ assistant: z.boolean() }))
+    .input(z.object({ assistant: z.boolean(), b1AutoWrite: z.boolean().optional() }))
     .handler(async ({ input, context }) => {
-      await db.insert(assistantSettings).values({ tenantId: context.tenantId, assistant: input.assistant })
-        .onConflictDoUpdate({ target: assistantSettings.tenantId, set: { assistant: input.assistant, updatedAt: new Date() } });
-      return { assistant: input.assistant, available: available() };
+      const set = { assistant: input.assistant, ...(input.b1AutoWrite !== undefined ? { b1AutoWrite: input.b1AutoWrite } : {}) };
+      await db.insert(assistantSettings).values({ tenantId: context.tenantId, ...set })
+        .onConflictDoUpdate({ target: assistantSettings.tenantId, set: { ...set, updatedAt: new Date() } });
+      return { assistant: input.assistant, b1AutoWrite: await workspaceAutoWrite(context.tenantId), available: available() };
     }),
 
   /** This month's spend against the limit, and the configurations it went to. */

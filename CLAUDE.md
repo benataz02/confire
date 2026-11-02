@@ -359,8 +359,24 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   that calls `configs_create` goes straight on — its answer carries the model block and what is
   missing. Business partners the chat reads are customers only (`CUSTOMERS_ONLY`, `intake.ts`, the
   customer value help's rule), whatever filter the model sends. Lists are capped at 20 rows (`LIST_CAP`,
-  Joule's list card). No tool posts to SAP: `propose_quotation` is `quoteDraft`, posting stays the
-  quote page's.
+  Joule's list card). A configuration's quotation is never the chat's to post: `propose_quotation` is
+  `quoteDraft`, posting stays the quote page's.
+- **SAP tools** (`orpc/routers/b1.ts`, `docs/superpowers/specs/2026-11-02-b1-tools-design.md`):
+  `b1_find`/`b1_schema`/`b1_read`/`b1_write`/`b1_copy` are the `b1` router's procedures as they are,
+  written once for the chat and for MCP later — so their caps (20 rows), strict field names (a wrong
+  one refused with the closest real ones, before `compileList`) and proposals live in the handlers, and
+  `tools.ts` adds nothing to them. Reads cover every entity set but `ADMIN_ONLY_READS`
+  (`entity-profiles.ts`, `assertReadable`, `entities.*` too). Writes are the curated entities with
+  every schema field (`entity-write.ts`' `schema` rule). **A write is a proposal** — `{ proposal }`,
+  nothing posted, the run ends on it (`untilAsked`) and `B1WriteCard` shows it before → after with
+  Post/Discard — unless auto mode is on (`assistant/auto.ts`): the workspace's
+  `assistant_settings.b1AutoWrite` *and* the user's `ui_user_state` `assistant:autoWrite` (the chat
+  box's toggle), and even then not in a chat holding client files nor for a copy to Invoices. The
+  chat's calls carry `assistantThreadId` in the call's context, which no request can fill. Post is
+  `b1.post` (the spec's `b1.apply`: oRPC's client reserves `apply`/`call`/`bind` as proxy keys), in
+  no tool set — the model cannot approve its own proposal — and it re-runs the checks with the
+  proposal's ETag, so a record changed since is `CONFLICT`. `entities_rows` stays the configuration's
+  customer lookup.
 - **Threads** (`threads.ts`) are server-owned and append-only (Sonnet 5.5 refuses edited history): the
   route takes only the last user message's text from the client. One run per thread under a lease
   (`takeLease`/`withThread`, `THREAD_BUSY`); one thread per (user, configuration) plus general ones.
@@ -564,11 +580,15 @@ line with its cached options, and a stale cache is a page message instead of a f
 
 - **ETag always.** Updates carry `If-Match`; a 412 surfaces as `CONFLICT`. There is no force path.
 - **Curated-only.** `entity-profiles.ts` names four entities (Quotations, Orders,
-  BusinessPartners, Items) and the exact fields on each; the rule is enforced in
-  `orpc/routers/entities.ts`, not by which buttons a page draws. Everything else B1 exposes is
-  read-only — DeliveryNotes and Invoices included, which stay copy targets.
-  `entities.metadata` hands the same rule to the browser as per-field `Editable`/`Required`
-  (`toConstraints`), so the form and the allowlist cannot drift.
+  BusinessPartners, Items); `entity-write.ts` is the one create/update/copy, called by the pages
+  (`entities.*`) and the assistant's tools (`b1.*`) with a **field rule** the server sets: `profile`
+  (the pages': exactly the profile's fields, `pickEditable`) or `schema` (the tools': every field of the
+  cached schema, collections included, an unknown name refused). Both require a curated entity, so
+  the pages' field list is what they *offer*, not the security boundary. Everything else B1 exposes is
+  read-only — DeliveryNotes and Invoices included, which stay copy targets (a copy keeps its
+  `CopyHeaderZ` allowlist under either rule). `entities.metadata` hands the profile rule to the
+  browser as per-field `Editable`/`Required` (`toConstraints`), so the form and the allowlist cannot
+  drift.
 - **Idempotent quote write-back.** `configDocumentCommandId()` (SHA-256 over
   `tenant|project|canonicalJson(selected assignments)`, keys sorted because Postgres reorders
   jsonb) is written to `U_CF_Key` and checked before create. It hashes the selected

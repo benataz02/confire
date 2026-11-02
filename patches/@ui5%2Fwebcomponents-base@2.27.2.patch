@@ -1,0 +1,19 @@
+diff --git a/dist/Render.js b/dist/Render.js
+index 8b8441911f19b51244648ddc1658b5ed4af3d69a..51c6329073e6fa5165d315b704366be4d48331c7 100644
+--- a/dist/Render.js
++++ b/dist/Render.js
+@@ -39,7 +39,13 @@ const unregisterElement = (webComponent) => {
+  */
+ const renderImmediately = (webComponent) => {
+     eventProvider.fireEvent("beforeComponentRender", webComponent);
+-    registerElement(webComponent);
++    // Confire patch: a component invalidated after it left the DOM (Popup's deferred
++    // _updateMediaRange, a slot change bubbling up) still renders here; registering it then would
++    // keep it, and its whole shadow tree, in registeredElements forever — disconnectedCallback has
++    // already unregistered it. connectedCallback registers it again if it comes back.
++    if (webComponent.isConnected) {
++        registerElement(webComponent);
++    }
+     webComponent._render();
+ };
+ /**

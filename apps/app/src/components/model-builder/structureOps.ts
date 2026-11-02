@@ -41,6 +41,24 @@ export function uniqueKey(base: string, taken: string[]): string {
   return k;
 }
 
+/** What TitleDialog edits on a section or a field group. */
+export type Heading = { title: string; visibleWhen?: string };
+
+const withHeading = <T extends { title: string; visibleWhen?: string }>({ visibleWhen: _v, ...node }: T, h: Heading): T =>
+  ({ ...node, title: h.title, ...(h.visibleWhen === undefined ? {} : { visibleWhen: h.visibleWhen }) }) as T;
+
+/** Set the heading of the section at `s`, or of its field group `g`. A table group has none. */
+export function setHeading(def: ModelDef, at: { s: number; g?: number }, h: Heading): ModelDef {
+  return {
+    ...def,
+    structure: {
+      sections: def.structure.sections.map((s, si) => si !== at.s ? s
+        : at.g === undefined ? withHeading(s, h)
+        : { ...s, groups: s.groups.map((g, gi) => (gi === at.g && !isTableGroup(g) ? withHeading(g, h) : g)) }),
+    },
+  };
+}
+
 /** The group at a position, only if it is one a parameter can go into. */
 const fieldGroupAt = (def: ModelDef, s: number, g: number): FieldGroup | undefined => {
   const grp = def.structure.sections[s]?.groups[g];
@@ -379,7 +397,7 @@ export function duplicateNodes(def: ModelDef, refs: RowRef[], keys: CopyKey[]): 
   };
   const copyGroups = (groups: Group[], key?: string): Group[] => groups.flatMap((g) => (isTableGroup(g)
     ? copyTable(g.table)
-    : [{ ...g, key: key ?? g.key, params: g.params.flatMap(copyParam) }]));
+    : [{ ...g, key: key ?? g.key, params: g.params.flatMap(copyParam), ...(g.visibleWhen === undefined ? {} : { visibleWhen: re(g.visibleWhen) }) }]));
 
   const intoSection = new Map<number, Group[]>();
   const intoGroup = new Map<string, string[]>();
@@ -389,7 +407,7 @@ export function duplicateNodes(def: ModelDef, refs: RowRef[], keys: CopyKey[]): 
     if (r.kind === "section") {
       const s = def.structure.sections[r.s];
       const key = keyOf.get(`s:${r.s}`);
-      if (s && key) sections.push({ ...s, key, groups: copyGroups(s.groups) });
+      if (s && key) sections.push({ ...s, key, groups: copyGroups(s.groups), ...(s.visibleWhen === undefined ? {} : { visibleWhen: re(s.visibleWhen) }) });
     } else if (r.kind === "group") {
       const g = fieldGroupAt(def, r.s, r.g);
       const key = keyOf.get(`g:${r.s}.${r.g}`);

@@ -6,6 +6,7 @@ import {
   type Entries, type ModelDef, type Param, type TableDef, type TableRows, type Val,
 } from "@confire/config-engine";
 import type { Side } from "./project-lifecycle.ts";
+import { t } from "./i18n/index.ts";
 
 // One edit to a configuration's engine inputs, as both processes take it: the fields that changed
 // and nothing else. Validated against the model before anything is written, then merged in SQL so
@@ -43,17 +44,19 @@ export const touchesEngine = (p: InputPatch): boolean =>
 
 const scalar = (v: unknown) => v === null || ["string", "number", "boolean"].includes(typeof v);
 const strings = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
+const TYPE_TEXT = { string: "TYPE_STRING", number: "TYPE_NUMBER", boolean: "TYPE_BOOLEAN" } as const;
+const expects = (type: keyof typeof TYPE_TEXT) => t("PATCH_EXPECTS", t(TYPE_TEXT[type]));
 
 /** Why a parameter refuses this value, or null. A value outside the field's options is not refused:
  *  options depend on other fields and on the cache, so the view reports it instead (`not_an_option`).
  *  Which is also why an options field takes any scalar — its options carry their own types. */
 function paramProblem(p: Param, v: Val | undefined): string | null {
-  if (p.readonly) return "read-only";
+  if (p.readonly) return t("PATCH_READ_ONLY");
   if (v === undefined) return null; // an unset
-  if (p.ui === "multicombo") return strings(v) || v === null ? null : "expects a list of strings";
-  if (!scalar(v)) return `expects a ${p.type}`;
+  if (p.ui === "multicombo") return strings(v) || v === null ? null : t("PATCH_EXPECTS_LIST");
+  if (!scalar(v)) return expects(p.type);
   if (v === null || p.domain?.kind === "options") return null;
-  return typeof v === p.type ? null : `expects a ${p.type}`;
+  return typeof v === p.type ? null : expects(p.type);
 }
 
 /** Why a table cell refuses this value, or null. External: the client types the declared input and
@@ -61,15 +64,15 @@ function paramProblem(p: Param, v: Val | undefined): string | null {
  *  salesperson's price. */
 function cellProblem(def: TableDef, key: string, v: Val, side: Side): string | null {
   if (key === PRICE_COL && def.role === "items") {
-    if (side === "external") return "set by the supplier";
-    return v === null || (typeof v === "number" && v >= 0) ? null : "expects a price of 0 or more";
+    if (side === "external") return t("PATCH_SET_BY_SUPPLIER");
+    return v === null || (typeof v === "number" && v >= 0) ? null : t("PATCH_EXPECTS_PRICE");
   }
   const c = def.columns.find((x) => x.key === key);
-  if (!c) return "not a column of this table";
-  if (c.cell.kind === "formula" && side === "external") return "computed, not editable here";
+  if (!c) return t("PATCH_NOT_A_COLUMN");
+  if (c.cell.kind === "formula" && side === "external") return t("PATCH_COMPUTED");
   if (v === null) return null;
-  if (c.cell.kind === "options") return scalar(v) || strings(v) ? null : `expects a ${c.type}`;
-  return typeof v === c.type ? null : `expects a ${c.type}`;
+  if (c.cell.kind === "options") return scalar(v) || strings(v) ? null : expects(c.type);
+  return typeof v === c.type ? null : expects(c.type);
 }
 
 /**
@@ -83,14 +86,14 @@ export function patchProblems(model: ModelDef, patch: InputPatch, side: Side): s
   const out: string[] = [];
   const field = (key: string, v: Val | undefined) => {
     const p = params.get(key);
-    const problem = p ? paramProblem(p, v) : "not a field of this model";
+    const problem = p ? paramProblem(p, v) : t("PATCH_NOT_A_FIELD");
     if (problem) out.push(`${key}: ${problem}`);
   };
   for (const [k, v] of Object.entries(patch.set ?? {})) field(k, v);
   for (const k of patch.unset ?? []) field(k, undefined);
   for (const [key, rows] of Object.entries(patch.tables ?? {})) {
     const def = defs.get(key);
-    if (!def) { out.push(`${key}: not a table of this model`); continue; }
+    if (!def) { out.push(`${key}: ${t("PATCH_NOT_A_TABLE")}`); continue; }
     const seen = new Set<string>();
     for (const r of rows)
       for (const [col, v] of Object.entries(r)) {

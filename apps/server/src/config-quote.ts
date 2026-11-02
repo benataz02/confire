@@ -21,6 +21,7 @@ import { canonicalJson } from "./canon.ts";
 import { quotationIn, tenantCompany, tenantConnector, tenantCurrency, viaB1 } from "./b1.ts";
 import { liveEngine } from "./config-project.ts";
 import { assertWritable, inputsOf, internalVisible, transition } from "./project-lifecycle.ts";
+import { t } from "./i18n/index.ts";
 
 export type ConfigProjectRow = typeof configProject.$inferSelect;
 
@@ -144,18 +145,22 @@ export function buildQuoteSeed(
   project: ConfigProjectRow, model: ModelDef, lookups: ResolvedLookups, currency?: string | null,
 ): Record<string, unknown> {
   if (!project.customer) {
-    throw new ORPCError("BAD_REQUEST", { message: "Customer is required before quoting" });
+    throw new ORPCError("BAD_REQUEST", { message: t("QUOTE_NEEDS_CUSTOMER") });
   }
   // The same check that hides the page's Create quote — the browser is not trusted to have done it.
-  const gaps = missingInputs(model, lookups, propagate(model, lookups, project.entries, project.tables), project.tables);
+  // A broken rule keeps the last prices on screen; it does not make them quotable.
+  const prop = propagate(model, lookups, project.entries, project.tables);
+  if (prop.conflicts.length)
+    throw new ORPCError("BAD_REQUEST", { message: prop.conflicts.map((c) => c.message).join("; ") });
+  const gaps = missingInputs(model, lookups, prop, project.tables);
   if (gaps.length)
-    throw new ORPCError("BAD_REQUEST", { message: `Complete the configuration before quoting: ${gaps.map((g) => g.message).join("; ")}` });
+    throw new ORPCError("BAD_REQUEST", { message: t("QUOTE_INCOMPLETE", gaps.map((g) => g.message).join("; ")) });
   if (!project.selection?.length) {
-    throw new ORPCError("BAD_REQUEST", { message: "Select at least one candidate before quoting" });
+    throw new ORPCError("BAD_REQUEST", { message: t("QUOTE_NEEDS_SELECTION") });
   }
   for (const s of project.selection) {
     if (!project.candidates[s.candidateIdx])
-      throw new ORPCError("BAD_REQUEST", { message: `No candidate at index ${s.candidateIdx}` });
+      throw new ORPCError("BAD_REQUEST", { message: t("QUOTE_NO_CANDIDATE", s.candidateIdx) });
   }
 
   const seed: Record<string, unknown> = {
@@ -186,12 +191,12 @@ export function validateSelectionPairs(
     const cand = candidates[s.candidateIdx];
     if (!cand || !cand.perBatch.some((b) => b.batchQty === s.batchQty)) {
       throw new ORPCError("BAD_REQUEST", {
-        message: "Selection does not match the calculated candidate/batch options",
+        message: t("SELECTION_MISMATCH"),
       });
     }
     const key = `${s.candidateIdx}:${s.batchQty}`;
     if (seen.has(key)) {
-      throw new ORPCError("BAD_REQUEST", { message: "Duplicate candidate/batch pair" });
+      throw new ORPCError("BAD_REQUEST", { message: t("SELECTION_DUPLICATE") });
     }
     seen.add(key);
   }
@@ -203,7 +208,7 @@ export function applySelection(
 ): { candidateIdx: number; batchQty: number; outputs: Outputs }[] {
   return selection.map((s) => {
     const cand = candidates[s.candidateIdx];
-    if (!cand) throw new ORPCError("BAD_REQUEST", { message: `No candidate at index ${s.candidateIdx}` });
+    if (!cand) throw new ORPCError("BAD_REQUEST", { message: t("QUOTE_NO_CANDIDATE", s.candidateIdx) });
     try {
       const outputs = computeOutputs(model, lookups, cand.assignment, s.batchQty, tableRows);
       return { candidateIdx: s.candidateIdx, batchQty: s.batchQty, outputs };
@@ -224,7 +229,7 @@ async function loadQuotable(tenantId: string, projectId: string) {
     .where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId), internalVisible)).limit(1);
   if (!project) throw new ORPCError("NOT_FOUND");
   if (!project.candidates.length)
-    throw new ORPCError("BAD_REQUEST", { message: "Calculate the configuration before quoting" });
+    throw new ORPCError("BAD_REQUEST", { message: t("QUOTE_NEEDS_CALCULATION") });
   return project;
 }
 
@@ -259,7 +264,7 @@ async function readQuotation(b1: B1Transport, docEntry: number) {
   const row = res.data as Record<string, unknown>;
   if (!(DEDUP_UDF in row))
     throw new ORPCError("BAD_REQUEST", {
-      message: `Cannot re-quote safely: ${DEDUP_UDF} is missing from Sales Quotation in SAP. Create it (alphanumeric, length 64) and try again.`,
+      message: t("QUOTE_REQUOTE_NO_UDF", DEDUP_UDF),
     });
   const lines = (row.DocumentLines as Record<string, unknown>[] | undefined) ?? [];
   return {
@@ -280,7 +285,7 @@ export async function createQuote(
   // entities.create honours. Checked before anything reaches SAP.
   const rejected = Object.keys(input.header ?? {}).filter((k) => !QUOTE_HEADER.has(k));
   if (rejected.length)
-    throw new ORPCError("BAD_REQUEST", { message: `Not settable on a quotation: ${rejected.join(", ")}` });
+    throw new ORPCError("BAD_REQUEST", { message: t("QUOTE_NOT_SETTABLE", rejected.join(", ")) });
 
   const project = await loadQuotable(tenantId, input.projectId);
   // One connector for the whole write: `here` is decided against the company its calls carry, so a
@@ -294,11 +299,11 @@ export async function createQuote(
   await assertWritable(tenantId, project.id, actor);
   // The customer of a portal project is the company (spec §10) — the page cannot quote someone else.
   if (project.portalCardCode !== null && input.header?.CardCode !== undefined && input.header.CardCode !== project.customer?.cardCode)
-    throw new ORPCError("BAD_REQUEST", { message: "A request is quoted to the client's own business partner" });
+    throw new ORPCError("BAD_REQUEST", { message: t("QUOTE_REQUEST_OWN_BP") });
 
   const commandId = commandIdOf(tenantId, project, here);
   if (commandId !== input.commandId)
-    throw new ORPCError("CONFLICT", { message: "STATE_CHANGED" });
+    throw new ORPCError("CONFLICT", { message: t("QUOTE_STATE_CHANGED"), data: { reason: "STATE_CHANGED" } });
 
   const { model, lookups } = await liveEngine(tenantId, project);
   const seed = buildQuoteSeed(project, model.definition, lookups, await tenantCurrency(tenantId));
@@ -340,7 +345,7 @@ export async function createQuote(
       // different problem and must keep its own status rather than becoming setup advice.
       if (e instanceof B1Error && e.status === 400)
         throw new ORPCError("BAD_REQUEST", {
-          message: `Cannot check for an existing quotation: ${DEDUP_UDF} is missing from Sales Quotation in SAP. Create it (alphanumeric, length 64) and try again. (${e.message})`,
+          message: t("QUOTE_CHECK_NO_UDF", DEDUP_UDF, e.message),
         });
       throw e;
     });
@@ -360,7 +365,7 @@ export async function createQuote(
     const doc = (prior ?? created?.data ?? {}) as Record<string, unknown>;
     const docEntry = Number(doc.DocEntry);
     if (!Number.isFinite(docEntry))
-      throw new ORPCError("BAD_GATEWAY", { message: "SAP created the quotation but returned no DocEntry" });
+      throw new ORPCError("BAD_GATEWAY", { message: t("QUOTE_NO_DOCENTRY") });
     return {
       docEntry,
       docNum: doc.DocNum === undefined ? null : Number(doc.DocNum),

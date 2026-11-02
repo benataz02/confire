@@ -7,8 +7,9 @@ import { toast } from "@confire/ui/toast.ts";
 import { useI18n } from "../../i18n.ts";
 import { orpc } from "../../orpc.ts";
 
-// Settings → Assistant (assistant spec §4.7): the workspace's switch, saying where the data goes, and
-// this month's spend against the limit. The operator reads across workspaces with SQL (DEPLOY.md).
+// Settings → Assistant (assistant spec §4.7): the workspace's switch, saying where the data goes, the
+// workspace's half of auto mode for SAP writes (b1-tools spec §5.7), and this month's spend against the
+// limit. The operator reads across workspaces with SQL (DEPLOY.md).
 
 const BODY = { padding: "1rem", gap: "0.75rem" } as const;
 
@@ -16,6 +17,7 @@ export function AssistantSettings() {
   return (
     <>
       <SwitchCard />
+      <AutoWriteCard />
       <UsageCard />
     </>
   );
@@ -45,6 +47,34 @@ function SwitchCard() {
         {q.data?.assistant && !q.data.available
           ? <MessageStrip design="Critical" hideCloseButton>{i18n.getText("ASSISTANT_SWITCH_NO_KEY")}</MessageStrip> : null}
         <Text>{i18n.getText("ASSISTANT_SWITCH_INFO")}</Text>
+      </FlexBox>
+    </Card>
+  );
+}
+
+/** Whether a user may switch the assistant's SAP writes to auto. Off stops it at once for everyone;
+ *  each user still turns it on for themselves beside the chat box. */
+function AutoWriteCard() {
+  const i18n = useI18n();
+  const qc = useQueryClient();
+  const q = useQuery(orpc.assistant.settings.queryOptions());
+  const save = useMutation(orpc.assistant.saveSettings.mutationOptions({
+    onSuccess: () => {
+      toast(i18n.getText("ASSISTANT_SAVED"));
+      void qc.invalidateQueries({ queryKey: orpc.assistant.key() });
+    },
+  }));
+  return (
+    <Card header={<CardHeader titleText={i18n.getText("ASSISTANT_AUTO")} subtitleText={i18n.getText("ASSISTANT_AUTO_SUB")}
+      action={q.data ? (
+        <Switch checked={save.isPending ? save.variables?.b1AutoWrite : q.data.b1AutoWrite} disabled={save.isPending}
+          accessibleName={i18n.getText("ASSISTANT_AUTO")}
+          onChange={(e) => save.mutate({ assistant: q.data.assistant, b1AutoWrite: e.target.checked })} />
+      ) : undefined} />}>
+      <FlexBox direction="Column" style={BODY}>
+        {save.error ? <MessageStrip design="Negative" hideCloseButton>{save.error.message}</MessageStrip> : null}
+        <Text>{i18n.getText("ASSISTANT_AUTO_INFO")}</Text>
+        <Text style={{ color: "var(--sapContent_LabelColor)" }}>{i18n.getText("ASSISTANT_AUTO_SAP_USER")}</Text>
       </FlexBox>
     </Card>
   );

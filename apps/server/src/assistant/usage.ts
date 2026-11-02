@@ -3,6 +3,7 @@ import type { ChatMiddleware, TokenUsage } from "@tanstack/ai";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { db, aiUsage, assistantSettings, type AiUsageKind } from "@confire/db";
 import { ASSISTANT_MODEL, available } from "./model.ts";
+import { t as text } from "../i18n/index.ts";
 
 // The meter, the monthly limit, the switch and the rate limit (assistant spec §4.7, §4.8). One row per
 // model call; the limit is what it protects, the count of assisted configurations what gets reported.
@@ -88,10 +89,10 @@ export async function offReason(tenantId: string): Promise<"switch" | "no_key" |
 /** Before any model call: the workspace's switch, a provider to call, and money left this month. */
 export async function assertAssistant(tenantId: string): Promise<void> {
   const off = await offReason(tenantId);
-  if (off === "switch") throw new ORPCError("ASSISTANT_OFF", { message: "The assistant is off for this workspace" });
-  if (off === "no_key") throw new ORPCError("ASSISTANT_UNAVAILABLE", { message: "The assistant is not set up on this server (no Claude API key)" });
+  if (off === "switch") throw new ORPCError("ASSISTANT_OFF", { message: text("ASSISTANT_OFF") });
+  if (off === "no_key") throw new ORPCError("ASSISTANT_UNAVAILABLE", { message: text("ASSISTANT_UNAVAILABLE") });
   if ((await monthUsage(tenantId)).cost >= MONTHLY_LIMIT_USD)
-    throw new ORPCError("ASSISTANT_LIMIT", { message: "This workspace has used its assistant budget for this month" });
+    throw new ORPCError("ASSISTANT_LIMIT", { message: text("ASSISTANT_LIMIT") });
 }
 
 // ponytail: per process; a shared store when there is more than one staff process.
@@ -103,7 +104,7 @@ export function rateLimit(userId: string): void {
   const now = Date.now();
   const w = windows.get(userId);
   if (!w || now - w.start >= 60_000) { windows.set(userId, { start: now, n: 1 }); return; }
-  if (++w.n > PER_MINUTE) throw new ORPCError("TOO_MANY_REQUESTS", { message: "Too many assistant requests — wait a minute" });
+  if (++w.n > PER_MINUTE) throw new ORPCError("TOO_MANY_REQUESTS", { message: text("ASSISTANT_RATE_LIMIT") });
 }
 
 /** The plain route's answer to a coded refusal (oRPC answers its own). */

@@ -6,6 +6,7 @@ import {
 import type { ConfigCandidate } from "@confire/db";
 import { liveProject, type LiveProject } from "./config-project.ts";
 import type { RowCache } from "./lookups.ts";
+import { t } from "./i18n/index.ts";
 
 // What the staff process page — and later an MCP client — is shown of a configuration: everything
 // the screen draws, worked out here, plain JSON, without the engine's raw output (no candidate's
@@ -44,7 +45,7 @@ function issuesOf(live: Pick<LiveProject, "row" | "model" | "md" | "lookups" | "
     if (!dom.length) continue; // an empty table says so itself (sync_never)
     const off = (Array.isArray(v) ? v : [v]).filter((x) => !dom.some((o) => o.value === x));
     for (const x of off)
-      out.push({ key: p.key, code: "not_an_option", params: [labelOf(model, p.key), String(x)], message: `${String(x)} is not one of ${labelOf(model, p.key)}'s options` });
+      out.push({ key: p.key, code: "not_an_option", params: [labelOf(model, p.key), String(x)], message: t("NOTICE_NOT_AN_OPTION", String(x), labelOf(model, p.key)) });
   }
   // Freshness travels with the data: a never-synced table is why its lists are empty, a failed sync
   // is worth knowing; merely stale says nothing, that is what a sync frequency is for.
@@ -52,15 +53,15 @@ function issuesOf(live: Pick<LiveProject, "row" | "model" | "md" | "lookups" | "
   for (const r of md) {
     if (r.kind !== "query" || !named.has(r.name)) continue;
     if (r.syncError)
-      out.push({ code: "sync_failed", params: [r.name, r.syncError, String(r.rowCount ?? 0)], message: `'${r.name}' could not be refreshed: ${r.syncError}` });
+      out.push({ code: "sync_failed", params: [r.name, r.syncError, String(r.rowCount ?? 0)], message: t("NOTICE_SYNC_FAILED", r.name, r.syncError) });
     else if (!r.syncedAt)
-      out.push({ code: "sync_never", params: [r.name], message: `'${r.name}' has not been synced yet` });
+      out.push({ code: "sync_never", params: [r.name], message: t("NOTICE_SYNC_NEVER", r.name) });
   }
   if (capped) {
     const w = widestOf(prop);
     out.push({
       code: "capped", params: [String(row.candidates.length), ...(w ? [labelOf(model, w.key), String(w.size)] : [])],
-      message: `Stopped at ${row.candidates.length} candidates — set more parameters${w ? ` (${labelOf(model, w.key)} has ${w.size} options)` : ""}`,
+      message: w ? t("NOTICE_CAPPED_WIDEST", row.candidates.length, labelOf(model, w.key), w.size) : t("NOTICE_CAPPED", row.candidates.length),
     });
   }
   // Read off the stored candidates, so the warning is exactly as current as the prices it is about.
@@ -69,7 +70,7 @@ function issuesOf(live: Pick<LiveProject, "row" | "model" | "md" | "lookups" | "
   for (const code of unpriced)
     out.push({
       code: "unpriced", params: [code, ...(list ? [String(list)] : [])],
-      message: `No price for ${code} in ${list ? `price list ${list}` : "the price list"} — its material is costed at 0`,
+      message: list ? t("NOTICE_UNPRICED_LIST", code, list) : t("NOTICE_UNPRICED", code),
     });
   return out;
 }

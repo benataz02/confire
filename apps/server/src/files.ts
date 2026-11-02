@@ -9,6 +9,7 @@ import { isInternalMember, seatOf } from "./portal/members.ts";
 import { tenantOf } from "./portal/orpc/base.ts";
 import { addFile, projectFileFor, type Actor, type Side } from "./project-lifecycle.ts";
 import { errorStatus } from "./serve.ts";
+import { localizeError, t } from "./i18n/index.ts";
 
 // Files (spec D14): plain Hono routes, not oRPC — the RPC body cap is 2 MB. Both processes mount
 // them, each with its own side: the same session and the same tenant → membership (staff) or seat
@@ -66,9 +67,9 @@ export async function whoFor(side: Side, c: Context): Promise<Who> {
     return { tenantId: m.tenantId, actor: { userId, side }, canUpload: true, isAdmin: m.role === "admin" || m.role === "owner" };
   }
   const tenant = await tenantOf(c.req.param("tenant"));
-  if (await isInternalMember(tenant.id, userId)) throw new ORPCError("FORBIDDEN", { message: "You work for this supplier: use its internal app" });
+  if (await isInternalMember(tenant.id, userId)) throw new ORPCError("FORBIDDEN", { message: t("PORTAL_STAFF_REFUSED") });
   const seat = await seatOf(tenant.id, userId);
-  if (!seat) throw new ORPCError("FORBIDDEN", { message: "Not a member of a company on this portal" });
+  if (!seat) throw new ORPCError("FORBIDDEN", { message: t("PORTAL_NO_SEAT") });
   // Viewers read and comment; buyers and owners upload (§4.2).
   return { tenantId: tenant.id, actor: { userId, side, cardCode: seat.cardCode }, canUpload: seat.role !== "viewer", isAdmin: false };
 }
@@ -93,10 +94,10 @@ export const handle = (fn: (c: Context) => Promise<Response>) => async (c: Conte
   try {
     return await fn(c);
   } catch (e) {
-    if (e instanceof ORPCError) return c.json({ message: e.message }, errorStatus(e) as 400);
+    if (e instanceof ORPCError) return c.json({ message: (localizeError(e) as ORPCError<string, unknown>).message }, errorStatus(e) as 400);
     console.error("[files]", e);
     Sentry.captureException(e);
-    return c.json({ message: "Something went wrong" }, 500);
+    return c.json({ message: t("SOMETHING_WENT_WRONG") }, 500);
   }
 };
 
@@ -109,11 +110,11 @@ export function fileRoutes(side: Side): Hono {
      *  settings name if that ever adds up. */
     app.post("/files/:tenant/logo", handle(async (c) => {
       const who = await whoFor(side, c);
-      if (!who.isAdmin) throw new ORPCError("FORBIDDEN", { message: "Admins only" });
+      if (!who.isAdmin) throw new ORPCError("FORBIDDEN", { message: t("ADMINS_ONLY") });
       const data = await readCapped(c.req.raw, LOGO_MAX);
-      if (!data) throw new ORPCError("PAYLOAD_TOO_LARGE", { message: "A logo can be up to 1 MB" });
+      if (!data) throw new ORPCError("PAYLOAD_TOO_LARGE", { message: t("FILE_LOGO_TOO_LARGE") });
       const mime = imageType(data);
-      if (!mime) throw new ORPCError("UNSUPPORTED_MEDIA_TYPE", { message: "A logo is a PNG or JPEG image" });
+      if (!mime) throw new ORPCError("UNSUPPORTED_MEDIA_TYPE", { message: t("FILE_LOGO_TYPE") });
       const [row] = await db.insert(projectFile).values({
         tenantId: who.tenantId, projectId: null, name: `logo.${mime === "image/png" ? "png" : "jpg"}`, mime,
         size: data.length, data, uploadedBy: who.actor.userId,
@@ -128,10 +129,10 @@ export function fileRoutes(side: Side): Hono {
     const projectId = c.req.param("projectId")!;
     if (!UUID.test(projectId)) throw new ORPCError("NOT_FOUND");
     const who = await whoFor(side, c);
-    if (!who.canUpload) throw new ORPCError("FORBIDDEN", { message: "Buyers and owners only" });
+    if (!who.canUpload) throw new ORPCError("FORBIDDEN", { message: t("FILE_BUYERS_OWNERS") });
     const data = await readCapped(c.req.raw, FILE_MAX);
-    if (!data) throw new ORPCError("PAYLOAD_TOO_LARGE", { message: "A file can be up to 10 MB" });
-    if (!data.length) throw new ORPCError("BAD_REQUEST", { message: "The file is empty" });
+    if (!data) throw new ORPCError("PAYLOAD_TOO_LARGE", { message: t("FILE_TOO_LARGE") });
+    if (!data.length) throw new ORPCError("BAD_REQUEST", { message: t("FILE_EMPTY") });
     const r = await addFile(who.tenantId, projectId, who.actor, {
       name: cleanName(c.req.query("name")), mime: cleanMime(c.req.header("content-type")), data,
     }, c.req.query("internal") === "1");

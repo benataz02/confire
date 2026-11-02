@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  Bar, Button, MessageItem, MessageView, MessageViewButton, ResponsivePopover, type ButtonDomRef,
+  Bar, Button, Link, MessageItem, MessageView, MessageViewButton, ResponsivePopover,
+  type ButtonDomRef, type MessageViewDomRef,
 } from "@ui5/webcomponents-react";
 import { useUiI18n } from "./i18n.ts";
 
@@ -9,9 +10,9 @@ export type PageMessage = {
   /** react key — stable across renders so the open list doesn't rebuild under the user */
   id: string;
   type: "Negative" | "Critical" | "Information" | "Positive";
-  /** the message itself, one line */
+  /** the title, one line: the problem, or for a failed call what failed */
   text: string;
-  /** what it is about: the field, or the action that failed */
+  /** the description under it: the field it is about, or why the call failed (the server's message) */
   detail?: string;
   /** group header — the title of the ObjectPageSection the message belongs to */
   group: string;
@@ -67,7 +68,8 @@ export function useRefusals(...signals: unknown[]): number {
 
 /**
  * The page's whole message state as one title action: severity and count on the button, the list
- * grouped by ObjectPageSection in the popover, and a click that lands on the offending field.
+ * grouped by ObjectPageSection in the popover. A message's title is a link that lands on the
+ * offending field; a click elsewhere on the row opens its details, as MessageView does.
  *
  * Opens itself only when `openOn` goes up (an action came back refused) and there is a Negative
  * message to show — never while typing, never for warnings.
@@ -82,6 +84,7 @@ export function PageMessages({ messages, okText, onSection, openOn }: {
 }) {
   const i18n = useUiI18n();
   const button = useRef<ButtonDomRef>(null);
+  const view = useRef<MessageViewDomRef>(null);
   const [open, setOpen] = useState(false);
   const worst = SEVERITY.find((t) => messages.some((m) => m.type === t)) ?? "Positive";
   const counter = messages.filter((m) => m.type === worst).length;
@@ -94,11 +97,23 @@ export function PageMessages({ messages, okText, onSection, openOn }: {
     if (messages.some((m) => m.type === "Negative")) setOpen(true);
   }, [openOn, messages]);
 
-  const go = (m: PageMessage) => {
+  // The popover keeps its content while closed, so it would reopen on the last details page.
+  const close = () => {
     setOpen(false);
+    view.current?.navigateBack();
+  };
+  const go = (m: PageMessage) => {
+    close();
     if (m.section) onSection(m.section);
     if (m.anchor) focusWhenReady(m.anchor);
   };
+  // The row underneath opens the details on a click and on Enter; the link's own press must not.
+  const title = (m: PageMessage) => (m.section || m.anchor ? (
+    <Link wrappingType="None" onClick={(e) => { e.stopPropagation(); go(m); }}
+      onKeyDown={(e) => { if (e.key === "Enter") e.stopPropagation(); }}>
+      {m.text}
+    </Link>
+  ) : m.text);
 
   return (
     <>
@@ -109,26 +124,26 @@ export function PageMessages({ messages, okText, onSection, openOn }: {
           : ok}
         onClick={() => setOpen(true)} />
       <ResponsivePopover className="confire-msgpop" headerText={i18n.getText("UI_MESSAGES")} opener={button.current ?? undefined}
-        open={open && !!button.current} onClose={() => setOpen(false)}
+        open={open && !!button.current} onClose={close}
         footer={
           <Bar design="Footer"
-            endContent={<Button design="Transparent" onClick={() => setOpen(false)}>{i18n.getText("UI_CLOSE")}</Button>} />
+            endContent={<Button design="Transparent" onClick={close}>{i18n.getText("UI_CLOSE")}</Button>} />
         }>
         {/* MessageView lays its two panes out at height:100%, so the popover cannot size itself to
             the list. A grouped row with a subtitle is ~4rem; the cap keeps a long list on screen.
             ponytail: one row per message with a cap; tune the 4rem if the rows grow. */}
-        <MessageView groupItems showDetailsPageHeader={false}
+        <MessageView ref={view} groupItems showDetailsPageHeader
           style={{ width: "26rem", height: `${Math.min(4 + messages.length * 4, 42)}rem` }}>
           {messages.length === 0 ? (
             <MessageItem type="Positive" titleText={ok} />
           ) : (
             messages.map((m) => (
-              // The details body is the only thing that makes a row clickable — MessageItem
-              // ignores a click on an item that has none. Nobody reads it: the click closes the
-              // popover in the same batch that opens the details page.
-              <MessageItem key={m.id} type={m.type} groupName={m.group} titleText={m.text}
-                subtitleText={m.detail} onClick={() => go(m)}>
-                {m.detail ?? m.text}
+              // The details page is the title over the description. MessageItem opens it only for an
+              // item with a body — or a title too long for its row — so one without a description
+              // and a short title is just its row.
+              <MessageItem key={m.id} type={m.type} groupName={m.group} titleText={title(m)}
+                subtitleText={m.detail}>
+                {m.detail}
               </MessageItem>
             ))
           )}

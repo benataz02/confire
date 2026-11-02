@@ -20,12 +20,15 @@ const QTY = "#qty";
 const PRICE = "#price";
 const TOTAL = "#total";
 const LOWEST = "#lowest";
-// The chart's segments, per unit: the cost's three parts, then the margin on top of them.
-const SEGMENTS = [["#mat", "CONFIG_MATERIALS"], ["#ops", "CONFIG_OPERATIONS"], ["#oth", "CONFIG_OTHER_COSTS"], ["#mrg", "CONFIG_MARGIN"]] as const;
-/** One bar's band, in px: what the chart's height grows by per grid row. The bar itself is slimmer
- *  than the band by the rounding stroke (global.css `.confire-rounded-bars`), which draws outside it. */
-const BAR_ROW = 28;
-const BAR = 16;
+// The chart's segments, per unit, left to right: the cost's three parts, then the margin on top of
+// them, each with its palette colour.
+const SEGMENTS = [["#mat", "CONFIG_MATERIALS", 1], ["#ops", "CONFIG_OPERATIONS", 2], ["#oth", "CONFIG_OTHER_COSTS", 3], ["#mrg", "CONFIG_MARGIN", 6]] as const;
+/** One bar's band, in px: what the chart's height grows by per grid row; and the bar inside it. */
+const BAR_ROW = 36;
+const BAR = 14;
+/** Bars the chart draws: the grid's first rows. Each bar is several SVG paths and a label, and 200
+ *  candidates × every quantity is a chart nobody reads. */
+const CHART_MAX = 10;
 
 const toSel = (r: Row): Sel => ({ candidateIdx: r[IDX] as number, batchQty: r[QTY] as number });
 const keyOf = (r: Row) => lineKey(toSel(r));
@@ -38,13 +41,15 @@ type Candidates = Awaited<ReturnType<typeof client.configs.get>>["candidates"];
 // quotation line. Each open parameter is a column and a filter. Below it, the same rows as bars:
 // what each unit price is made of. Every figure and the Lowest tag are the view's; the cap is a
 // message-popover warning.
-export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, selection, onSelect, disabled }: {
+export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, selection, onSelect, disabled, loading }: {
   model: ModelDef;
   candidates: Candidates;
   selection: Sel[];
   onSelect: (selection: Sel[]) => void;
   /** locked (quoted), or about to be replaced: the ticks still show, they just stop taking clicks */
   disabled?: boolean;
+  /** being recalculated: the chart's figures are on their way */
+  loading?: boolean;
 }) {
   const currency = useCurrency();
   const i18n = useI18n();
@@ -107,12 +112,27 @@ export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, s
     [selection, resync],
   );
 
-  // The grid's rows, filtered and sorted as it shows them. One quantity needs no quantity in the label.
-  const dataset = rows.map((r) => ({
-    ...r,
+  // The grid's first rows, filtered and sorted as it shows them — sorting or filtering the grid is
+  // how another row gets charted. One quantity needs no quantity in the label.
+  // Each bar is its unit price split into shares, so every bar is one length and reads as a mix; the
+  // price itself closes the row. A part no row has is left out, legend included.
+  const charted = rows.slice(0, CHART_MAX);
+  const parts = SEGMENTS.filter(([k]) => charted.some((r) => r[k] !== 0));
+  const dataset = charted.map((r) => ({
+    row: r,
     label: [candidateLabel(t, keys, candidates[r[IDX] as number]!.assignment),
       ...(batches.length > 1 ? [t("CONFIG_QTY_AXIS", fmt(r[QTY] as number))] : [])].join(" · "),
+    ...Object.fromEntries(parts.map(([k]) => [k, (r[k] as number) / ((r[PRICE] as number) || 1)])),
   }));
+  // A recharts label: `index` is the row, the box is the last part's, which ends at the plot's edge.
+  const Total = ({ index, viewBox: b }: { index: number; viewBox: { x: number; y: number; width: number; height: number } }) => (
+    <text x={b.x + b.width + 12} y={b.y + b.height / 2} dominantBaseline="central"
+      style={{ fill: "var(--sapTextColor)", fontWeight: "bold" }}>
+      {money(dataset[index]!.row[PRICE] as number, currency)}
+    </text>
+  );
+  // ponytail: room for the widest total by its length (~0.6em a character), not a text measurement.
+  const totalRoom = 24 + 9 * Math.max(0, ...dataset.map((d) => money(d.row[PRICE] as number, currency).length));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
@@ -143,20 +163,32 @@ export function PriceAnalysis({ model, candidates: { keys, rows: candidates }, s
         }} />
 
       {/* The grid above is this chart's table view — same rows, same order, exact figures — so the
-          bars stay a shape: no data labels; the tooltip and the legend name the parts. */}
+          bars stay a shape: no axis, no data labels; the tooltip and the legend name the parts.
+          No animation and no resize debounce: either redraws every bar from its old width, so each
+          layout change (side nav, rail, window) made the bars grow or shrink a beat late. While the
+          rows are recalculated the chart is its own placeholder, at the height it will have. */}
       {dataset.length ? (
         <>
           <Title level="H6" style={{ marginBlockStart: "1.25rem" }}>{t("CONFIG_CHART")}</Title>
-          <div style={{ maxHeight: "32rem", overflowY: "auto" }}>
-            <BarChart className="confire-rounded-bars" style={{ height: `${dataset.length * BAR_ROW + 64}px` }}
-              dataset={dataset} dimensions={[{ accessor: "label" }]}
-              chartConfig={{ legendPosition: "top", legendHorizontalAlign: "left" }}
-              measures={SEGMENTS.map(([accessor, key], n) => ({
-                accessor, label: t(key), stackId: "price", hideDataLabel: true, width: BAR,
-                color: `var(--sapChart_OrderedColor_${n + 1})`,
-                formatter: (v: number) => money(v, currency),
-              }))} />
-          </div>
+          {rows.length > CHART_MAX ? <Text>{t("CONFIG_CHART_CAPPED", String(CHART_MAX), String(rows.length))}</Text> : null}
+          <BarChart className="confire-price-chart" style={{ height: `${dataset.length * BAR_ROW + 72}px` }}
+            dataset={loading ? [] : dataset} loading={loading} noAnimation dimensions={[{ accessor: "label" }]}
+            chartConfig={{
+              resizeDebounce: 0, gridHorizontal: false,
+              margin: { left: 0, right: totalRoom },
+              xAxisConfig: { hide: true, domain: [0, 1], allowDataOverflow: true },
+              yAxisConfig: { axisLine: false, tickLine: false },
+              legendConfig: {
+                iconType: "square", iconSize: 12,
+                formatter: (v: string) => <span style={{ color: "var(--sapContent_LabelColor)" }}>{v}</span>,
+              },
+            }}
+            tooltipConfig={{ cursor: false, formatter: (_v, _n, item) => money(item.payload.row[item.dataKey as string], currency) }}
+            measures={parts.map(([accessor, key, color], n) => ({
+              accessor, label: t(key), stackId: "price", width: BAR,
+              color: `var(--sapChart_OrderedColor_${color})`,
+              ...(n === parts.length - 1 ? { hideDataLabel: false, DataLabel: Total } : { hideDataLabel: true }),
+            }))} />
         </>
       ) : null}
     </div>

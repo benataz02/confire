@@ -4,6 +4,7 @@ import { db, organization } from "@confire/db";
 import { auth } from "../../auth.ts";
 import { TENANT_HEADER, tenantSlug } from "../../tenant.ts";
 import { isInternalMember, seatOf } from "../members.ts";
+import { t } from "../../i18n/index.ts";
 
 export { isInternalMember, seatOf };
 
@@ -29,10 +30,10 @@ export const portalAuthedProcedure = portalBase.use(async ({ context, next }) =>
 /** The supplier a slug names — from `x-tenant`, or a file route's path. */
 export async function tenantOf(slugValue: string | null | undefined) {
   const slug = tenantSlug(slugValue);
-  if (!slug) throw new ORPCError("BAD_REQUEST", { message: "No supplier in the request" });
+  if (!slug) throw new ORPCError("BAD_REQUEST", { message: t("NO_SUPPLIER") });
   const [tenant] = await db.select({ id: organization.id, slug: organization.slug, name: organization.name, logo: organization.logo })
     .from(organization).where(eq(organization.slug, slug)).limit(1);
-  if (!tenant) throw new ORPCError("NOT_FOUND", { message: "No such supplier" });
+  if (!tenant) throw new ORPCError("NOT_FOUND", { message: t("UNKNOWN_SUPPLIER") });
   return tenant;
 }
 
@@ -41,7 +42,7 @@ export async function tenantOf(slugValue: string | null | undefined) {
 export const portalSessionProcedure = portalAuthedProcedure.use(async ({ context, next }) => {
   const tenant = await tenantOf(context.headers.get(TENANT_HEADER));
   if (await isInternalMember(tenant.id, context.user.id)) {
-    throw new ORPCError("FORBIDDEN", { message: "You work for this supplier: use its internal app" });
+    throw new ORPCError("FORBIDDEN", { message: t("PORTAL_STAFF_REFUSED") });
   }
   return next({ context: { tenantId: tenant.id, tenant } });
 });
@@ -49,18 +50,18 @@ export const portalSessionProcedure = portalAuthedProcedure.use(async ({ context
 /** Has a seat at a company of this supplier. */
 export const portalMemberProcedure = portalSessionProcedure.use(async ({ context, next }) => {
   const seat = await seatOf(context.tenantId, context.user.id);
-  if (!seat) throw new ORPCError("FORBIDDEN", { message: "Not a member of a company on this portal" });
+  if (!seat) throw new ORPCError("FORBIDDEN", { message: t("PORTAL_NO_SEAT") });
   return next({ context: seat });
 });
 
 /** Creates, edits, submits and withdraws projects; answers quotes. */
 export const portalBuyerProcedure = portalMemberProcedure.use(({ context, next }) => {
-  if (context.role !== "owner" && context.role !== "buyer") throw new ORPCError("FORBIDDEN", { message: "Buyers only" });
+  if (context.role !== "owner" && context.role !== "buyer") throw new ORPCError("FORBIDDEN", { message: t("PORTAL_BUYERS_ONLY") });
   return next({});
 });
 
 /** Invites colleagues, changes roles, removes members. */
 export const portalOwnerProcedure = portalMemberProcedure.use(({ context, next }) => {
-  if (context.role !== "owner") throw new ORPCError("FORBIDDEN", { message: "Company owners only" });
+  if (context.role !== "owner") throw new ORPCError("FORBIDDEN", { message: t("PORTAL_OWNERS_ONLY") });
   return next({});
 });

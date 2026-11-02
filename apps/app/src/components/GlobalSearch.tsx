@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
-import { useRouterState } from "@tanstack/react-router";
-import { SearchItem, SearchItemGroup, SearchMessageArea, SearchScope, ShellBarSearch } from "@ui5/webcomponents-react";
+import { useParams, useRouterState } from "@tanstack/react-router";
+import {
+  SearchItem, SearchItemGroup, SearchItemShowMore, SearchMessageArea, SearchScope, ShellBarSearch,
+} from "@ui5/webcomponents-react";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { entityPath } from "@confire/ui/navigation.ts";
 import { formatValue } from "@confire/ui/format.ts";
@@ -14,10 +16,26 @@ import { b1Label } from "./AppShell.tsx";
 /** One thing the search opens: `to` is a path inside the workspace, as the side nav's `data-to`. */
 export type SearchHit = { text: string; description?: string; icon: string; to: string };
 type Group = { key: string; header: string; hits: SearchHit[] };
+/** A hit once picked, with the scope it was found under (a group's key up to its `:`). */
+type Recent = SearchHit & { scope: string };
 
 const ALL = "all";
 // Unscoped, one group cannot bury the others; scoped, there is one list, so let it breathe.
 const CAP = { all: 5, scoped: 20 };
+// The empty field's list: this many first, as many more per Show more, never more than KEEP.
+const RECENT = { step: 5, keep: 20 };
+
+// ponytail: localStorage per workspace, like the model builder's collapsed rows — a ui_user_state
+// key only if the history has to follow the user to another browser.
+const recentKey = (slug: string) => `search.recent.${slug}`;
+function readRecent(slug: string): Recent[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(recentKey(slug)) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((r): r is Recent => typeof r?.to === "string" && typeof r?.text === "string") : [];
+  } catch {
+    return [];
+  }
+}
 const ISO_DAY = /^\d{4}-\d\d-\d\d/;
 const cell = (v: unknown) => (typeof v === "string" && ISO_DAY.test(v) ? formatValue(v, "date") : String(v));
 const join = (...v: unknown[]) => v.filter((x) => x != null && x !== "").map(cell).join(" · ") || undefined;
@@ -55,6 +73,16 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
   const onAiPage = useRouterState({ select: (s) => s.matches.some((m) => m.routeId.startsWith("/$slug/assistant")) });
   const [scope, setScope] = useState(onAiPage ? "chats" : ALL);
   useEffect(() => setScope(onAiPage ? "chats" : ALL), [onAiPage]);
+  const { slug } = useParams({ from: "/$slug" });
+  const [recent, setRecent] = useState(() => readRecent(slug));
+  const remember = (hit: Recent) => {
+    const next = [hit, ...recent.filter((r) => r.to !== hit.to)].slice(0, RECENT.keep);
+    localStorage.setItem(recentKey(slug), JSON.stringify(next));
+    setRecent(next);
+  };
+  // How many of the empty field's list are drawn; each opening starts again at one step.
+  const [shown, setShown] = useState(RECENT.step);
+  useEffect(() => { if (!open) setShown(RECENT.step); }, [open]);
 
   const cap = scope === ALL ? CAP.all : CAP.scoped;
   const on = (s: string, allowed = true) => !!term && allowed && (scope === ALL || scope === s);
@@ -64,6 +92,8 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
   const configs = useQuery({ ...orpc.configs.rows.queryOptions({ input: page }), enabled: on("configs"), ...opts });
   const requests = useQuery({ ...orpc.requests.rows.queryOptions({ input: page }), enabled: on("requests"), ...opts });
   const chats = useQuery({ ...orpc.assistant.threads.queryOptions({ input: { q: term } }), enabled: on("chats"), ...opts });
+  // The AI page's own list (same key), so an empty field there offers the latest chats.
+  const latestChats = useQuery({ ...orpc.assistant.threads.queryOptions({ input: undefined }), enabled: open && scope === "chats" && !q.trim() });
   const models = useQuery({ ...orpc.models.rows.queryOptions({ input: page }), enabled: on("models", isAdmin), ...opts });
   const masterdata = useQuery({ ...orpc.masterdata.rows.queryOptions({ input: page }), enabled: on("masterdata", isAdmin), ...opts });
   const features = Object.values(B1_FEATURES);
@@ -78,7 +108,15 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
   const hits = <T,>(s: string, rows: T[] | undefined, hit: (r: T) => SearchHit, allowed = true) =>
     on(s, allowed) ? (rows ?? []).slice(0, cap).map(hit) : [];
   const needle = q.trim().toLowerCase();
-  const groups: Group[] = [
+  const chatHit = (r: { id: string; title: string; projectName: string | null }) => ({
+    text: r.title || r.projectName || t("ASSISTANT_UNTITLED"), description: join(r.projectName), icon: "ai", to: `/assistant/${r.id}`,
+  });
+  // The empty field: scoped to chats, the AI page's list (pinned first, as there); else what was
+  // picked here last under this scope.
+  const latest: Recent[] = scope === "chats"
+    ? (latestChats.data ?? []).map((r) => ({ ...chatHit(r), scope: "chats" }))
+    : recent.filter((r) => scope === ALL || r.scope === scope);
+  const results: Group[] = [
     {
       key: "pages", header: t("SHELL_SEARCH_PAGES"),
       hits: needle && (scope === ALL || scope === "pages")
@@ -88,8 +126,7 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
       ({ text: r.name, description: join(r.customerName, r.modelName), icon: "sales-quote", to: `/configs/${r.id}` })) },
     { key: "requests", header: t("NAV_REQUESTS"), hits: hits("requests", requests.data?.rows, (r) =>
       ({ text: r.name, description: join(r.cardName, r.modelName), icon: "inbox", to: `/configs/${r.id}` })) },
-    { key: "chats", header: t("SHELL_SEARCH_CHATS"), hits: hits("chats", chats.data, (r) =>
-      ({ text: r.title, description: join(r.projectName), icon: "ai", to: `/assistant/${r.id}` })) },
+    { key: "chats", header: t("SHELL_SEARCH_CHATS"), hits: hits("chats", chats.data, chatHit) },
     { key: "models", header: t("NAV_MODELS"), hits: hits("models", models.data?.rows, (r) =>
       ({ text: r.name, icon: "tree", to: `/models/${r.id}` }), isAdmin) },
     { key: "masterdata", header: t("NAV_MASTERDATA"), hits: hits("masterdata", masterdata.data?.rows, (r) =>
@@ -104,8 +141,22 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
       })),
     })),
   ].filter((g) => g.hits.length);
+  const groups: Group[] = needle ? results
+    : latest.length ? [{ key: "recent", header: t(scope === "chats" ? "SHELL_SEARCH_RECENT_CHATS" : "SHELL_SEARCH_RECENT"), hits: latest }] : [];
+  // A picked hit keeps the scope it was found under; a recent one already carries its own.
+  const pick = (to: string): Recent | undefined =>
+    groups.flatMap((g) => g.hits.map((h) => ({ scope: g.key.split(":")[0]!, ...h }))).find((h) => h.to === to);
 
-  const busy = q.trim() !== term || [configs, requests, chats, models, masterdata, ...b1].some((r) => r.isFetching);
+  // Show more takes focus to the first item it revealed, as Fiori asks — and the row itself goes
+  // once everything is shown, which would otherwise drop focus out of the popover.
+  const revealed = useRef<number | null>(null);
+  const focusRevealed = useCallback((el: HTMLElement | null) => {
+    console.log("DBG ref", el?.tagName, (el as { text?: string } | null)?.text, el?.isConnected);
+    if (el) { revealed.current = null; void el.focus(); }
+  }, []);
+
+  const busy = q.trim() !== term || latestChats.isLoading
+    || [configs, requests, chats, models, masterdata, ...b1].some((r) => r.isFetching);
 
   return (
     <ShellBarSearch
@@ -114,7 +165,10 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
       value={q}
       showClearIcon
       noTypeahead
-      open={open && !!q.trim()}
+      // Opens on focus, with the empty field's list; a click into the field reopens it after Escape.
+      autoOpen
+      open={open && (!!needle || groups.length > 0)}
+      onClick={(e) => { if (e.nativeEvent.composedPath()[0] instanceof HTMLInputElement) setOpen(true); }}
       fieldLoading={busy}
       scopeValue={scope}
       scopes={
@@ -135,24 +189,34 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
       onOpen={() => setOpen(true)}
       onClose={() => setOpen(false)}
       // Enter and an item's click are both `search`, the item (picked or arrowed to) in its detail.
-      // Empty Enter goes on to UI5, which collapses the field, as a shellbar search does.
+      // Empty Enter with no item goes on to UI5, which collapses the field, as a shellbar search does.
       onSearch={(e) => {
-        const to = (e.detail as { item?: HTMLElement } | undefined)?.item?.dataset.to ?? groups[0]?.hits[0]?.to;
-        if (!q.trim() || !to) return;
+        const to = (e.detail as { item?: HTMLElement } | undefined)?.item?.dataset.to ?? (needle ? groups[0]?.hits[0]?.to : undefined);
+        if (!to) return;
         e.preventDefault();
+        const hit = pick(to);
+        if (hit) remember(hit);
         setQ("");
         setTerm("");
         setOpen(false);
         go(to);
       }}
     >
-      {groups.map((g) => (
-        <SearchItemGroup key={g.key} headerText={g.header}>
-          {g.hits.map((h) => (
-            <SearchItem key={h.to} data-to={h.to} text={h.text} description={h.description} icon={h.icon} />
-          ))}
-        </SearchItemGroup>
-      ))}
+      {groups.map((g) => {
+        const more = g.key === "recent" ? g.hits.length - shown : 0;
+        return (
+          <SearchItemGroup key={g.key} headerText={g.header}>
+            {(more > 0 ? g.hits.slice(0, shown) : g.hits).map((h, i) => (
+              <SearchItem key={h.to} data-to={h.to} text={h.text} description={h.description} icon={h.icon}
+                ref={g.key === "recent" && i === revealed.current ? focusRevealed : undefined} />
+            ))}
+            {more > 0 ? (
+              <SearchItemShowMore itemsToShowCount={Math.min(RECENT.step, more)}
+                onClick={() => { revealed.current = shown; setShown(shown + RECENT.step); }} />
+            ) : null}
+          </SearchItemGroup>
+        );
+      })}
     </ShellBarSearch>
   );
 }

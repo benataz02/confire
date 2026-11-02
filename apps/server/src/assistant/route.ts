@@ -18,8 +18,9 @@ import { modelBlock } from "./extract.ts";
 import { modelOptions, textAdapter } from "./model.ts";
 import { CONFIGURE_CHAT, GENERAL, languageLine, LANGUAGES, pageFor, SYSTEM } from "./pages.ts";
 import { appendMessages, dehydrate, hydrate, ownThread, releaseLease, takeLease, withoutThinking } from "./threads.ts";
-import { ASK_USER, toolsFor } from "./tools.ts";
+import { ASK_USER, B1_WRITES, toolsFor } from "./tools.ts";
 import { assertAssistant, meter, rateLimit, REFUSAL_STATUS, type Meter } from "./usage.ts";
+import { localizeError, t } from "../i18n/index.ts";
 
 // POST /api/assistant (assistant spec §4.8): one chat turn, streamed as AG-UI events over SSE. The
 // staff process mounts it; the portal has no assistant. The client sends its page and the user's
@@ -35,22 +36,37 @@ const PropsZ = z.object({
   language: z.enum(Object.keys(LANGUAGES) as [keyof typeof LANGUAGES, ...(keyof typeof LANGUAGES)[]]),
 });
 
-/** Up to 12 model turns, and none after the model asked the user: the engine consults this only once
- *  a turn's tools have run, so the stored history ends on ask_user's result and the answer is the
- *  user's next message. */
-const untilAsked: AgentLoopStrategy = (s) => {
+/** A SAP write of the last turn answered a proposal: it waits for the user's click (b1-tools §5.6). */
+export function proposed(messages: ModelMessage[]): boolean {
+  const at = messages.findLastIndex((m) => m.role === "assistant");
+  const ids = new Set((messages[at]?.toolCalls ?? []).filter((c) => B1_WRITES.has(c.function.name)).map((c) => c.id));
+  if (!ids.size) return false;
+  return messages.slice(at + 1).some((m) => {
+    if (m.role !== "tool" || !ids.has(m.toolCallId ?? "") || typeof m.content !== "string") return false;
+    try {
+      return (JSON.parse(m.content) as { proposal?: unknown })?.proposal !== undefined;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Up to 12 model turns, and none after the model asked the user or proposed a SAP write: the engine
+ *  consults this only once a turn's tools have run, so the stored history ends on that result and the
+ *  answer (the pick, "Posted Order 1234") is the user's next message. */
+export const untilAsked: AgentLoopStrategy = (s) => {
   const last = s.messages.findLast((m) => m.role === "assistant");
-  return maxIterations(12)(s) && !last?.toolCalls?.some((c) => c.function.name === ASK_USER);
+  return maxIterations(12)(s) && !last?.toolCalls?.some((c) => c.function.name === ASK_USER) && !proposed(s.messages);
 };
 
 /** A refusal as JSON with its code, so the panel can say why (off, over budget, busy…). */
 function refusal(c: Context, e: unknown) {
   if (e instanceof ORPCError) {
     const status = REFUSAL_STATUS[e.code] ?? errorStatus(e);
-    return c.json({ code: e.code, message: e.message }, status as 400);
+    return c.json({ code: e.code, message: (localizeError(e) as ORPCError<string, unknown>).message }, status as 400);
   }
   Sentry.captureException(e);
-  return c.json({ code: "INTERNAL_SERVER_ERROR", message: "Something went wrong" }, 500);
+  return c.json({ code: "INTERNAL_SERVER_ERROR", message: t("SOMETHING_WENT_WRONG") }, 500);
 }
 
 /** The text of the client's last message: the only thing taken from its copy of the history. */
@@ -64,7 +80,7 @@ export function assistantRoutes(): Hono {
   app.post("/api/assistant", async (c) => {
     const headers = c.req.raw.headers;
     const session = await auth.api.getSession({ headers, query: { disableCookieCache: true } });
-    if (!session) return c.json({ code: "UNAUTHORIZED", message: "Sign in again" }, 401);
+    if (!session) return c.json({ code: "UNAUTHORIZED", message: t("SIGN_IN_AGAIN") }, 401);
     const userId = session.user.id;
 
     let tenantId: string;
@@ -77,17 +93,17 @@ export function assistantRoutes(): Hono {
       rateLimit(userId);
       await assertAssistant(tenantId);
       const params = await chatParamsFromRequestBody(await c.req.json()).catch(() => {
-        throw new ORPCError("BAD_REQUEST", { message: "Not a chat request" });
+        throw new ORPCError("BAD_REQUEST", { message: t("CHAT_NOT_A_REQUEST") });
       });
       const parsed = PropsZ.safeParse(params.forwardedProps);
-      if (!parsed.success) throw new ORPCError("BAD_REQUEST", { message: "The request does not say where it comes from" });
+      if (!parsed.success) throw new ORPCError("BAD_REQUEST", { message: t("CHAT_NO_PAGE") });
       props = parsed.data;
       thread = await ownThread(tenantId, userId, params.threadId);
       // Client-sent tools and history are ignored: the last message's text is all that is taken.
       const last = params.messages.at(-1);
       text = last && last.role === "user" ? textOf(last).trim() : "";
-      if (!text) throw new ORPCError("BAD_REQUEST", { message: "Send a message" });
-      if (text.length > MAX_TEXT) throw new ORPCError("BAD_REQUEST", { message: `A message can be up to ${MAX_TEXT} characters` });
+      if (!text) throw new ORPCError("BAD_REQUEST", { message: t("CHAT_EMPTY") });
+      if (text.length > MAX_TEXT) throw new ORPCError("BAD_REQUEST", { message: t("CHAT_TOO_LONG", MAX_TEXT) });
       ids = { threadId: thread.id, runId: params.runId };
       await takeLease(thread.id);
     } catch (e) {

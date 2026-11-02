@@ -14,6 +14,7 @@ import { scalarFields } from "../../entity-list.ts";
 import { bad } from "../../entity-read.ts";
 import { copyName } from "../../copy-name.ts";
 import { masterdataRows } from "../../config-project.ts";
+import { t } from "../../i18n/index.ts";
 
 export { masterdataRows };
 
@@ -47,7 +48,11 @@ const valuesOf = (f: B1Field): string[] | undefined =>
   : f.kind === "boolean" ? ["true", "false"]
   : f.options?.map((o) => `'${o.label}'`);
 const SaveZ = z.discriminatedUnion("kind", [
-  z.object({ ...base, kind: z.literal("table"), columns: z.array(ColumnZ).min(1), rows: z.array(z.array(ValZ)) }),
+  z.object({
+    ...base, kind: z.literal("table"), rows: z.array(z.array(ValZ)),
+    // A lookup reads a column by key, so a second one of the same key could never be read.
+    columns: z.array(ColumnZ).min(1).refine((cs) => new Set(cs.map((c) => c.key)).size === cs.length, "Column keys must be unique"),
+  }),
   z.object({ ...base, kind: z.literal("query"), query: MasterdataQueryZ }),
 ]);
 
@@ -130,7 +135,7 @@ export const masterdataRouter = {
     if (input.kind === "table") {
       for (const r of input.rows) {
         if (r.length !== input.columns.length)
-          throw new ORPCError("BAD_REQUEST", { message: `Row has ${r.length} cells, expected ${input.columns.length}` });
+          throw new ORPCError("BAD_REQUEST", { message: t("MASTERDATA_ROW_CELLS", r.length, input.columns.length) });
       }
     }
     const values = { name: input.name, ...fields, updatedAt: new Date() };
@@ -157,7 +162,7 @@ export const masterdataRouter = {
       return { id: ins!.id };
     } catch (e) {
       if ((e as { code?: string }).code === "23505")
-        throw new ORPCError("BAD_REQUEST", { message: `A table named '${input.name}' already exists` });
+        throw new ORPCError("BAD_REQUEST", { message: t("MASTERDATA_NAME_TAKEN", input.name) });
       throw e;
     }
   }),
@@ -214,9 +219,9 @@ export const masterdataRouter = {
     }
     if (used.size)
       throw new ORPCError("CONFLICT", {
-        message: `${[...used]
-          .map(([name, ms]) => `'${name}' is used by ${ms.length === 1 ? "model" : "models"} ${ms.join(", ")}`)
-          .join("; ")}. Remove the reference there first.`,
+        message: t("MASTERDATA_IN_USE", [...used]
+          .map(([name, ms]) => t(ms.length === 1 ? "MASTERDATA_USED_BY_MODEL" : "MASTERDATA_USED_BY_MODELS", name, ms.join(", ")))
+          .join("; ")),
       });
     await db.transaction(async (tx) => {
       await tx.delete(configMasterdataRow)
@@ -232,7 +237,7 @@ export const masterdataRouter = {
    *  `ensureFresh` on the read path; this is the button for "I changed something in SAP". */
   sync: adminProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
     const md = queryRowOf(await masterdataRows(context.tenantId), (await one(context.tenantId, input.id)).name);
-    if (!md) throw new ORPCError("BAD_REQUEST", { message: "Only a query table can be synced" });
+    if (!md) throw new ORPCError("BAD_REQUEST", { message: t("MASTERDATA_SYNC_QUERY_ONLY") });
     return syncNow(context.tenantId, md);
   }),
 
@@ -253,7 +258,7 @@ export const masterdataRouter = {
       const schema = await viaB1(async () => input.target === "beas"
         ? (await beasSchemas(context.tenantId, c.beas)).find((s) => s.name === input.entitySet)
         : entitySchema(context.tenantId, c.b1, input.entitySet)).catch(bad);
-      if (!schema) throw new ORPCError("NOT_FOUND", { message: `Unknown entity set '${input.entitySet}'` });
+      if (!schema) throw new ORPCError("NOT_FOUND", { message: t("ENTITY_SET_UNKNOWN", input.entitySet) });
       return scalarFields(schema).map((f) => ({ name: f.name, kind: f.kind, label: f.label, values: valuesOf(f) }));
     }),
 

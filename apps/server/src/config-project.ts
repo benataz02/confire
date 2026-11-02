@@ -12,6 +12,8 @@ import {
 } from "./lookups.ts";
 import { ensureFresh, pageRows, rowCache } from "./masterdata-sync.ts";
 import { canWrite, type Side } from "./project-lifecycle.ts";
+import type { InputPatch } from "./config-patch.ts";
+import { t } from "./i18n/index.ts";
 
 // The configuration engine's server half: model, lookups, calculate, value-help paging. Moved out
 // of orpc/routers/configs.ts (spec §7.5) because that module imports orpc/base.ts and with it the
@@ -41,7 +43,7 @@ export async function loadModel(tenantId: string, modelId: string) {
     .from(configModel)
     .where(and(eq(configModel.id, modelId), eq(configModel.tenantId, tenantId)))
     .limit(1);
-  if (!m) throw new ORPCError("NOT_FOUND", { message: "Model not found" });
+  if (!m) throw new ORPCError("NOT_FOUND", { message: t("MODEL_NOT_FOUND") });
   return m;
 }
 export type LoadedModel = Awaited<ReturnType<typeof loadModel>>;
@@ -170,12 +172,24 @@ export function missingOf(
   p: Pick<ConfigProject, "name" | "customer" | "batches" | "tables">,
 ): Notice[] {
   return [
-    ...(p.name.trim() ? [] : [{ key: NAME_KEY, code: "name_required", params: [], message: "Enter a name" }]),
+    ...(p.name.trim() ? [] : [{ key: NAME_KEY, code: "name_required", params: [], message: t("MISSING_NAME") }]),
     // cardCode, not just a truthy customer: a half-filled one would otherwise reach the B1 seed.
-    ...(p.customer?.cardCode ? [] : [{ key: CUSTOMER_KEY, code: "customer_required", params: [], message: "Pick a customer" }]),
-    ...(p.batches.length ? [] : [{ key: BATCHES_KEY, code: "batches_required", params: [], message: "Add at least one batch quantity" }]),
-    ...missingInputs(model, lookups, prop, p.tables),
+    ...(p.customer?.cardCode ? [] : [{ key: CUSTOMER_KEY, code: "customer_required", params: [], message: t("MISSING_CUSTOMER") }]),
+    ...(p.batches.length ? [] : [{ key: BATCHES_KEY, code: "batches_required", params: [], message: t("MISSING_BATCHES") }]),
+    ...missingInputs(model, lookups, prop, p.tables).map(inLanguage),
   ];
+}
+
+/** An engine notice reworded in the request's language off its code and params; one the server
+ *  has no words for keeps the engine's English. */
+function inLanguage(n: Notice): Notice {
+  const [a = "", b = "", c = ""] = n.params;
+  switch (n.code) {
+    case "param_required": return { ...n, message: t("MISSING_PARAM", a) };
+    case "table_empty": return { ...n, message: t("MISSING_ROWS", a) };
+    case "cell_required": return { ...n, message: t(c.includes(",") ? "MISSING_CELLS" : "MISSING_CELL", a, b, c) };
+    default: return n;
+  }
 }
 
 /** A stored calculation is stale once the model changed after it, or any masterdata row the model
@@ -192,6 +206,38 @@ export function isStale(calculatedAt: Date | null, model: LoadedModel, md: Maste
 /** waiting: something is missing, or there are conflicts. failed: nothing valid completes the
  *  inputs, or a formula broke — the inputs are saved, and the message says why. */
 export type Calculation = { state: "waiting" | "current" | "failed"; message?: string };
+
+/**
+ * An engine edit keeps the stored candidates when it breaks a rule and nothing else is missing.
+ * Nothing new can be priced, so the price panel stays on the last calculation and the rule is the
+ * message. Anything missing, or an edit the engine can re-price, returns false — those drop the
+ * candidates in the same write as the inputs.
+ */
+export async function keepsCandidates(
+  tenantId: string,
+  row: Pick<ConfigProject, "modelId" | "margin" | "name" | "customer" | "batches" | "entries" | "tables">,
+  patch: InputPatch,
+  over: { name?: string; customer?: ConfigProject["customer"] } = {},
+): Promise<boolean> {
+  const entries: Entries = { ...row.entries, ...patch.set };
+  for (const k of patch.unset ?? []) delete entries[k];
+  const tables = patch.tables ? { ...row.tables, ...patch.tables } : row.tables;
+  const model = withMargin(await loadModel(tenantId, row.modelId), row.margin);
+  const lookups = await cachedLookups(tenantId, model, entries, tables);
+  try {
+    const prop = propagate(model.definition, lookups, entries, tables);
+    if (!prop.conflicts.length) return false;
+    return missingOf(model.definition, lookups, prop, {
+      name: over.name ?? row.name,
+      customer: over.customer !== undefined ? over.customer : row.customer,
+      batches: patch.batches ?? row.batches,
+      tables,
+    }).length === 0;
+  } catch (e) {
+    if (e instanceof DslError) return false;
+    throw e;
+  }
+}
 
 /** The row as the calculation reads it, plus its version: `updated_at` as text, exact to the
  *  microsecond — a JS Date would round a database-set default to the millisecond and never match. */
@@ -221,14 +267,16 @@ export async function recalculate(
       .returning({ id: configProject.id });
     return done.length === 0;
   };
-  // Stale candidates never outlive the gate, or a failure: they go, and nothing replaces them.
+  // A missing input or a failure drops the candidates: nothing replaces them. A broken rule does
+  // not — the last calculation stays, and the rule is the message.
   const clear = () => (row.candidates.length ? write({ candidates: [], selection: null, calculatedAt: null }) : Promise.resolve(false));
-  if (gate.missing.length || gate.conflicts.length) return { state: "waiting", lost: await clear() };
+  if (gate.missing.length) return { state: "waiting", lost: await clear() };
+  if (gate.conflicts.length) return { state: "waiting", lost: false };
   let candidates: ConfigCandidate[];
   try {
     const en = enumerate(model.definition, lookups, row.entries, 200, row.tables);
     if (!en.candidates.length)
-      return { state: "failed", message: "No valid configuration completes the current entries", lost: await clear() };
+      return { state: "failed", message: t("CALC_NO_SOLUTION"), lost: await clear() };
     candidates = en.candidates.map((assignment) => ({
       assignment,
       perBatch: row.batches.map((batchQty) => ({
@@ -273,13 +321,17 @@ export async function liveProject(tenantId: string, where: SQL, side: Side, cach
   const model = withMargin(await loadModel(tenantId, row.modelId), row.margin);
   const md = await masterdataRows(tenantId);
   let d = await derive(row);
-  let calculation = shown(row);
+  // Candidates may outlive a broken rule. That is not a current calculation: nothing is quoted off it.
+  let calculation: Calculation = d.prop.conflicts.length ? { state: "waiting" } : shown(row);
   const gateOpen = !d.missing.length && !d.prop.conflicts.length;
   if (canWrite(row, side) && isStale(row.calculatedAt, model, md) && (gateOpen || row.candidates.length)) {
     const r = await recalculate(tenantId, row, model, d.lookups, { missing: d.missing, conflicts: d.prop.conflicts });
     row = await read();
     // Lost: the newer row is built once, as it is — no loop.
-    if (r.lost) { d = await derive(row); calculation = shown(row); }
+    if (r.lost) {
+      d = await derive(row);
+      calculation = d.prop.conflicts.length ? { state: "waiting" } : shown(row);
+    }
     else calculation = { state: r.state, ...(r.message ? { message: r.message } : {}) };
   }
   return { row, model, md, ...d, calculation };

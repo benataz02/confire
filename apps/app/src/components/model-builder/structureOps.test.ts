@@ -166,13 +166,16 @@ test("a copied section takes its content, renamed, and lands after the last sect
   const m = model();
   m.parameters.push({ key: "height", label: "Height", type: "number", ui: "input", visibleWhen: 'width > 2 && height != "width"' });
   (m.structure.sections[0]!.groups[0] as { params: string[] }).params.push("height");
-  const refs = [{ kind: "section", s: 0 } as const];
+  m.structure.sections[2] = { key: "rest", title: "Rest", groups: [{ key: "r", title: "R", params: [], visibleWhen: "width > 1" }], visibleWhen: "height > 0" };
+  const refs = [{ kind: "section", s: 0 } as const, { kind: "section", s: 2 } as const];
   const keys = copyKeys(m, refs);
   // the items grid stays out: a model holds exactly one
-  expect(keys.map((k) => `${k.kind}:${k.from}→${k.key}`)).toEqual(["section:main→main2", "param:width→width2", "param:height→height2"]);
+  expect(keys.map((k) => `${k.kind}:${k.from}→${k.key}`)).toEqual(["section:main→main2", "param:width→width2", "param:height→height2", "section:rest→rest2"]);
   const out = duplicateNodes(m, refs, keys);
-  expect(out.structure.sections.map((s) => s.key)).toEqual(["main", "other", "main2"]);
-  expect(out.structure.sections[2]!.groups).toEqual([{ key: "g", title: "G", params: ["width2", "height2"] }]);
+  expect(out.structure.sections.map((s) => s.key)).toEqual(["main", "other", "rest", "main2", "rest2"]);
+  expect(out.structure.sections[3]!.groups).toEqual([{ key: "g", title: "G", params: ["width2", "height2"] }]);
+  // a copied section's and group's rules read the copies too
+  expect(out.structure.sections[4]).toEqual({ key: "rest2", title: "Rest", groups: [{ key: "r", title: "R", params: [], visibleWhen: "width2 > 1" }], visibleWhen: "height2 > 0" });
   // the copy reads the copy; the string literal is not a reference
   expect(out.parameters.find((p) => p.key === "height2")!.visibleWhen).toBe('width2 > 2 && height2 != "width"');
   expect(out.parameters.find((p) => p.key === "height")!.visibleWhen).toBe('width > 2 && height != "width"');

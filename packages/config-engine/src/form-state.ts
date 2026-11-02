@@ -36,16 +36,20 @@ export type FormState = {
   open: number;
   /** each table's rows evaluated — formula cells filled in, declared columns only */
   tables: Record<string, Record<string, Val>[]>;
+  /** structureIds of the sections and field groups the rules hide; absent = none */
+  hidden?: string[];
 };
 
 /** The ref's display columns for one option value, joined. A `table` ref only: its rows are the
  *  whole masterdata, so the row is always there; a query option shows its label and nothing else. */
 function extraOf(ref: LookupRef, t: ResolvedTable | undefined, val: Val): string | undefined {
   if (!t || ref.source !== "table") return undefined;
-  const vi = t.columns.indexOf(refKeyCols(ref, t.columns).valueCol);
+  const { valueCol } = refKeyCols(ref, t.columns);
+  const vi = t.columns.indexOf(valueCol);
   const row = vi < 0 ? undefined : t.rows.find((r) => r[vi] === val);
   if (!row) return undefined;
-  const hidden = new Set(t.hidden ?? []);
+  // The option already carries its code; it is repeated beside it only when the author picked it.
+  const hidden = new Set([...(t.hidden ?? []), ...(ref.columns ? [] : [valueCol])]);
   const s = displayColumns(ref, t.columns).filter((c) => !hidden.has(c))
     .map((c) => String(row[t.columns.indexOf(c)] ?? "")).filter(Boolean).join(" · ");
   return s || undefined;
@@ -88,5 +92,6 @@ export function formState(model: ModelDef, lookups: ResolvedLookups, prop: Propa
       const rows = evalTableRows(def, tableRows[def.key] ?? [], prop.values, lookups.tables);
       return [def.key, rows.map((r) => Object.fromEntries(cols.map((c) => [c, r[c] ?? null])))];
     })),
+    ...(prop.hiddenStructure.size ? { hidden: [...prop.hiddenStructure] } : {}),
   };
 }

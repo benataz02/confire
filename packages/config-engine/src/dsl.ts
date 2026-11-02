@@ -279,7 +279,8 @@ function call(n: Extract<Ast, { t: "call" }>, scope: Scope): Val {
     case "ISBLANK":
     case "SELECTED": {
       arity(1);
-      // An unpicked field is an absent key, which every other read refuses as unbound.
+      // An unpicked field is an absent key. Only ISBLANK, SELECTED and HAS read that as
+      // empty; every other read refuses it as unbound.
       const a = n.args[0]!;
       const v = a.t === "ident" ? (Object.hasOwn(scope.vars, a.name) ? scope.vars[a.name]! : null) : arg(0);
       const blank = v === null || v === "" || (Array.isArray(v) && v.length === 0);
@@ -287,9 +288,14 @@ function call(n: Extract<Ast, { t: "call" }>, scope: Scope): Val {
     }
     case "HAS": {
       arity(2);
-      const l = arg(0);
+      // An unpicked multi-select is an absent key, a hidden one is null — the same read as
+      // ISBLANK. Neither contains the value, so the sought value is not read. A present
+      // non-list is still an error: HAS only means something for a multi-value field.
+      const a = n.args[0]!;
+      const l = a.t === "ident" ? (Object.hasOwn(scope.vars, a.name) ? scope.vars[a.name]! : null) : arg(0);
+      if (l === null || (Array.isArray(l) && l.length === 0)) return false;
       if (!Array.isArray(l))
-        throw new DslError("HAS expects a multi-value parameter as first argument", n.args[0]!.from, n.args[0]!.to);
+        throw new DslError("HAS expects a multi-value parameter as first argument", a.from, a.to);
       return l.includes(arg(1) as string);
     }
     case "LOOKUP": {

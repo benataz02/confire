@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { B1EntitySchema, B1Field } from "@confire/b1";
 import type { PortalExtraField } from "@confire/db";
+import { t } from "../i18n/index.ts";
 
 // The new-client onboarding form (spec §5.3, §5.4): which BusinessPartners fields a prospect fills
 // in, and how that form becomes a B1 lead. One rule for the settings picker, the form the portal
@@ -88,14 +89,14 @@ const INTEGER = /^Edm\.(Int\d+|S?Byte)$/;
 export function formProblems(s: OnboardingSchema, countries: Set<string>, form: Record<string, unknown>): string[] {
   const byName = new Map(s.fields.map((f) => [f.name, f]));
   const required = new Set(s.required);
-  const problems = Object.keys(form).filter((k) => !byName.has(k)).map((k) => `${k} is not on this form`);
+  const problems = Object.keys(form).filter((k) => !byName.has(k)).map((k) => t("FORM_NOT_ON_FORM", k));
   const shipToSame = form[SHIP_TO_SAME] !== false;
   for (const f of s.fields) {
     if (shipToSame && f.name.startsWith("ShipTo.")) continue;
     const v = form[f.name];
     const label = f.label ?? f.name;
     if (isEmpty(v)) {
-      if (required.has(f.name)) problems.push(`${label} (${f.name}) is required`);
+      if (required.has(f.name)) problems.push(t("FORM_REQUIRED", label, f.name));
       continue;
     }
     const ok =
@@ -105,8 +106,8 @@ export function formProblems(s: OnboardingSchema, countries: Set<string>, form: 
       // B1 sends and accepts an enum's member NAME, which is what the page's select carries.
       : f.kind === "enum" ? (f.options ?? []).some((o) => o.label === v)
       : typeof v === "string";
-    if (!ok) problems.push(`${label} (${f.name}) has an invalid value`);
-    else if (typeof v === "string" && f.maxLength && v.length > f.maxLength) problems.push(`${label} (${f.name}) is longer than ${f.maxLength}`);
+    if (!ok) problems.push(t("FORM_INVALID", label, f.name));
+    else if (typeof v === "string" && f.maxLength && v.length > f.maxLength) problems.push(t("FORM_TOO_LONG", label, f.name, f.maxLength));
   }
   return problems;
 }

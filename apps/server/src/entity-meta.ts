@@ -1,17 +1,21 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db, entityMeta } from "@confire/db";
 import {
   parseEntityList, parseEntitySchemas,
   type B1EntityRef, type B1EntitySchema, type B1Field, type B1FieldKind, type B1Transport,
 } from "@confire/b1";
 import type { EntityProfile } from "./entity-profiles.ts";
+import { t } from "./i18n/index.ts";
 
 // B1's $metadata, cached. The full EDMX is ~1.7 MB; both reads here use the scoped query, so a
 // schema costs one entity's worth of XML, not the lot — on 10.0 FP2608 and later. An older Service
 // Layer ignores every $metadata option and answers the whole unannotated document (verified
 // 2026-10-24): the parse still finds the entity, minus labels (the browser's catalog names fields).
-// ponytail: an old SL pays ~1.5 MB per entity's first read and per day's entity list; keep one
-// full document per tenant if that read shows up.
+// That answer holds every schema, so a miss stores them all (b1-tools spec §4): no version check —
+// the answer's size is the signal — and an old SL sends the document once, not once per entity,
+// until a Refresh or a company switch (adoptCompany deletes the tenant's rows).
+// ponytail: the entity list on an old SL is still the full document once a day per process
+// (`daily`); keep its parse in Postgres too if that read shows up.
 
 const LIST_TTL_MS = 24 * 60 * 60_000;
 
@@ -55,7 +59,7 @@ export const beasSchemas = (tenantId: string, beas: B1Transport, refresh = false
 /** Reject an entity name the tenant's B1 does not expose, before it can reach a URL. */
 export async function assertEntity(tenantId: string, b1: B1Transport, name: string): Promise<B1EntityRef> {
   const found = (await entityList(tenantId, b1)).find((e) => e.name === name);
-  if (!found) throw new Error(`Unknown entity set '${name}'`);
+  if (!found) throw new Error(t("ENTITY_SET_UNKNOWN", name));
   return found;
 }
 
@@ -173,15 +177,20 @@ export async function entitySchema(
     entityset: name,
     dependency: true,
   });
-  const schema = parseEntitySchemas(xml, await entityList(tenantId, b1, refresh)).find((s) => s.name === name);
-  if (!schema) throw new Error(`EntitySet '${name}' not found in metadata`);
+  const all = parseEntitySchemas(xml, await entityList(tenantId, b1, refresh));
+  const schema = all.find((s) => s.name === name);
+  if (!schema) throw new Error(t("ENTITY_SET_NOT_IN_METADATA", name));
   const fetchedAt = new Date();
-  await db
-    .insert(entityMeta)
-    .values({ tenantId, entityName: name, json: schema, fetchedAt })
-    .onConflictDoUpdate({
-      target: [entityMeta.tenantId, entityMeta.entityName],
-      set: { json: schema, fetchedAt },
-    });
+  // One entity on FP2608+; every one of them (~360) on an older Service Layer. Chunked so a
+  // statement stays a few hundred KB of jsonb.
+  for (let i = 0; i < all.length; i += 50) {
+    await db
+      .insert(entityMeta)
+      .values(all.slice(i, i + 50).map((s) => ({ tenantId, entityName: s.name, json: s, fetchedAt })))
+      .onConflictDoUpdate({
+        target: [entityMeta.tenantId, entityMeta.entityName],
+        set: { json: sql`excluded.json`, fetchedAt },
+      });
+  }
   return schema;
 }

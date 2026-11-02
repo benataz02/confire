@@ -5,7 +5,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import type { UIMessage } from "@tanstack/ai-react";
 import { TextPart } from "@tanstack/ai-react/ui";
 import {
-  BusyIndicator, Button, FlexBox, HeroBanner, Icon, Label, Link, MessageStrip, Tag, Text, TextArea, Token, Tokenizer,
+  BusyIndicator, Button, FlexBox, HeroBanner, Icon, Label, Link, MessageStrip, Tag, Text, TextArea, ToggleButton, Token, Tokenizer,
   type TextAreaDomRef,
 } from "@ui5/webcomponents-react";
 import { Button as AiButton, ButtonState } from "@ui5/webcomponents-ai-react";
@@ -27,6 +27,10 @@ import { assistantToggle } from "./toggle.ts";
 import { QuestionCard } from "./cards/QuestionCard.tsx";
 import { CandidatesCard } from "./cards/CandidatesCard.tsx";
 import type { ExtractResult } from "./cards/ExtractionCard.tsx";
+import { WavingDots } from "./WavingDots.tsx";
+
+/** The user's auto-mode switch, a ui_user_state key: the server's assistant/auto.ts AUTO_WRITE_KEY. */
+const AUTO_WRITE_KEY = "assistant:autoWrite";
 
 // The chat (assistant spec §4.2), drawn by the panel and by the AI page. Empty on the page, it is a
 // welcome: a HeroBanner with the greeting and the chat box inside, which the first send turns into the
@@ -304,7 +308,9 @@ export function ChatView({ thread, route, kind, page = false, head }: {
   const last = chat.messages.at(-1);
   // The model's question stays open until the user's next message: while it is, it is the one question
   // on screen — no question card, no quick replies.
-  const asked = last?.role === "assistant" && last.parts.some((p) => p.type === "tool-call" && p.name === "ask_user");
+  // A SAP write's proposal is the same: it waits for the user's Post or Discard (b1-tools spec §5.6).
+  const asked = last?.role === "assistant" && last.parts.some((p) => p.type === "tool-call" && (p.name === "ask_user"
+    || ((p.name === "b1_write" || p.name === "b1_copy") && !!(p.output ?? parse(results.get(p.id)?.content) as { proposal?: unknown } | undefined)?.proposal)));
   const lastUser = [...chat.messages].reverse().find((m) => m.role === "user");
   const failed = !busy && (!!chat.error || !!refusal) && last?.role === "user";
 
@@ -479,17 +485,32 @@ export function ChatView({ thread, route, kind, page = false, head }: {
       <ButtonState name="generating" icon="stop" />
     </AiButton>
   );
+  // Auto mode, the user's own half (b1-tools spec §5.3): drawn only while the workspace allows it. The
+  // server reads the stored switch on every write; nothing here rides along with one.
+  const auto = status.data?.autoWrite;
+  const autoToggle = auto?.allowed ? (
+    <ToggleButton design="Transparent" icon="process" pressed={auto.on}
+      tooltip={t(auto.on ? "ASSISTANT_AUTO_ON" : "ASSISTANT_AUTO_OFF")} accessibleName={t("ASSISTANT_AUTO_TOGGLE")}
+      onClick={() => {
+        const on = !auto.on;
+        qc.setQueryData(orpc.assistant.status.queryKey(), (d: typeof status.data) => (d ? { ...d, autoWrite: { ...d.autoWrite, on } } : d));
+        void client.views.setState({ key: AUTO_WRITE_KEY, value: on ? true : null })
+          .finally(() => void qc.invalidateQueries({ queryKey: orpc.assistant.status.key() }));
+      }}>
+      {page ? t("ASSISTANT_AUTO_TOGGLE") : null}
+    </ToggleButton>
+  ) : null;
   // The page's chat box, its buttons under the field; the panel's composer, one row.
   const composer = page ? (
     <FlexBox direction="Column" gap="0.25rem" style={{ ...BOX, outline: focused ? FOCUS : "none" }}>
       {tokens}
       {field}
-      <FlexBox alignItems="Center" justifyContent="SpaceBetween">{attach}{sendButton}</FlexBox>
+      <FlexBox alignItems="Center" justifyContent="SpaceBetween"><FlexBox alignItems="Center">{attach}{autoToggle}</FlexBox>{sendButton}</FlexBox>
     </FlexBox>
   ) : (
     <>
       {tokens}
-      <FlexBox alignItems="End" gap="0.5rem">{attach}{field}{sendButton}</FlexBox>
+      <FlexBox alignItems="End" gap="0.5rem">{attach}{autoToggle}{field}{sendButton}</FlexBox>
     </>
   );
 
@@ -501,7 +522,7 @@ export function ChatView({ thread, route, kind, page = false, head }: {
   return (
     <FlexBox direction="Column"
       style={{
-        ...ASSISTANT_BUTTONS, flex: 1, minHeight: 0,
+        ...ASSISTANT_BUTTONS, flex: 1, minHeight: 0, position: "relative", isolation: "isolate",
         // The bubbles and steps are plain elements: the theme's font reaches them from here, not from a component.
         fontFamily: "var(--sapFontFamily)", fontSize: "var(--sapFontSize)", color: "var(--sapTextColor)",
         outline: dragging ? "2px dashed var(--sapContent_FocusColor)" : "none", outlineOffset: "-0.5rem",
@@ -509,6 +530,7 @@ export function ChatView({ thread, route, kind, page = false, head }: {
       onDragOver={(e) => { if (disabled) return; e.preventDefault(); setDragging(true); }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
       onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled) addFiles(e.dataTransfer.files); }}>
+      {page && empty ? <WavingDots /> : null}
       {head?.({ busy, projectId, empty })}
       {page && empty ? (
         <FlexBox direction="Column" justifyContent="Center"

@@ -62,8 +62,8 @@ function Company() {
   const refused = useRefusals(failed);
   const peopleGroup = { group: i18n.getText("PORTAL_PEOPLE"), section: "people" };
   const messages: PageMessage[] = [
-    ...(failed ? [{ id: "failed", type: "Negative" as const, text: failed.message, detail: i18n.getText("PORTAL_CHANGE_FAILED"), ...peopleGroup }] : []),
-    ...(people.error ? [{ id: "people", type: "Negative" as const, text: people.error.message, ...peopleGroup }] : []),
+    ...(failed ? [{ id: "failed", type: "Negative" as const, text: i18n.getText("PORTAL_CHANGE_FAILED"), detail: failed.message, ...peopleGroup }] : []),
+    ...(people.error ? [{ id: "people", type: "Negative" as const, text: i18n.getText("PORTAL_PEOPLE_FAILED"), detail: people.error.message, ...peopleGroup }] : []),
   ];
   const [page, setPage] = useState<HTMLElement | null>(null);
   const goSection = (section: string) => page?.querySelector<HTMLElement>(`[id="ObjectPageSection-${section}"]`)?.scrollIntoView({ block: "start" });

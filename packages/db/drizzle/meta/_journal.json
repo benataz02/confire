@@ -71,6 +71,13 @@
       "when": 1793462499654,
       "tag": "0009_config_project_margin",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793604841849,
+      "tag": "0010_assistant_b1_auto_write",
+      "breakpoints": true
     }
   ]
 }

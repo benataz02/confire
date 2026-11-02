@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchServerSentEvents, useChat, type UIMessage } from "@tanstack/ai-react";
-import { currentSlug, TENANT_HEADER } from "@confire/ui/host.ts";
+import { callHeaders } from "@confire/ui/host.ts";
 import { orpc } from "../orpc.ts";
 
 // The panel's data: this user's thread for the page's configuration (or their general one), and a
@@ -36,7 +36,7 @@ export function useAssistantChat(thread: Thread) {
   const [refusal, setRefusal] = useState<Refusal>(null);
   // One connection per chat: a new one would recreate the client and drop the conversation.
   const connection = useMemo(() => fetchServerSentEvents("/api/assistant", () => ({
-    headers: { [TENANT_HEADER]: currentSlug() ?? "" },
+    headers: callHeaders(),
     fetchClient: (async (input: RequestInfo | URL, init?: RequestInit) => {
       const res = await fetch(input, init);
       if (res.ok) setRefusal(null);

@@ -4,6 +4,8 @@
 // call sends it as `x-tenant`; a file route carries it in its own path. Sign-in is a page of the staff app, the one
 // sign-in host. The server re-validates against membership — this is only for UX and redirects.
 
+import getLocale from "@ui5/webcomponents-base/dist/locale/getLocale.js";
+
 /** Never a slug: the staff SPA's own top-level pages, the server's routes, a few names kept back, the mail names. */
 const RESERVED = new Set([
   "login", "signup", "forgot-password", "reset-password", "onboarding",
@@ -15,6 +17,14 @@ const RESERVED = new Set([
 export const isReserved = (slug: string) => RESERVED.has(slug);
 
 export const TENANT_HEADER = "x-tenant";
+
+/** What every call to our own server carries: the page's tenant, when it has one, and the UI
+ *  language — the server writes its messages in it (apps/server/src/i18n). UI5's language, so the
+ *  user menu's choice wins over the browser's own Accept-Language. Read on call, like currentSlug. */
+export function callHeaders(): Record<string, string> {
+  const slug = currentSlug();
+  return { "accept-language": getLocale().getLanguage(), ...(slug ? { [TENANT_HEADER]: slug } : {}) };
+}
 
 /** Whether a path segment can name a tenant: what the `$slug` routes accept. */
 export const isSlug = (s: string) => /^[a-z0-9-]+$/.test(s) && !RESERVED.has(s);

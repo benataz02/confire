@@ -4,6 +4,7 @@ import type { RecordIssues, RecordMessage } from "@confire/ui/object-page/useObj
 import type { Row } from "@confire/ui/types.ts";
 import { constraintAt, defOf } from "../../features/model/record.ts";
 import { issueText } from "./exprHelpers.ts";
+import { rowKeyOf } from "./structureOps.ts";
 
 export const issueFor = (issues: Issue[], path: string) => issues.find((i) => i.path === path);
 
@@ -29,23 +30,22 @@ export function sectionOf(path: string): string {
   return "settings"; // pricing.*
 }
 
-/** The tree row a table is placed on — `rowKeyOf({ kind: "table" })`, which is an index pair. */
+/** The tree row a table is placed on — a table is addressed by its place, not its key. */
 function tableRow(draft: ModelDef, key: string): string | undefined {
   for (const [s, sec] of draft.structure.sections.entries())
     for (const [g, grp] of sec.groups.entries())
-      if (isTableGroup(grp) && grp.table === key) return `[data-key="t:${s}.${g}"]`;
+      if (isTableGroup(grp) && grp.table === key) return rowKeyOf({ kind: "table", s, g });
   return undefined;
 }
 
-/** The tree row an issue about a parameter, a table or a formula points at, or undefined when the
- *  section itself is as close as we get. An anchor that turns out not to be rendered is fine too:
- *  the message leaves the user on the right tab. */
-export function anchorOf(path: string, draft: ModelDef): string | undefined {
+/** The tree row (its `rowKeyOf` key) an issue about a parameter, a table, a formula or a heading's
+ *  rule is about, or undefined when no one row is. */
+export function rowOf(path: string, draft: ModelDef): string | undefined {
   // Parameters and tables are edited on a page of their own, so the tree row that opens it is the target.
   const p = /^parameters\[(\d+)\]/.exec(path);
   if (p) {
     const key = draft.parameters[Number(p[1])]?.key;
-    return key ? `[data-key="p:${key}"]` : undefined;
+    return key ? rowKeyOf({ kind: "param", key }) : undefined;
   }
   const t = /^tables\[(\d+)\]/.exec(path);
   if (t) {
@@ -54,8 +54,19 @@ export function anchorOf(path: string, draft: ModelDef): string | undefined {
   }
   // A formula is edited in a dialog its tree row opens, like a parameter on its page.
   const c = /^computed\[(\d+)\]/.exec(path);
-  if (c) return `[data-key="c:${c[1]}"]`;
+  if (c) return rowKeyOf({ kind: "formula", i: Number(c[1]) });
+  // So is a section's or group's visibility rule.
+  const s = /^structure\.sections\[(\d+)\](?:\.groups\[(\d+)\])?\.visibleWhen$/.exec(path);
+  if (s) return rowKeyOf(s[2] === undefined ? { kind: "section", s: Number(s[1]) } : { kind: "group", s: Number(s[1]), g: Number(s[2]) });
   return undefined; // model / structure / tables — the section is the answer
+}
+
+/** The selector of an issue's tree row, or undefined when the section itself is as close as we
+ *  get. A row a collapse hides is fine too: the message leaves the user on the right tab, and the
+ *  row that hides it is the red one. */
+export function anchorOf(path: string, draft: ModelDef): string | undefined {
+  const row = rowOf(path, draft);
+  return row ? `.confire-params-struct [row-key="${row}"]` : undefined;
 }
 
 // A grid's cell in an issue path: `bom[2].qty`, `history.mappings[0]` (the mapping as a whole sits
@@ -115,10 +126,10 @@ export function builderMessages(a: {
   // On the page, the combination tables are what go without options; the preview says it itself.
   if (a.lookupsError)
     out.push({
-      id: "lookups", type: "Negative", text: a.lookupsError.message, detail: t("MODEL_LOOKUPS_FAILED"),
+      id: "lookups", type: "Negative", text: t("MODEL_LOOKUPS_FAILED"), detail: a.lookupsError.message,
       group: a.title("rules"), section: "rules",
     });
   if (a.actionError)
-    out.push({ id: "action", type: "Negative", text: a.actionError.message, detail: t("MODEL_ACTION_FAILED"), group: t("MODEL_GROUP_MODEL") });
+    out.push({ id: "action", type: "Negative", text: t("MODEL_ACTION_FAILED"), detail: a.actionError.message, group: t("MODEL_GROUP_MODEL") });
   return out;
 }

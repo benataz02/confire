@@ -18,6 +18,8 @@ test("thinking and tool calls join one run of steps until a text", () => {
 test("a decision tool is a card of its own and splits the run", () => {
   expect(kinds([tool("entities_rows"), tool("ask_user")])).toEqual(["steps:1", "card"]);
   expect(kinds([tool("read_request"), tool("extract_values"), tool("propose_quotation")])).toEqual(["card", "steps:1", "card"]);
+  // A SAP write is a decision (its proposal's Post/Discard); its reads are steps.
+  expect(kinds([tool("b1_find"), tool("b1_read"), tool("b1_write"), tool("b1_copy")])).toEqual(["steps:2", "card", "card"]);
 });
 
 test("empty texts, file labels and empty thinking draw nothing and split nothing", () => {
@@ -35,4 +37,8 @@ test("a step says what it found", () => {
   expect(stepSummary("extract_values", {}, { applied: [{}], questions: [{}, {}] }, t)).toBe("ASSISTANT_READ_COUNTS 1 2");
   expect(stepSummary("configs_models", {}, [{}, {}, {}], t)).toBe("ASSISTANT_STEP_MODELS 3");
   expect(stepSummary("home_overview", {}, { myDrafts: 1 }, t)).toBe("");
+  expect(stepSummary("b1_find", {}, { entities: [{}, {}], total: 12 }, t)).toBe("ASSISTANT_STEP_FOUND 12");
+  expect(stepSummary("b1_read", {}, { rows: [{}], total: 40 }, t)).toBe("ASSISTANT_STEP_FOUND 40");
+  expect(stepSummary("b1_read", { key: 5 }, { row: {}, etag: "x" }, t)).toBe("ASSISTANT_STEP_FOUND 1");
+  expect(stepSummary("b1_schema", {}, { fields: [{}, {}, {}] }, t)).toBe("ASSISTANT_STEP_FIELDS 3");
 });

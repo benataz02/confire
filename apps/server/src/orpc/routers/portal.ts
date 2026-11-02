@@ -18,6 +18,7 @@ import { extraPickable } from "../../portal/onboarding-form.ts";
 import { contrastOnWhite, loadPortalSettings, savePortalSettings } from "../../portal/settings.ts";
 import { entitySchema } from "../../entity-meta.ts";
 import { bad } from "../../entity-read.ts";
+import { t } from "../../i18n/index.ts";
 
 // The internal app's side of the customer portal (spec §5.1, §10, §11): invite a business partner's
 // people (existing-BP invitations, from its Object Page), list and cancel invitations, and edit who
@@ -53,7 +54,7 @@ async function companyOf(tenantId: string, cardCode: string) {
 
 async function requireCompany(tenantId: string, cardCode: string) {
   const c = await companyOf(tenantId, cardCode);
-  if (!c) throw new ORPCError("NOT_FOUND", { message: `${cardCode} is not on the portal yet: invite someone first` });
+  if (!c) throw new ORPCError("NOT_FOUND", { message: t("PORTAL_COMPANY_NOT_YET", cardCode) });
   return c;
 }
 
@@ -89,7 +90,7 @@ export const portalInvitationsRouter = {
         b1.readEntity("BusinessPartners", input.cardCode, { select: ["CardCode", "CardName", "CardType", "LanguageCode"] }));
       const bp = data as { CardCode: string; CardName: string | null; CardType: string; LanguageCode: number | null };
       if (bp.CardType !== "cCustomer" && bp.CardType !== "cLid") {
-        throw new ORPCError("BAD_REQUEST", { message: `${bp.CardCode} is not a customer or a lead: only those can use the portal` });
+        throw new ORPCError("BAD_REQUEST", { message: t("PORTAL_NOT_CUSTOMER", bp.CardCode) });
       }
       const fresh = { cardName: bp.CardName ?? bp.CardCode, cardType: bp.CardType as PortalCardType, languageCode: bp.LanguageCode };
       await db.insert(portalCompany)
@@ -150,13 +151,13 @@ export const portalCompaniesRouter = {
     .input(z.object({ cardCode: CardCodeZ, domain: DomainZ }))
     .handler(async ({ input, context }) => {
       if (isFreeMail(input.domain)) {
-        throw new ORPCError("BAD_REQUEST", { message: `${input.domain} is a free-mail domain: anyone can get an address there` });
+        throw new ORPCError("BAD_REQUEST", { message: t("DOMAIN_FREE_MAIL", input.domain) });
       }
       const c = await requireCompany(context.tenantId, input.cardCode);
       const res = await db.transaction((tx) =>
         claimDomain(tx, { tenantId: context.tenantId, cardCode: c.cardCode, domain: input.domain, addedBy: context.user.id }));
       if (typeof res === "object") {
-        throw new ORPCError("CONFLICT", { message: `${input.domain} is already registered to ${res.takenBy}` });
+        throw new ORPCError("CONFLICT", { message: t("DOMAIN_TAKEN", input.domain, res.takenBy) });
       }
       return { domain: input.domain };
     }),
@@ -268,14 +269,14 @@ export const portalSettingsRouter = {
       if (input.branding?.accent) {
         const ratio = contrastOnWhite(input.branding.accent);
         if (ratio < 4.5) throw new ORPCError("BAD_REQUEST", {
-          message: `White text on ${input.branding.accent} has a contrast of ${ratio.toFixed(1)}:1, under the 4.5:1 buttons need: pick a darker colour`,
+          message: t("BRANDING_CONTRAST", input.branding.accent, ratio.toFixed(1)),
         });
       }
       if (input.branding?.logoFileId) {
         const [logo] = await db.select({ id: projectFile.id }).from(projectFile).where(and(
           eq(projectFile.id, input.branding.logoFileId), eq(projectFile.tenantId, context.tenantId), isNull(projectFile.projectId),
         )).limit(1);
-        if (!logo) throw new ORPCError("BAD_REQUEST", { message: "Upload the logo again" });
+        if (!logo) throw new ORPCError("BAD_REQUEST", { message: t("BRANDING_LOGO_AGAIN") });
       }
       if (input.docFields) {
         const schemas = await docSchemas(context.tenantId);
@@ -284,16 +285,16 @@ export const portalSettingsRouter = {
           const allowed = { header: new Set(p.header.map((f) => f.name)), lines: new Set(p.lines.map((f) => f.name)) };
           for (const part of ["header", "lines"] as const) {
             const refused = fields[part].find((n) => !allowed[part].has(n));
-            if (refused) throw new ORPCError("BAD_REQUEST", { message: `${refused} can't be shown on the portal (${entity})` });
+            if (refused) throw new ORPCError("BAD_REQUEST", { message: t("PORTAL_FIELD_REFUSED", refused, entity) });
           }
         }
       }
       if (input.extraFields) {
         const offered = new Set(extraPickable(await bpSchema(context.tenantId)).map((f) => f.name));
         const refused = input.extraFields.find((x) => !offered.has(x.key));
-        if (refused) throw new ORPCError("BAD_REQUEST", { message: `${refused.key} can't be on the onboarding form` });
+        if (refused) throw new ORPCError("BAD_REQUEST", { message: t("ONBOARDING_FIELD_REFUSED", refused.key) });
         if (new Set(input.extraFields.map((x) => x.key)).size !== input.extraFields.length)
-          throw new ORPCError("BAD_REQUEST", { message: "A field is on the onboarding form twice" });
+          throw new ORPCError("BAD_REQUEST", { message: t("ONBOARDING_FIELD_TWICE") });
       }
       const next: PortalSettings = { ...(await loadPortalSettings(context.tenantId)) };
       if (input.docFields) next.docFields = input.docFields;

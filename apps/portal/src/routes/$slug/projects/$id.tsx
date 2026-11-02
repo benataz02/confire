@@ -123,10 +123,10 @@ function ProjectPage({ id }: { id: string }) {
   const general = { group: i18n.getText("PORTAL_GENERAL"), section: GENERAL_SECTION };
   const messages: PageMessage[] = [
     ...(error ? [{
-      id: "error", type: "Negative" as const, text: error.message, ...general,
-      detail: i18n.getText(!queue.error ? "PORTAL_CHANGE_FAILED" : queue.error.refused ? "PORTAL_CHANGE_REFUSED" : "PORTAL_CHANGE_UNSENT"),
+      id: "error", type: "Negative" as const, detail: error.message, ...general,
+      text: i18n.getText(!queue.error ? "PORTAL_CHANGE_FAILED" : queue.error.refused ? "PORTAL_CHANGE_REFUSED" : "PORTAL_CHANGE_UNSENT"),
     }] : []),
-    ...(p.calcError ? [{ id: "calc", type: "Negative" as const, text: p.calcError, detail: i18n.getText("PORTAL_CALC_FAILED"), ...general }] : []),
+    ...(p.calcError ? [{ id: "calc", type: "Negative" as const, text: i18n.getText("PORTAL_CALC_FAILED"), detail: p.calcError, ...general }] : []),
     // A conflict's jump goes to the first of its parameters actually drawn (`data-param`).
     ...form.conflicts.map((c, i) => {
       const key = c.params.find((k) => form.fields[k]?.visible);

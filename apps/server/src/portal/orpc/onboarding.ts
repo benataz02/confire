@@ -14,6 +14,7 @@ import { bad } from "../../entity-read.ts";
 import { DEDUP_UDF } from "../../config-quote.ts";
 import { TENANT_HEADER } from "../../tenant.ts";
 import { hasWorkAccount } from "../../auth.ts";
+import { t } from "../../i18n/index.ts";
 
 // The two ways into a company (spec §4.4, §5.2): an invitation, accepted on its link, and auto-join
 // by a registered email domain. Both run on the supplier's portal page — sign-in lives on the sign-in
@@ -39,14 +40,14 @@ async function openInvitationFor(tenantId: string, u: { email: string; emailVeri
     .leftJoin(user, eq(user.id, invitation.inviterId))
     .where(and(eq(invitation.id, id), portalInvitationOf(tenantId)))
     .limit(1);
-  if (!inv) throw new ORPCError("NOT_FOUND", { message: "This invitation doesn't exist on this portal" });
+  if (!inv) throw new ORPCError("NOT_FOUND", { message: t("INVITATION_UNKNOWN") });
   if (inv.email.toLowerCase() !== u.email.toLowerCase()) {
-    throw new ORPCError("FORBIDDEN", { message: `This invitation was sent to ${mask(inv.email)}. Sign in with that address to accept it.` });
+    throw new ORPCError("FORBIDDEN", { message: t("INVITATION_OTHER_EMAIL", mask(inv.email)) });
   }
-  if (inv.status === "accepted") throw new ORPCError("CONFLICT", { message: "This invitation has already been accepted" });
-  if (inv.status === "canceled") throw new ORPCError("CONFLICT", { message: "This invitation was cancelled. Ask for a new one." });
-  if (inv.expiresAt < new Date()) throw new ORPCError("CONFLICT", { message: "This invitation has expired. Ask for a new one." });
-  if (!u.emailVerified) throw new ORPCError("FORBIDDEN", { message: "Confirm your email address first, then open the invitation again." });
+  if (inv.status === "accepted") throw new ORPCError("CONFLICT", { message: t("INVITATION_ACCEPTED") });
+  if (inv.status === "canceled") throw new ORPCError("CONFLICT", { message: t("INVITATION_CANCELLED") });
+  if (inv.expiresAt < new Date()) throw new ORPCError("CONFLICT", { message: t("INVITATION_EXPIRED") });
+  if (!u.emailVerified) throw new ORPCError("FORBIDDEN", { message: t("INVITATION_VERIFY_EMAIL") });
   return inv;
 }
 
@@ -57,9 +58,9 @@ type SessionCtx = { tenantId: string; user: { id: string; email: string; emailVe
  *  second look: the address is the user's, and sendInvitation keeps one open invitation per address. */
 async function newClientInvitation(c: SessionCtx, id: string) {
   const inv = await openInvitationFor(c.tenantId, c.user, id);
-  if (inv.cardCode) throw new ORPCError("BAD_REQUEST", { message: "This invitation joins an existing company: accept it instead" });
+  if (inv.cardCode) throw new ORPCError("BAD_REQUEST", { message: t("INVITATION_EXISTING_COMPANY") });
   const seat = await seatOf(c.tenantId, c.user.id);
-  if (seat) throw new ORPCError("CONFLICT", { message: `You already belong to ${seat.cardName} on this portal` });
+  if (seat) throw new ORPCError("CONFLICT", { message: t("INVITATION_HAVE_SEAT", seat.cardName) });
   return inv;
 }
 
@@ -122,12 +123,12 @@ export const onboardingRouter = {
   accept: portalSessionProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
     const inv = await openInvitationFor(context.tenantId, context.user, input.id);
     const cardCode = inv.cardCode;
-    if (!cardCode) throw new ORPCError("BAD_REQUEST", { message: "This invitation opens the new-client form: fill it in to join" });
+    if (!cardCode) throw new ORPCError("BAD_REQUEST", { message: t("INVITATION_NEW_CLIENT") });
     await db.transaction(async (tx) => {
       const done = await tx.update(invitation).set({ status: "accepted" })
         .where(and(eq(invitation.id, inv.id), eq(invitation.status, "pending"), gt(invitation.expiresAt, new Date())))
         .returning({ id: invitation.id });
-      if (!done.length) throw new ORPCError("CONFLICT", { message: "This invitation has just been accepted or cancelled" });
+      if (!done.length) throw new ORPCError("CONFLICT", { message: t("INVITATION_JUST_USED") });
       await addPortalMember(tx, { tenantId: context.tenantId, cardCode, userId: context.user.id, role: inv.role });
       await claimDomain(tx, { tenantId: context.tenantId, cardCode, domain: emailDomain(inv.email), addedBy: inv.inviterId });
     });
@@ -176,7 +177,7 @@ export const onboardingRouter = {
           // Only a 400 means "no such property": an unreachable agent keeps its own status.
           if (e instanceof B1Error && e.status === 400)
             throw new ORPCError("BAD_REQUEST", {
-              message: `${context.tenant.name} can't take new clients on the portal yet: ${DEDUP_UDF} is missing from Business Partners in SAP. Ask them to create it (alphanumeric, length 64). (${e.message})`,
+              message: t("ONBOARDING_NO_UDF", context.tenant.name, DEDUP_UDF, e.message),
             });
           throw e;
         });
@@ -193,7 +194,7 @@ export const onboardingRouter = {
         return (await b1.createEntity("BusinessPartners", body, { prefer: "representation" })).data as Record<string, unknown>;
       });
       const cardCode = typeof lead.CardCode === "string" ? lead.CardCode : "";
-      if (!cardCode) throw new ORPCError("BAD_GATEWAY", { message: "SAP created the business partner but returned no CardCode" });
+      if (!cardCode) throw new ORPCError("BAD_GATEWAY", { message: t("ONBOARDING_NO_CARDCODE") });
 
       // A failure from here leaves the invitation pending: the retry binds through U_CF_Key.
       const fresh = {
@@ -209,7 +210,7 @@ export const onboardingRouter = {
         const done = await tx.update(invitation).set({ status: "accepted", cardCode })
           .where(and(eq(invitation.id, inv.id), eq(invitation.status, "pending")))
           .returning({ id: invitation.id });
-        if (!done.length) throw new ORPCError("CONFLICT", { message: "This invitation has just been used or cancelled" });
+        if (!done.length) throw new ORPCError("CONFLICT", { message: t("INVITATION_JUST_USED") });
         await addPortalMember(tx, { tenantId: context.tenantId, cardCode, userId: context.user.id, role: "owner" });
         await claimDomain(tx, { tenantId: context.tenantId, cardCode, domain: emailDomain(inv.email), addedBy: inv.inviterId });
       });

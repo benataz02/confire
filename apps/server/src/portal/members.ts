@@ -9,6 +9,7 @@ import { sendMails } from "../mail/mailer.ts";
 import { invitationMail } from "../mail/portal-mail.tsx";
 import { portalTenantUrl } from "../tenant.ts";
 import { tenantBrand } from "./settings.ts";
+import { t } from "../i18n/index.ts";
 
 // The customer portal's write rules (spec §4.2, §5.1): seats, registered domains and invitations.
 // Both processes import this module — the internal app (an admin inviting from a BP, editing a
@@ -107,10 +108,10 @@ export async function addPortalMember(tx: Tx, m: { tenantId: string; cardCode: s
   }
   const current = PORTAL_ROLES.find((r) => externalRole(r) === row.role);
   if (!current) {
-    throw new ORPCError("FORBIDDEN", { message: "This account works for the supplier: staff use its internal app, not the portal" });
+    throw new ORPCError("FORBIDDEN", { message: t("MEMBER_IS_STAFF") });
   }
   if (row.cardCode !== m.cardCode) {
-    throw new ORPCError("CONFLICT", { message: "This account already belongs to another company on this portal" });
+    throw new ORPCError("CONFLICT", { message: t("MEMBER_OTHER_COMPANY") });
   }
   if (RANK[m.role] > RANK[current]) await tx.update(member).set({ role: externalRole(m.role) }).where(eq(member.id, row.id));
 }
@@ -141,10 +142,10 @@ export async function changeMember(c: { tenantId: string; cardCode: string; user
       .where(and(fence, eq(member.role, externalRole("owner")))).for("update");
     const [target] = await tx.select({ role: portalRole }).from(member)
       .where(and(fence, eq(member.userId, c.userId)));
-    if (!target) throw new ORPCError("NOT_FOUND", { message: "No such member in this company" });
+    if (!target) throw new ORPCError("NOT_FOUND", { message: t("MEMBER_UNKNOWN") });
     const lastOwner = target.role === "owner" && owners.length === 1 && owners[0]!.userId === c.userId;
     if (lastOwner && c.role !== "owner") {
-      throw new ORPCError("CONFLICT", { message: "A company needs at least one owner: make someone else owner first" });
+      throw new ORPCError("CONFLICT", { message: t("MEMBER_LAST_OWNER") });
     }
     if (c.role === null) await tx.delete(member).where(and(fence, eq(member.userId, c.userId)));
     else await tx.update(member).set({ role: externalRole(c.role) }).where(and(fence, eq(member.userId, c.userId)));
@@ -158,14 +159,14 @@ async function inviteGuard(tenantId: string, cardCode: string | null, email: str
   const [u] = await db.select({ id: user.id }).from(user).where(sql`lower(${user.email}) = ${email}`).limit(1);
   if (!u) return;
   if (await isInternalMember(tenantId, u.id)) {
-    throw new ORPCError("FORBIDDEN", { message: `${email} works for you: staff use the internal app, not the portal` });
+    throw new ORPCError("FORBIDDEN", { message: t("INVITE_IS_STAFF", email) });
   }
   const seat = await seatOf(tenantId, u.id);
   if (!seat) return;
   throw new ORPCError("CONFLICT", {
     message: seat.cardCode === cardCode
-      ? `${email} is already a member of ${seat.cardName}`
-      : `${email} already belongs to ${seat.cardName} (${seat.cardCode}) on your portal`,
+      ? t("INVITE_ALREADY_MEMBER", email, seat.cardName)
+      : t("INVITE_OTHER_COMPANY", email, seat.cardName, seat.cardCode),
   });
 }
 
@@ -198,7 +199,7 @@ export async function sendInvitation(i: {
   const [company] = i.cardCode === null ? [null] : await db
     .select({ cardName: portalCompany.cardName, languageCode: portalCompany.languageCode }).from(portalCompany)
     .where(and(eq(portalCompany.tenantId, i.tenantId), eq(portalCompany.cardCode, i.cardCode)));
-  if (company === undefined) throw new ORPCError("NOT_FOUND", { message: "No such company on this portal" });
+  if (company === undefined) throw new ORPCError("NOT_FOUND", { message: t("COMPANY_UNKNOWN") });
   const languageCode = company ? company.languageCode : (i.languageCode ?? null);
   await inviteGuard(i.tenantId, i.cardCode, email);
 
@@ -211,8 +212,11 @@ export async function sendInvitation(i: {
       .where(and(portalInvitationOf(i.tenantId), eq(invitation.email, email), openInvitation()))
       .limit(1);
     if (taken) {
-      const to = taken.cardCode ? ` to ${taken.cardName} (${taken.cardCode})` : " as a new client";
-      throw new ORPCError("CONFLICT", { message: `${email} already has an open invitation${to}: cancel it to send a new one` });
+      throw new ORPCError("CONFLICT", {
+        message: taken.cardCode
+          ? t("INVITE_OPEN_COMPANY", email, taken.cardName ?? taken.cardCode, taken.cardCode)
+          : t("INVITE_OPEN_NEW_CLIENT", email),
+      });
     }
     const id = crypto.randomUUID();
     await tx.insert(invitation).values({

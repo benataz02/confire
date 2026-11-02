@@ -3,10 +3,15 @@ import { and, eq, notInArray } from "drizzle-orm";
 import { db, EXTERNAL_ROLES, member, organization } from "@confire/db";
 import { auth } from "../auth.ts";
 import { TENANT_HEADER, tenantSlug } from "../tenant.ts";
+import { t } from "../i18n/index.ts";
 
 // Initial context provided by the Hono adapter on every request.
 export interface InitialContext {
   headers: Headers;
+  /** Set only by the assistant's chat when its tools call a procedure (tools.ts `procedureTool`):
+   *  the thread the call runs in. The RPC and OpenAPI handlers never fill it from a request, so a
+   *  browser cannot set it. b1.write/b1.copy read it for auto mode's file exception. */
+  assistantThreadId?: string;
 }
 
 export const base = os.$context<InitialContext>();
@@ -29,14 +34,14 @@ const requireSession = base.middleware(async ({ context, next }) => {
  *  of the organization too, and is refused here like a stranger. */
 export async function membershipOf(slugValue: string | null | undefined, userId: string) {
   const slug = tenantSlug(slugValue);
-  if (!slug) throw new ORPCError("BAD_REQUEST", { message: "No workspace in the request" });
+  if (!slug) throw new ORPCError("BAD_REQUEST", { message: t("NO_WORKSPACE") });
   const [row] = await db
     .select({ tenantId: organization.id, role: member.role })
     .from(organization)
     .innerJoin(member, eq(member.organizationId, organization.id))
     .where(and(eq(organization.slug, slug), eq(member.userId, userId), notInArray(member.role, EXTERNAL_ROLES)))
     .limit(1);
-  if (!row) throw new ORPCError("FORBIDDEN", { message: "Not a member of this workspace" });
+  if (!row) throw new ORPCError("FORBIDDEN", { message: t("NOT_A_MEMBER") });
   return row;
 }
 
@@ -53,7 +58,7 @@ export const userProcedure = base.use(requireSession).use(async ({ context, next
 /** The admin check, named so a caller (the assistant's tool list) can tell an admin procedure. */
 export const requireAdmin = base.$context<InitialContext & { role: string }>().middleware(({ context, next }) => {
   if (context.role !== "admin" && context.role !== "owner") {
-    throw new ORPCError("FORBIDDEN", { message: "Admins only" });
+    throw new ORPCError("FORBIDDEN", { message: t("ADMINS_ONLY") });
   }
   return next({});
 });

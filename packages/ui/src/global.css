@@ -235,10 +235,17 @@ ui5-shellbar-search.confire-search-pulse {
   ui5-shellbar-search.confire-search-pulse { animation: none }
 }
 
-/* Rounded bars. BarChart passes no `radius` on to recharts' <Bar>, so each segment gets a stroke in
-   its own colour (BarChart sets stroke = fill) with round joins: every segment's corners round by
-   half the stroke. ponytail: styles recharts' internal class names; recheck on a charts upgrade. */
-.confire-rounded-bars .recharts-bar-rectangle path {
-  stroke-width: 6px;
-  stroke-linejoin: round;
-}
+/* The price chart (PriceAnalysis): each row one pill, its parts split by a hairline. BarChart passes
+   no `radius` or `shape` on to recharts' <Bar>, so the rounding is a clip: every part is inset 1px a
+   side (the gap), the first part's left end and the last part's right end round — a 999px radius
+   scales down to half the bar's height. Legend squares round to match.
+   ponytail: styles recharts' internal class names; recheck on a charts upgrade. A row whose own
+   first or last part is 0 ends square; a per-row end needs `shape`, which BarChart does not pass.
+   No min-height: the chart's own `fit-content` lets the loading placeholder (an SVG as wide as the
+   chart at its own aspect ratio) stretch the chart several times its height while it loads. */
+.confire-price-chart { font-size: var(--sapFontSize); min-height: 0 }
+.confire-price-chart .recharts-bar-rectangle path { stroke: none; clip-path: inset(0 1px) }
+.confire-price-chart .recharts-bar:nth-child(1 of .recharts-bar) path { clip-path: inset(0 1px round 999px 0 0 999px) }
+.confire-price-chart .recharts-bar:nth-last-child(1 of .recharts-bar) path { clip-path: inset(0 1px round 0 999px 999px 0) }
+.confire-price-chart .recharts-bar:nth-child(1 of .recharts-bar):nth-last-child(1 of .recharts-bar) path { clip-path: inset(0 1px round 999px) }
+.confire-price-chart .recharts-legend-item svg { border-radius: 3px }

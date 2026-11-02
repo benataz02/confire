@@ -8,9 +8,7 @@ import {
 import { decryptSecret } from "./crypto.ts";
 import { forgetEntityList } from "./entity-meta.ts";
 import { bumpMasterdata, DEFAULT_PAGE, type QueryRunner } from "./lookups.ts";
-
-export const SAP_UNAVAILABLE =
-  "No SAP agent is paired with this workspace yet. An admin pairs one in Settings → SAP agent.";
+import { t } from "./i18n/index.ts";
 
 export type { Connector };
 
@@ -21,7 +19,7 @@ export type { Connector };
  *  application lets it through and nothing else. Unset in dev, where nothing stands in front. */
 export async function agentTarget(tenantId: string): Promise<AgentTarget> {
   const [row] = await db.select().from(sapConnection).where(eq(sapConnection.tenantId, tenantId)).limit(1);
-  if (!row) throw new ORPCError("SERVICE_UNAVAILABLE", { message: SAP_UNAVAILABLE });
+  if (!row) throw new ORPCError("SERVICE_UNAVAILABLE", { message: t("SAP_NOT_PAIRED") });
   return {
     agentUrl: row.agentUrl,
     secret: decryptSecret(row.secret),
@@ -135,18 +133,18 @@ export function toOrpcError(e: unknown): unknown {
       return new ORPCError("SERVICE_UNAVAILABLE", { message });
     case e.status === 401 && message === "Bad agent secret":
       return new ORPCError("BAD_GATEWAY", {
-        message: "The SAP agent rejected Confire's secret: another workspace or server paired since. Pair it again in Settings → SAP agent.",
+        message: t("SAP_AGENT_SECRET"),
       });
     case e.code === COMPANY_CHANGED:
       return new ORPCError("CONFLICT", { message });
     case e.code === "AGENT_REFUSED": // the agent's allowlist (apps/agent/allow.go), not SAP
       return new ORPCError("FORBIDDEN", { message });
     case e.status === 401 || e.status === 403:
-      return new ORPCError("BAD_GATEWAY", { message: `SAP rejected the request: ${message}` });
+      return new ORPCError("BAD_GATEWAY", { message: t("SAP_REJECTED", message) });
     case e.status === 404:
       return new ORPCError("NOT_FOUND", { message });
     case e.status === 409 || e.status === 412:
-      return new ORPCError("CONFLICT", { message: `The SAP document changed since it was read: ${message}` });
+      return new ORPCError("CONFLICT", { message: t("SAP_DOC_CHANGED", message) });
     case e.status === 400:
       return new ORPCError("BAD_REQUEST", { message });
     default:

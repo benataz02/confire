@@ -126,7 +126,7 @@ function Page({ record: r, ...p }: PageProps & { record: ObjectRecord }) {
       const s = r.sections.find((x) => x.id === m.section);
       out.push({ ...m, id: `other:${m.id}`, type: "Negative", group: s?.label ?? title });
     }
-    if (r.saveError) out.push({ id: "save", type: "Negative", text: r.saveError, detail: t("UI_SAVE_FAILED"), group: title });
+    if (r.saveError) out.push({ id: "save", type: "Negative", text: t("UI_SAVE_FAILED"), detail: r.saveError, group: title });
     return [...out, ...(p.messages ?? [])];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [r.sections, r.errors, r.cellErrors, r.other, r.saveError, p.messages, title, i18n]);

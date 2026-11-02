@@ -159,7 +159,12 @@ function issuesOf(r: Row, t: Translate): RecordIssues {
     if (n !== undefined && !(Number.isInteger(n) && n > 0)) fields["query.syncMinutes"] = t("ADMIN_SYNC_MINUTES_ERR");
     return { fields };
   }
-  d.columns.forEach((c, i) => { if (!c.key.trim()) columns[`${i}:key`] = t("ADMIN_NEED_KEY"); });
+  // Every copy of a doubled key is marked, so the one to rename is in view whichever it is.
+  const keys = d.columns.map((c) => c.key.trim());
+  keys.forEach((k, i) => {
+    if (!k) columns[`${i}:key`] = t("ADMIN_NEED_KEY");
+    else if (keys.indexOf(k) !== keys.lastIndexOf(k)) columns[`${i}:key`] = t("ADMIN_DUPLICATE_KEY", k);
+  });
   return {
     fields, cells: { columns },
     other: d.columns.length ? [] : [{ id: "columns", text: t("ADMIN_MD_NEED_COLUMN"), section: "columns" }],
@@ -254,10 +259,10 @@ function Editor({ row }: { row?: MasterdataRow }) {
 
   const messages: PageMessage[] = [
     ...[remove.error, duplicate.error, sync.error].flatMap((e, i) => (e ? [{
-      id: `action:${i}`, type: "Negative" as const, text: e.message, detail: t("ADMIN_ACTION_FAILED"), group: t("ADMIN_SECTION_GENERAL"),
+      id: `action:${i}`, type: "Negative" as const, text: t("ADMIN_ACTION_FAILED"), detail: e.message, group: t("ADMIN_SECTION_GENERAL"),
     }] : [])),
-    ...(testFetch.error ? [{ id: "preview", type: "Negative" as const, text: testFetch.error.message, detail: t("ADMIN_TEST_FETCH"), group: t("ADMIN_PREVIEW"), section: "preview" }] : []),
-    ...(row?.syncError ? [{ id: "sync", type: "Negative" as const, text: row.syncError, detail: t("ADMIN_LAST_ERROR"), group: t("ADMIN_CACHE") }] : []),
+    ...(testFetch.error ? [{ id: "preview", type: "Negative" as const, text: t("ADMIN_TEST_FETCH_FAILED"), detail: testFetch.error.message, group: t("ADMIN_PREVIEW"), section: "preview" }] : []),
+    ...(row?.syncError ? [{ id: "sync", type: "Negative" as const, text: t("ADMIN_SYNC_FAILED"), detail: row.syncError, group: t("ADMIN_CACHE") }] : []),
   ];
 
   const controls: Record<string, Control> = {

@@ -6,10 +6,12 @@ import { getOpenAPIMeta } from "@orpc/openapi";
 import { toolDefinition, type AnyServerTool } from "@tanstack/ai";
 import { configProject, ListQueryZ } from "@confire/db";
 import { SourcesZ } from "../config-patch.ts";
+import { LIST_CAP } from "../entity-read.ts";
 import { configView } from "../config-view.ts";
 import { internalVisible } from "../project-lifecycle.ts";
 import { configsRouter } from "../orpc/routers/configs.ts";
 import { entitiesRouter } from "../orpc/routers/entities.ts";
+import { b1Router } from "../orpc/routers/b1.ts";
 import { homeRouter } from "../orpc/routers/home.ts";
 import { requestsRouter, timelineRouter } from "../orpc/routers/requests.ts";
 import { startFromThread } from "../orpc/routers/assistant.ts";
@@ -23,12 +25,13 @@ import type { Meter } from "./usage.ts";
 // with the chat request's headers, so the session, the membership join and every procedure's rules
 // apply exactly as for the page. Names, descriptions and input schemas come from the procedures. A
 // few are stricter than their procedure (calculate needs a source per value) or shaped for a card
-// (lists capped at what the card shows). None posts to SAP.
+// (lists capped at what the card shows). The SAP tools (`b1_*`, b1-tools spec) are the b1 router's
+// procedures as they are — MCP gets them bare, so their caps and proposals live in the handlers. Only
+// b1_write/b1_copy write to SAP, and outside auto mode they answer a proposal the user posts.
 
 export type ToolCtx = { headers: Headers; tenantId: string; userId: string; thread: Thread; meter: Meter };
 
-/** Joule's list card maximum: the card shows these rows and the model reads no more than that. */
-export const LIST_CAP = 20;
+export { LIST_CAP };
 
 /** A procedure's error is an answer the model can correct itself from; anything else is a bug, and
  *  its message stays in the log. */
@@ -48,7 +51,7 @@ const capped = (out: unknown) => {
 };
 
 /** A procedure as a tool: `configs.get` is `configs_get` (the name MCP derives too). */
-export function procedureTool(path: string, p: AnyProcedure, ctx: { headers: Headers }, o: {
+export function procedureTool(path: string, p: AnyProcedure, ctx: { headers: Headers; thread?: { id: string } }, o: {
   name?: string; input?: z.ZodType; describe?: string; slim?: (out: unknown) => unknown; cap?: boolean;
   prepare?: (input: Record<string, unknown>) => Record<string, unknown>;
 } = {}): AnyServerTool {
@@ -62,7 +65,9 @@ export function procedureTool(path: string, p: AnyProcedure, ctx: { headers: Hea
     let input = (args ?? {}) as Record<string, unknown>;
     if (o.cap) input = { ...input, top: Math.min(Number(input.top ?? LIST_CAP) || LIST_CAP, LIST_CAP) };
     if (o.prepare) input = o.prepare(input);
-    let out = await run(() => call(p, input, { context: { headers: ctx.headers } }));
+    // The thread rides in the call's context, which no request can fill: b1.write reads it for auto
+    // mode's file exception.
+    let out = await run(() => call(p, input, { context: { headers: ctx.headers, ...(ctx.thread ? { assistantThreadId: ctx.thread.id } : {}) } }));
     if (o.cap) out = capped(out);
     return o.slim ? o.slim(out) : out;
   }) as AnyServerTool;
@@ -163,6 +168,11 @@ function rerunTools(ctx: ToolCtx): Record<string, AnyServerTool> {
   };
 }
 
+/** The SAP tools, each its b1 procedure. `b1.post` is the user's click and never one of them. */
+export const B1_TOOLS = ["b1_find", "b1_schema", "b1_read", "b1_write", "b1_copy"] as const;
+/** The SAP tools that write: a proposal they answer ends the run (route.ts), like ask_user. */
+export const B1_WRITES: ReadonlySet<string> = new Set(["b1_write", "b1_copy"]);
+
 /** The tool's name, which the route's loop strategy stops on. */
 export const ASK_USER = "ask_user";
 
@@ -217,6 +227,7 @@ function allTools(ctx: ToolCtx): Record<string, AnyServerTool> {
     home_overview: t("home.overview", homeRouter.overview),
     timeline_list: t("timeline.list", timelineRouter.list),
     entities_rows: readSap(ctx),
+    ...Object.fromEntries(B1_TOOLS.map((n) => [n, t(`b1.${n.slice(3)}`, b1Router[n.slice(3) as keyof typeof b1Router])])),
     propose_quotation: proposeQuotation(ctx),
     [ASK_USER]: askUser,
     ...rerunTools(ctx),
@@ -231,6 +242,7 @@ export function procedureOf(name: string): AnyProcedure | undefined {
     configs_rows: configsRouter.rows, configs_create: configsRouter.create, requests_rows: requestsRouter.rows,
     home_overview: homeRouter.overview, timeline_list: timelineRouter.list, entities_rows: entitiesRouter.rows,
     propose_quotation: configsRouter.quoteDraft,
+    ...Object.fromEntries(B1_TOOLS.map((n) => [n, b1Router[n.slice(3) as keyof typeof b1Router]])),
   };
   return map[name] as AnyProcedure | undefined;
 }

@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, organization, portalSettings, type PortalSettings } from "@confire/db";
 import type { Brand } from "../mail/layout.tsx";
 import { portalUrl } from "../tenant.ts";
+import { t } from "../i18n/index.ts";
 
 // The tenant's portal settings document (spec §6), loaded and saved whole. Both processes read it:
 // the internal Settings → Portal tab writes it, the portal's document reads apply it.
@@ -29,7 +30,7 @@ export async function tenantBrand(tenantId: string): Promise<{ slug: string; bra
       .from(organization).where(eq(organization.id, tenantId)).limit(1),
     loadPortalSettings(tenantId),
   ]);
-  if (!org) throw new ORPCError("NOT_FOUND", { message: "No such supplier" });
+  if (!org) throw new ORPCError("NOT_FOUND", { message: t("UNKNOWN_SUPPLIER") });
   const b = settings.branding ?? {};
   return {
     slug: org.slug,

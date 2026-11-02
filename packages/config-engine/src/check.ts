@@ -218,6 +218,17 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   };
   for (const k of computedKeys) visit(k, []);
 
+  // A hidden section's tables count no rows, and the items grid's rows are the quotation's lines.
+  const itemsKey = tableDefs.find((t) => t.role === "items")?.key;
+  model.structure.sections.forEach((s, i) => {
+    checkExpr(s.visibleWhen, `structure.sections[${i}].visibleWhen`, base);
+    if (s.visibleWhen !== undefined && s.groups.some((g) => isTableGroup(g) && g.table === itemsKey))
+      issues.push({ path: `structure.sections[${i}].visibleWhen`, message: "This section holds the item grid, which is always shown — move the grid or put the rule on its groups." });
+    s.groups.forEach((g, j) => {
+      if (!isTableGroup(g)) checkExpr(g.visibleWhen, `structure.sections[${i}].groups[${j}].visibleWhen`, base);
+    });
+  });
+
   // structure references. A group is either a table (naming one TableDef) or a list of parameter
   // keys — never both, so the two arms are checked separately.
   const seenPlaced = new Set<string>();
@@ -422,6 +433,10 @@ function* exprsOf(model: ModelDef): Generator<string> {
   for (const p of model.parameters)
     for (const e of [p.defaultExpr, p.visibleWhen, p.requiredWhen, p.priceExpr]) if (e) yield e;
   for (const c of model.computed) yield c.expr;
+  for (const s of model.structure.sections) {
+    if (s.visibleWhen) yield s.visibleWhen;
+    for (const g of s.groups) if (!isTableGroup(g) && g.visibleWhen) yield g.visibleWhen;
+  }
   for (const c of model.constraints) if (c.kind === "expr") { if (c.when) yield c.when; yield c.assert; }
   for (const l of model.bom) for (const e of [l.itemCode, l.condition, l.qty]) if (e) yield e;
   for (const o of model.routing)

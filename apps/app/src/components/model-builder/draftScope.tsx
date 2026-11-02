@@ -42,14 +42,24 @@ export function useModelDraft(): Scope {
   return value;
 }
 
-function colKeys(columns: unknown): string[] {
-  if (!Array.isArray(columns)) return [];
+function colMeta(columns: unknown): { keys: string[]; labels?: Record<string, string> } {
+  if (!Array.isArray(columns)) return { keys: [] };
   const keys: string[] = [];
+  const labels: Record<string, string> = {};
   for (const c of columns) {
     if (typeof c === "string") keys.push(c);
-    else if (c && typeof c === "object" && "key" in c && typeof c.key === "string") keys.push(c.key);
+    else if (c && typeof c === "object" && "key" in c && typeof c.key === "string") {
+      keys.push(c.key);
+      if ("label" in c && typeof c.label === "string" && c.label.trim()) labels[c.key] = c.label.trim();
+    }
   }
-  return keys;
+  return { keys, ...(Object.keys(labels).length ? { labels } : {}) };
+}
+
+function keptLabels(raw: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!raw) return undefined;
+  const labels = Object.fromEntries(Object.entries(raw).filter(([, l]) => l.trim() !== ""));
+  return Object.keys(labels).length ? labels : undefined;
 }
 
 /** Owns the model record for the builder and its parameter and table pages. The layout stays
@@ -66,7 +76,7 @@ export function ModelDraftScope({ id }: { id?: string }) {
 function Loaded({ id, row, masterdata }: {
   id?: string;
   row?: ModelRow;
-  masterdata: { name: string; kind: "table" | "query"; columns: unknown; query: { columns: string[]; target?: "b1" | "beas" } | null }[];
+  masterdata: { name: string; kind: "table" | "query"; columns: unknown; query: { columns: string[]; labels?: Record<string, string>; target?: "b1" | "beas" } | null }[];
 }) {
   const i18n = useI18n();
   const t: Translate = (key, ...params) => i18n.getText(key, ...params);
@@ -80,11 +90,15 @@ function Loaded({ id, row, masterdata }: {
   // Masterdata is one namespace: a model references a maintained table and a live query the same
   // way, so both kinds go into checkModel and into the expression suggestions.
   const tableCols = useMemo<TableCols[]>(
-    () => masterdata.map((m) => ({
-      name: m.name, kind: m.kind,
-      columns: m.kind === "query" ? (m.query?.columns ?? []) : colKeys(m.columns),
-      target: m.query?.target,
-    })),
+    () => masterdata.map((m) => {
+      const meta = m.kind === "query" ? { keys: m.query?.columns ?? [] } : colMeta(m.columns);
+      const labels = m.kind === "query" ? keptLabels(m.query?.labels) : meta.labels;
+      return {
+        name: m.name, kind: m.kind, columns: meta.keys,
+        ...(labels ? { labels } : {}),
+        target: m.query?.target,
+      };
+    }),
     [masterdata],
   );
   // One check per record object: the record's validate and the page's own reads share it.

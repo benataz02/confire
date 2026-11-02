@@ -24,6 +24,18 @@ describe("bindings", () => {
     expect(bindings(model, lookups, { coated: true }).visible.color).toBe(true);
   });
 
+  test("HAS on an empty multi-select is false, so the rule hides", () => {
+    const m = structuredClone(model);
+    m.parameters.push(
+      { key: "finish", label: "Finish", type: "string", ui: "multicombo", domain: { kind: "options", ref: { source: "manual", options: [{ value: "gloss" }] } } },
+      { key: "note", label: "Note", type: "string", ui: "input", visibleWhen: 'HAS(finish, "gloss")' },
+    );
+    expect(bindings(m, lookups, {}).visible.note).toBe(false);
+    expect(bindings(m, lookups, { finish: [] }).visible.note).toBe(false);
+    expect(bindings(m, lookups, { finish: null }).visible.note).toBe(false);
+    expect(bindings(m, lookups, { finish: ["gloss"] }).visible.note).toBe(true);
+  });
+
   test("a hidden parameter is null: its entry and its default are both ignored", () => {
     const b = bindings(model, lookups, { coated: false, color: "red" });
     expect(b.visible.color).toBe(false);

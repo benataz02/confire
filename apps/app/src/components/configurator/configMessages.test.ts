@@ -136,11 +136,12 @@ test("a value outside its options jumps to the field", () => {
   expect([msg!.text, msg!.anchor]).toEqual(["9 is not one of the options of Width", '[data-param="width"]']);
 });
 
-test("a failed calculation says why; a refused and an undelivered edit say what happened to it", () => {
-  expect(configMessages({ ...base, calculation: { state: "failed", message: "No valid configuration" } })[0]!.text).toBe("No valid configuration");
+test("a failure is titled with what failed and described by the server's why", () => {
+  const calc = configMessages({ ...base, calculation: { state: "failed", message: "No valid configuration" } })[0]!;
+  expect([calc.text, calc.detail]).toEqual(["The configuration could not be calculated.", "No valid configuration"]);
   const refused = configMessages({ ...base, writeError: { refused: true, error: new Error("width: read-only") } })[0]!;
-  expect([refused.text, refused.detail]).toEqual(["width: read-only", "Not saved: the form shows what is stored."]);
-  expect(configMessages({ ...base, writeError: { refused: false, error: new Error("offline") } })[0]!.detail).toBe("Not saved yet: press Retry.");
+  expect([refused.text, refused.detail]).toEqual(["Not saved: the form shows what is stored.", "width: read-only"]);
+  expect(configMessages({ ...base, writeError: { refused: false, error: new Error("offline") } })[0]!.text).toBe("Not saved yet: press Retry.");
 });
 
 test("a clean configuration has nothing to say", () => {
@@ -157,5 +158,5 @@ test("read-only says why: quoted internally, or the request's status — the cli
 
 test("every failed change is its own message, so an old one cannot hide a newer one", () => {
   const msgs = configMessages({ ...base, configErrors: [new Error("rename"), null, new Error("delete")] });
-  expect(msgs.map((m) => m.text)).toEqual(["rename", "delete"]);
+  expect(msgs.map((m) => m.detail)).toEqual(["rename", "delete"]);
 });

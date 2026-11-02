@@ -9,6 +9,7 @@ import type { Val } from "@confire/config-engine";
 import { sameJson } from "./canon.ts";
 import { staffOf } from "./notifications.ts";
 import { notifyInBackground } from "./notify.ts";
+import { t, type TextKey } from "./i18n/index.ts";
 
 // A project's lifecycle (spec §7): the ONLY writer of config_project.status and of
 // config_project_event. Both processes import it — the portal's buyer actions and the internal
@@ -42,11 +43,12 @@ export const canWrite = (p: Pick<ConfigProject, "status" | "portalCardCode">, si
   p.portalCardCode === null ? side === "internal" && p.status !== "quoted"
   : side === "external" ? p.status === "draft" || p.status === "returned" : p.status === "in_review";
 
-/** Client-facing words for a status (spec §7). */
-export const STATUS_LABEL: Record<ProjectStatus, string> = {
-  draft: "Draft", submitted: "Submitted", in_review: "In review", returned: "Changes requested",
-  declined: "Declined", quoted: "Quoted",
+/** Client-facing words for a status (spec §7), in the request's language. */
+const STATUS_TEXT: Record<ProjectStatus, TextKey> = {
+  draft: "STATUS_DRAFT", submitted: "STATUS_SUBMITTED", in_review: "STATUS_IN_REVIEW", returned: "STATUS_RETURNED",
+  declined: "STATUS_DECLINED", quoted: "STATUS_QUOTED",
 };
+const statusWord = (s: ProjectStatus) => t(STATUS_TEXT[s]).toLowerCase();
 
 const TRANSITIONS = {
   submit: { from: ["draft"], to: "submitted", side: "external", kind: "submitted" },
@@ -183,9 +185,9 @@ export async function assign(tenantId: string, projectId: string, actor: Actor, 
       .where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId)))
       .for("update");
     const row = fenced(locked, actor);
-    if (row.portalCardCode === null) throw new ORPCError("BAD_REQUEST", { message: "Only a client's request has an assignee" });
+    if (row.portalCardCode === null) throw new ORPCError("BAD_REQUEST", { message: t("ASSIGN_ONLY_REQUESTS") });
     const [target] = await staffOf(tenantId, eq(member.userId, assigneeId));
-    if (!target) throw new ORPCError("BAD_REQUEST", { message: "Only someone in this workspace can be assigned" });
+    if (!target) throw new ORPCError("BAD_REQUEST", { message: t("ASSIGN_ONLY_STAFF") });
     if (row.assigneeId === assigneeId) return { eventId: null, name: target.name };
     await tx.update(configProject).set({ assigneeId, updatedAt: new Date() }).where(eq(configProject.id, projectId));
     const eventId = await append(tx, {
@@ -212,15 +214,15 @@ export async function assertWritable(
   const p = fenced(row, actor);
   if (p.portalCardCode === null) {
     if (actor.side === "external") throw new ORPCError("NOT_FOUND");
-    if (p.status === "quoted") throw new ORPCError("CONFLICT", { message: "Configuration is quoted and locked" });
+    if (p.status === "quoted") throw new ORPCError("CONFLICT", { message: t("CONFIG_QUOTED_LOCKED") });
     return p;
   }
   if (!canWrite(p, actor.side)) {
     throw new ORPCError("CONFLICT", {
       message: actor.side === "external"
-        ? `This project is ${STATUS_LABEL[p.status].toLowerCase()} and can't be changed`
-        : p.status === "submitted" ? "Accept the request before editing it"
-        : `The request is ${STATUS_LABEL[p.status].toLowerCase()} and can't be changed`,
+        ? t("PROJECT_LOCKED", statusWord(p.status))
+        : p.status === "submitted" ? t("REQUEST_ACCEPT_FIRST")
+        : t("REQUEST_LOCKED", statusWord(p.status)),
     });
   }
   return p;
@@ -248,31 +250,31 @@ export async function transition(o: {
 }
 
 async function step(tx: Tx, o: Parameters<typeof transition>[0]) {
-  const t = TRANSITIONS[o.action];
-  if (o.actor.side !== t.side) throw new ORPCError("FORBIDDEN");
+  const tr = TRANSITIONS[o.action];
+  if (o.actor.side !== tr.side) throw new ORPCError("FORBIDDEN");
   const [locked] = await tx.select().from(configProject)
     .where(and(eq(configProject.id, o.projectId), eq(configProject.tenantId, o.tenantId)))
     .for("update");
   const row = fenced(locked, o.actor);
 
   const internalOnly = row.portalCardCode === null;
-  const from: readonly ProjectStatus[] = o.action === "quote" && internalOnly ? ["draft"] : t.from;
+  const from: readonly ProjectStatus[] = o.action === "quote" && internalOnly ? ["draft"] : tr.from;
   if (!from.includes(row.status) || (internalOnly && o.action !== "quote")) {
     throw new ORPCError("CONFLICT", {
-      message: `This project is ${STATUS_LABEL[row.status].toLowerCase()} now — reload to see what changed`,
+      message: t("PROJECT_MOVED_ON", statusWord(row.status)),
     });
   }
   // Accept is final: it leaves the status `quoted`, so only this check refuses a decline after it.
   // A new `quote` clears the response, which makes the next quotation answerable again.
   if ((o.action === "quoteAccept" || o.action === "quoteDecline") && row.quoteResponse !== null)
-    throw new ORPCError("CONFLICT", { message: "This quotation has already been answered" });
+    throw new ORPCError("CONFLICT", { message: t("QUOTE_ALREADY_ANSWERED") });
   if (o.expectCalculatedAt && row.calculatedAt?.getTime() !== o.expectCalculatedAt.getTime())
-    throw new ORPCError("CONFLICT", { message: "The configuration changed while it was being checked — try again" });
+    throw new ORPCError("CONFLICT", { message: t("CONFIG_CHANGED_WHILE_CHECKING") });
 
   // One `revised` per round, written at the transition that closes it (§7.4) — never per edit.
   // It mails nobody on its own: the transition's own mail lists it.
   let revisedId: string | null = null;
-  if ("revise" in t && !internalOnly) {
+  if ("revise" in tr && !internalOnly) {
     const [base] = await tx.select({ payload: configProjectEvent.payload }).from(configProjectEvent)
       .where(and(eq(configProjectEvent.projectId, row.id), inArray(configProjectEvent.kind, INPUT_EVENTS)))
       .orderBy(desc(configProjectEvent.at)).limit(1);
@@ -284,7 +286,7 @@ async function step(tx: Tx, o: Parameters<typeof transition>[0]) {
   const now = new Date();
   await tx.update(configProject)
     .set({
-      status: t.to, updatedAt: now,
+      status: tr.to, updatedAt: now,
       // Accept takes the request only when nobody holds it: one reassigned before anyone accepted stays put.
       ...(o.action === "accept" ? { assigneeId: row.assigneeId ?? o.actor.userId } : {}),
       ...(o.action === "quoteAccept" ? { quoteResponse: "accepted" as const, quoteRespondedAt: now } : {}),
@@ -294,8 +296,8 @@ async function step(tx: Tx, o: Parameters<typeof transition>[0]) {
     })
     .where(eq(configProject.id, row.id));
   const eventId = await append(tx, {
-    tenantId: o.tenantId, projectId: row.id, kind: t.kind, actor: o.actor,
+    tenantId: o.tenantId, projectId: row.id, kind: tr.kind, actor: o.actor,
     note: o.note?.trim() || null, payload: o.payload?.(row) ?? null,
   });
-  return { from: row.status, to: t.to, eventId, revisedId };
+  return { from: row.status, to: tr.to, eventId, revisedId };
 }

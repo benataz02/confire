@@ -1,6 +1,7 @@
 import { andFilter, encodeBool, escapeLiteral, isYesNo, type B1Field, type B1EntitySchema, type QueryOptions } from "@confire/b1";
 import type { FilterCond, ListQuery } from "@confire/db";
 import { searchTargets } from "./list-sql.ts";
+import { t } from "./i18n/index.ts";
 
 // Compile a list query (ListQuery) into a B1 read. list-sql.ts compiles the same query to SQL for
 // Confire's own tables — same query, same rules, one executed by B1 and one by Postgres.
@@ -16,7 +17,7 @@ const literal = (f: B1Field, value: string | number | boolean): string => {
   switch (f.kind) {
     case "number":
       if (typeof value === "boolean" || !Number.isFinite(Number(value)))
-        throw new Error(`'${f.name}' needs a number, got '${value}'`);
+        throw new Error(t("FILTER_NEEDS_NUMBER", f.name, String(value)));
       return String(Number(value));
     case "boolean": {
       const on = value === true || value === "true" || value === "tYES";
@@ -44,7 +45,7 @@ const condition = (cond: FilterCond, f: B1Field): string => {
     if (!values.length) return "1 eq 0";
     return values.map((v) => `${f.name} eq ${literal(f, v)}`).join(" or ");
   }
-  if (Array.isArray(cond.value)) throw new Error(`Filter '${cond.field}' ${cond.op} needs a single value`);
+  if (Array.isArray(cond.value)) throw new Error(t("FILTER_SINGLE_VALUE", cond.field, cond.op));
   return `${f.name} ${cond.op} ${literal(f, cond.value)}`;
 };
 
@@ -73,7 +74,7 @@ export function compileList(
   let filter: string | undefined;
   for (const cond of query.filter) {
     const f = byName.get(cond.field);
-    if (!f) throw new Error(`Filter field '${cond.field}' is not on ${schema.name}`);
+    if (!f) throw new Error(t("FILTER_FIELD_NOT_ON", cond.field, schema.name));
     filter = andFilter(filter, condition(cond, f));
   }
 

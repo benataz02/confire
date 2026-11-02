@@ -18,8 +18,24 @@ export function issueText(e: { message: string; from?: number; to?: number }, te
 
 /** One tenant masterdata table, as the builder needs it: a name, its column keys, and which
  *  kind it is. Both kinds share one namespace — a model references either the same way.
- *  `target` is the query's system, for the badge a picker shows; absent on maintained rows. */
-export type TableCols = { name: string; kind: "table" | "query"; columns: string[]; target?: "b1" | "beas" };
+ *  `labels` is the column's display name where the masterdata named one (a maintained column's
+ *  label, or a query's `labels`). `target` is the query's system, for the badge a picker shows;
+ *  absent on maintained rows. */
+export type TableCols = {
+  name: string;
+  kind: "table" | "query";
+  columns: string[];
+  labels?: Record<string, string>;
+  target?: "b1" | "beas";
+};
+
+/** What the columns multi-select shows. The chip is the label when one was named; the key is
+ *  what is stored and what a formula writes, so it stays as secondary text in the list. */
+export function columnCaption(key: string, labels?: Record<string, string>): { text: string; additionalText?: string } {
+  const label = labels?.[key]?.trim();
+  if (!label || label === key) return { text: key };
+  return { text: label, additionalText: key };
+}
 
 /** Where a source's rows live, as one word next to its name in a picker. Beas and SAP stay as names. */
 export const sourceBadge = (table: TableCols, t: (key: string, ...params: string[]) => string) =>

@@ -1,5 +1,5 @@
 import {
-  refKeyCols,
+  isTableGroup, refKeyCols,
   type FormState, type LookupRef, type ModelDef, type Param, type ResolvedLookups, type ResolvedTable,
   type TableDef, type TableRows,
 } from "@confire/config-engine";
@@ -36,14 +36,24 @@ function portalTable(t: TableDef): TableDef {
         ...(t.minRows === undefined ? {} : { minRows: t.minRows }), ...(t.maxRows === undefined ? {} : { maxRows: t.maxRows }) };
 }
 
-/** name, description, parameters (display shape), structure, tables (display shape). computed,
- *  constraints, bom, routing, history and pricing stay out. */
+/** The structure without its visibility rules: what they hide arrives as toPortalForm's `hidden`. */
+function portalStructure(s: ModelDef["structure"]): ModelDef["structure"] {
+  return {
+    sections: s.sections.map(({ key, title, groups }) => ({
+      key, title,
+      groups: groups.map((g) => (isTableGroup(g) ? { table: g.table } : { key: g.key, title: g.title, params: g.params })),
+    })),
+  };
+}
+
+/** name, description, parameters (display shape), structure (display shape), tables (display
+ *  shape). computed, constraints, bom, routing, history and pricing stay out. */
 export function toPortalModelDef(model: ModelDef): ModelDef {
   return {
     name: model.name,
     ...(model.description ? { description: model.description } : {}),
     parameters: model.parameters.map(portalParam),
-    structure: model.structure,
+    structure: portalStructure(model.structure),
     ...(model.tables ? { tables: model.tables.map(portalTable) } : {}),
     computed: [], constraints: [], bom: [], routing: [],
     pricing: { margin: 0, quoteItemCode: "" },

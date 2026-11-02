@@ -1,24 +1,29 @@
-import { useMemo, useRef, useState, type CSSProperties } from "react";
+import { useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import {
   Input, List, ResponsivePopover, SuggestionItem, SuggestionItemCustom, TextArea, type TextAreaDomRef,
 } from "@ui5/webcomponents-react";
 import generateHighlightedMarkup from "@ui5/webcomponents-base/dist/util/generateHighlightedMarkup.js";
 import { DslError, parse, type Issue, type ModelDef } from "@confire/config-engine";
 import { useI18n } from "../../i18n.ts";
+import { ExprHelp } from "./ExprGuide.tsx";
 import { complete, issueText, matches, scopeSuggestions, trailingIdent, type Suggestion, type TableCols } from "./exprHelpers.ts";
 
 // The one expression editor used everywhere in the builder: monospace, parse-on-change with
-// span-accurate messages, trailing-token suggestions in the Input's native popup. Each
-// suggestion's text is the *completed* expression, so picking one just fires onInput with it.
+// span-accurate messages, trailing-token suggestions in the Input's native popup, and the
+// expression guide on the help icon inside the field. Each suggestion's text is the *completed* expression,
+// so picking one just fires onInput with it.
 
 // Monospace inside the shadow DOM via the exposed `input`/`textarea` CSS parts.
-if (typeof document !== "undefined" && !document.getElementById("confire-expr-style")) {
-  const el = document.createElement("style");
+if (typeof document !== "undefined") {
+  const el = document.getElementById("confire-expr-style") ?? document.createElement("style");
   el.id = "confire-expr-style";
   el.textContent = `.confire-expr::part(input),.confire-expr::part(textarea){font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}`
+    // TextArea has no icon slot, so the help icon is overlaid and the text stops short of it.
+    + `.confire-expr-help::part(textarea){padding-inline-end:2rem;}`
+    + `.confire-expr-help-anchor{position:absolute;inset-inline-end:.35rem;inset-block-start:.35rem;z-index:1;line-height:0;}`
     // Input's own suggestions popover rules (Suggestions.css), which live in its shadow root.
     + `.confire-expr-pop{box-shadow:var(--sapContent_Shadow1);}.confire-expr-pop::part(header),.confire-expr-pop::part(content){padding:0;}`;
-  document.head.appendChild(el);
+  if (!el.parentNode) document.head.appendChild(el);
 }
 
 export function ExprInput({
@@ -78,6 +83,7 @@ export function ExprInput({
   // driven from the text's keys while the focus stays in it. -1 = nothing highlighted yet.
   const area = useRef<TextAreaDomRef>(null);
   const [open, setOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [active, setActive] = useState(-1);
   const shown = open && sugg.length > 0;
   const at = Math.min(active, sugg.length - 1);
@@ -88,14 +94,14 @@ export function ExprInput({
     area.current?.focus();
   };
 
-  // One wrapper: FormItem gives every direct child its own slot and splits the width between them.
-  if (rows)
-    return (
-      <div style={{ width: "100%" }}>
+  // One element: FormItem gives every direct child its own slot. The help icon is inside
+  // the field — Input's icon slot, or overlaid on a TextArea, which has no such slot.
+  const field = (icon: ReactElement) => rows ? (
+      <>
         <TextArea
           ref={area}
           id={fieldId}
-          className="confire-expr"
+          className="confire-expr confire-expr-help"
           style={{ width: "100%", ...style }}
           rows={rows}
           growing
@@ -136,6 +142,7 @@ export function ExprInput({
           onClick={() => setOpen(false)}
           data-expr-input
         />
+        <span className="confire-expr-help-anchor">{icon}</span>
         <ResponsivePopover className="confire-expr-pop" open={shown} opener={area.current} placement="Bottom"
           horizontalAlign="Start" hideArrow preventInitialFocus preventFocusRestore tabIndex={-1}
           style={{ minWidth: width || undefined, maxWidth: `max(40rem, ${width}px)` }}
@@ -154,18 +161,21 @@ export function ExprInput({
             ))}
           </List>
         </ResponsivePopover>
-      </div>
-    );
-
-  return (
+      </>
+  ) : (
     <Input
       id={fieldId}
       style={{ width: "100%", ...style }}
       className="confire-expr" // fontFamily via CSS part
+      icon={icon}
       value={text}
       placeholder={placeholder}
-      valueState={error ? "Negative" : "None"}
+      // Not while a completion is on offer: valueState Negative is drawn as that popover's
+      // header, so the unfinished-token message sits over the list (the TextArea drops it too).
+      valueState={error && !(focused && sugg.length > 0) ? "Negative" : "None"}
       valueStateMessage={<div>{errorText}</div>}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
       showSuggestions
       filter="None"
       noTypeahead // items carry the whole completed expression; autocompleting it while typing fights the caret
@@ -188,4 +198,5 @@ export function ExprInput({
       ))}
     </Input>
   );
+  return <ExprHelp>{field}</ExprHelp>;
 }

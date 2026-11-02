@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { addBatch, displayValue } from "./formHelpers.ts";
+import { addBatch, displayValue, multiItem } from "./formHelpers.ts";
 
 const yn = [
   { value: true, label: "Yes" },
@@ -24,6 +24,11 @@ test("displayValue: domain label, else the raw string; 0 is a value", () => {
 
 test("displayValue: multicombo joins labels", () => {
   expect(displayValue(["red", "blue"], colors)).toBe("Crimson, Azure");
+});
+
+test("multiItem: the chip is the label, the stored value is the key", () => {
+  expect(multiItem({ value: "red", label: "Crimson", extra: "matte" })).toEqual({ text: "Crimson", value: "red", additionalText: "matte" });
+  expect(multiItem({ value: 10, label: "10 mm" })).toEqual({ text: "10 mm", value: "10" });
 });
 
 test("addBatch: positive integers only, de-duped, ascending", () => {

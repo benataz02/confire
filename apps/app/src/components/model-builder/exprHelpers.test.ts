@@ -1,6 +1,6 @@
 import { describe, expect, it, test } from "bun:test";
 import type { ModelDef } from "@confire/config-engine";
-import { complete, matches, scopeSuggestions, trailingIdent, modelWithParam } from "./exprHelpers.ts";
+import { columnCaption, complete, matches, scopeSuggestions, trailingIdent, modelWithParam } from "./exprHelpers.ts";
 
 const model = {
   name: "m",
@@ -16,6 +16,13 @@ const model = {
 } as ModelDef;
 
 describe("exprHelpers", () => {
+  test("columnCaption: the chip is the label, the key stays beside it", () => {
+    expect(columnCaption("ItemCode")).toEqual({ text: "ItemCode" });
+    expect(columnCaption("ItemCode", { ItemCode: "Item code" })).toEqual({ text: "Item code", additionalText: "ItemCode" });
+    expect(columnCaption("Code", { Code: "  " })).toEqual({ text: "Code" });
+    expect(columnCaption("Code", { Code: "Code" })).toEqual({ text: "Code" });
+  });
+
   test("scopeSuggestions: params + computed + extras + functions", () => {
     const all = scopeSuggestions(model, ["qty"]);
     const names = all.map((s) => s.text);

@@ -12,13 +12,14 @@ test("the key is keyField, else the first column", () => {
   expect(keyFieldOf(cfl.priceLists())).toBe("PriceListNo");
 });
 
-test("a masterdata CFL starts the columns the parameter did not pick hidden, key and label never", () => {
+test("a masterdata CFL starts the columns the parameter did not pick hidden, the key among them, the label never", () => {
   const t = { columns: ["Code", "Name", "Density", "Colour"], rows: [] };
   const hidden = (columns?: string[]) => cfl.masterdataQuery({ modelId: "m" }, { source: "query", table: "mat", columns }, t)
     .columns.filter((c) => c.hidden).map((c) => c.key);
   expect(hidden()).toEqual([]);
-  expect(hidden(["Density"])).toEqual(["Colour"]);
-  expect(hidden([])).toEqual(["Density", "Colour"]);
+  expect(hidden(["Code", "Density"])).toEqual(["Colour"]);
+  expect(hidden(["Density"])).toEqual(["Code", "Colour"]);
+  expect(hidden([])).toEqual(["Code", "Density", "Colour"]);
 });
 
 test("N(): tokens become key values, blanks dropped; and back", () => {

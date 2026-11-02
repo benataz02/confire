@@ -219,6 +219,34 @@ describe.skipIf(!process.env.DATABASE_URL)("the configuration process", () => {
     at20.items.forEach((r, i) => expect(r!.unitPrice).toBeCloseTo(q.lines[i]!.UnitPrice as number, 8));
     expect(at20.items[1]).toMatchObject({ unitPrice: 4, typed: true });
   });
+
+  test("a broken rule keeps the last calculation; fixing it prices again", async () => {
+    const ruled: ModelDef = {
+      ...PRICED,
+      constraints: [{ kind: "expr", assert: 'size != "L"', message: "No large" }],
+    };
+    const s = await setup(ruled, 3);
+    const id = await s.create();
+    const price = (v: { candidates: { rows: { perBatch: { unitPrice: number }[] }[] }; costs: unknown[] }) =>
+      v.candidates.rows[0]!.perBatch[0]!.unitPrice;
+    const ok = await s.calc({ id, set: { size: "S" }, tables: { items: ITEMS } });
+    expect([ok.calculation.state, price(ok), ok.costs.length]).toEqual(["current", 6, 2]);
+
+    const broken = await s.calc({ id, set: { size: "L" } });
+    expect(broken.project.entries).toEqual({ size: "L" });
+    expect(broken.form.conflicts.map((c) => c.message)).toEqual(["No large"]);
+    expect(broken.calculation.state).toBe("waiting");
+    expect(broken.project.calculatedAt).not.toBeNull();
+    expect([price(broken), broken.costs.length, broken.candidates.rows.length]).toEqual([6, 2, 1]);
+
+    // A price sync while the rule is broken must not throw the last figures away.
+    await s.sync(9);
+    const held = await call(router.configs.get, { id }, s.ctx);
+    expect([held.calculation.state, price(held), held.form.conflicts.length]).toEqual(["waiting", 6, 1]);
+
+    const fixed = await s.calc({ id, set: { size: "S" } });
+    expect([fixed.calculation.state, fixed.form.conflicts, price(fixed)]).toEqual(["current", [], 18]);
+  });
 });
 
 describe.skipIf(!process.env.DATABASE_URL)("sources", () => {

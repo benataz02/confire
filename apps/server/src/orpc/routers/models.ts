@@ -10,6 +10,7 @@ import { masterdataRows } from "../../config-project.ts";
 import { ensureFresh, rowCache } from "../../masterdata-sync.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { copyName } from "../../copy-name.ts";
+import { t } from "../../i18n/index.ts";
 
 // Admin-only configurator model builder API. save is the gate: a model that passes
 // ModelDefZ + checkModel here can never produce a parse/unknown-ref error at runtime.
@@ -17,7 +18,7 @@ import { copyName } from "../../copy-name.ts";
 /** models.save/create reject an invalid definition with BAD_REQUEST + data.issues (span Issues). */
 function assertValid(definition: ModelDef, known: KnownTable[]) {
   const issues = checkModel(definition, known);
-  if (issues.length) throw new ORPCError("BAD_REQUEST", { message: "Model has errors", data: { issues } });
+  if (issues.length) throw new ORPCError("BAD_REQUEST", { message: t("MODEL_HAS_ERRORS"), data: { issues } });
 }
 
 /** The customer portal's columns beside the definition: optional on a save, defaulted on a create. */
@@ -142,7 +143,7 @@ export const modelsRouter = {
       .where(and(eq(configProject.tenantId, context.tenantId), inArray(configProject.modelId, input.ids)));
     if (inUse.length)
       throw new ORPCError("BAD_REQUEST", {
-        message: `${inUse.map((m) => m.name).join(", ")} ${inUse.length === 1 ? "is" : "are"} used by existing configurations`,
+        message: t(inUse.length === 1 ? "MODEL_IN_USE" : "MODELS_IN_USE", inUse.map((m) => m.name).join(", ")),
       });
     await db.delete(configModel).where(and(inArray(configModel.id, input.ids), eq(configModel.tenantId, context.tenantId)));
     return { ok: true };

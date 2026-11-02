@@ -18,11 +18,13 @@ import { ProposalCard, type Proposal } from "./ProposalCard.tsx";
 import { ExtractionCard, type ExtractResult } from "./ExtractionCard.tsx";
 import { QuoteCard, type QuoteDraft } from "./QuoteCard.tsx";
 import { ChoiceCard, type Ask } from "./ChoiceCard.tsx";
+import { B1WriteCard, type B1WriteOut } from "./B1WriteCard.tsx";
 
 // Tool name → card (plan "The look"). The tool's name picks the card, never the model, and the card
 // draws the tool's output, so its figures are the server's. A decision tool's card (steps.ts DECISION)
 // is drawn in the chat; every other one is the body of its step, shown when the step is opened. A
-// card's actions navigate or scroll the page; only the choice card answers the model, as the user.
+// card's actions navigate or scroll the page; only the choice card and a SAP write's card (its Post or
+// Discard) answer the model, as the user.
 
 export type ToolPart = { name: string; input: unknown; output: unknown; error?: string };
 
@@ -57,7 +59,7 @@ const DOC_TITLE: Record<string, string> = { Quotations: "NAV_QUOTATIONS", Orders
 export const CARDS: ReadonlySet<string> = new Set([
   "configs_rows", "requests_rows", "entities_rows", "configs_get", "configs_select", "configs_calculate",
   "configs_queryPage", "configs_similar", "configs_models", "configs_create", "home_overview", "read_request",
-  "extract_values", "propose_quotation", "timeline_list", "ask_user",
+  "extract_values", "propose_quotation", "timeline_list", "ask_user", "b1_write", "b1_copy",
 ]);
 
 export function renderTool(part: ToolPart, ctx: Ctx): ReactNode {
@@ -184,6 +186,9 @@ function ToolCard({ part, ctx }: { part: ToolPart; ctx: Ctx }) {
       return <ExtractionCard r={out as ExtractResult} ctx={ctx} />;
     case "ask_user":
       return <ChoiceCard ask={input as Ask} ctx={ctx} />;
+    case "b1_write":
+    case "b1_copy":
+      return <B1WriteCard out={out as B1WriteOut} ctx={ctx} />;
     case "propose_quotation":
       return <QuoteCard projectId={String(input.projectId ?? "")} d={out as QuoteDraft} />;
     case "timeline_list":

@@ -5,6 +5,7 @@ import { db, PORTAL_ROLES, portalCompany, portalCompanyDomain, type PortalCardTy
 import { portalMemberProcedure, portalOwnerProcedure } from "./base.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
 import { cancelInvitations, changeMember, companyPeople, emailDomain, sendInvitation } from "../members.ts";
+import { t } from "../../i18n/index.ts";
 
 // The customer's own company page (spec §9, §11): the business partner as SAP has it, colleagues,
 // and the registered domains. Everyone with a seat reads; only the owner invites, changes roles and
@@ -61,8 +62,8 @@ export const companyRouter = {
         if (!domains.includes(emailDomain(input.email))) {
           throw new ORPCError("FORBIDDEN", {
             message: domains.length
-              ? `You can invite addresses on ${domains.join(", ")}. Ask ${context.tenant.name} to invite anyone else.`
-              : `Your company has no registered email domain yet. Ask ${context.tenant.name} to invite your colleagues.`,
+              ? t("COMPANY_INVITE_DOMAINS", domains.join(", "), context.tenant.name)
+              : t("COMPANY_INVITE_NO_DOMAIN", context.tenant.name),
           });
         }
         return sendInvitation({
@@ -83,7 +84,7 @@ export const companyRouter = {
 
     cancelInvite: portalOwnerProcedure.input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
       if (!(await cancelInvitations(context.tenantId, [input.id], context.cardCode))) {
-        throw new ORPCError("NOT_FOUND", { message: "No open invitation with that id in your company" });
+        throw new ORPCError("NOT_FOUND", { message: t("COMPANY_INVITATION_UNKNOWN") });
       }
     }),
   },

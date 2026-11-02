@@ -137,6 +137,16 @@ describe("evaluate", () => {
     const s2 = { vars: { opts: ["a", "b"] as string[] } };
     expect(evaluate('HAS(opts, "a")', s2)).toBe(true);
     expect(evaluate('HAS(opts, "z")', s2)).toBe(false);
+    // An empty selection contains nothing: a stored [], a cleared field (null), or one never picked.
+    expect(evaluate('HAS(opts, "a")', { vars: { opts: [] } })).toBe(false);
+    expect(evaluate('HAS(opts, "a")', { vars: { opts: null } })).toBe(false);
+    expect(evaluate('HAS(unpicked, "a")', { vars: {} })).toBe(false);
+    // Empty contains nothing, so the sought value is not read — an unbound one must not
+    // turn the whole call into "could not decide".
+    expect(evaluate("HAS(unpicked, nosuch)", { vars: {} })).toBe(false);
+    expect(evaluate("HAS(opts, nosuch)", { vars: { opts: [] as string[] } })).toBe(false);
+    expect(() => evaluate("HAS(opts, nosuch)", s2)).toThrow(DslError);
+    expect(() => evaluate('HAS("nope", "a")', { vars: {} })).toThrow(DslError);
     expect(() => evaluate("opts + 1", s2)).toThrow(DslError);
     expect(() => evaluate('CONCAT(opts, "x")', s2)).toThrow(DslError);
   });

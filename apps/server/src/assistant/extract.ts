@@ -2,7 +2,7 @@ import { z } from "zod";
 import { call, ORPCError } from "@orpc/server";
 import { chat, type ContentPart } from "@tanstack/ai";
 import { and, eq } from "drizzle-orm";
-import { QTY_COL, refKeyCols, type Entries, type FieldOption, type FormState, type LookupRef, type ModelDef, type Param, type TableColumn, type TableDef, type TableRows, type Val } from "@confire/config-engine";
+import { isTableGroup, QTY_COL, refKeyCols, type Entries, type FieldOption, type FormState, type LookupRef, type ModelDef, type Param, type TableColumn, type TableDef, type TableRows, type Val } from "@confire/config-engine";
 import { configProject, type ValueSource } from "@confire/db";
 import { queryTablePage } from "../config-project.ts";
 import { PatchZ, patchProblems } from "../config-patch.ts";
@@ -12,6 +12,7 @@ import { assertWritable, internalVisible } from "../project-lifecycle.ts";
 import { fileParts, type FileRef } from "./files.ts";
 import { modelOptions, textAdapter } from "./model.ts";
 import { assertAssistant, meter, type Meter } from "./usage.ts";
+import { t as text } from "../i18n/index.ts";
 
 // Extraction (assistant spec §4.4): one structured call reads the client's files against the chosen
 // model, and the server turns the answer into one `configs.calculate` patch plus questions. This half
@@ -83,11 +84,18 @@ export function modelBlock(def: ModelDef, form: FormState): string {
   const out = [`# Model: ${def.name}`];
   if (def.description) out.push(def.description);
   out.push("", "## Parameters (key — label)");
+  // A field shows only while its section's, its group's and its own rule all hold.
+  const shownWhen = new Map<string, string[]>();
+  for (const s of def.structure.sections)
+    for (const g of s.groups)
+      if (!isTableGroup(g))
+        for (const k of g.params) shownWhen.set(k, [s.visibleWhen, g.visibleWhen].filter((r): r is string => !!r));
   for (const p of writable(def)) {
     const facts = [`${p.ui === "multicombo" ? "list of " : ""}${TYPE[p.type]}${p.unit ? `, ${p.unit}` : ""}`];
     if (p.mandatory) facts.push("required");
     if (p.requiredWhen) facts.push(`required when ${p.requiredWhen}`);
-    if (p.visibleWhen) facts.push(`shown when ${p.visibleWhen}`);
+    const rules = [...(shownWhen.get(p.key) ?? []), ...(p.visibleWhen ? [p.visibleWhen] : [])];
+    if (rules.length) facts.push(`shown when ${rules.map((r) => (rules.length > 1 ? `(${r})` : r)).join(" && ")}`);
     let allowed = "";
     if (p.domain?.kind === "range") allowed = ` Range ${p.domain.min}–${p.domain.max}${p.domain.step ? ` step ${p.domain.step}` : ""}.`;
     else if (p.domain?.kind === "options" && p.domain.ref.source === "query") allowed = ` One ${namedList(p.domain.ref)}, searched by text.`;
@@ -301,7 +309,7 @@ export async function extractInto(ctx: Ctx, projectId: string, input: { refs: Fi
   const where = and(eq(configProject.id, projectId), eq(configProject.tenantId, ctx.tenantId), internalVisible)!;
   const before = await configView(ctx.tenantId, where);
   const parts = await fileParts(ctx.tenantId, input.refs, fence);
-  if (!parts.length && !input.text.trim()) throw new ORPCError("BAD_REQUEST", { message: "Nothing to read: drop a PDF, PNG or JPEG, or paste the text" });
+  if (!parts.length && !input.text.trim()) throw new ORPCError("BAD_REQUEST", { message: text("EXTRACT_NOTHING") });
 
   const m: Meter = { tenantId: ctx.tenantId, userId: ctx.userId, threadId: ctx.threadId, projectId, kind: "extract" };
   const x = await readExtraction({ def: before.live.model.definition, form: before.view.form, parts, text: input.text, meter: m });

@@ -4,6 +4,7 @@ import { masterdataRouter } from "./routers/masterdata.ts";
 import { configsRouter } from "./routers/configs.ts";
 import { entitiesRouter } from "./routers/entities.ts";
 import { sapRouter } from "./routers/sap.ts";
+import { b1Router } from "./routers/b1.ts";
 import { portalCompaniesRouter, portalInvitationsRouter, portalSettingsRouter } from "./routers/portal.ts";
 import { requestsRouter, timelineRouter } from "./routers/requests.ts";
 import { notificationsRouter } from "./routers/notifications.ts";
@@ -35,6 +36,8 @@ export const router = {
   configs: configsRouter,
   entities: entitiesRouter,
   sap: sapRouter,
+  // The assistant's SAP tools (b1-tools spec); `sap` is pairing and status.
+  b1: b1Router,
   portalInvitations: portalInvitationsRouter,
   portalCompanies: portalCompaniesRouter,
   portalSettings: portalSettingsRouter,

@@ -10,13 +10,14 @@ import * as schema from "@confire/db/schema";
 import { EXTERNAL_ROLES } from "@confire/db/schema";
 import { authUrl, cookieDomain, portalUrl, tenantSlug } from "./tenant.ts";
 import { authMail } from "./mail/auth-mail.tsx";
+import { t } from "./i18n/index.ts";
 
 /** The web's SLUG_RE is UX; this is the gate. Better Auth takes any non-empty slug, and one the path
  *  rule cannot hand back is a workspace no URL can ever reach — with a one-workspace limit and
  *  deletion off, its owner could not start over. */
 const assertSlug = (slug: string | undefined) => {
   if (slug !== undefined && tenantSlug(slug) !== slug) {
-    throw new APIError("BAD_REQUEST", { message: "Invalid workspace URL" });
+    throw new APIError("BAD_REQUEST", { message: t("WORKSPACE_URL_INVALID") });
   }
 };
 

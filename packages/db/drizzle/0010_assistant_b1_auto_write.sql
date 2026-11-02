@@ -1,0 +1,1 @@
+ALTER TABLE "assistant_settings" ADD COLUMN "b1_auto_write" boolean DEFAULT false NOT NULL;

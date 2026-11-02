@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gt, gte, ilike, lt, lte, ne, or, sql, type Column, 
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { ListQueryZ, type FilterCond, type ListQuery } from "@confire/db";
+import { t } from "./i18n/index.ts";
 
 // Compile a list query (ListQuery) into a Postgres WHERE + ORDER BY. entity-list.ts compiles the
 // same query to OData for B1; this one compiles it to SQL for the tenant's own tables (configs,
@@ -30,7 +31,7 @@ const condition = (cond: FilterCond, f: SqlField): SQL => {
     // Empty IN matches nothing (dropping it would show more rows than asked).
     return values.length ? or(...values.map((v) => eq(col, v)))! : sql`false`;
   }
-  if (Array.isArray(cond.value)) throw new Error(`Filter '${cond.field}' ${cond.op} needs a single value`);
+  if (Array.isArray(cond.value)) throw new Error(t("FILTER_SINGLE_VALUE", cond.field, cond.op));
   switch (cond.op) {
     // ilike, not like: applySpec lowercased both sides, so case-insensitive is what every saved
     // view was written against.
@@ -59,7 +60,7 @@ export const searchTargets = <F>(all: [string, F][], isString: (f: F) => boolean
   if (!named?.length) return all.filter(([, f]) => isString(f)).map(([, f]) => f);
   return named.map((n) => {
     const hit = all.find(([k]) => k === n);
-    if (!hit || !isString(hit[1])) throw new Error(`Search field '${n}' is not a text field on this list`);
+    if (!hit || !isString(hit[1])) throw new Error(t("SEARCH_FIELD_NOT_TEXT", n));
     return hit[1];
   });
 };
@@ -82,7 +83,7 @@ export function compileListSql(
 
   for (const cond of query.filter) {
     const f = fields[cond.field];
-    if (!f) throw new Error(`Filter field '${cond.field}' is not on this list`);
+    if (!f) throw new Error(t("FILTER_FIELD_NOT_ON_LIST", cond.field));
     clauses.push(condition(cond, f));
   }
 

@@ -5,10 +5,10 @@ import {
 import { derivedColumns, displayColumns, type LookupRef, type Param } from "@confire/config-engine";
 import { FORM_LAYOUT } from "@confire/ui/formLayout.ts";
 import { EditGrid } from "@confire/ui/list-report/EditGrid.tsx";
-import { GridForm } from "@confire/ui/list-report/Grid.tsx";
+import { TABLE_ITEM } from "@confire/ui/list-report/Grid.tsx";
 import { ownColumns } from "@confire/ui/metadata.ts";
 import type { ListColumn, Row } from "@confire/ui/types.ts";
-import { masterdataRef, sourceBadge, type TableCols } from "./exprHelpers.ts";
+import { columnCaption, masterdataRef, sourceBadge, type TableCols } from "./exprHelpers.ts";
 import { useI18n } from "../../i18n.ts";
 import type { Translate } from "./builderMessages.ts";
 
@@ -61,29 +61,27 @@ export function ParamDomain({ p, set, tables }: {
   const sourceRef = ref && ref.source !== "manual" ? ref : null;
   const rangeDomain = p.domain?.kind === "range" ? p.domain : undefined;
   return (
-    <>
-      <Form layout={FORM_LAYOUT} accessibleMode="Edit" accessibleName={t("MODEL_DOMAIN")}>
-        <FormGroup>
-          <FormItem labelContent={label(t("MODEL_DOMAIN_FROM"))}>
-            <Select accessibleName={t("MODEL_DOMAIN")} value={domainKind(p.domain)} style={W}
-              onChange={(e) => set({ domain: newDomain(optValue(e), tables) })}>
-              {DOMAIN_KINDS.map(([v, l]) => <Option key={v} value={v}>{t(l)}</Option>)}
-            </Select>
-          </FormItem>
-          {/* About the domains of the *other* parameters, so it belongs here rather than among the flags. */}
-          <FormItem labelContent={label(t("MODEL_EXCLUDE"))}>
-            <CheckBox accessibleName={t("MODEL_EXCLUDE")} checked={!!p.excludeFromDomains}
-              onChange={(e) => set({ excludeFromDomains: e.target.checked || undefined })} />
-          </FormItem>
-          {rangeDomain ? <RangeEditor value={rangeDomain} onChange={(domain) => set({ domain })} /> : null}
-          {sourceRef ? (
-            <SourceRefEditor ref_={sourceRef} tables={tables} onChange={(r) => set({ domain: { kind: "options", ref: r } })} />
-          ) : null}
-        </FormGroup>
-      </Form>
-      {/* A list of records is a table, in a Form of its own like every grid. */}
+    <Form layout={FORM_LAYOUT} accessibleMode="Edit" accessibleName={t("MODEL_DOMAIN")}>
+      {/* Spans the Form: beside the options group it would otherwise get one column of two. */}
+      <FormGroup colSpan={FORM_LAYOUT}>
+        <FormItem labelContent={label(t("MODEL_DOMAIN_FROM"))}>
+          <Select accessibleName={t("MODEL_DOMAIN")} value={domainKind(p.domain)} style={W}
+            onChange={(e) => set({ domain: newDomain(optValue(e), tables) })}>
+            {DOMAIN_KINDS.map(([v, l]) => <Option key={v} value={v}>{t(l)}</Option>)}
+          </Select>
+        </FormItem>
+        {/* About the domains of the *other* parameters, so it belongs here rather than among the flags. */}
+        <FormItem labelContent={label(t("MODEL_EXCLUDE"))}>
+          <CheckBox accessibleName={t("MODEL_EXCLUDE")} checked={!!p.excludeFromDomains}
+            onChange={(e) => set({ excludeFromDomains: e.target.checked || undefined })} />
+        </FormItem>
+        {rangeDomain ? <RangeEditor value={rangeDomain} onChange={(domain) => set({ domain })} /> : null}
+        {sourceRef ? (
+          <SourceRefEditor ref_={sourceRef} tables={tables} onChange={(r) => set({ domain: { kind: "options", ref: r } })} />
+        ) : null}
+      </FormGroup>
       {manualRef ? <ManualOptions ref_={manualRef} onChange={(r) => set({ domain: { kind: "options", ref: r } })} /> : null}
-    </>
+    </Form>
   );
 }
 
@@ -122,7 +120,8 @@ function SourceRefEditor({ ref_, tables, onChange }: {
 }) {
   const i18n = useI18n();
   const t: Translate = (key, ...params) => i18n.getText(key, ...params);
-  const cols = tables.find((table) => table.name === ref_.table)?.columns ?? [];
+  const source = tables.find((row) => row.name === ref_.table);
+  const cols = source?.columns ?? [];
   const extra = derivedColumns(ref_, cols);
   const displayed = displayColumns(ref_, cols);
 
@@ -140,12 +139,15 @@ function SourceRefEditor({ ref_, tables, onChange }: {
         </Select>
       </FormItem>
       <FormItem labelContent={label(t("MODEL_COLS_SHOWN"))}>
-        <MultiComboBox style={W} accessibleName={t("MODEL_COLS_SHOWN")}
+        <MultiComboBox style={W} accessibleName={t("MODEL_COLS_SHOWN")} selectedValues={displayed}
           onSelectionChange={(e) => {
-            const sel = e.detail.items.map((i) => (i as HTMLElement).getAttribute("text")!);
+            const sel = e.detail.items.flatMap((i) => (i.value ? [i.value] : []));
             onChange({ ...ref_, columns: sel.length === extra.length ? undefined : sel });
           }}>
-          {extra.map((c) => <MultiComboBoxItem key={c} text={c} selected={displayed.includes(c)} />)}
+          {extra.map((c) => {
+            const cap = columnCaption(c, source?.labels);
+            return <MultiComboBoxItem key={c} value={c} text={cap.text} additionalText={cap.additionalText} />;
+          })}
         </MultiComboBox>
       </FormItem>
     </>
@@ -164,16 +166,20 @@ function ManualOptions({ ref_, onChange }: {
   ]), [i18n]);
   const rows = useMemo<Row[]>(() => ref_.options.map((o) => ({ value: o.value === null ? "" : String(o.value), label: o.label })), [ref_.options]);
   return (
-    <GridForm name={t("MODEL_OPTIONS")}>
-      <EditGrid title={t("MODEL_OPTIONS")} columns={columns} rows={rows} newRow={() => ({ value: "" })}
-        onChange={(next) => onChange({
-          ...ref_,
-          options: next.map((r) => {
-            const raw = String(r.value ?? "");
-            // numbers stay numbers so table constraints compare correctly
-            return { value: raw !== "" && !Number.isNaN(Number(raw)) ? Number(raw) : raw, label: (r.label as string | null) || undefined };
-          }),
-        })} />
-    </GridForm>
+    // A table group in ParamDomain's Form: it spans the Form and the item breaks out of the column
+    // flow (TABLE_ITEM); the grid's toolbar names it.
+    <FormGroup colSpan={FORM_LAYOUT}>
+      <FormItem className={TABLE_ITEM}>
+        <EditGrid title={t("MODEL_OPTIONS")} columns={columns} rows={rows} newRow={() => ({ value: "" })}
+          onChange={(next) => onChange({
+            ...ref_,
+            options: next.map((r) => {
+              const raw = String(r.value ?? "");
+              // numbers stay numbers so table constraints compare correctly
+              return { value: raw !== "" && !Number.isNaN(Number(raw)) ? Number(raw) : raw, label: (r.label as string | null) || undefined };
+            }),
+          })} />
+      </FormItem>
+    </FormGroup>
   );
 }

@@ -9,12 +9,13 @@ import { formState, referencedTables } from "@confire/config-engine";
 import { portalBuyerProcedure, portalMemberProcedure } from "./base.ts";
 import { quotationIn, tenantConnector, viaB1 } from "../../b1.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
-import { liveProject, loadModel, QueryPageZ, queryTablePage } from "../../config-project.ts";
+import { keepsCandidates, liveProject, loadModel, QueryPageZ, queryTablePage } from "../../config-project.ts";
 import { PatchZ, defaultQuantities, patchColumns, patchProblems, touchesEngine } from "../../config-patch.ts";
 import { assertWritable, inputsOf, recordCreated, transition, writableBy, type Action, type Actor } from "../../project-lifecycle.ts";
 import {
   toPortalForm, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalRows,
 } from "../projection.ts";
+import { t } from "../../i18n/index.ts";
 
 // The client's projects (spec §7, §9, §11). One project = one configuration, fenced on the seat's
 // company in every read and write. The engine runs here: the page gets the §7.1 projection and the
@@ -92,10 +93,10 @@ async function submit(c: Seat, id: string, action: Extract<Action, "submit" | "r
   const [p] = await db.select({ calculatedAt: configProject.calculatedAt }).from(configProject).where(eq(configProject.id, id)).limit(1);
   const gaps = [
     ...pl.missing.map((m) => m.message),
-    ...(pl.form.conflicts.length ? ["no conflicts"] : []),
+    ...(pl.form.conflicts.length ? [t("SUBMIT_NO_CONFLICTS")] : []),
   ];
-  if (gaps.length) throw new ORPCError("BAD_REQUEST", { message: `Before submitting: ${gaps.join("; ")}` });
-  if (!p?.calculatedAt) throw new ORPCError("BAD_REQUEST", { message: "The configuration is still calculating — try again in a moment" });
+  if (gaps.length) throw new ORPCError("BAD_REQUEST", { message: t("SUBMIT_GAPS", gaps.join("; ")) });
+  if (!p?.calculatedAt) throw new ORPCError("BAD_REQUEST", { message: t("SUBMIT_CALCULATING") });
   const indicative = pl.model.portalPricing === "indicative";
   await transition({
     tenantId: c.tenantId, projectId: id, action, actor: actorOf(c), expectCalculatedAt: p.calculatedAt!,
@@ -131,7 +132,7 @@ export const projectsRouter = {
     .input(z.object({ modelId: z.uuid(), name: z.string().trim().min(1).max(200) }))
     .handler(async ({ input, context }) => {
       const model = await loadModel(context.tenantId, input.modelId);
-      if (!model.portal) throw new ORPCError("NOT_FOUND", { message: "Model not found" });
+      if (!model.portal) throw new ORPCError("NOT_FOUND", { message: t("MODEL_NOT_FOUND") });
       return db.transaction(async (tx) => {
         const [ins] = await tx.insert(configProject).values({
           tenantId: context.tenantId, modelId: model.id, name: input.name,
@@ -161,13 +162,14 @@ export const projectsRouter = {
         eq(configProject.id, input.id), seatFence(context), eq(configProject.status, "draft"),
       ))
       .returning({ id: configProject.id });
-    if (!gone.length) throw new ORPCError("CONFLICT", { message: "Only a draft can be deleted" });
+    if (!gone.length) throw new ORPCError("CONFLICT", { message: t("PROJECT_DELETE_DRAFT_ONLY") });
     return { ok: true };
   }),
 
   /** One edit is one call (§7.1): write what changed, emptying the candidates in the same
    *  statement, and answer the payload — which calculates once the inputs are complete. A
-   *  calculation that fails keeps the edit and comes back as `calcError`. */
+   *  calculation that fails keeps the edit and comes back as `calcError`. A broken rule keeps the
+   *  last calculation: the prices stay, and the rule is the message. */
   calculate: portalBuyerProcedure
     .input(z.object({ id: z.uuid(), ...PatchZ }))
     .handler(async ({ input, context }) => {
@@ -177,13 +179,18 @@ export const projectsRouter = {
         const stored = await ownProject(context, id);
         const def = (await loadModel(context.tenantId, stored.modelId)).definition;
         const problems = patchProblems(def, patch, "external");
-        if (problems.length) throw new ORPCError("BAD_REQUEST", { message: `Not editable here: ${problems.join("; ")}` });
+        if (problems.length) throw new ORPCError("BAD_REQUEST", { message: t("PATCH_NOT_EDITABLE", problems.join("; ")) });
         defaultQuantities(def, patch);
+        const keep = await keepsCandidates(context.tenantId, stored, patch);
         const written = await db.update(configProject)
-          .set({ ...patchColumns(patch), candidates: [], selection: null, calculatedAt: null, updatedAt: new Date() })
+          .set({
+            ...patchColumns(patch),
+            ...(keep ? {} : { candidates: [], selection: null, calculatedAt: null }),
+            updatedAt: new Date(),
+          })
           .where(and(eq(configProject.id, id), seatFence(context), writableBy("external")))
           .returning({ id: configProject.id });
-        if (!written.length) throw new ORPCError("CONFLICT", { message: "This project moved on meanwhile — reload it" });
+        if (!written.length) throw new ORPCError("CONFLICT", { message: t("PROJECT_MOVED_RELOAD") });
       }
       return payload(context, id);
     }),
