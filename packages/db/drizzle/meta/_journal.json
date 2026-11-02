@@ -92,6 +92,13 @@
       "when": 1793622936780,
       "tag": "0012_tables_in_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793651886071,
+      "tag": "0013_assistant_lease_owner",
+      "breakpoints": true
     }
   ]
 }

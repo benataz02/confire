@@ -1,17 +1,17 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { db, assistantFile, assistantSettings, entityMeta } from "@confire/db";
+import { db, assistantFile, assistantSettings, assistantThread, configModel, configProject, entityMeta } from "@confire/db";
 import type { ModelMessage } from "@tanstack/ai";
 import { router } from "../src/orpc/router.ts";
 import { tenantConnector } from "../src/b1.ts";
 import { entitySchema } from "../src/entity-meta.ts";
 import { closestNames, postWrite, prepareWrite } from "../src/entity-write.ts";
-import { GENERAL, PAGES } from "../src/assistant/pages.ts";
+import { CHAT_TOOLS } from "../src/assistant/pages.ts";
 import { procedureOf } from "../src/assistant/tools.ts";
 import { proposed } from "../src/assistant/route.ts";
-import { newThread } from "../src/assistant/threads.ts";
-import { AUTO_WRITE_KEY } from "../src/assistant/auto.ts";
-import { call, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
+import { appendMessages, newThread } from "../src/assistant/threads.ts";
+import { AUTO_WRITE_KEY, readsClientContent } from "../src/assistant/auto.ts";
+import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
 // The SAP tools (b1-tools spec §8): one write core under two field rules, strict names on b1.read, the
@@ -69,12 +69,9 @@ test("a proposal of a SAP write ends the run; a written answer or another tool d
   expect(proposed(turn("b1_read", { proposal: 1 }))).toBe(false);
 });
 
-test("no tool set reaches b1.post, and every page outside the model builder can read and write SAP", () => {
-  for (const page of [...Object.values(PAGES), GENERAL])
-    for (const name of page.tools) expect(procedureOf(name)).not.toBe(router.b1.post);
-  expect(GENERAL.tools).toEqual(expect.arrayContaining(["b1_find", "b1_schema", "b1_read", "b1_write", "b1_copy"]));
-  expect(PAGES["/$slug/assistant/"]!.tools).toContain("b1_write");
-  expect(PAGES["/$slug/models/$id"]!.tools).not.toContain("b1_read");
+test("the chat's one tool set reaches SAP but never b1.post", () => {
+  for (const name of CHAT_TOOLS) expect(procedureOf(name)).not.toBe(router.b1.post);
+  expect(CHAT_TOOLS).toEqual(expect.arrayContaining(["b1_find", "b1_schema", "b1_read", "b1_write", "b1_copy"]));
 });
 
 describe.skipIf(!process.env.DATABASE_URL)("b1 tools", () => {
@@ -233,6 +230,35 @@ describe.skipIf(!process.env.DATABASE_URL)("b1 tools", () => {
     const posted = await call(router.b1.post, { proposal: (inv as { proposal: never }).proposal }, w.staff);
     expect(posted.written.entity).toBe("Invoices");
     expect(agent.store.Invoices![0]!.DocumentLines).toEqual([expect.objectContaining({ BaseType: 17, BaseEntry: 5, BaseLine: 0 })]);
+  });
+
+  test("auto still proposes once the chat read what a client wrote: this run, an earlier one, or a client's request", async () => {
+    const w = await world();
+    await autoOn(w);
+    const thread = await newThread(w.tenantId, w.u.userId);
+    const inChat = (extra = {}) => ({ context: { headers: w.headers, assistantThreadId: thread.id, ...extra } });
+    const write = (c: object) => call(router.b1.write, { entity: "Orders", key: 5, data: { Comments: "c" } }, c);
+    expect("written" in (await write(inChat()))).toBe(true);
+    // This run read a client's text (route.ts' guard sets it before the write runs).
+    expect("proposal" in (await write(inChat({ assistantClientContent: true })))).toBe(true);
+    // An earlier run did: its stored assistant message says so.
+    await appendMessages(thread.id, [{ role: "user", content: "x" }, { role: "assistant", content: "y", metadata: { clientContent: true } }]);
+    expect("proposal" in (await write(inChat()))).toBe(true);
+
+    // A configuration that is a client's request taints its own chat, and any run that reads it.
+    const [m] = await db.insert(configModel).values({ tenantId: w.tenantId, name: "Cable", definition: TEST_MODEL }).returning({ id: configModel.id });
+    const [req] = await db.insert(configProject).values({ tenantId: w.tenantId, modelId: m!.id, name: "Their request", portalCardCode: "C1", status: "submitted", createdBy: w.u.userId }).returning({ id: configProject.id });
+    const [own] = await db.insert(configProject).values({ tenantId: w.tenantId, modelId: m!.id, name: "Ours", createdBy: w.u.userId }).returning({ id: configProject.id });
+    const [rt] = await db.insert(assistantThread).values({ tenantId: w.tenantId, userId: w.u.userId, projectId: req!.id }).returning({ id: assistantThread.id });
+    expect("proposal" in (await write({ context: { headers: w.headers, assistantThreadId: rt!.id } }))).toBe(true);
+    expect(await readsClientContent(w.tenantId, "configs_get", { id: req!.id })).toBe(true);
+    expect(await readsClientContent(w.tenantId, "timeline_list", { projectId: req!.id })).toBe(true);
+    expect(await readsClientContent(w.tenantId, "configs_get", { id: own!.id })).toBe(false);
+    expect(await readsClientContent(w.tenantId, "requests_rows", {})).toBe(true);
+    expect(await readsClientContent(w.tenantId, "b1_read", { entity: "Orders", key: 5 })).toBe(false);
+    // Another workspace's request is not this one's.
+    const other = await makeTenant();
+    expect(await readsClientContent(other.tenantId, "configs_get", { id: req!.id })).toBe(false);
   });
 
   test("b1.post posts with the proposal's ETag; a record changed since is CONFLICT", async () => {

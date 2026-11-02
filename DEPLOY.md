@@ -203,7 +203,9 @@ CF_ACCESS_CLIENT_SECRET=...
 
 # The assistant: Claude (console.anthropic.com → API Keys). Unset = off for every workspace; each
 # workspace is also off until its admin turns it on in Settings → Assistant. Optional, with defaults:
-# ASSISTANT_MODEL (claude-sonnet-5-5) and ASSISTANT_MONTHLY_LIMIT_USD (25, per workspace, per month)
+# ASSISTANT_MODEL (claude-sonnet-5-5: the chat and the reading), ASSISTANT_INTAKE_MODEL
+# (claude-haiku-5-5: sorting a drop), ASSISTANT_EFFORT (high: the chat's; scripts/assistant-chat-eval.ts
+# measures the others) and ASSISTANT_MONTHLY_LIMIT_USD (25, per workspace, per month)
 ANTHROPIC_API_KEY=sk-ant-...
 
 # §4; until these are set the backup container restart-loops

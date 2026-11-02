@@ -30,15 +30,21 @@ export function useAssistantInvalidate() {
 /** A coded refusal from the route (off, over budget, busy…): the panel says why, not just "failed". */
 export type Refusal = { code: string; message: string } | null;
 
+/** The server's CUSTOM event for a declined answer (`stop_reason: "refusal"`, route.ts REFUSAL_EVENT). */
+const REFUSAL_EVENT = "confire.refusal";
+
 /** The chat over one thread. Mount it keyed by the thread id: a new configuration is a new chat. */
 export function useAssistantChat(thread: Thread) {
   const invalidate = useAssistantInvalidate();
   const [refusal, setRefusal] = useState<Refusal>(null);
+  // The model declined the last turn: the run ends with no answer, so the chat says so.
+  const [declined, setDeclined] = useState(false);
   // One connection per chat: a new one would recreate the client and drop the conversation.
   const connection = useMemo(() => fetchServerSentEvents("/api/assistant", () => ({
     headers: callHeaders(),
     fetchClient: (async (input: RequestInfo | URL, init?: RequestInit) => {
       const res = await fetch(input, init);
+      setDeclined(false);
       if (res.ok) setRefusal(null);
       else setRefusal(await res.clone().json().catch(() => ({ code: "ERROR", message: res.statusText })) as Refusal);
       return res;
@@ -49,6 +55,7 @@ export function useAssistantChat(thread: Thread) {
     threadId: thread.id,
     initialMessages: thread.messages,
     onFinish: invalidate,
+    onCustomEvent: (name) => { if (name === REFUSAL_EVENT) setDeclined(true); },
   });
-  return { chat, refusal, clearRefusal: () => setRefusal(null) };
+  return { chat, refusal, declined, clearRefusal: () => { setRefusal(null); setDeclined(false); } };
 }

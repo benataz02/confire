@@ -70,7 +70,8 @@ export async function listThreads(tenantId: string, userId: string, q?: string):
   const said = sql`exists (select 1 from jsonb_array_elements(${assistantThread.messages}) m
     where m->>'role' in ('user', 'assistant') and case jsonb_typeof(m->'content')
       when 'string' then m->>'content'
-      when 'array' then (select string_agg(p->>'content', ' ') from jsonb_array_elements(m->'content') p where p->>'type' = 'text')
+      when 'array' then (select string_agg(p->>'content', ' ') from jsonb_array_elements(m->'content') p
+        where p->>'type' = 'text' and coalesce(p->'metadata'->>'pageContext', '') <> 'true')
     end ilike ${like})`;
   return db.select({
     id: assistantThread.id, title: assistantThread.title, projectId: assistantThread.projectId,
@@ -117,28 +118,41 @@ export async function ownThread(tenantId: string, userId: string, threadId: stri
   return asThread(t);
 }
 
-/** One run at a time: a five-minute lease taken in one UPDATE. A second tab sending meanwhile is
- *  refused rather than interleaved into the history. The streamed chat takes and releases it around
- *  its run; everything else goes through `withThread`. */
-export async function takeLease(threadId: string): Promise<void> {
+/** One run at a time: a five-minute lease taken in one UPDATE, held by the id it answers. A second
+ *  tab sending meanwhile is refused rather than interleaved into the history. The streamed chat takes
+ *  it, renews it on every model call (`renewLease`) and releases it; everything else goes through
+ *  `withThread`. Only the holder renews or releases: a run that outlived its lease cannot free the
+ *  next run's. */
+export async function takeLease(threadId: string): Promise<string> {
+  const leaseId = crypto.randomUUID();
   const taken = await db.update(assistantThread)
-    .set({ busyUntil: sql`now() + interval '5 minutes'` })
+    .set({ busyUntil: sql`now() + interval '5 minutes'`, leaseId })
     .where(and(eq(assistantThread.id, threadId), or(isNull(assistantThread.busyUntil), lt(assistantThread.busyUntil, sql`now()`))))
     .returning({ id: assistantThread.id });
   if (!taken.length) throw new ORPCError("THREAD_BUSY", { message: text("CHAT_BUSY") });
+  return leaseId;
 }
 
-export async function releaseLease(threadId: string): Promise<void> {
-  await db.update(assistantThread).set({ busyUntil: null }).where(eq(assistantThread.id, threadId));
+/** Five more minutes for the holder; false when the lease is no longer its own. */
+export async function renewLease(threadId: string, leaseId: string): Promise<boolean> {
+  const r = await db.update(assistantThread).set({ busyUntil: sql`now() + interval '5 minutes'` })
+    .where(and(eq(assistantThread.id, threadId), eq(assistantThread.leaseId, leaseId)))
+    .returning({ id: assistantThread.id });
+  return r.length > 0;
+}
+
+export async function releaseLease(threadId: string, leaseId: string): Promise<void> {
+  await db.update(assistantThread).set({ busyUntil: null, leaseId: null })
+    .where(and(eq(assistantThread.id, threadId), eq(assistantThread.leaseId, leaseId)));
 }
 
 /** `fn` under the thread's lease, released when it settles. */
 export async function withThread<T>(threadId: string, fn: () => Promise<T>): Promise<T> {
-  await takeLease(threadId);
+  const lease = await takeLease(threadId);
   try {
     return await fn();
   } finally {
-    await releaseLease(threadId);
+    await releaseLease(threadId, lease);
   }
 }
 
@@ -159,19 +173,45 @@ export async function linkProject(threadId: string, projectId: string): Promise<
 const fileOf = (p: ContentPart): FileRef | null =>
   (p.type === "document" || p.type === "image") ? ((p.metadata as FileMeta | undefined)?.file ?? null) : null;
 
-/**
- * An earlier run's message as the model is sent it: without its thinking. Thinking is signed against
- * the conversation it was made in, prompts and tools included, and ours change between runs (the
- * page's section and tools, the model block, a deploy): replayed, a block is refused — "Invalid
- * `signature` in `thinking` block. The block is bound to a different conversation" (400, verified
- * 2026-10-28). A run's own thinking still goes back within the run, where nothing changes. The stored
- * message keeps it, so the panel still shows it.
- */
+/** A user turn's page context (route.ts `contextPart`): what the user is looking at, for the model
+ *  only. It rides in the stored turn, so the prompt prefix stays the same from turn to turn; the
+ *  panel, the chat search and `lastDrop` never show it. */
+export const isContext = (p: ContentPart): boolean =>
+  p.type === "text" && !!(p.metadata as { pageContext?: boolean } | undefined)?.pageContext;
+
+/** Stored messages as the panel gets them: without the page context parts. */
+export function withoutContext(ms: ModelMessage[]): ModelMessage[] {
+  return ms.map((m) => (m.role === "user" && Array.isArray(m.content) && m.content.some(isContext)
+    ? { ...m, content: m.content.filter((p) => !isContext(p)) } : m));
+}
+
+/** What an assistant message records about the run that produced it. `prefix` is the hash of that
+ *  run's system prompts and tools (route.ts `prefixHash`); `resetThinking` on a user turn marks a
+ *  thinking refusal, after which nothing older is replayed. */
+export type MessageMeta = { prefix?: string; resetThinking?: boolean };
+const metaOf = (m: ModelMessage) => (m.metadata ?? {}) as MessageMeta;
+
+/** An earlier run's message without its thinking. */
 export function withoutThinking(m: ModelMessage): ModelMessage {
   if (!m.thinking?.length) return m;
   const { thinking: _t, blockOrder, ...rest } = m;
   const order = blockOrder?.filter((b) => b.type !== "thinking");
   return order?.length ? { ...rest, blockOrder: order } : rest;
+}
+
+/**
+ * Stored messages with the thinking that may be sent back. A thinking block is signed against the
+ * conversation it was made in — system prompts and tools included — and replayed into another one it
+ * is refused: "Invalid `signature` in `thinking` block. The block is bound to a different
+ * conversation" (400, verified 2026-10-28). So a block goes back only when its run's prefix hash is
+ * this run's (the same prompts, tools, model, effort and adapter), and never from before a
+ * `resetThinking` turn. A message stripped once is stripped in every later run with this prefix too,
+ * so what a kept block was made against is what it is sent with. The stored message keeps its
+ * thinking either way, so the panel still shows it.
+ */
+export function replayable(ms: ModelMessage[], prefix: string): ModelMessage[] {
+  const reset = ms.findLastIndex((m) => m.role === "user" && metaOf(m).resetThinking);
+  return ms.map((m, i) => (m.role === "assistant" && (i < reset || metaOf(m).prefix !== prefix) ? withoutThinking(m) : m));
 }
 
 /** A message as it is stored: every file part keeps its reference and drops its bytes. */
@@ -208,7 +248,7 @@ export function lastDrop(ms: ModelMessage[]): { refs: FileRef[]; text: string } 
     const refs = m.content.map(fileOf).filter((r): r is FileRef => !!r);
     if (!refs.length) continue;
     const text = m.content
-      .filter((p) => p.type === "text" && !(p.metadata as { fileLabel?: boolean } | undefined)?.fileLabel)
+      .filter((p) => p.type === "text" && !(p.metadata as { fileLabel?: boolean } | undefined)?.fileLabel && !isContext(p))
       .map((p) => (p.type === "text" ? p.content : "")).join("\n");
     return { refs, text };
   }

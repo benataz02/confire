@@ -7,7 +7,9 @@
  *
  *   bun --env-file=.env scripts/assistant-eval.ts                 # count and estimated cost, spends nothing
  *   bun --env-file=.env scripts/assistant-eval.ts --yes           # run it
- *   bun --env-file=.env scripts/assistant-eval.ts --model claude-haiku-5-5 --limit 30 --yes
+ *   bun --env-file=.env scripts/assistant-eval.ts --model claude-opus-5-5 --intake-model claude-haiku-5-5 --limit 30 --yes
+ *
+ * The chat's own behaviour (sources, asking, never posting unasked) is `assistant-chat-eval.ts`.
  *
  * Stored entries are the final values, which the client may have revised after the drawing: every
  * difference is listed with its source for a person to mark misread or revised. Misreads are the bar.
@@ -43,6 +45,7 @@ function arg(name: string): string | undefined {
 async function main(): Promise<void> {
   // The model is read when model.ts loads, so it is set before the server modules are imported.
   if (arg("model")) process.env.ASSISTANT_MODEL = arg("model");
+  if (arg("intake-model")) process.env.ASSISTANT_INTAKE_MODEL = arg("intake-model");
   const limit = Number(arg("limit") ?? 30);
   const go = process.argv.includes("--yes");
 
@@ -53,7 +56,7 @@ async function main(): Promise<void> {
   const { modelBlock, readExtraction } = await import("../apps/server/src/assistant/extract.ts");
   const { docType, fileParts } = await import("../apps/server/src/assistant/files.ts");
   const { readRequest } = await import("../apps/server/src/assistant/intake.ts");
-  const { ASSISTANT_MODEL } = await import("../apps/server/src/assistant/model.ts");
+  const { ASSISTANT_MODEL, INTAKE_MODEL } = await import("../apps/server/src/assistant/model.ts");
   const { costOf } = await import("../apps/server/src/assistant/usage.ts");
 
   // Files first, sniffed: a case is a configuration with at least one file the assistant reads.
@@ -79,11 +82,12 @@ async function main(): Promise<void> {
     const { model, lookups } = await liveEngine(p.tenantId, { modelId: p.modelId, entries: {}, margin: null });
     const form = formState(model.definition, lookups, propagate(model.definition, lookups, {}, {}), {});
     const pages = byProject.get(p.id)!.reduce((n, f) => n + pagesOf(f.data), 0);
-    // twice: the intake proposal reads the same pages
-    estimate += 2 * costOf(ASSISTANT_MODEL, { input: pages * 1500 + modelBlock(model.definition, form, lookups.tables).length / 4, cacheRead: 0, cacheWrite: 0, output: 1000 });
+    // the reading, then the intake proposal over the same pages (on its own model)
+    estimate += costOf(ASSISTANT_MODEL, { input: pages * 1500 + modelBlock(model.definition, form, lookups.tables).length / 4, cacheRead: 0, cacheWrite: 0, output: 1000 })
+      + costOf(INTAKE_MODEL, { input: pages * 1500 + 1000, cacheRead: 0, cacheWrite: 0, output: 300 });
     cases.push({ p, model, form, tables: lookups.tables });
   }
-  console.log(`${cases.length} case(s) on ${ASSISTANT_MODEL}, estimated $${estimate.toFixed(2)}`);
+  console.log(`${cases.length} case(s) on ${ASSISTANT_MODEL} (intake ${INTAKE_MODEL}), estimated $${estimate.toFixed(2)}`);
   if (!go) {
     console.log("Nothing sent. Re-run with --yes to read them (this spends real money).");
     await pool.end();
@@ -99,9 +103,10 @@ async function main(): Promise<void> {
     // assisted configurations.
     const meter = { tenantId: EVAL, userId: EVAL, threadId: null, projectId: null, kind: "extract" as const };
     const x = await readExtraction({ def: model.definition, form, tables, parts, text: "", meter });
+    const intakeMeter = { ...meter, kind: "intake" as const };
     // The first call too: does it propose the model the configuration was made with? No SAP read is
     // wanted here, so its headers name no session and the customer lookup fails quietly.
-    const proposal = await readRequest({ headers: new Headers(), tenantId: p.tenantId }, { parts, text: "", meter });
+    const proposal = await readRequest({ headers: new Headers(), tenantId: p.tenantId }, { parts, text: "", meter: intakeMeter });
     const writable = model.definition.parameters.filter((q) => !q.readonly).map((q) => q.key);
     const r = scoreCase(p.entries, x, writable);
     totals.filled += r.filled; totals.asked += r.asked; totals.total += r.total; totals.differs += r.differs.length;
@@ -111,7 +116,7 @@ async function main(): Promise<void> {
       console.log(`  ${d.key}: read ${canon(d.read)}, stored ${canon(d.stored)} — ${d.source.file} p.${d.source.page ?? "-"} "${d.source.quote}"  [misread / revised?]`);
   }
   const [spent] = await db.select({ cost: sql<string>`coalesce(sum(${aiUsage.cost}), 0)` }).from(aiUsage)
-    .where(and(eq(aiUsage.tenantId, EVAL), eq(aiUsage.kind, "extract"), gte(aiUsage.at, started)));
+    .where(and(eq(aiUsage.tenantId, EVAL), inArray(aiUsage.kind, ["extract", "intake"]), gte(aiUsage.at, started)));
   const share = totals.total ? Math.round((totals.filled / totals.total) * 100) : 0;
   console.log(`\nfilled ${share}% (${totals.filled}/${totals.total}), asked ${totals.asked}, differs ${totals.differs}, model proposed ${totals.proposed}/${cases.length}, spent $${Number(spent?.cost ?? 0).toFixed(4)}`);
   await pool.end();

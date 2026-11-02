@@ -81,9 +81,12 @@ services:
       MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
       MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
       # The assistant (apps/server/src/assistant): Claude, staff process only. No key = off everywhere,
-      # whatever a workspace's switch says. Unset model/limit = claude-sonnet-5-5 and $25 a month.
+      # whatever a workspace's switch says. Unset = claude-sonnet-5-5 (chat, reading), claude-haiku-5-5
+      # (intake), effort high and $25 a month.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ASSISTANT_MODEL: ${ASSISTANT_MODEL:-}
+      ASSISTANT_INTAKE_MODEL: ${ASSISTANT_INTAKE_MODEL:-}
+      ASSISTANT_EFFORT: ${ASSISTANT_EFFORT:-}
       ASSISTANT_MONTHLY_LIMIT_USD: ${ASSISTANT_MONTHLY_LIMIT_USD:-}
     depends_on:
       db:

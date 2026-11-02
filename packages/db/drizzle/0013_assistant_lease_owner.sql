@@ -1,0 +1,1 @@
+ALTER TABLE "assistant_thread" ADD COLUMN "lease_id" uuid;

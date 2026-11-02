@@ -15,8 +15,10 @@ import { makeTenant } from "./harness.ts";
 const codeOf = (p: Promise<unknown>) => p.then(() => "OK", (e: { code?: string }) => e.code);
 afterEach(() => useTestAdapter(null));
 
-test("costOf: Sonnet 5.5 per MTok, cache reads at 0.10", () => {
-  expect(costOf("claude-sonnet-5-5", { input: 1e6, cacheRead: 1e6, cacheWrite: 1e6, output: 1e6 })).toBeCloseTo(2 + 0.10 + 2.5 + 10);
+test("costOf: Sonnet 5.5 per MTok, cache reads at 0.20, 1-hour writes at 4", () => {
+  expect(costOf("claude-sonnet-5-5", { input: 1e6, cacheRead: 1e6, cacheWrite: 1e6, output: 1e6 })).toBeCloseTo(2 + 0.20 + 2.5 + 10);
+  expect(costOf("claude-sonnet-5-5", { input: 0, cacheRead: 0, cacheWrite: 2e6, cacheWrite1h: 1e6, output: 0 })).toBeCloseTo(2.5 + 4);
+  expect(costOf("claude-opus-5-5", { input: 1e6, cacheRead: 1e6, cacheWrite: 0, output: 1e6 })).toBeCloseTo(4 + 0.20 + 20);
 });
 test("costOf: Haiku 5.5 switches to long-context prices past 100k prompt tokens", () => {
   expect(costOf("claude-haiku-5-5", { input: 100_001, cacheRead: 0, cacheWrite: 0, output: 0 })).toBeCloseTo(100_001 * 0.5 / 1e6);
@@ -26,7 +28,7 @@ test("tokensOf: promptTokens includes the cache parts", () => {
   expect(tokensOf({
     promptTokens: 100, completionTokens: 7, totalTokens: 107,
     promptTokensDetails: { cachedTokens: 60, cacheWriteTokens: 30 },
-  })).toEqual({ input: 10, cacheRead: 60, cacheWrite: 30, output: 7 });
+  })).toEqual({ input: 10, cacheRead: 60, cacheWrite: 30, cacheWrite1h: 0, output: 7 });
 });
 test("rateLimit: the 21st call in a minute is refused", () => {
   const u = crypto.randomUUID();

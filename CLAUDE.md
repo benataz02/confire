@@ -330,8 +330,10 @@ link (`sendOnSignIn`). The test harness verifies its users directly before signi
 `apps/server/src/assistant/` and `apps/app/src/assistant/` (`docs/superpowers/specs/2026-10-24-ai-assistant-design.md`;
 phases 1–3 built; MCP is §4.10). Claude through TanStack AI (`@tanstack/ai` + `-anthropic` on the
 server, `@tanstack/ai-react` in the app); `model.ts` is the one provider seam (`ASSISTANT_MODEL`,
-default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and the preload drops
-`ANTHROPIC_API_KEY`). Staff only: the portal has no assistant.
+default `claude-sonnet-5-5`, for the chat and the extraction; `ASSISTANT_INTAKE_MODEL`, default
+`claude-haiku-5-5` at low effort, for the intake; `ASSISTANT_EFFORT`, the chat's, default `high`;
+tests swap in `fakeText` with `useTestAdapter`, and the preload drops `ANTHROPIC_API_KEY`). Staff
+only: the portal has no assistant.
 
 - **Two fixed structured calls, then the chat.** A drop in the panel runs `assistant.intake`
   (`intake.ts`: model, customer, name over the models' descriptions — nothing is created), then
@@ -339,8 +341,15 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   to `project_file`), then `assistant.extract` (`extract.ts`). Typed messages go to the chat,
   `POST /api/assistant` (`route.ts`, AG-UI over SSE, staff process only). Intake and extract write
   their results into the thread as tool-call/result pairs, so the chat reads one history; their tools
-  (`read_request`, `extract_values`) are in every tool set because a request naming an undefined tool
-  is refused.
+  (`read_request`, `extract_values`) are in the chat's tool set because a request naming an undefined
+  tool is refused.
+- **The prompt prefix stays the same from turn to turn** (`route.ts`): one sorted tool set on every
+  page (`CHAT_TOOLS`, `pages.ts`), then `SYSTEM` and the thread's model block — the two system
+  markers — and the per-turn page note (`page.section`, the language) as a `pageContext` text part
+  opening the stored user turn (`contextText`; the panel, the search and `lastDrop` never show it,
+  `withoutContext`). `CHAT_OPTIONS` adds top-level `cache_control` — required: the adapter adds no
+  marker of its own once a request has one, so without it the history was never cached — and context
+  editing (old tool results cleared past 80k input tokens, never what was read off files or asked).
 - **Extraction fills empty fields only.** `modelBlock` (the cache breakpoint: stable per model version,
   it lists options whether a rule rules them out or not) and `extractionSchema` (generated per model:
   objects and `anyOf` only — Claude's structured output takes `additionalProperties: false`, no `oneOf`,
@@ -356,10 +365,10 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   tool requires a source per written value (`missingSources`): no value from nowhere.
 - **Tools are the procedures** (`tools.ts`), run with `call(procedure, input, { context: { headers } })`
   under the chat request's own headers — the builders are the permission; the page registry
-  (`pages.ts`, route id → tools + prompt section) is a hint, and **the thread outranks it**: a
-  configuration's thread gets that configuration's tools and model block on any page (the panel left
-  on the home page after the chat created one), and every set has the configuration tools, so a run
-  that calls `configs_create` goes straight on — its answer carries the model block and what is
+  (`pages.ts`, route id → the turn's page note) is a hint, and **the thread outranks it**: a
+  configuration's thread gets that configuration's note and model block on any page (the panel left
+  on the home page after the chat created one), and the one tool set has the configuration tools, so
+  a run that calls `configs_create` goes straight on — its answer carries the model block and what is
   missing. Business partners the chat reads are customers only (`CUSTOMERS_ONLY`, `intake.ts`, the
   customer value help's rule), whatever filter the model sends. Lists are capped at 20 rows (`LIST_CAP`,
   Joule's list card). A configuration's quotation is never the chat's to post: `propose_quotation` is
@@ -374,7 +383,11 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   nothing posted, the run ends on it (`untilAsked`) and `B1WriteCard` shows it before → after with
   Post/Discard — unless auto mode is on (`assistant/auto.ts`): the workspace's
   `assistant_settings.b1AutoWrite` *and* the user's `ui_user_state` `assistant:autoWrite` (the chat
-  box's toggle), and even then not in a chat holding client files nor for a copy to Invoices. The
+  box's toggle), and even then not for a copy to Invoices nor in a chat holding client content
+  (`chatHasClientContent`, `auto.ts`): its files, a configuration that is a client's request, or a
+  read of what a client wrote — a request list, or a client request's configuration, timeline or
+  quotation (`readsClientContent`, checked by the chat's `onGuardToolCall` before the step's tools
+  run; the run's assistant messages then carry `clientContent`, so later turns stay tainted). The
   chat's calls carry `assistantThreadId` in the call's context, which no request can fill. Post is
   `b1.post` (the spec's `b1.apply`: oRPC's client reserves `apply`/`call`/`bind` as proxy keys), in
   no tool set — the model cannot approve its own proposal — and it re-runs the checks with the
@@ -388,16 +401,25 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   only. A general New chat is the user's blank thread if there is one (`blankThread`).
   Stored file parts keep a reference (`metadata.file`), never bytes; `hydrate` refills them. File refs
   are fenced by tenant and by their own project or thread. Only PDF, PNG and JPEG, by their bytes.
-  Thinking is on and summarized (`reasoning: { level: "high", summary: true }`, the default effort); the
-  thread keeps it for the panel, but an earlier run's thinking is never sent back (`withoutThinking`):
-  it is signed against its run's prompts and tools, which change between runs (page section, tool set,
-  model block, a deploy), and a replayed block is a 400 "bound to a different conversation".
+  Thinking is on and summarized (`reasoning: { level: CHAT_EFFORT, summary: true }`); the thread keeps
+  it for the panel. A block is signed against its run's prompts and tools, and replayed into another
+  prefix it is a 400 "bound to a different conversation": each stored assistant message carries its
+  run's `prefixHash` (system prompts, tools on the wire, model, effort, options, adapter version), and
+  `replayable` sends an earlier turn's thinking back only when that hash is this run's. A refused
+  replay marks the turn `resetThinking`, after which nothing older is replayed.
+  A run is stored as it goes (`completeUpTo`): after each step whose tools all answered, and again
+  however it ends, so an error, a disconnect or the budget never loses a tool that ran (a SAP record
+  auto mode posted would otherwise be posted again on a retry). The lease (`takeLease`) has a holder
+  (`lease_id`): each model call renews it, and only the holder releases it.
 - **Metered and capped**: `usage.ts` writes one `ai_usage` row per model call (`meter` middleware, cost
   from `PRICES`) and `assertAssistant` refuses when the workspace's switch (`assistant_settings`) is off
   (`ASSISTANT_OFF`, an admin's fix), the server has no `ANTHROPIC_API_KEY` (`ASSISTANT_UNAVAILABLE`, the
   operator's fix — the panel and Settings say which), or this month's cost reached
   `ASSISTANT_MONTHLY_LIMIT_USD` (default 25). `rateLimit` is 20 calls a
-  minute per user. Env read with `||`, not `??`: compose passes an unset variable as `""`.
+  minute per user. Env read with `||`, not `??`: compose passes an unset variable as `""`. Inside a
+  chat run the limit is read again before each further model call (`budget`, `onShouldContinue`):
+  over it, the loop stops after the tools it ran. A declined answer (`stop_reason: "refusal"`) is a
+  `confire.refusal` CUSTOM event the panel shows (`REFUSAL_EVENT`).
 - **MCP** (`mcp.ts`, spec §4.10): the user's own Claude/ChatGPT on `https://mcp.<DOMAIN>` (`mcpUrl`, dev
   `http://mcp.localhost`), one address for every workspace. It is its own host: `index.ts` sends it to
   `mcp.ts` before the staff app (MCP at `/`, nothing else). Dev's port 80 is `bun run dev`'s `dev:mcp`
@@ -447,7 +469,8 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   post" opens the quote page. The model selects or prepares the quotation only when asked. Colours come only from the theme's `--sapAssistant_*` parameters, and there is no
   stylesheet: every style is inline on the UI5 components (theme parameters set on them, which reach their
   shadow DOM). `scripts/assistant-eval.ts` is the hand-run eval (it spends
-  money and says so first).
+  money and says so first) for the extraction; `scripts/assistant-chat-eval.ts` scores the chat's
+  loop on scripted scenarios per effort level (`assistant/chat-eval.ts`, the same warning).
 
 ## `packages/config-engine` — the calculation core
 

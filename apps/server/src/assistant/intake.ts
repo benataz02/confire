@@ -4,13 +4,15 @@ import { chat, type ContentPart } from "@tanstack/ai";
 import { eq, sql } from "drizzle-orm";
 import { db, configModel } from "@confire/db";
 import { entitiesRouter } from "../orpc/routers/entities.ts";
-import { modelOptions, textAdapter } from "./model.ts";
+import { INTAKE_MODEL, modelOptions, textAdapter } from "./model.ts";
 import { meter, type Meter } from "./usage.ts";
 import { unlabeled } from "./files.ts";
 
 // The first, cheap call (assistant spec §4.1 step 2): which model, which customer, what name. It
 // sees the drop and the workspace's models by name and description; the customer is then looked up
 // in SAP by what the model read. Nothing is created here: the panel shows a card to confirm first.
+// A classification, so it runs on the intake model (Haiku 5.5) at low effort; the reading that
+// fills values (extract.ts) and the chat stay on ASSISTANT_MODEL.
 
 /** A configuration's customer is an SAP customer, as the page's customer value help reads them
  *  (cfl-configs.ts `customers`): never a supplier or a lead. Every assistant read of business partners
@@ -61,8 +63,9 @@ export async function readRequest(
   const ids = models.map((m) => m.id);
   const list = models.map((m) => `- ${m.id}: ${m.name}${m.description ? ` — ${m.description}` : ""}`).join("\n");
   const out = await chat({
-    adapter: textAdapter(),
+    adapter: textAdapter(INTAKE_MODEL),
     threadId: a.meter.threadId ?? `intake-${crypto.randomUUID()}`,
+    reasoning: { level: "low" },
     systemPrompts: [INTAKE_SYSTEM, { content: `# The models\n${list || "(none)"}`, metadata: { cache_control: { type: "ephemeral" } } }],
     messages: [{ role: "user", content: [...unlabeled(a.parts), { type: "text", content: a.text.trim() ? `Pasted text:\n${a.text}` : "(no text)" }] }],
     outputSchema: z.object({
@@ -71,7 +74,7 @@ export async function readRequest(
       customer: z.object({ name: z.string().nullable(), emailDomain: z.string().nullable() }),
       name: z.string(),
     }),
-    modelOptions: modelOptions(),
+    modelOptions: modelOptions(INTAKE_MODEL),
     middleware: [meter(a.meter)],
   });
   const model = models.find((m) => m.id === out.modelId);

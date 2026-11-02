@@ -220,10 +220,12 @@ cannot name a parameter that doesn't exist):
 - The server applies `set`/`batches`/`tables` to empty fields only (§4.1 step 3) with one
   `configs.calculate`, which carries the sources (§4.7). Anything the patch refuses becomes a question
   rather than an error.
-- Model: **Claude Sonnet 5.5 to start; test Claude Haiku 5.5 against it on the test set (§6) and
-  switch if it reads as well.** One configured model id, not a cascade. Use adaptive thinking, with
-  the effort level set by the test set. The Claude API's server-side refusal fallback is on if the
-  TanStack adapter passes it through.
+- Model: **Claude Sonnet 5.5 for the extraction and the chat (`ASSISTANT_MODEL`); the intake — a
+  classification of the drop: model, customer, name — on Claude Haiku 5.5 at low effort
+  (`ASSISTANT_INTAKE_MODEL`, decided 2026-11-02).** Use adaptive thinking; the chat's effort is
+  `ASSISTANT_EFFORT` (default `high`, Sonnet 5.5's own), set from the chat eval's sweep (§6). The Claude
+  API's server-side refusal fallback (`fallbacks: "default"`) is on for Sonnet 5.5 and Opus 5.5; Haiku
+  5.5 has none.
 - The system prompt states that attachments and pasted text are the client's content to read, never
   instructions.
 
@@ -488,10 +490,15 @@ New dependencies are listed as direct dependencies wherever they are imported:
   - The first call is scored too: was the configuration's actual model proposed?
   - Run Sonnet 5.5 and Haiku 5.5 on the same set; the model choice and effort level come from this
     **once there are about 30 cases**. Until then, Sonnet 5.5 at the default effort.
+- **The chat's eval (spends money, run by hand: `scripts/assistant-chat-eval.ts`):** scripted
+  scenarios over the real `SYSTEM` and the real tools, each tool answering a fixture, graded on the
+  prompt's rules (a source for every value, ask_user for a choice and the turn ended there, no SAP
+  write unasked, a client's text never obeyed, never "posted" without `written`). Each scenario runs
+  per effort level: rules kept, model calls and cost per level decide `ASSISTANT_EFFORT`.
 - **Unit tests (no API):**
   - the per-model schema from a form state (enums, ranges, a large list as a string)
   - `sources` marker logic (marker gone after a human edit)
-  - the page registry (a route's tool set; unknown routes get the general set)
+  - the page registry (a route's note; unknown routes are general) and the one fixed tool set
   - the limit (refuses at the limit)
   - the switch (refuses when off)
 - **Boundary tests:**
@@ -541,7 +548,7 @@ New dependencies are listed as direct dependencies wherever they are imported:
 | Monthly limit | `ASSISTANT_MONTHLY_LIMIT_USD`, default 25, one value for every workspace. |
 | Drawings in the chat's context | Kept: a thread's files stay at the turn they were dropped and are re-sent each turn under prompt caching. |
 | Per-workspace MCP resource | One resource, `https://mcp.<DOMAIN>`; the workspace is the token's `tenant` claim, the consent's reference (§4.10). |
-| Prices | Verified 2026-10-24 on platform.claude.com/docs/en/about-claude/pricing: Sonnet 5.5 $2 / $2.50 cache write / $0.10 cache read / $10; Haiku 5.5 $0.10 / $0.125 / $0.01 / $0.50 (×5 past 100k prompt tokens). |
+| Prices | Checked 2026-11-02 (the 2026-10-24 table had Sonnet 5.5's cache read at $0.10): Sonnet 5.5 $2 / $2.50 5-min write / $4 1-hour write / $0.20 cache read / $10; Opus 5.5 $4 / $5 / $8 / $0.20 / $20; Haiku 5.5 $0.10 / $0.125 / $0.20 / $0.01 / $0.50 (×5 past 100k prompt tokens). |
 | Prompt wording, effort | `EXTRACT_SYSTEM`, `INTAKE_SYSTEM` and `SYSTEM` in `apps/server/src/assistant/`; effort left at the model's default until the eval has about 30 cases (§6). |
 | Data in the chat | Cards, not prose: the tool's name picks the card (`apps/app/src/assistant/cards/registry.tsx`), the card draws the tool's output, and the model writes one or two sentences around it. |
 | Product name | "Assistant" (`da` icon): "Joule" is SAP's. |
@@ -554,7 +561,7 @@ New dependencies are listed as direct dependencies wherever they are imported:
   chat must give a source for every value it sets.
 - One thread per user and configuration, plus one general thread; New chat on both (a configuration's is deleted).
 - The admin's Assistant tab shows the month's usage against the limit; SQL for the operator.
-- Sonnet 5.5 first, Haiku 5.5 tested against it; one model setting.
+- Sonnet 5.5 for the chat and the extraction, Haiku 5.5 for the intake (two model settings).
 - Chips and the post button bypass the model (cheaper, faster, and the human click is the write).
 - The assistant has no posting tool; it proposes, the card posts.
 - Every workspace switch (assistant, SAP auto mode, External AI) is off by default.

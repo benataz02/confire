@@ -10,7 +10,7 @@ import { readRequest } from "../../assistant/intake.ts";
 import { ASSISTANT_MODEL, available } from "../../assistant/model.ts";
 import {
   appendMessages, blankThread, clearThread, deleteThread, dehydrate, lastDrop, linkProject, listThreads, ownThread, setThread,
-  threadFor, withThread, type Thread,
+  threadFor, withThread, type Thread, withoutContext,
 } from "../../assistant/threads.ts";
 import { userAutoWrite, workspaceAutoWrite } from "../../assistant/auto.ts";
 import { assertAssistant, assistantOn, MONTHLY_LIMIT_USD, monthUsage, offReason, rateLimit } from "../../assistant/usage.ts";
@@ -95,7 +95,7 @@ export const assistantRouter = {
       const t = input.id
         ? await ownThread(context.tenantId, context.userId, input.id)
         : await threadFor(context.tenantId, context.userId, input.projectId ?? null);
-      return { id: t.id, projectId: t.projectId, messages: modelMessagesToUIMessages(t.messages) };
+      return { id: t.id, projectId: t.projectId, messages: modelMessagesToUIMessages(withoutContext(t.messages)) };
     }),
 
   /** New chat: a blank general thread, or with a configuration its thread started over. */
@@ -135,7 +135,7 @@ export const assistantRouter = {
         const parts = await fileParts(context.tenantId, input.refs as FileRef[], { threadId: t.id, ...(t.projectId ? { projectId: t.projectId } : {}) });
         const proposal = await readRequest({ headers: context.headers, tenantId: context.tenantId }, {
           parts, text: input.text,
-          meter: { tenantId: context.tenantId, userId: context.userId, threadId: t.id, projectId: t.projectId, kind: "extract" },
+          meter: { tenantId: context.tenantId, userId: context.userId, threadId: t.id, projectId: t.projectId, kind: "intake" },
         });
         const messages = await append(t.id, [userMessage(parts, input.text), ...toolPair("read_request", proposal)], proposal.name);
         return { messages, proposal };

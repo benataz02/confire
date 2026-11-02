@@ -2,9 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { fakeText } from "@tanstack/ai/testing";
 import { db, aiUsage, assistantSettings, assistantThread, configModel } from "@confire/db";
+import type { ModelMessage } from "@tanstack/ai";
 import { useTestAdapter } from "../src/assistant/model.ts";
-import { assistantRoutes } from "../src/assistant/route.ts";
-import { newThread, threadFor } from "../src/assistant/threads.ts";
+import { assistantRoutes, CHAT_OPTIONS, completeUpTo, REFUSAL_EVENT } from "../src/assistant/route.ts";
+import { CHAT_TOOLS } from "../src/assistant/pages.ts";
+import { newThread, releaseLease, renewLease, takeLease, threadFor } from "../src/assistant/threads.ts";
 import { MONTHLY_LIMIT_USD } from "../src/assistant/usage.ts";
 import { router } from "../src/orpc/router.ts";
 import { TENANT_HEADER } from "../src/tenant.ts";
@@ -16,6 +18,10 @@ import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness
 afterEach(() => useTestAdapter(null));
 
 const HOME = { routeId: "/$slug", params: {} };
+
+/** A stored user turn's own words, and its page note (the panel never shows the note). */
+const said = (m: ModelMessage) => (Array.isArray(m.content) ? m.content.filter((p) => p.type === "text" && !(p.metadata as { pageContext?: boolean } | undefined)?.pageContext).map((p) => (p.type === "text" ? p.content : "")).join("") : m.content);
+const note = (m: ModelMessage) => (Array.isArray(m.content) ? m.content.find((p) => (p.metadata as { pageContext?: boolean } | undefined)?.pageContext) : undefined);
 
 async function world(on = true) {
   const { tenantId, slug } = await makeTenant();
@@ -70,7 +76,11 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/assistant", () => {
     expect(await res.text()).toContain("RUN_FINISHED");
     const t = await w.stored();
     expect(t.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
-    expect(t.messages[0]).toMatchObject({ role: "user", content: "Which configurations are waiting on me?" });
+    expect(said(t.messages[0]!)).toBe("Which configurations are waiting on me?");
+    expect(note(t.messages[0]!)).toMatchObject({ type: "text", content: expect.stringContaining("Answer in English.") });
+    // the panel gets the turn without its note
+    const shown = await call(router.assistant.thread, { id: w.thread.id }, { context: { headers: tenantHeaders(w.slug, w.u.cookie) } });
+    expect(JSON.stringify(shown.messages)).not.toContain("<context>");
     expect(t.title).toBe("Which configurations are waiting on me?");
     expect(t.busyUntil).toBeNull();
     const usage = await db.select().from(aiUsage).where(eq(aiUsage.threadId, w.thread.id));
@@ -113,7 +123,7 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/assistant", () => {
     expect((await w.stored()).messages.map((m) => m.role)).toEqual(["user", "assistant", "tool", "user", "assistant"]);
   });
 
-  test("thinking goes back within its run, never to a later one; the thread keeps it", async () => {
+  test("thinking goes back while the prompt prefix is the same; not after it changed or was refused", async () => {
     const w = await world();
     const thought = (ms: { thinking?: unknown[] }[]) => ms.filter((m) => m.thinking?.length).length;
     let within = -1;
@@ -125,9 +135,39 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/assistant", () => {
     await (await w.post({ text: "Which models are there?" })).text();
     expect(within).toBe(1);
     expect(thought((await w.stored()).messages)).toBe(1);
+    // Same tools and system prompts on another page: the earlier turn's thinking goes back.
     w.fake.setResponses([({ request }) => { later = thought(request.messages); return { text: "Still none." }; }]);
-    await (await w.post({ text: "And now?" })).text();
+    await (await w.post({ text: "And now?", route: { routeId: "/$slug/models/$id", params: { id: "x" } } })).text();
+    expect(later).toBe(1);
+    // A replayed block refused (a 400 about its signature): the turn is marked, and nothing older goes back.
+    w.fake.setResponses([{ error: "messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation" }]);
+    await (await w.post({ text: "Again?" })).text();
+    const t = await w.stored();
+    expect(t.messages.at(-1)).toMatchObject({ role: "user", metadata: { resetThinking: true } });
+    w.fake.setResponses([({ request }) => { later = thought(request.messages); return { text: "ok" }; }]);
+    await (await w.post({ text: "Once more" })).text();
     expect(later).toBe(0);
+  });
+
+  test("the chat's prefix is the same on every page: one tool set, SYSTEM; the page note is in the turn", async () => {
+    const w = await world();
+    const seen: { tools: string[]; system: string; last: string; options: unknown }[] = [];
+    const look = ({ request }: { request: { tools?: { name: string }[]; systemPrompts?: unknown; messages: unknown[]; modelOptions?: unknown } }) => {
+      seen.push({ tools: (request.tools ?? []).map((x) => x.name), system: JSON.stringify(request.systemPrompts), last: JSON.stringify(request.messages.at(-1)), options: request.modelOptions });
+      return { text: "ok" };
+    };
+    w.fake.setResponses([look]);
+    await (await w.post({ text: "a" })).text();
+    w.fake.setResponses([look]);
+    await (await w.post({ text: "b", route: { routeId: "/$slug/models/$id", params: { id: "x" } } })).text();
+    expect(seen[0]!.tools).toEqual([...CHAT_TOOLS]);
+    expect(seen[1]!.tools).toEqual(seen[0]!.tools);
+    expect(seen[1]!.system).toBe(seen[0]!.system);
+    expect(seen[1]!.last).toContain("model builder");
+    expect(seen[0]!.system).not.toContain("model builder");
+    // the history is cached (top-level marker) and old tool results are cleared past 80k tokens
+    expect(seen[0]!.options).toMatchObject(CHAT_OPTIONS);
+    expect(JSON.stringify(seen[0]!.last)).not.toContain("pageContext"); // Confire's metadata never reaches the wire
   });
 
   test("a configuration's chat works on it from any page; one the chat creates, in the same run", async () => {
@@ -149,8 +189,7 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/assistant", () => {
     w.fake.setResponses([({ request }) => { system = JSON.stringify(request.systemPrompts); tools = (request.tools ?? []).map((x) => x.name); return { text: "ok" }; }]);
     await (await w.post({ text: "What is missing?" })).text();
     expect(system).toContain("# Model: Cable");
-    expect(tools).not.toContain("configs_create");
-    expect(tools).toContain("configs_calculate");
+    expect(tools).toEqual([...CHAT_TOOLS]);
   });
 
   test("an error mid-run keeps the user's message", async () => {
@@ -158,8 +197,82 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/assistant", () => {
     w.fake.setResponses([{ error: "boom" }]);
     await (await w.post({ text: "Please read it" })).text();
     const t = await w.stored();
-    expect(t.messages).toEqual([{ role: "user", content: "Please read it" }]);
+    expect(t.messages.map((m) => [m.role, said(m)])).toEqual([["user", "Please read it"]]);
     expect(t.busyUntil).toBeNull();
+    expect(t.leaseId).toBeNull();
+  });
+
+  test("an error after a tool ran keeps the step: the tool's call and result are stored", async () => {
+    const w = await world();
+    w.fake.setResponses([{ toolCalls: [{ name: "configs_models", input: {} }] }, { error: "overloaded" }]);
+    await (await w.post({ text: "Which models?" })).text();
+    const t = await w.stored();
+    expect(t.messages.map((m) => m.role)).toEqual(["user", "assistant", "tool"]);
+    expect(t.messages[1]!.toolCalls?.[0]?.function.name).toBe("configs_models");
+    expect(t.busyUntil).toBeNull();
+    // the next turn follows on as valid history
+    w.fake.setResponses([{ text: "There are none." }]);
+    await (await w.post({ text: "So?" })).text();
+    expect((await w.stored()).messages.map((m) => m.role)).toEqual(["user", "assistant", "tool", "user", "assistant"]);
+  });
+
+  test("completeUpTo: the run's last step whose tools all answered", () => {
+    const call = (id: string) => ({ id, type: "function" as const, function: { name: "x", arguments: "{}" } });
+    const ms: ModelMessage[] = [
+      { role: "user", content: "go" },
+      { role: "assistant", content: null, toolCalls: [call("a"), call("b")] },
+      { role: "tool", toolCallId: "a", content: "1" },
+      { role: "tool", toolCallId: "b", content: "2" },
+      { role: "assistant", content: "half an ans", toolCalls: [call("c")] },
+    ];
+    expect(completeUpTo(ms)).toBe(4);
+    expect(completeUpTo(ms.slice(0, 3))).toBe(1);
+    expect(completeUpTo(ms.slice(0, 1))).toBe(1);
+  });
+
+  test("over the month's limit mid-run, the loop stops after the tools it ran", async () => {
+    const w = await world();
+    w.fake.setResponses([
+      async () => {
+        await db.insert(aiUsage).values({
+          tenantId: w.tenantId, userId: "u", model: "claude-sonnet-5-5", kind: "chat",
+          inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: String(MONTHLY_LIMIT_USD),
+        });
+        return { toolCalls: [{ name: "configs_models", input: {} }] };
+      },
+      { text: "never reached" },
+    ]);
+    await (await w.post({ text: "Which models?" })).text();
+    expect(w.fake.state.callCount).toBe(1);
+    expect((await w.stored()).messages.map((m) => m.role)).toEqual(["user", "assistant", "tool"]);
+  });
+
+  test("a declined answer is a CUSTOM event the panel shows, and stores nothing empty", async () => {
+    const w = await world();
+    w.fake.setResponses([{ finishReason: "content_filter" }]);
+    const body = await (await w.post({ text: "Something it declines" })).text();
+    expect(body).toContain(REFUSAL_EVENT);
+    expect((await w.stored()).messages.map((m) => m.role)).toEqual(["user"]);
+  });
+
+  test("a run that reads a client's request marks its messages: auto mode stays off in that chat", async () => {
+    const w = await world();
+    w.fake.setResponses([{ toolCalls: [{ name: "requests_rows", input: { query: { select: [], filter: [], orderby: [] } } }] }, { text: "One request." }]);
+    await (await w.post({ text: "Any client requests?" })).text();
+    const t = await w.stored();
+    expect(t.messages.filter((m) => m.role === "assistant").every((m) => (m.metadata as { clientContent?: boolean } | undefined)?.clientContent)).toBe(true);
+  });
+
+  test("the lease is its holder's: renewed and released by it alone", async () => {
+    const w = await world();
+    const a = await takeLease(w.thread.id);
+    expect(await renewLease(w.thread.id, a)).toBe(true);
+    expect(await renewLease(w.thread.id, crypto.randomUUID())).toBe(false);
+    await releaseLease(w.thread.id, crypto.randomUUID()); // not the holder: nothing changes
+    expect((await w.stored()).busyUntil).not.toBeNull();
+    expect((await w.post()).status).toBe(409);
+    await releaseLease(w.thread.id, a);
+    expect((await w.stored()).busyUntil).toBeNull();
   });
 
   test("client-sent history is ignored", async () => {
