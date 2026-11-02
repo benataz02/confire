@@ -180,8 +180,8 @@ export type ProjectEventPayload =
   | { fileId: string; name: string; size: number }
   /** `assigned`: the name is snapshotted, so the timeline needs no join */
   | { assigneeId: string; assigneeName: string }
-  /** `created` from the assistant's panel */
-  | { via: "assistant" };
+  /** `created` from the assistant's panel, or over MCP by the user's own AI */
+  | { via: "assistant" | "mcp" };
 
 // The project's timeline (spec §6, §8), append-only. project-lifecycle.ts writes every status
 // event in the same transaction as the guarded status UPDATE; comments are written beside it.

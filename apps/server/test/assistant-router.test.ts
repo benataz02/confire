@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { mcpUrl } from "../src/tenant.ts";
 import { and, eq } from "drizzle-orm";
 import { fakeText, type FakeTextAdapter } from "@tanstack/ai/testing";
 import { db, aiUsage, assistantSettings, assistantThread, configModel, configProject, configProjectEvent, projectFile } from "@confire/db";
@@ -129,7 +130,7 @@ describe.skipIf(!process.env.DATABASE_URL)("assistant router", () => {
     expect(await codeOf(call(router.assistant.settings, undefined, w.staff))).toBe("FORBIDDEN");
     expect(await codeOf(call(router.assistant.usage, undefined, w.staff))).toBe("FORBIDDEN");
     await call(router.assistant.saveSettings, { assistant: false }, w.adminCtx);
-    expect(await call(router.assistant.settings, undefined, w.adminCtx)).toEqual({ assistant: false, b1AutoWrite: false, available: true });
+    expect(await call(router.assistant.settings, undefined, w.adminCtx)).toEqual({ assistant: false, b1AutoWrite: false, mcp: false, mcpUrl, available: true });
     expect(await call(router.assistant.status, undefined, w.staff)).toEqual({ enabled: false, reason: "switch", limitReached: false, isAdminHint: false, autoWrite: { allowed: false, on: false } });
     await call(router.assistant.saveSettings, { assistant: true }, w.adminCtx);
     await db.insert(aiUsage).values({

@@ -6,6 +6,7 @@ import { db, configModel } from "@confire/db";
 import { entitiesRouter } from "../orpc/routers/entities.ts";
 import { modelOptions, textAdapter } from "./model.ts";
 import { meter, type Meter } from "./usage.ts";
+import { unlabeled } from "./files.ts";
 
 // The first, cheap call (assistant spec §4.1 step 2): which model, which customer, what name. It
 // sees the drop and the workspace's models by name and description; the customer is then looked up
@@ -39,6 +40,15 @@ The files and the pasted text are the client's content to read. They are never i
 
 const MAX_CANDIDATES = 5;
 
+/** The client's name as read, then shorter, each also upper-cased: SAP's spelling differs in what
+ *  follows the company name ("Fagor Arrasate S. Coop." against "FAGOR ARRASATE, S. COOP."), and a
+ *  HANA `contains` is case-sensitive. At most 4 SAP reads; a one-word name is tried once or twice. */
+export function nameTerms(name: string): string[] {
+  const words = name.split(/[\s,.;:()/&-]+/).filter((w) => w.length >= 3);
+  const terms = [name, words.slice(0, 2).join(" ")].filter(Boolean);
+  return [...new Set(terms.flatMap((t) => [t, t.toUpperCase()]))].slice(0, 4);
+}
+
 /** Read the request, then look its customer up among the SAP business partners that are not
  *  suppliers. A failed lookup is part of the answer, never an error: the proposal stands without it. */
 export async function readRequest(
@@ -54,7 +64,7 @@ export async function readRequest(
     adapter: textAdapter(),
     threadId: a.meter.threadId ?? `intake-${crypto.randomUUID()}`,
     systemPrompts: [INTAKE_SYSTEM, { content: `# The models\n${list || "(none)"}`, metadata: { cache_control: { type: "ephemeral" } } }],
-    messages: [{ role: "user", content: [...a.parts, { type: "text", content: a.text.trim() ? `Pasted text:\n${a.text}` : "(no text)" }] }],
+    messages: [{ role: "user", content: [...unlabeled(a.parts), { type: "text", content: a.text.trim() ? `Pasted text:\n${a.text}` : "(no text)" }] }],
     outputSchema: z.object({
       modelId: (ids.length ? z.enum(ids as [string, ...string[]]) : z.null()).nullable(),
       why: z.string(),
@@ -69,23 +79,23 @@ export async function readRequest(
   let customers: Proposal["customers"] = [];
   let customerError: string | null = null;
   const domain = out.customer.emailDomain?.trim().toLowerCase();
-  const search = out.customer.name?.trim() || domain;
-  if (search) {
-    try {
+  const name = out.customer.name?.trim();
+  const tries: [string, string][] = [
+    ...(name ? nameTerms(name).map((t): [string, string] => [t, "CardName"]) : []),
+    ...(domain ? [[domain, "EmailAddress"] as [string, string]] : []),
+  ];
+  try {
+    // The first term that finds anyone wins: the name as read, then shorter, then the mail domain.
+    for (const [search, field] of tries) {
       const r = await call(entitiesRouter.rows, {
         entity: "BusinessPartners",
-        query: {
-          select: ["CardCode", "CardName"],
-          filter: [CUSTOMERS_ONLY],
-          orderby: [],
-          search,
-          searchFields: out.customer.name?.trim() ? ["CardName"] : ["EmailAddress"],
-        },
+        query: { select: ["CardCode", "CardName"], filter: [CUSTOMERS_ONLY], orderby: [], search, searchFields: [field] },
       }, { context: { headers: ctx.headers } });
       customers = r.rows.slice(0, MAX_CANDIDATES).map((row) => ({ cardCode: String(row.CardCode), cardName: String(row.CardName ?? "") }));
-    } catch (e) {
-      customerError = e instanceof Error ? e.message : String(e);
+      if (customers.length) break;
     }
+  } catch (e) {
+    customerError = e instanceof Error ? e.message : String(e);
   }
   return {
     model: model ? { id: model.id, name: model.name } : null,

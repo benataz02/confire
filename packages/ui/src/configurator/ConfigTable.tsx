@@ -1,7 +1,7 @@
 import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Button, CheckBox, Input, Option, Select, Text } from "@ui5/webcomponents-react";
 import {
-  columnOptions, requiredColumn, COST_COL, PRICE_COL,
+  cellDefault, columnOptions, requiredColumn, COST_COL, PRICE_COL,
   type ResolvedTable, type RowMoney, type TableColumn, type TableDef, type Val,
 } from "@confire/config-engine";
 import { CflField } from "../cfl/CflField.tsx";
@@ -115,7 +115,11 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
     // evalTableRows applies the same rule server-side, which is what makes the quote agree.
     const computed = c.cell.kind === "formula";
     const overridden = computed && stored !== undefined && stored !== null;
-    const value = computed ? (overridden ? stored : evaluated[ri]?.[c.key] ?? null) : stored;
+    // An unpicked select reads as its first option (cellDefault). A query pick stays unset:
+    // that control is a value help, and the cached first row is not a choice.
+    const select = c.cell.kind === "options" && c.cell.ref.source !== "query";
+    const value = computed ? (overridden ? stored : evaluated[ri]?.[c.key] ?? null)
+      : select ? stored ?? cellDefault(c, tables) : stored;
     // The column's own flag and the cell's emptiness: the asterisk and the red, as on a field.
     const req = requiredColumn(def, c);
     const blank = req && (value === undefined || value === null || value === "");
@@ -127,7 +131,7 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
       if (c.cell.kind === "options") {
         // Items grid: the stored code is what rides to SAP; don't swap it for the lookup label.
         const opts = def.role === "items" ? [] : columnOptions(c, tables);
-        return <Text>{displayValue(stored, opts)}</Text>;
+        return <Text>{displayValue(value, opts)}</Text>;
       }
       return <Text>{displayValue(stored, [])}</Text>;
     }
@@ -161,12 +165,13 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
       return (
         <Select style={{ width: "100%" }} disabled={disabled} required={req}
           valueState={blank ? "Negative" : "None"} valueStateMessage={<div>{i18n.getText("UI_REQUIRED", header(c))}</div>}
-          value={stored === undefined || stored === null ? "" : JSON.stringify(stored)}
+          value={value === undefined || value === null ? "" : JSON.stringify(value)}
           onChange={(e) => {
             const j = (e.detail.selectedOption as HTMLElement).dataset.j;
             set(j === undefined || j === "" ? null : (JSON.parse(j) as Val));
           }}>
-          <Option value="" data-j="">—</Option>
+          {/* A select with options always holds one: an empty choice would only snap back to the first. */}
+          {opts.length ? null : <Option value="" data-j="">—</Option>}
           {opts.map((o, i) => (
             <Option key={i} value={JSON.stringify(o.value)} data-j={JSON.stringify(o.value)}>{o.label}</Option>
           ))}
@@ -175,7 +180,9 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
     }
 
     return (
-      <Input style={{ width: "100%" }} type={c.type === "number" ? "Number" : "Text"}
+      // A formula's result shows as it is: a Number input blanks text, which made a text-yielding
+      // formula in a number column look like it computed nothing.
+      <Input style={{ width: "100%" }} type={c.type === "number" && typeof value !== "string" ? "Number" : "Text"}
         accessibleName={header(c)} required={req}
         value={value === undefined || value === null ? "" : computed ? show(value) : String(value)}
         // The clear icon IS the revert, and the value state is how a hand-typed number is told

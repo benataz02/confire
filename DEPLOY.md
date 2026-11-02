@@ -112,8 +112,8 @@ Cloudflare dashboard → `confire.ai` → **DNS → Records**. Every record is *
 
 | Type | Name | Content |
 |---|---|---|
-| A | `@`, `app`, `portal` (three records) | `<IPv4>` |
-| AAAA | `@`, `app`, `portal` (three records) | `<IPv6>` |
+| A | `@`, `app`, `portal`, `mcp` (four records) | `<IPv4>` |
+| AAAA | `@`, `app`, `portal`, `mcp` (four records) | `<IPv6>` |
 | CAA | `@` | `0 issue "letsencrypt.org"` |
 | A / AAAA (optional) | `www` | `<IPv4>` / `<IPv6>`: Caddy redirects it to the apex ([§16](#16-the-marketing-site)) |
 
@@ -123,6 +123,9 @@ the proxy on, every visitor would share Cloudflare's IPs, and both would need ex
 
 Cloudflare adds its own certificate authorities to the CAA set. That does no harm, as long as
 `letsencrypt.org` stays in it.
+
+`mcp` is the MCP connector address ([§15](#external-ai-mcp)), this stack's own staff process behind
+Caddy.
 
 **No wildcard record (`*`), ever.** Every `*.confire.ai` host receives the session cookie. The only
 other names under `confire.ai` are the mail records ([§3](#3-mail-resend)) and the optional `www`, which
@@ -648,6 +651,25 @@ docker compose exec db psql -U confire -c "select s.tenant_id, s.b1_auto_write, 
 ```
 
 Turning the workspace switch off stops auto mode at once for everyone in it.
+
+### External AI (MCP)
+
+`https://mcp.confire.ai` is one connector address for every workspace (assistant spec §4.10). A user adds
+it to Claude or ChatGPT as a custom connector and signs in with their Confire account; the consent says
+which workspace (their one staff membership), and the token carries it. A workspace's admin turns it on in
+Settings → Assistant → *External AI (MCP)*, which is off by default; off, every call answers 403 `MCP_OFF`.
+Over MCP no SAP write is ever automatic: each one asks the user to confirm in their AI first. Clients
+register themselves (open dynamic client registration); access tokens are JWTs and never stored, so the
+consents are the record of who connected what, per workspace:
+
+```bash
+docker compose exec db psql -U confire -c "select k.reference_id as tenant_id, c.name, count(distinct k.user_id) as users, max(k.updated_at) as last_consent from oauth_consent k join oauth_client c on c.client_id = k.client_id group by 1, 2 order by 4 desc"
+```
+
+The signing keys are in the `jwks` table (the JWT plugin creates them on first use), so a restore brings
+them back with everything else and nothing is in `.env`. To try it on a dev machine, Claude Code is the
+client: `claude mcp add --transport http confire http://mcp.localhost` (`bun run dev` forwards port 80;
+it needs `net.ipv4.ip_unprivileged_port_start=80` once, which `dev:mcp` prints).
 
 ---
 

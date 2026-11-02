@@ -14,7 +14,7 @@ function ruled(group?: string, section?: string): ModelDef {
     key: "holes", title: "Holes", role: "calc",
     columns: [{ key: "d", label: "Diameter", type: "number", required: true, cell: { kind: "input" } }],
   });
-  m.structure.sections.push({ key: "extra", title: "Extra", groups: [{ table: "holes" }], ...(section ? { visibleWhen: section } : {}) });
+  m.structure.sections.push({ key: "extra", title: "Extra", groups: [{ key: "holes_g", title: "", params: ["holes"] }], ...(section ? { visibleWhen: section } : {}) });
   return m;
 }
 
@@ -57,7 +57,7 @@ describe("a section's or group's visibleWhen", () => {
     expect(hidden.values.holes_d).toBe(0);
     expect(hidden.hiddenTables).toEqual(new Set(["holes"]));
     expect(missingInputs(m, lookups, hidden, rows).map((n) => n.code)).not.toContain("cell_required");
-    expect(formState(m, lookups, hidden, rows).hidden).toEqual(["extra"]);
+    expect(formState(m, lookups, hidden, rows).hidden).toEqual(["extra", "extra/holes_g"]);
   });
 
   test("hiding cascades through a table's sums", () => {
@@ -71,7 +71,11 @@ describe("a section's or group's visibleWhen", () => {
   test("checkModel checks the rules and keeps the item grid's section unconditional", () => {
     const m = ruled("nope", "coated");
     expect(checkModel(m).map((i) => i.path)).toContain("structure.sections[0].groups[1].visibleWhen");
-    m.structure.sections[1]!.groups.push({ table: "items" });
+    m.structure.sections[1]!.groups.push({ key: "items_g", title: "", params: ["items"] });
     expect(checkModel(m).map((i) => i.path)).toContain("structure.sections[1].visibleWhen");
+    // …and the group that holds it.
+    m.structure.sections[0]!.groups[1]!.params.push("items");
+    m.structure.sections[1]!.groups.pop();
+    expect(checkModel(m).map((i) => i.path)).toContain("structure.sections[0].groups[1].visibleWhen");
   });
 });

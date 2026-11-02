@@ -79,7 +79,7 @@ const sameColumn = (a: ListColumn, b: ListColumn) => {
 const lineNo: CellTemplate = (row) => <span>{Number(row.VisualOrder ?? row[IDX]) + 1}</span>;
 
 export function EditGrid({
-  title, table, columns, rows, onChange, readOnly, fixedRows, newRow, errors, controls, toolbarActions, onColumnsChange,
+  title, table, columns, rows, onChange, readOnly, fixedRows, newRow, errors, controls, toolbarActions, onColumnsChange, noExport,
 }: {
   title?: string;
   /** the collection's key, handed to a control kind with the line's position */
@@ -99,6 +99,8 @@ export function EditGrid({
   toolbarActions?: (selection: Selection) => ReactNode;
   /** enables the settings gear: the columns to show, in order (the rest are hidden) */
   onColumnsChange?: (keys: string[]) => void;
+  /** no Excel download: a definition grid, not data anyone takes away */
+  noExport?: boolean;
 }) {
   const i18n = useUiI18n();
   // The page re-applies its layout on every keystroke, which hands over a new column array (and a
@@ -162,7 +164,7 @@ export function EditGrid({
       showSettings={!!onColumnsChange}
       // Only the column set is the layout's; widths stay the table's own, as before.
       onStateChange={onColumnsChange ? (patch) => { if (patch.columns) onColumnsChange(patch.columns); } : undefined}
-      exportName={title} noDataText={i18n.getText("UI_NO_LINES")} cellTemplates={cellTemplates}
+      exportName={noExport ? undefined : title} noDataText={i18n.getText("UI_NO_LINES")} cellTemplates={cellTemplates}
       selectionMode={readOnly ? "None" : "Multiple"}
       toolbarActions={readOnly && !toolbarActions ? undefined : (sel) => (
         <>

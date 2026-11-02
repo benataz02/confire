@@ -1,6 +1,6 @@
 # The assistant: from a drawing to a configuration, and Confire over MCP
 
-2026-10-24 · design · **phases 1–2 built 2026-10-25** (plan `docs/superpowers/plans/2026-10-24-ai-assistant.md`); MCP (phase 3) not yet
+2026-10-24 · design · **phases 1–2 built 2026-10-25** (plan `docs/superpowers/plans/2026-10-24-ai-assistant.md`); MCP (phase 3) designed 2026-11-02 (§4.10)
 
 ## 1. Why
 
@@ -356,29 +356,90 @@ The provider key (`ANTHROPIC_API_KEY`) is server env only, and the test preload 
 - Per-user rate limits on the route. Files are size-capped, and only PDF and image types are accepted
   (sniffed like `imageType`, not trusted from the name).
 
-### 4.10 MCP (second phase)
+### 4.10 MCP (phase 3)
 
-> The SAP tools MCP registers, and what confirm/auto mode means over MCP, are
-> `2026-11-02-b1-tools-design.md` §5.5.
+> Decided 2026-11-02 after an implementation-readiness review. This supersedes
+> `2026-11-02-b1-tools-design.md` §5.5 on the SAP tools over MCP.
 
-- **Server:** `@orpc/mcp` (pinned to the same `2.0.0-beta.N` as every other `@orpc/*`; `beta.45` exists)
-  registers the same procedures as MCP tools, curated with `filter`. Names and descriptions come from
-  the `openapi()` meta. It is mounted by the staff process.
-- **Sign-in:** `@better-auth/mcp` (on `@better-auth/oauth-provider` + `jwt()` + `@better-auth/cimd`),
-  so Claude and ChatGPT connect with OAuth against the Confire account. Dynamic client registration is
-  the fallback for older clients. Load the Better Auth skills before building.
-- **Workspace:** one connector address per workspace, `https://app.<DOMAIN>/api/mcp/<slug>`. The token
-  says who; the path says which workspace, and `membershipOf` joins them, so the tenant boundary is
-  unchanged. `tenant.ts` stays the only reader of a slug. The procedures' context needs the user from
-  the verified bearer token instead of a cookie session: one small alternative to `requireSession`,
-  with the rest of the builders unchanged.
-- **Tools:** the same set as §4.5, plus `configs.createQuote` annotated as destructive, so MCP clients
-  ask before running it. It still needs a `commandId` from `configs.quoteDraft`, so the AI must preview
-  first. The workspace's *External AI* switch gates the whole endpoint.
-- **Provenance:** the MCP tool description of `configs.calculate` asks the client to pass `sources`.
-  It can't be enforced on someone else's AI, so a value set over MCP without one simply shows no ✦.
-- **Cost to Confire:** none in AI tokens. The user's AI reads the drawing; Confire supplies the
-  parameter list and checks every edit.
+The user's own Claude or ChatGPT reaches Confire's tools over MCP, signed in as the user. The same
+builders run under them, so the user's AI sees and does what the user may, in the user's workspace.
+Confire spends no AI tokens on it: the user's AI reads the drawing, Confire supplies the parameters and
+checks every edit.
+
+- **The address:** `https://mcp.<DOMAIN>` (`mcpUrl`, `tenant.ts`), the same for every workspace; dev
+  `http://mcp.localhost`. It is its own host, served by the staff process: `index.ts` sends a request for
+  it to `mcp.ts` before the staff app sees it, so the host answers MCP at `/` and its protected-resource
+  document, and nothing else (no SPA, no `/rpc`). Caddy's `mcp.` site only proxies. In dev, `*.localhost`
+  is loopback and plain http is allowed there; `bun run dev` forwards port 80 to the staff server
+  (`scripts/dev-mcp.ts`; port 80 needs `net.ipv4.ip_unprivileged_port_start=80` once). `@better-auth/mcp`
+  1.7.15 allows plain http only for exactly `localhost`, so a one-line patch (`patches/`) lets it take
+  `*.localhost` too, as its own core already does. It is a host under `<DOMAIN>`, so the session cookie
+  reaches it, and it is this stack's own service; the MCP host reads no cookie.
+- **Sign-in and workspace, both Better Auth's:** `jwt()` and `@better-auth/mcp`'s `mcp()` in `auth.ts`
+  (packages pinned to the `better-auth` version, moved together), `resource: mcpUrl`, `loginPage: "/login"`,
+  `consentPage: "/oauth/consent"`. **The workspace is the consent's reference:**
+  `postLogin.consentReferenceId` returns the user's one staff membership's organization (`oneMembership`:
+  a user is staff of at most one workspace, `organizationLimit`) and refuses one with none, a portal
+  customer included, before any token is issued. `postLogin.shouldRedirect` is always false (one workspace,
+  nothing to pick). `customAccessTokenClaims` writes that reference into the token as `tenant`, so a token
+  is bound to one workspace and a consent is stored per workspace.
+  `// ponytail: one workspace per staff user; a workspace picker as postLogin.page when that changes.`
+  Clients register by open dynamic client registration (`allowDynamicClientRegistration`,
+  `allowUnauthenticatedClientRegistration`, `clientRegistrationDefaultApplicationType: "infer"`), which
+  Claude and ChatGPT both use. Every client is public (PKCE), and every grant is the user's click on the
+  consent page: `/oauth/consent`, a staff SPA page in `AuthLayout` naming the client and the workspace. Its
+  query is verified with `verifyOAuthQueryParams`. `oauth` is a reserved slug. The sign-in page passes the
+  signed `oauth_query` through (`oauthProviderClient`). No CIMD: it makes the server fetch an address a
+  client names (`// ponytail: @better-auth/cimd, with an SSRF-safe transport, when a client requires it`).
+  The tables come from `auth:generate`, in migration 0011.
+- **Who is calling:** `requireMcpAuth` verifies the bearer JWT against the JWKS (signature, issuer,
+  audience `mcpUrl`, expiry) and answers a missing or bad token with 401 and the RFC 9728
+  `WWW-Authenticate`. `mcp.ts` then reads `sub` and `tenant`, looks up the tenant's slug, and builds the
+  tools' headers itself: `x-tenant` from the token, never from the request. `InitialContext.mcpUserId`
+  carries the user. Only `mcp.ts` fills it (no request can, like `assistantThreadId`). `userProcedure` runs
+  `requireUser`: `mcpUserId` → a live read of the user row, otherwise the cookie session as today. So
+  `membershipOf` is still the tenant boundary, read live on every call, and a member removed after the
+  token was issued is refused. `sessionProcedure` (`me`, the lobby, setup) keeps the cookie-only
+  `requireSession`.
+- **Switch:** *External AI (MCP)*, `assistant_settings.mcp` (off by default, migration 0011), in Settings →
+  Assistant beside the other two. The tab names where data goes (Confire data to the user's own AI
+  provider) and shows the connector address. Order of checks: token (401), staff membership (403), switch
+  (403, `MCP_OFF`), all before the MCP handshake. `rateLimit` (20 calls a minute per user, shared with the
+  chat) is checked per tool call.
+- **Server:** `@tanstack/ai-mcp/server`'s `createMCPServer` hosts the chat's own tools: `tools.ts`'
+  `toolDefinition().server()` tools, called through the procedures exactly as the chat calls them. The
+  server is built once, so each tool reads its call's user and headers off `ctx.context` (`CtxOf`). So
+  MCP and the chat share one tool layer with the same names, wrappers and rules: `configs_calculate`
+  requires a source per value and has no `margin`, lists are capped at `LIST_CAP`, and business
+  partners are customers only. It speaks MCP 2026-07-28 and 2025 (`sessions: "memory"`: one staff
+  process; 2025 elicitation needs the open session). `server.handle(request, { authInfo, context })` runs
+  behind `requireMcpAuth`. On the MCP host: `/` (a 2 MB body limit) and
+  `/.well-known/oauth-protected-resource`, which Better Auth answers itself (the `mcp()` plugin's
+  `onRequest`). On the staff app's host (the issuer's): the authorization server's two documents
+  (`oauth-authorization-server`, `openid-configuration`, issuer-inserted `/api/auth`) from the plugin's
+  metadata helpers. The verifier reads the JWKS over loopback. The MCP host refuses any request carrying
+  an `Origin`: MCP clients are servers and CLIs, and that is the DNS-rebinding defence the MCP spec asks
+  for. A browser-hosted MCP client is not supported.
+- **Tools:** the chat's set, less what needs a thread: `configs_models/rows/get/calculate/queryPage/similar/select`,
+  `configs_create` (`via: "mcp"`, no files to copy), `requests_rows`, `timeline_list`, `home_overview`,
+  `entities_rows`, `b1_find/schema/read`, and the destructive ones below (`MCP_TOOL_NAMES`, `tools.ts`).
+  `ask_user`, `read_request` and `extract_values` are left out: the user's AI asks in its own chat, and it
+  reads the files itself. `propose_quotation` is left out because it draws a card; `post_quotation`'s
+  confirmation shows the same draft. `b1.post` is never a tool.
+- **SAP writes ask the user first (the approval path).** The destructive tools are `b1_write`, `b1_copy`
+  and `post_quotation` (`quoteDraft` then `createQuote`), annotated `destructiveHint`. Over MCP each one
+  always prepares a proposal: auto mode never applies (`autoWrite` is false for an MCP call), because
+  Confire cannot see what the external AI read. It then asks with MCP elicitation
+  (`ctx.context.requestInput`). The question is built by the server: the record or quotation, and each
+  field before → after (the quotation's customer, currency, lines and total). It posts only on the user's
+  accept: `b1.post` with the proposal (its ETag re-checked, so a record changed since is `CONFLICT`), or
+  `createQuote` with the draft's `commandId`. A decline answers "not posted". On spec 2026 the tool runs
+  again with the answer, so the proposal is prepared again and the ETag decides. A client that cannot
+  elicit gets a tool error saying nothing was posted.
+  `// ponytail: elicitation only; an approval page in Confire for clients without it.`
+- **Provenance:** `configs_calculate` requires a `source` per written value, as in the chat. The external
+  AI writes those sources, and Confire cannot check them against a file it never saw. A value written
+  without a source is refused.
 
 ## 5. Code layout
 
@@ -390,17 +451,24 @@ The provider key (`ANTHROPIC_API_KEY`) is server env only, and the test preload 
 | `apps/server/src/assistant/extract.ts` | the extraction call: model block, per-model schema, apply, sources |
 | `apps/server/src/assistant/usage.ts` | meter rows, the monthly sum, the limit, the price table |
 | `apps/server/src/assistant/files.ts` | thread attachment upload/serve; copy to `project_file` on create |
-| `apps/server/src/mcp.ts` | phase 2: MCP handler, bearer → user, the curated tool filter |
+| `apps/server/src/mcp.ts`, `index.ts`, `scripts/dev-mcp.ts` | phase 3: the MCP host (split off by host in `index.ts`; dev's port-80 forwarder) and discovery, `requireMcpAuth` → user + tenant, the switch, the rate limit, `createMCPServer` over the MCP tool set and the approval tools |
+| `apps/server/src/orpc/base.ts` | phase 3: `InitialContext.mcpUserId`, `requireUser` under `userProcedure` |
+| `apps/server/src/auth.ts` | phase 3: `jwt()`, `mcp()` (consent reference = workspace, `tenant` claim, DCR) |
+| `apps/server/src/assistant/tools.ts`, `auto.ts` | phase 3: `mcpTools` (the chat's tools less the thread's, plus the approval tools); no auto mode over MCP |
+| `apps/server/src/tenant.ts`, `packages/ui/src/host.ts` | phase 3: `mcpUrl`; `oauth` reserved |
+| `apps/app/src/routes/oauth.consent.tsx`, the login page | phase 3: the consent page; `oauthProviderClient` keeps `oauth_query` |
+| `packages/db/src/schema/auth.ts` (generated), `assistant.ts` | phase 3: the OAuth tables, `assistant_settings.mcp`, migration 0011 |
+| `deploy/Caddyfile`, `DEPLOY.md` | phase 3: the `mcp.` site |
 | `packages/db/src/schema/assistant.ts` | `assistant_thread`, `assistant_file`, `ai_usage` (+ migration) |
 | `apps/app/src/assistant/` | the panel, chips, the quotation card, route-context capture |
 | `ConfigProcessPage.tsx` / `ConfiguratorForm` | ✦ ⚙ 💬 markers from the thread's `sources` and the view |
-| Settings → Assistant tab | the two switches, with where the data goes |
+| Settings → Assistant tab | the three switches (assistant, SAP auto mode, External AI), with where the data goes; the MCP address |
 
 New dependencies are listed as direct dependencies wherever they are imported:
 
-- `@tanstack/ai`, `@tanstack/ai-anthropic` and `@tanstack/ai-react` (1.0.x); `@tanstack/ai-persistence`
-  if used
-- phase 2: `@orpc/mcp`, `@better-auth/mcp`, `@better-auth/oauth-provider` and `@better-auth/cimd`
+- `@tanstack/ai`, `@tanstack/ai-anthropic` and `@tanstack/ai-react` (1.0.x)
+- phase 3: `@tanstack/ai-mcp` (1.0.x) with `@modelcontextprotocol/server` (2.x); `@better-auth/mcp` and
+  `@better-auth/oauth-provider` at the `better-auth` version
 
 ## 6. Tests
 
@@ -430,7 +498,15 @@ New dependencies are listed as direct dependencies wherever they are imported:
   - a tool call with a forged `x-tenant` is refused
   - a non-admin's tool set has no admin procedure
   - the route refuses without a session
-  - phase 2: an MCP token for workspace A on `/api/mcp/<B>` is refused
+- **MCP (phase 3, `mcp.test.ts`; tokens minted in the test with the JWT plugin):**
+  - no token, or a token for another audience → 401 with `WWW-Authenticate`
+  - a token whose user is no longer staff of its `tenant` → 403; a portal customer gets no consent
+    reference, so no token
+  - the External AI switch off → 403 `MCP_OFF`
+  - `tools/list` is exactly the MCP set: no `b1.post`, no thread tools, no admin procedure
+  - a tool call reaches the token's workspace only, whatever `x-tenant` the request sends
+  - `b1_write` never posts without an accepted elicitation, auto mode on or off; a decline posts nothing
+  - `configs_create` over MCP records `via: "mcp"`
 - `chat()` itself is not unit-tested against a live model. Tests stub the adapter.
 
 ## 7. Phases
@@ -440,7 +516,9 @@ New dependencies are listed as direct dependencies wherever they are imported:
    settle the model choice, so it starts on Sonnet 5.5 (§6).
 2. **The panel**: route, threads, files, tools, page context, chips, markers, the quotation card, the
    Settings tab.
-3. **MCP**.
+3. **MCP** (§4.10), in four buildable steps: (a) `requireUser` + `mcpUserId` and their tests; (b) the OAuth
+   provider (`jwt`, `mcp`, the consent page, the login hand-off, migration 0011); (c) `mcp.ts` with the tool
+   set, the switch, the rate limit and the approval tools; (d) Settings, Caddy, DEPLOY.md and CLAUDE.md.
 
 ## 8. Later (not this build)
 
@@ -455,14 +533,14 @@ New dependencies are listed as direct dependencies wherever they are imported:
 
 | Question | Decision |
 |---|---|
-| Where the switches live | Table `assistant_settings` (tenant pk, `assistant` boolean). The `mcp` column comes with phase 3. |
+| Where the switches live | Table `assistant_settings` (tenant pk, `assistant`, `b1AutoWrite`, `mcp` booleans, `updatedAt`). |
 | How ⚙ is known | Already known: `FieldState.defaulted` (a `defaultExpr` filled it). Rules only eliminate options and never set values, so ⚙ is the existing "Auto" status. |
 | Enum size | `ENUM_MAX = 60` options. Query-backed fields are always a string in the schema, checked against the cache (`queryTablePage({ match })`). A hand-typed list past 60 is still listed whole in the model block. |
 | `@tanstack/ai-persistence` | Not used: one jsonb column plus an append under a lease is less code, and its store merges *client* messages by id, which §4.7 forbids. |
 | Intake orchestration | Fixed steps from the panel: `assistant.intake`, `assistant.start`, `assistant.extract`. The chat model runs only for typed messages. |
 | Monthly limit | `ASSISTANT_MONTHLY_LIMIT_USD`, default 25, one value for every workspace. |
 | Drawings in the chat's context | Kept: a thread's files stay at the turn they were dropped and are re-sent each turn under prompt caching. |
-| Per-workspace MCP resource | Phase 3. |
+| Per-workspace MCP resource | One resource, `https://mcp.<DOMAIN>`; the workspace is the token's `tenant` claim, the consent's reference (§4.10). |
 | Prices | Verified 2026-10-24 on platform.claude.com/docs/en/about-claude/pricing: Sonnet 5.5 $2 / $2.50 cache write / $0.10 cache read / $10; Haiku 5.5 $0.10 / $0.125 / $0.01 / $0.50 (×5 past 100k prompt tokens). |
 | Prompt wording, effort | `EXTRACT_SYSTEM`, `INTAKE_SYSTEM` and `SYSTEM` in `apps/server/src/assistant/`; effort left at the model's default until the eval has about 30 cases (§6). |
 | Data in the chat | Cards, not prose: the tool's name picks the card (`apps/app/src/assistant/cards/registry.tsx`), the card draws the tool's output, and the model writes one or two sentences around it. |
@@ -479,13 +557,13 @@ New dependencies are listed as direct dependencies wherever they are imported:
 - Sonnet 5.5 first, Haiku 5.5 tested against it; one model setting.
 - Chips and the post button bypass the model (cheaper, faster, and the human click is the write).
 - The assistant has no posting tool; it proposes, the card posts.
-- Both workspace switches are off by default.
+- Every workspace switch (assistant, SAP auto mode, External AI) is off by default.
 - The limit is measured in cost; the count of assisted configurations is reported for pricing.
-- Over MCP, `createQuote` is included, marked destructive, behind `quoteDraft`'s `commandId`. The
-  user's AI may fill header fields through the same server-side filter (`QUOTE_HEADER`). There is no
-  quote page over MCP, so a missing required field ends in SAP refusing the post, not in a bad document.
+- Over MCP, SAP writes (`b1_write`, `b1_copy`, `post_quotation`) are always proposals, posted only when the
+  user accepts the server-built confirmation the MCP client shows (elicitation). The quotation's
+  confirmation names its customer, currency, lines and total, because `QUOTE_HEADER` lets the AI set
+  `CardCode` and `DocCurrency`.
 - The eval reads only workspaces with the assistant switched on, and the model choice waits for about
   30 cases.
-- The MCP address carries the workspace slug.
-- Extraction first, then UI, then MCP.
-- The dropped files are kept as the configuration's files: they grow the test set for free.
+- One MCP address, `https://mcp.<DOMAIN>`; the workspace is Better Auth's consent reference, carried in the token.
+- The dropped files are kept as the configuration's files, so the test set grows with no extra collection step.

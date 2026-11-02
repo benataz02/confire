@@ -34,13 +34,14 @@ export async function chatHasFiles(tenantId: string, userId: string, threadId: s
 }
 
 /** Both switches on, and none of the exceptions: no client files in the chat, not an Invoice copy
- *  (it posts to the accounts and is undone only by a credit memo). No thread = a browser call or MCP:
- *  no file exception (Confire cannot see what an external AI read; phase 3 revisits it). */
+ *  (it posts to the accounts and is undone only by a credit memo), not an MCP call — Confire cannot see
+ *  what an external AI read, so over MCP every write is a proposal the user confirms (spec §4.10).
+ *  No thread and no MCP = a browser call: no file exception. */
 export async function autoWrite(
-  c: { tenantId: string; userId: string; assistantThreadId?: string },
+  c: { tenantId: string; userId: string; assistantThreadId?: string; mcpUserId?: string },
   o: { target: string },
 ): Promise<boolean> {
-  if (o.target === "Invoices") return false;
+  if (o.target === "Invoices" || c.mcpUserId) return false;
   if (!(await workspaceAutoWrite(c.tenantId)) || !(await userAutoWrite(c.tenantId, c.userId))) return false;
   return !c.assistantThreadId || !(await chatHasFiles(c.tenantId, c.userId, c.assistantThreadId));
 }

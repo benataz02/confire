@@ -1,10 +1,10 @@
-import { isTableGroup, type Issue, type ModelDef } from "@confire/config-engine";
+import { type Issue, type ModelDef } from "@confire/config-engine";
 import type { PageMessage } from "@confire/ui/PageMessages.tsx";
 import type { RecordIssues, RecordMessage } from "@confire/ui/object-page/useObjectRecord.ts";
 import type { Row } from "@confire/ui/types.ts";
 import { constraintAt, defOf } from "../../features/model/record.ts";
 import { issueText } from "./exprHelpers.ts";
-import { rowKeyOf } from "./structureOps.ts";
+import { findPlaced, rowKeyOf } from "./structureOps.ts";
 
 export const issueFor = (issues: Issue[], path: string) => issues.find((i) => i.path === path);
 
@@ -30,13 +30,9 @@ export function sectionOf(path: string): string {
   return "settings"; // pricing.*
 }
 
-/** The tree row a table is placed on — a table is addressed by its place, not its key. */
-function tableRow(draft: ModelDef, key: string): string | undefined {
-  for (const [s, sec] of draft.structure.sections.entries())
-    for (const [g, grp] of sec.groups.entries())
-      if (isTableGroup(grp) && grp.table === key) return rowKeyOf({ kind: "table", s, g });
-  return undefined;
-}
+/** The tree row a table is drawn on, if a group places it. */
+const tableRow = (draft: ModelDef, key: string): string | undefined =>
+  findPlaced(draft, key) ? rowKeyOf({ kind: "table", key }) : undefined;
 
 /** The tree row (its `rowKeyOf` key) an issue about a parameter, a table, a formula or a heading's
  *  rule is about, or undefined when no one row is. */

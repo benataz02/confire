@@ -1,6 +1,6 @@
 import { os, ORPCError } from "@orpc/server";
 import { and, eq, notInArray } from "drizzle-orm";
-import { db, EXTERNAL_ROLES, member, organization } from "@confire/db";
+import { db, EXTERNAL_ROLES, member, organization, user } from "@confire/db";
 import { auth } from "../auth.ts";
 import { TENANT_HEADER, tenantSlug } from "../tenant.ts";
 import { t } from "../i18n/index.ts";
@@ -12,6 +12,9 @@ export interface InitialContext {
    *  the thread the call runs in. The RPC and OpenAPI handlers never fill it from a request, so a
    *  browser cannot set it. b1.write/b1.copy read it for auto mode's file exception. */
   assistantThreadId?: string;
+  /** Set only by the MCP route (mcp.ts) once Better Auth has verified the bearer token: the token's
+   *  user. Like assistantThreadId, no handler fills it from a request, so a cookie or header cannot. */
+  mcpUserId?: string;
 }
 
 export const base = os.$context<InitialContext>();
@@ -27,6 +30,20 @@ const requireSession = base.middleware(async ({ context, next }) => {
   });
   if (!data) throw new ORPCError("UNAUTHORIZED");
   return next({ context: { session: data.session, user: data.user } });
+});
+
+/** The user behind a workspace call: the MCP token's (read live, so a deleted user is refused at
+ *  once), otherwise the cookie session's. Only userProcedure takes a token: `me`, the lobby and setup
+ *  (sessionProcedure) are the browser's and keep requireSession. */
+const requireUser = base.middleware(async ({ context, next }) => {
+  if (context.mcpUserId) {
+    const [row] = await db.select().from(user).where(eq(user.id, context.mcpUserId)).limit(1);
+    if (!row) throw new ORPCError("UNAUTHORIZED");
+    return next({ context: { user: row } });
+  }
+  const data = await auth.api.getSession({ headers: context.headers, query: { disableCookieCache: true } });
+  if (!data) throw new ORPCError("UNAUTHORIZED");
+  return next({ context: { user: data.user } });
 });
 
 /** The workspace a request names (its `x-tenant`: the page's first path segment, tenant.ts), gated by
@@ -50,7 +67,7 @@ export async function membershipOf(slugValue: string | null | undefined, userId:
  * join is the tenant boundary: a forged `x-tenant` can only ever select an org the user is already
  * staff of.
  */
-export const userProcedure = base.use(requireSession).use(async ({ context, next }) => {
+export const userProcedure = base.use(requireUser).use(async ({ context, next }) => {
   const row = await membershipOf(context.headers.get(TENANT_HEADER), context.user.id);
   return next({ context: { tenantId: row.tenantId, role: row.role, userId: context.user.id } });
 });

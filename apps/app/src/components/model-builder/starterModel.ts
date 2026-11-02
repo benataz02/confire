@@ -22,7 +22,7 @@ export function starterModel(name: string, t?: Translate): ModelDef {
   return {
     name,
     parameters: [],
-    structure: { sections: [{ key: "main", title: t ? copy(t, "MODEL_STARTER_SECTION", "General") : "General", groups: [{ table: "items" }] }] },
+    structure: { sections: [{ key: "main", title: t ? copy(t, "MODEL_STARTER_SECTION", "General") : "General", groups: [{ key: "group", title: "", params: ["items"] }] }] },
     computed: [],
     constraints: [],
     tables: [items],

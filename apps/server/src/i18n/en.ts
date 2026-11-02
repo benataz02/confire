@@ -221,6 +221,7 @@ export const en = {
 
   // The assistant (assistant/*, orpc/routers/assistant.ts)
   ASSISTANT_OFF: "The assistant is off for this workspace",
+  MCP_OFF: "External AI (MCP) is off for this workspace: an admin turns it on in Settings → Assistant",
   ASSISTANT_UNAVAILABLE: "The assistant is not set up on this server (no Claude API key)",
   ASSISTANT_LIMIT: "This workspace has used its assistant budget for this month",
   ASSISTANT_RATE_LIMIT: "Too many assistant requests — wait a minute",

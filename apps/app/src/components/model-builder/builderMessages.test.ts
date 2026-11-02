@@ -60,7 +60,7 @@ test("the starter's one issue is the price list, a Settings field", () => {
 test("an issue's row is the tree row that opens its parameter, table, formula or heading", () => {
   const draft = { ...named(), parameters: [{ key: "width", label: "Width", type: "number", ui: "input" }] } as ModelDef;
   expect(rowOf("parameters[0].defaultExpr", draft)).toBe("p:width");
-  expect(rowOf("tables[0].columns[1]", draft)).toBe("t:0.0");
+  expect(rowOf("tables[0].columns[1]", draft)).toBe("t:items");
   expect(rowOf("computed[2].expr", draft)).toBe("c:2");
   expect(rowOf("structure.sections[1].visibleWhen", draft)).toBe("s:1");
   expect(rowOf("structure.sections[1].groups[2].visibleWhen", draft)).toBe("g:1.2");

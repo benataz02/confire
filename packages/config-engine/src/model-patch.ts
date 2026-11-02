@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isTableGroup, ModelDefZ, ParamZ, TableDefZ, type ModelDef } from "./model";
+import { ModelDefZ, ParamZ, TableDefZ, type ModelDef } from "./model";
 
 // A model is saved as what changed since the last save, not as the whole document: the builder
 // diffs its draft against the definition it loaded (`diffModel`) and the server lays that over the
@@ -120,7 +120,6 @@ function placements(d: ModelDef): { groups: Set<string>; of: Map<string, string>
   const of = new Map<string, string>();
   for (const s of d.structure.sections)
     for (const g of s.groups) {
-      if (isTableGroup(g)) continue;
       groups.add(`${s.key}/${g.key}`);
       for (const p of g.params) of.set(p, `${s.key}/${g.key}`);
     }
@@ -151,7 +150,7 @@ function keepPlaced(before: ModelDef, after: ModelDef): ModelDef {
     structure: {
       sections: after.structure.sections.map((s) => ({
         ...s,
-        groups: s.groups.map((g) => (isTableGroup(g) ? g : { ...g, params: [...g.params, ...(back.get(`${s.key}/${g.key}`) ?? [])] })),
+        groups: s.groups.map((g) => ({ ...g, params: [...g.params, ...(back.get(`${s.key}/${g.key}`) ?? [])] })),
       })),
     },
   };

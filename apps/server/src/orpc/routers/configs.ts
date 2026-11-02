@@ -132,7 +132,7 @@ export const Customer = z.object({ cardCode: z.string().min(1), cardName: z.stri
  *  start passes `via` so the timeline says who made it. */
 export async function createProject(
   tenantId: string, userId: string, input: { modelId: string; name: string; customer?: z.infer<typeof Customer> | null },
-  via?: "assistant",
+  via?: "assistant" | "mcp",
 ) {
   const model = await loadModel(tenantId, input.modelId);
   return db.transaction(async (tx) => {
@@ -209,7 +209,7 @@ export const configsRouter = {
       name: z.string().trim().min(1).describe("The configuration's name"),
       customer: Customer.nullable().optional().describe("The SAP business partner the quotation will go to"),
     }))
-    .handler(({ input, context }) => createProject(context.tenantId, context.userId, input)),
+    .handler(({ input, context }) => createProject(context.tenantId, context.userId, input, context.mcpUserId ? "mcp" : undefined)),
 
   // Copy the inputs, then recalculate so the copy opens against what the cache says now. Deliberately
   // no assertWritable: duplicating a *quoted* configuration is the point — the source stays

@@ -1,6 +1,9 @@
 import { ORPCError } from "@orpc/server";
+import { z } from "zod";
+import { verifyOAuthQueryParams } from "@better-auth/oauth-provider";
 import { and, eq, notInArray } from "drizzle-orm";
-import { db, EXTERNAL_ROLES, member, organization } from "@confire/db";
+import { db, EXTERNAL_ROLES, member, oauthClient, organization } from "@confire/db";
+import { auth } from "../../auth.ts";
 import { adminProcedure, sessionProcedure } from "../base.ts";
 import { sapConnectionExists } from "../../seed-agent.ts";
 import { agentStatus, issuePairingCode } from "../../agent-pairing.ts";
@@ -46,6 +49,26 @@ export const sapRouter = {
       portals: seats.map(({ tenantId, ...s }) => ({ ...s, url: portalTenantUrl(s.slug), active: tenantId === active })),
     };
   }),
+
+  // The MCP consent page (/oauth/consent, assistant spec §4.10): what a client asks for, read off the
+  // query Better Auth signed — never off the browser's say-so — and the workspace it would reach (the
+  // consent's reference, auth.ts). The page then answers with Better Auth's own /oauth2/consent.
+  oauthConsent: sessionProcedure
+    .input(z.object({ query: z.string().max(8000) }))
+    .handler(async ({ input, context }) => {
+      if (!(await verifyOAuthQueryParams(input.query, (await auth.$context).secret))) throw new ORPCError("BAD_REQUEST");
+      const params = new URLSearchParams(input.query);
+      const [client] = await db.select({ name: oauthClient.name, uri: oauthClient.uri, disabled: oauthClient.disabled })
+        .from(oauthClient).where(eq(oauthClient.clientId, params.get("client_id") ?? "")).limit(1);
+      if (!client || client.disabled) throw new ORPCError("NOT_FOUND");
+      const row = await oneMembership(context.user.id);
+      return {
+        client: { name: client.name ?? params.get("client_id")!, uri: client.uri ?? null },
+        scopes: (params.get("scope") ?? "").split(" ").filter(Boolean),
+        workspace: row ? { name: row.name, slug: row.slug } : null,
+        email: context.user.email,
+      };
+    }),
 
   // Pairing (spec 2026-10-21 §4): a one-time code the agent redeems on the SAP server, and the status
   // that turns green once SAP answers through it. Settings reaches them through the path's tenant;

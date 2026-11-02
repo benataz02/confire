@@ -3,6 +3,7 @@ import { checkModel } from "../src/check";
 import type { ModelDef, TableDef } from "../src/model";
 import { bindings } from "../src/propagate";
 import { placedTables } from "../src/model";
+import { missingInputs, propagate } from "../src/propagate";
 import { evalTableRows, itemSplit, splitShares, splitWeights, tableAggregates } from "../src/tables";
 import { fieldGroup, lookups, model as base } from "./fixture";
 
@@ -82,7 +83,7 @@ const model: ModelDef = {
   structure: {
     sections: [{
       ...base.structure.sections[0]!,
-      groups: [...base.structure.sections[0]!.groups, { table: "holes" }],
+      groups: [...base.structure.sections[0]!.groups, { key: "holes_g", title: "", params: ["holes"] }],
     }],
   },
 };
@@ -102,6 +103,47 @@ describe("evalTableRows", () => {
     expect(out[0]!.minutes).toBeCloseTo(0.628318, 6);
     expect(out[1]!.perimeter).toBe(80);
     expect(out[1]!.minutes).toBe(1.6);
+  });
+
+  test("an unpicked manual list reads as its first option", () => {
+    const out = evalTableRows(holes, [{ size: 10 }], {}, lookups.tables);
+    expect(out[0]!.shape).toBe("circular");
+    expect(out[0]!.perimeter).toBeCloseTo(31.4159, 6);
+  });
+
+  test("an unpicked masterdata select reads as its first row", () => {
+    const out = evalTableRows(bought, [{ pieces: 2 }], {}, lookups.tables);
+    expect(out[0]!.item).toBe("COND-steel");
+    expect(out[0]!.item_price).toBe(1.5);
+    expect(out[0]!.cost).toBe(3);
+  });
+
+  test("a required masterdata select counts as filled by that first row", () => {
+    const item = { ...bought.columns[0]!, required: true };
+    const t: TableDef = { ...bought, columns: [item, bought.columns[1]!, bought.columns[2]!] };
+    const m: ModelDef = { ...model, tables: [...model.tables!, t] };
+    const rows = { bought: [{ pieces: 2 }] };
+    const gaps = missingInputs(m, lookups, propagate(m, lookups, entries, rows), rows);
+    expect(gaps.map((n) => n.code)).not.toContain("cell_required");
+  });
+
+  test("an unpicked query pick stays empty", () => {
+    const pick: TableDef = {
+      ...bought,
+      columns: [
+        { ...bought.columns[0]!, required: true, cell: { kind: "options", ref: { source: "query", table: "prices", valueCol: "code" } } },
+        bought.columns[1]!,
+        bought.columns[2]!,
+      ],
+    };
+    const out = evalTableRows(pick, [{ pieces: 2 }], {}, lookups.tables);
+    expect(out[0]!.item).toBe("");
+    expect(out[0]).not.toHaveProperty("item_price");
+    expect(out[0]!.cost).toBeNull();
+    const m: ModelDef = { ...model, tables: [...model.tables!, pick] };
+    const rows = { bought: [{ pieces: 2 }] };
+    const gaps = missingInputs(m, lookups, propagate(m, lookups, entries, rows), rows);
+    expect(gaps.map((n) => n.code)).toContain("cell_required");
   });
 
   test("a row formula reads model values, and row cells shadow them", () => {
@@ -280,6 +322,20 @@ describe("checkModel", () => {
     expect(msgs(typo)).toContain("unknown identifier 'item_prive'");
   });
 
+  test("a cell formula whose function has the wrong number of arguments", () => {
+    // IF(condition, then) saves today and evaluates to null — the same blank as an unbound name.
+    const m: ModelDef = {
+      ...model,
+      tables: [...model.tables!, {
+        role: "calc",
+        key: "cuts",
+        title: "Cuts",
+        columns: [{ key: "n", label: "N", type: "number", cell: { kind: "formula", expr: "IF(1, 2)" } }],
+      }],
+    };
+    expect(msgs(m)).toContain("IF expects 3 arguments");
+  });
+
   test("a table key colliding with a parameter", () => {
     const m: ModelDef = { ...model, tables: [{ ...holes, key: "material" }], structure: base.structure };
     expect(msgs(m)).toContain("A parameter or computed value is already called 'material'.");
@@ -340,27 +396,26 @@ describe("checkModel", () => {
     expect(msgs(m)).toContain("structure references unknown parameter 'nope'");
   });
 
-  test("a table group naming no TableDef", () => {
+  test("a group naming a table that is gone", () => {
     const m: ModelDef = {
       ...model,
-      structure: { sections: [{ ...base.structure.sections[0]!, groups: [{ table: "ghost" }] }] },
+      structure: { sections: [{ ...base.structure.sections[0]!, groups: [{ key: "ghost_g", title: "", params: ["ghost"] }] }] },
     };
-    expect(msgs(m)).toContain("structure references unknown table 'ghost'");
+    expect(msgs(m)).toContain("structure references unknown parameter 'ghost'");
   });
 
-  test("the same table placed as two groups", () => {
+  test("the same table placed twice", () => {
     const m: ModelDef = {
       ...model,
       structure: {
-        sections: [{ ...base.structure.sections[0]!, groups: [{ table: "holes" }, { table: "holes" }] }],
+        sections: [{ ...base.structure.sections[0]!, groups: [{ key: "holes_g", title: "", params: ["holes"] }, { key: "holes_g", title: "", params: ["holes"] }] }],
       },
     };
     expect(msgs(m)).toContain("table 'holes' is placed more than once");
   });
 
-  // A model saved before tables became groups. It still parses (the field arm is unchanged), but
-  // placedTables() no longer sees the table, so the form would drop it into the catch-all section.
-  test("a legacy table key still sitting in a group's params", () => {
+  // A table is a field like a parameter: it sits in a group's list, among the parameters.
+  test("a table placed among a group's parameters", () => {
     const m: ModelDef = {
       ...model,
       structure: {
@@ -370,7 +425,8 @@ describe("checkModel", () => {
         }],
       },
     };
-    expect(msgs(m)).toContain("table 'holes' sits in group 'conductor' — place it as a group of its own");
-    expect(placedTables(m)).not.toContain("holes");
+    expect(msgs(m).filter((x) => x.includes("holes"))).toEqual([]);
+    expect(placedTables(m)).toContain("holes");
   });
+
 });

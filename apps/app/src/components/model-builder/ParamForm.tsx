@@ -1,13 +1,9 @@
-import { useMemo } from "react";
+import type { CSSProperties } from "react";
 import {
-  CheckBox, Form, FormGroup, FormItem, Label, MultiComboBox, MultiComboBoxItem, Option, Select, StepInput,
+  CheckBox, Form, FormGroup, FormItem, Label, MultiComboBox, MultiComboBoxItem, MultiInput, Option, Select, StepInput, Token,
 } from "@ui5/webcomponents-react";
 import { derivedColumns, displayColumns, type LookupRef, type Param } from "@confire/config-engine";
 import { FORM_LAYOUT } from "@confire/ui/formLayout.ts";
-import { EditGrid } from "@confire/ui/list-report/EditGrid.tsx";
-import { TABLE_ITEM } from "@confire/ui/list-report/Grid.tsx";
-import { ownColumns } from "@confire/ui/metadata.ts";
-import type { ListColumn, Row } from "@confire/ui/types.ts";
 import { columnCaption, masterdataRef, sourceBadge, type TableCols } from "./exprHelpers.ts";
 import { useI18n } from "../../i18n.ts";
 import type { Translate } from "./builderMessages.ts";
@@ -75,12 +71,17 @@ export function ParamDomain({ p, set, tables }: {
           <CheckBox accessibleName={t("MODEL_EXCLUDE")} checked={!!p.excludeFromDomains}
             onChange={(e) => set({ excludeFromDomains: e.target.checked || undefined })} />
         </FormItem>
+        {manualRef ? (
+          <FormItem labelContent={label(t("MODEL_OPTIONS"))}>
+            <ManualList ref_={manualRef} type={p.type} accessibleName={t("MODEL_OPTIONS")}
+              onChange={(r) => set({ domain: { kind: "options", ref: r } })} />
+          </FormItem>
+        ) : null}
         {rangeDomain ? <RangeEditor value={rangeDomain} onChange={(domain) => set({ domain })} /> : null}
         {sourceRef ? (
           <SourceRefEditor ref_={sourceRef} tables={tables} onChange={(r) => set({ domain: { kind: "options", ref: r } })} />
         ) : null}
       </FormGroup>
-      {manualRef ? <ManualOptions ref_={manualRef} onChange={(r) => set({ domain: { kind: "options", ref: r } })} /> : null}
     </Form>
   );
 }
@@ -154,32 +155,38 @@ function SourceRefEditor({ ref_, tables, onChange }: {
   );
 }
 
-function ManualOptions({ ref_, onChange }: {
-  ref_: Extract<LookupRef, { source: "manual" }>;
-  onChange: (r: LookupRef) => void;
+type ManualRef = Extract<LookupRef, { source: "manual" }>;
+
+/** A manual list as tokens: type a value and Enter (or leave the field) adds it, a pasted
+ *  "a, b, c" adds each. Values are the field's type, so constraints compare like with like. A value
+ *  that stays keeps the label it had; a list worth labelling belongs in masterdata.
+ *  Uncontrolled text, so it is cleared by hand (as BatchInput). */
+export function ManualList({ ref_, type, accessibleName, error, style, onChange }: {
+  ref_: ManualRef;
+  type: Param["type"];
+  accessibleName: string;
+  error?: string;
+  style?: CSSProperties;
+  onChange: (r: ManualRef) => void;
 }) {
   const i18n = useI18n();
-  const t: Translate = (key, ...params) => i18n.getText(key, ...params);
-  const columns = useMemo<ListColumn[]>(() => ownColumns([
-    { key: "value", label: t("MODEL_COL_VALUE") },
-    { key: "label", label: t("MODEL_COL_LABEL"), placeholder: t("MODEL_OPTIONAL") },
-  ]), [i18n]);
-  const rows = useMemo<Row[]>(() => ref_.options.map((o) => ({ value: o.value === null ? "" : String(o.value), label: o.label })), [ref_.options]);
+  const coerce = (v: string) => (type === "number" ? Number(v) : type === "boolean" ? v === "true" : v);
   return (
-    // A table group in ParamDomain's Form: it spans the Form and the item breaks out of the column
-    // flow (TABLE_ITEM); the grid's toolbar names it.
-    <FormGroup colSpan={FORM_LAYOUT}>
-      <FormItem className={TABLE_ITEM}>
-        <EditGrid title={t("MODEL_OPTIONS")} columns={columns} rows={rows} newRow={() => ({ value: "" })}
-          onChange={(next) => onChange({
-            ...ref_,
-            options: next.map((r) => {
-              const raw = String(r.value ?? "");
-              // numbers stay numbers so table constraints compare correctly
-              return { value: raw !== "" && !Number.isNaN(Number(raw)) ? Number(raw) : raw, label: (r.label as string | null) || undefined };
-            }),
-          })} />
-      </FormItem>
-    </FormGroup>
+    <MultiInput style={style ?? W} accessibleName={accessibleName} placeholder={i18n.getText("MODEL_MANUAL_PH")}
+      valueState={error ? "Negative" : "None"} valueStateMessage={<div>{error}</div>}
+      tokens={ref_.options.map((o, i) => <Token key={`${i}:${String(o.value)}`} data-i={i} text={String(o.value)} />)}
+      onChange={(e) => {
+        const options = [...ref_.options];
+        for (const raw of (e.target.value ?? "").split(",").map((v) => v.trim())) {
+          const value = coerce(raw);
+          if (raw && !Number.isNaN(value) && !options.some((o) => o.value === value)) options.push({ value });
+        }
+        e.target.value = "";
+        if (options.length > ref_.options.length) onChange({ ...ref_, options });
+      }}
+      onTokenDelete={(e) => {
+        const gone = new Set(e.detail.tokens.map((tk) => Number((tk as HTMLElement).dataset.i)));
+        onChange({ ...ref_, options: ref_.options.filter((_, i) => !gone.has(i)) });
+      }} />
   );
 }

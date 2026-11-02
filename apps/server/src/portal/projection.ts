@@ -1,5 +1,5 @@
 import {
-  isTableGroup, refKeyCols,
+  refKeyCols,
   type FormState, type LookupRef, type ModelDef, type Param, type ResolvedLookups, type ResolvedTable,
   type TableDef, type TableRows,
 } from "@confire/config-engine";
@@ -41,7 +41,7 @@ function portalStructure(s: ModelDef["structure"]): ModelDef["structure"] {
   return {
     sections: s.sections.map(({ key, title, groups }) => ({
       key, title,
-      groups: groups.map((g) => (isTableGroup(g) ? { table: g.table } : { key: g.key, title: g.title, params: g.params })),
+      groups: groups.map((g) => ({ key: g.key, title: g.title, params: g.params })),
     })),
   };
 }

@@ -237,36 +237,51 @@ export function evalAst(n: Ast, scope: Scope): Val {
   }
 }
 
+/** Argument counts `checkModel` and `evaluate` share, so a formula the editor accepts can run.
+ *  CONCAT is absent on purpose: any number of arguments, including none. */
+const ARITY: Record<string, readonly [number, number]> = {
+  IF: [3, 3],
+  MIN: [1, 99],
+  MAX: [1, 99],
+  ROUND: [1, 2],
+  CEIL: [1, 1],
+  FLOOR: [1, 1],
+  ABS: [1, 1],
+  ISBLANK: [1, 1],
+  SELECTED: [1, 1],
+  HAS: [2, 2],
+  LOOKUP: [4, 4],
+};
+
+export function assertCallArity(n: Extract<Ast, { t: "call" }>): void {
+  const range = ARITY[n.name];
+  if (!range) return;
+  const [min, max] = range;
+  if (n.args.length < min || n.args.length > max)
+    throw new DslError(`${n.name} expects ${min === max ? min : `${min}-${max}`} arguments`, n.from, n.to);
+}
+
 function call(n: Extract<Ast, { t: "call" }>, scope: Scope): Val {
+  assertCallArity(n);
   const arg = (i: number) => evalAst(n.args[i]!, scope);
   const argN = (i: number) => num(arg(i), n.args[i]!);
-  const arity = (min: number, max = min) => {
-    if (n.args.length < min || n.args.length > max)
-      throw new DslError(`${n.name} expects ${min === max ? min : `${min}-${max}`} arguments`, n.from, n.to);
-  };
   switch (n.name) {
     case "IF":
-      arity(3);
       return bool(arg(0), n.args[0]!) ? arg(1) : arg(2);
     case "MIN":
     case "MAX": {
-      arity(1, 99);
       const vals = n.args.map((a, i) => argN(i));
       return n.name === "MIN" ? Math.min(...vals) : Math.max(...vals);
     }
     case "ROUND": {
-      arity(1, 2);
       const f = 10 ** (n.args.length === 2 ? argN(1) : 0);
       return Math.round(argN(0) * f) / f;
     }
     case "CEIL":
-      arity(1);
       return Math.ceil(argN(0));
     case "FLOOR":
-      arity(1);
       return Math.floor(argN(0));
     case "ABS":
-      arity(1);
       return Math.abs(argN(0));
     case "CONCAT":
       return n.args
@@ -278,7 +293,6 @@ function call(n: Extract<Ast, { t: "call" }>, scope: Scope): Val {
         .join("");
     case "ISBLANK":
     case "SELECTED": {
-      arity(1);
       // An unpicked field is an absent key. Only ISBLANK, SELECTED and HAS read that as
       // empty; every other read refuses it as unbound.
       const a = n.args[0]!;
@@ -287,7 +301,6 @@ function call(n: Extract<Ast, { t: "call" }>, scope: Scope): Val {
       return n.name === "ISBLANK" ? blank : !blank;
     }
     case "HAS": {
-      arity(2);
       // An unpicked multi-select is an absent key, a hidden one is null — the same read as
       // ISBLANK. Neither contains the value, so the sought value is not read. A present
       // non-list is still an error: HAS only means something for a multi-value field.
@@ -299,7 +312,6 @@ function call(n: Extract<Ast, { t: "call" }>, scope: Scope): Val {
       return l.includes(arg(1) as string);
     }
     case "LOOKUP": {
-      arity(4);
       const tn = arg(0);
       const kc = arg(1);
       const kv = arg(2);

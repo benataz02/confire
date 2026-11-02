@@ -4,7 +4,7 @@ import {
   ObjectPageSection, ObjectStatus, Option, RadioButton, SegmentedButton, SegmentedButtonItem, Select, Slider, Text, TextArea, Token,
 } from "@ui5/webcomponents-react";
 import {
-  isTableGroup, placedTables, structureId,
+  placedTables, structureId,
   type FieldOption, type FormState, type Group, type LookupRef, type ModelDef, type ResolvedTable, type RowMoney, type TableRows, type Val,
 } from "@confire/config-engine";
 import { CflField } from "../cfl/CflField.tsx";
@@ -45,28 +45,26 @@ export const UNPLACED_TABLES_SECTION = "__tables";
  *  author forgot to place. A table nobody can reach is a table whose sums are permanently zero —
  *  and for an items table it would be the quotation's lines going missing. */
 function formSections(model: ModelDef, form: FormState): { key: string; title: string; groups: Group[] }[] {
-  const defined = new Set((model.tables ?? []).map((t) => t.key));
   const hidden = new Set(form.hidden ?? []);
-  // A group left behind by a deleted table is dropped, so it is neither an empty titleless
-  // FormGroup nor counted as a second group. So is whatever a section's or group's rule hides.
+  // Whatever a section's or group's rule hides is dropped.
   const own = model.structure.sections.filter((s) => !hidden.has(structureId(s.key))).map((s) => ({
     key: s.key, title: s.title,
-    groups: s.groups.filter((g) => (isTableGroup(g) ? defined.has(g.table) : !hidden.has(structureId(s.key, g.key)))),
+    groups: s.groups.filter((g) => !hidden.has(structureId(s.key, g.key))),
   }));
   const placed = new Set(placedTables(model));
   const orphans = (model.tables ?? []).filter((t) => !placed.has(t.key));
   if (!orphans.length) return own;
-  // The catch-all section owns no structure: its orphans become table groups, so they go through
+  // The catch-all section owns no structure: its orphans become one group, so they go through
   // the very same Form/FormGroup path a placed table does.
   return [...own, {
     key: UNPLACED_TABLES_SECTION, title: orphans.map((t) => t.title || t.key).join(", "),
-    groups: orphans.map((t) => ({ table: t.key })),
+    groups: [{ key: UNPLACED_TABLES_SECTION, title: "", params: orphans.map((t) => t.key) }],
   }];
 }
 
-// A table group holds exactly one FormItem, and it must not be one column wide: the group spans
-// the whole Form (colSpan mirrors its layout) and the item breaks out of the column flow
-// (TABLE_ITEM). ConfigTable's Grid toolbar names the table, with its row count, and carries Add/Delete.
+// A table sits in a group among its fields, but is drawn as a FormGroup of its own holding exactly
+// one FormItem, which must not be one column wide: that group spans the whole Form (colSpan mirrors
+// its layout) and the item breaks out of the column flow (TABLE_ITEM). ConfigTable's Grid toolbar names the table, with its row count, and carries Add/Delete.
 
 /** A field's provenance mark: the assistant wrote it (with the source as its tip), or a question about
  *  it is open in the assistant. */
@@ -128,10 +126,9 @@ export function configuratorForms(props: ConfiguratorProps) {
 // Form supports exactly one level of grouping (Form > FormGroup), so section title / group→FormGroup
 // keeps both. A section's only group drops its own header, which would just repeat the section's.
 //
-// A section's groups are of two kinds: a table group renders as one full-width, headerless
-// FormGroup — the Grid's toolbar titles it from its TableDef (so a rename on the table's page cannot
-// leave a stale heading), and a group header would only say it twice — a field group as the
-// ordinary label-and-field group.
+// A group lists parameters and tables alike. A table renders as a full-width FormGroup of its own,
+// headed only when it opens its group — the Grid's toolbar titles it from its TableDef (so a rename
+// on the table's page cannot leave a stale heading).
 function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabled, readOnly, querySource, batches, itemMoney, itemBatch, onItemBatchChange, formulaOverride, marks, onMarkPress, title, groups, headerText }: ConfiguratorProps & {
   title: string;
   groups: Group[];
@@ -314,72 +311,82 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
     </SegmentedButton>
   ) : undefined;
 
+  const fieldItem = (k: string) => {
+    const p = model.parameters.find((x) => x.key === k);
+    if (!p) return null;
+    const f = fieldOf(k);
+    const eliminated = (f.options ?? []).filter((o) => o.unavailable).length;
+    // MultiComboBox filters eliminated options out (no per-item disabled in UI5 v2), so
+    // unlike Select/Radio it can't show them greyed — explain the gap with a count instead.
+    const showEliminatedNote = !readOnly && !p.readonly && p.ui === "multicombo" && eliminated > 0;
+    // RadioButton and CheckBox take a valueState but have no valueStateMessage slot, and
+    // Slider has neither, so the broken rule's message is spelled out under them instead.
+    const ruleNote = !readOnly && !p.readonly && f.conflicts
+      && (p.ui === "radio" || p.ui === "checkbox" || p.ui === "slider" || (p.type === "boolean" && p.ui !== "select" && p.ui !== "dropdown"));
+    return (
+      <FormItem key={k} labelContent={
+        <Label required={f.required && !readOnly && !p.readonly} showColon>
+          {p.label + (p.unit ? ` (${p.unit})` : "")}
+          {p.help ? <Icon name="message-information" accessibleName={p.help} title={p.help}
+            style={{ marginInlineStart: "0.375rem", cursor: "help", color: "var(--sapContent_IconColor)" }} /> : null}
+        </Label>
+      }>
+        {/* data-param is what a conflict message in the page's popover scrolls to —
+            the controls themselves vary too much to each carry an id. */}
+        <div data-param={k} style={{ display: "flex", flexDirection: "column", gap: "0.125rem", width: "100%" }}>
+          {/* The label sits beside the field, so the assistant's mark closes the control's own row. */}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
+            <div style={{ flex: 1, minInlineSize: 0, display: "flex" }}>{control(k)}</div>
+            {marks?.[k] ? <MarkIcon mark={marks[k]!} label={i18n.getText("UI_MARK_QUESTION")}
+              onPress={(el) => onMarkPress?.(k, el)} /> : null}
+          </div>
+          {showEliminatedNote ? (
+            <Text style={{ fontSize: "0.75rem", color: "var(--sapContent_LabelColor)" }}>
+              {i18n.getText(eliminated === 1 ? "UI_OPTION_UNAVAILABLE" : "UI_OPTIONS_UNAVAILABLE", String(eliminated))}
+            </Text>
+          ) : null}
+          {ruleNote ? f.conflicts!.map((m, i) => (
+            <Text key={i} style={{ fontSize: "0.75rem", color: "var(--sapNegativeTextColor)" }}>{m}</Text>
+          )) : null}
+        </div>
+      </FormItem>
+    );
+  };
+  const tableGroup = (key: string, def: NonNullable<ReturnType<typeof defOf>>, header?: string) => (
+    <FormGroup key={`t:${key}`} headerText={header} colSpan={FORM_LAYOUT}>
+      {/* data-param: table keys share the parameters' namespace, so a missing-row message
+          scrolls here the same way a parameter's does. */}
+      <FormItem className={TABLE_ITEM} data-param={key}>
+        <ConfigTable def={def} rows={tableRows[key] ?? []} evaluated={form.tables[key] ?? []}
+          tables={tables} querySource={querySource}
+          disabled={disabled || !onRowsChange} readOnly={readOnly} formulaOverride={formulaOverride}
+          money={def.role === "items" ? itemMoney : undefined}
+          actions={def.role === "items" ? batchPick : undefined}
+          onChange={(next) => onRowsChange?.(key, next)} />
+      </FormItem>
+    </FormGroup>
+  );
+
   return (
     <Form headerText={headerText} accessibleName={headerText ? undefined : title} layout={FORM_LAYOUT} {...formMode}>
-      {groups.map((g, gi) => {
-      if (isTableGroup(g)) {
-        const def = defOf(g.table)!;
-        return (
-          <FormGroup key={`${g.table}:${gi}`} colSpan={FORM_LAYOUT}>
-            {/* data-param: table keys share the parameters' namespace, so a missing-row message
-                scrolls here the same way a parameter's does. */}
-            <FormItem className={TABLE_ITEM} data-param={g.table}>
-              <ConfigTable def={def} rows={tableRows[g.table] ?? []} evaluated={form.tables[g.table] ?? []}
-                tables={tables} querySource={querySource}
-                disabled={disabled || !onRowsChange} readOnly={readOnly} formulaOverride={formulaOverride}
-                money={def.role === "items" ? itemMoney : undefined}
-                actions={def.role === "items" ? batchPick : undefined}
-                onChange={(next) => onRowsChange?.(g.table, next)} />
-            </FormItem>
-          </FormGroup>
-        );
-      }
-      const content = g.params.filter((k) => fieldOf(k).visible);
-      return (
-        <FormGroup key={`${g.key}:${gi}`} headerText={head(g.title)}>
-          {content.map((k) => {
-            const p = model.parameters.find((x) => x.key === k);
-            if (!p) return null;
-            const f = fieldOf(k);
-            const eliminated = (f.options ?? []).filter((o) => o.unavailable).length;
-            // MultiComboBox filters eliminated options out (no per-item disabled in UI5 v2), so
-            // unlike Select/Radio it can't show them greyed — explain the gap with a count instead.
-            const showEliminatedNote = !readOnly && !p.readonly && p.ui === "multicombo" && eliminated > 0;
-            // RadioButton and CheckBox take a valueState but have no valueStateMessage slot, and
-            // Slider has neither, so the broken rule's message is spelled out under them instead.
-            const ruleNote = !readOnly && !p.readonly && f.conflicts
-              && (p.ui === "radio" || p.ui === "checkbox" || p.ui === "slider" || (p.type === "boolean" && p.ui !== "select" && p.ui !== "dropdown"));
-            return (
-              <FormItem key={k} labelContent={
-                <Label required={f.required && !readOnly && !p.readonly} showColon>
-                  {p.label + (p.unit ? ` (${p.unit})` : "")}
-                  {p.help ? <Icon name="message-information" accessibleName={p.help} title={p.help}
-                    style={{ marginInlineStart: "0.375rem", cursor: "help", color: "var(--sapContent_IconColor)" }} /> : null}
-                </Label>
-              }>
-                {/* data-param is what a conflict message in the page's popover scrolls to —
-                    the controls themselves vary too much to each carry an id. */}
-                <div data-param={k} style={{ display: "flex", flexDirection: "column", gap: "0.125rem", width: "100%" }}>
-                  {/* The label sits beside the field, so the assistant's mark closes the control's own row. */}
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
-                    <div style={{ flex: 1, minInlineSize: 0, display: "flex" }}>{control(k)}</div>
-                    {marks?.[k] ? <MarkIcon mark={marks[k]!} label={i18n.getText("UI_MARK_QUESTION")}
-                      onPress={(el) => onMarkPress?.(k, el)} /> : null}
-                  </div>
-                  {showEliminatedNote ? (
-                    <Text style={{ fontSize: "0.75rem", color: "var(--sapContent_LabelColor)" }}>
-                      {i18n.getText(eliminated === 1 ? "UI_OPTION_UNAVAILABLE" : "UI_OPTIONS_UNAVAILABLE", String(eliminated))}
-                    </Text>
-                  ) : null}
-                  {ruleNote ? f.conflicts!.map((m, i) => (
-                    <Text key={i} style={{ fontSize: "0.75rem", color: "var(--sapNegativeTextColor)" }}>{m}</Text>
-                  )) : null}
-                </div>
-              </FormItem>
-            );
-          })}
-        </FormGroup>
-      );
+      {groups.flatMap((g, gi) => {
+        // Runs of fields share the group's FormGroup; each table breaks out into one of its own.
+        // The group's title heads whichever comes first.
+        const runs: (string | string[])[] = [];
+        for (const k of g.params) {
+          if (defOf(k)) runs.push(k);
+          else if (fieldOf(k).visible) {
+            const last = runs.at(-1);
+            if (Array.isArray(last)) last.push(k);
+            else runs.push([k]);
+          }
+        }
+        if (!runs.length) runs.push([]);
+        return runs.map((run, ri) => {
+          const header = ri === 0 ? head(g.title) : undefined;
+          if (typeof run === "string") return tableGroup(run, defOf(run)!, header);
+          return <FormGroup key={`${g.key}:${gi}:${ri}`} headerText={header}>{run.map(fieldItem)}</FormGroup>;
+        });
       })}
     </Form>
   );

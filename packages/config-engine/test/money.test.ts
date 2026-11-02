@@ -13,7 +13,7 @@ const model: ModelDef = {
       domain: { kind: "options", ref: { source: "manual", options: [{ value: 2 }, { value: 3 }] } },
     },
   ],
-  structure: { sections: [{ key: "main", title: "Main", groups: [{ table: "parts" }] }] },
+  structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "parts_g", title: "", params: ["parts"] }] }] },
   computed: [],
   tables: [{
     role: "items", key: "parts", title: "Parts", basisExpr: "area",

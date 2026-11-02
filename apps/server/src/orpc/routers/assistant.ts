@@ -15,6 +15,12 @@ import {
 import { userAutoWrite, workspaceAutoWrite } from "../../assistant/auto.ts";
 import { assertAssistant, assistantOn, MONTHLY_LIMIT_USD, monthUsage, offReason, rateLimit } from "../../assistant/usage.ts";
 import { t as text } from "../../i18n/index.ts";
+import { mcpUrl } from "../../tenant.ts";
+import { eq } from "drizzle-orm";
+
+/** The External AI (MCP) switch: off unless an admin turned it on. */
+const mcpOn = async (tenantId: string) =>
+  (await db.select({ mcp: assistantSettings.mcp }).from(assistantSettings).where(eq(assistantSettings.tenantId, tenantId)).limit(1))[0]?.mcp ?? false;
 
 // The assistant's fixed steps (spec §4.1), called by the panel: read the request (`intake`), start
 // the configuration it proposes (`start`, no model call), read its values (`extract`). Each step's
@@ -167,19 +173,28 @@ export const assistantRouter = {
       });
     }),
 
-  /** The switch, and whether this server can call Claude at all (an API key is set). */
+  /** The switches, whether this server can call Claude at all (an API key is set), and the MCP
+   *  connector address the External AI switch opens (spec §4.10). */
   settings: adminProcedure.handler(async ({ context }) => ({
-    assistant: await assistantOn(context.tenantId), b1AutoWrite: await workspaceAutoWrite(context.tenantId), available: available(),
+    assistant: await assistantOn(context.tenantId), b1AutoWrite: await workspaceAutoWrite(context.tenantId),
+    mcp: await mcpOn(context.tenantId), mcpUrl, available: available(),
   })),
 
   /** `b1AutoWrite` off stops auto mode at once for everyone: every write is read for it. */
   saveSettings: adminProcedure
-    .input(z.object({ assistant: z.boolean(), b1AutoWrite: z.boolean().optional() }))
+    .input(z.object({ assistant: z.boolean(), b1AutoWrite: z.boolean().optional(), mcp: z.boolean().optional() }))
     .handler(async ({ input, context }) => {
-      const set = { assistant: input.assistant, ...(input.b1AutoWrite !== undefined ? { b1AutoWrite: input.b1AutoWrite } : {}) };
+      const set = {
+        assistant: input.assistant,
+        ...(input.b1AutoWrite !== undefined ? { b1AutoWrite: input.b1AutoWrite } : {}),
+        ...(input.mcp !== undefined ? { mcp: input.mcp } : {}),
+      };
       await db.insert(assistantSettings).values({ tenantId: context.tenantId, ...set })
         .onConflictDoUpdate({ target: assistantSettings.tenantId, set: { ...set, updatedAt: new Date() } });
-      return { assistant: input.assistant, b1AutoWrite: await workspaceAutoWrite(context.tenantId), available: available() };
+      return {
+        assistant: input.assistant, b1AutoWrite: await workspaceAutoWrite(context.tenantId),
+        mcp: await mcpOn(context.tenantId), mcpUrl, available: available(),
+      };
     }),
 
   /** This month's spend against the limit, and the configurations it went to. */

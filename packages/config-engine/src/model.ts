@@ -229,34 +229,19 @@ export const TableRowsZ = z.record(
 /** Scalar a table contributes to every expression scope, e.g. holes_perimeter, holes_count. */
 export const aggregateKey = (tableKey: string, col: string) => `${tableKey}_${col}`;
 
-/** A section holds two kinds of group, and the form renders each as one UI5 FormGroup.
- *
- *  A **table group** carries nothing but the table key: its FormGroup is keyed and titled from the
- *  TableDef itself, so a rename on the table's page cannot leave a stale title behind in the structure.
- *  A **field group** is the ordinary label-and-fields group and is unchanged.
- *
- *  Plain `z.union`, not `discriminatedUnion`: there is no tag field, so every model saved before
- *  tables were groups still parses as the field arm. Its table keys simply stop being placed, and
- *  the form's trailing catch-all section (UNPLACED_TABLES_SECTION) picks them up — which is the
- *  whole migration. The table arm is listed first so it wins for `{ table }` objects.
- */
-export const TableGroupZ = z.object({ table: KeyZ });
-export const FieldGroupZ = z.object({
+/** A section's groups, each rendered as one UI5 FormGroup. A group lists its fields in render
+ *  order: parameter keys and table keys alike — they share one namespace (checkModel), so a key
+ *  names one or the other. A table draws across the whole form, titled from its TableDef, so a
+ *  rename on the table's page never leaves a stale title in the structure. */
+export const GroupZ = z.object({
   key: KeyZ,
   title: z.string(),
-  /** The group's fields in render order. Parameter keys only — a table is a group of its own now. */
   params: z.array(KeyZ),
-  /** false hides every field in it, exactly as each field's own `visibleWhen` would */
+  /** false hides every field in it, exactly as each field's own `visibleWhen` would, and its
+   *  tables, whose rows then count for nothing */
   visibleWhen: z.string().optional(),
 });
-export const GroupZ = z.union([TableGroupZ, FieldGroupZ]);
-export type TableGroup = z.infer<typeof TableGroupZ>;
-export type FieldGroup = z.infer<typeof FieldGroupZ>;
 export type Group = z.infer<typeof GroupZ>;
-
-/** The one type guard for the group union. `"table" in g` inlined everywhere would work, but this
- *  narrows in .filter()/.map() callbacks where TypeScript loses the `in` narrowing. */
-export const isTableGroup = (g: Group): g is TableGroup => "table" in g;
 
 /** A section's (`key`) or field group's (`section/group`) id in FormState.hidden. Keys are
  *  identifiers, so the slash never collides; a group key alone is only unique in its section. */
@@ -274,7 +259,7 @@ export const ModelDefZ = z.object({
         title: z.string(),
         groups: z.array(GroupZ),
         /** false hides everything in it: its groups' fields, and its tables, whose rows then count
-         *  for nothing. checkModel refuses one on the section holding the items grid. */
+         *  for nothing. checkModel refuses one on the section or group holding the items grid. */
         visibleWhen: z.string().optional(),
       }),
     ),
@@ -384,12 +369,9 @@ export const itemsTable = (): ItemsTable => ({
   ],
 });
 
-/** Table keys the form actually shows, in render order. A table is a group of its own and lives
- *  nowhere else — a key naming no TableDef is dropped, so a group left behind by a deleted table
- *  never renders. */
+/** Table keys the form actually shows, in render order: the ones a group lists. A key naming no
+ *  TableDef is a parameter's, or one left behind by a deleted table, which never renders. */
 export const placedTables = (model: ModelDef): string[] => {
   const keys = new Set((model.tables ?? []).map((t) => t.key));
-  return model.structure.sections.flatMap((s) =>
-    s.groups.filter(isTableGroup).map((g) => g.table).filter((k) => keys.has(k)),
-  );
+  return model.structure.sections.flatMap((s) => s.groups.flatMap((g) => g.params.filter((k) => keys.has(k))));
 };

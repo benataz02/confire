@@ -24,7 +24,7 @@ const PRICED: ModelDef = {
     { key: "note", label: "Note", type: "string", ui: "input" },
     { key: "fixed", label: "Fixed", type: "number", ui: "input", readonly: true },
   ],
-  structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["size", "note", "fixed"] }, { table: "items" }, { table: "holes" }] }] },
+  structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["size", "note", "fixed"] }, { key: "items_g", title: "", params: ["items"] }, { key: "holes_g", title: "", params: ["holes"] }] }] },
   computed: [],
   tables: [
     itemsTable(),

@@ -208,6 +208,7 @@ export const es: Partial<Record<keyof typeof en, string>> = {
   FILE_EMPTY: "El archivo está vacío",
 
   ASSISTANT_OFF: "El asistente está desactivado en este espacio de trabajo",
+  MCP_OFF: "La IA externa (MCP) está desactivada en este espacio de trabajo: un administrador la activa en Ajustes → Asistente",
   ASSISTANT_UNAVAILABLE: "El asistente no está configurado en este servidor (no hay clave de API de Claude)",
   ASSISTANT_LIMIT: "Este espacio de trabajo ha agotado el presupuesto del asistente de este mes",
   ASSISTANT_RATE_LIMIT: "Demasiadas solicitudes al asistente — espere un minuto",

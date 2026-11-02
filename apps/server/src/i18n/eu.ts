@@ -208,6 +208,7 @@ export const eu: Partial<Record<keyof typeof en, string>> = {
   FILE_EMPTY: "Fitxategia hutsik dago",
 
   ASSISTANT_OFF: "Laguntzailea desaktibatuta dago lan-eremu honetan",
+  MCP_OFF: "Kanpoko IA (MCP) desaktibatuta dago lan-eremu honetan: administratzaile batek aktibatzen du Ezarpenak → Laguntzailea atalean",
   ASSISTANT_UNAVAILABLE: "Laguntzailea ez dago konfiguratuta zerbitzari honetan (ez dago Claude API gakorik)",
   ASSISTANT_LIMIT: "Lan-eremu honek hilabete honetako laguntzailearen aurrekontua agortu du",
   ASSISTANT_RATE_LIMIT: "Laguntzaileari eskaera gehiegi — itxaron minutu bat",

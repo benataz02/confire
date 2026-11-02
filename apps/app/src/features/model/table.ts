@@ -1,4 +1,4 @@
-import { checkModel, isTableGroup, REQUIRED_ITEM_COLS, type ModelDef, type TableColumn, type TableDef } from "@confire/config-engine";
+import { checkModel, REQUIRED_ITEM_COLS, type ModelDef, type TableColumn, type TableDef } from "@confire/config-engine";
 import type { RecordIssues, RecordMessage } from "@confire/ui/object-page/useObjectRecord.ts";
 import type { Row, Section } from "@confire/ui/types.ts";
 import { copy } from "../../components/model-builder/builderMessages.ts";
@@ -95,7 +95,7 @@ export function tableIssues(r: Row, draft: ModelDef, tables: TableCols[], opened
 }
 
 /** The table written back over the one the page opened; a rename follows into placement, or the
- *  group points at a table that is gone. */
+ *  group lists a table that is gone. */
 export function commitTable(d: ModelDef, openedAs: string, tb: TableDef): ModelDef {
   return {
     ...d,
@@ -103,7 +103,7 @@ export function commitTable(d: ModelDef, openedAs: string, tb: TableDef): ModelD
     structure: openedAs === tb.key ? d.structure : {
       sections: d.structure.sections.map((sec) => ({
         ...sec,
-        groups: sec.groups.map((g) => (isTableGroup(g) && g.table === openedAs ? { table: tb.key } : g)),
+        groups: sec.groups.map((g) => ({ ...g, params: g.params.map((k) => (k === openedAs ? tb.key : k)) })),
       })),
     },
   };

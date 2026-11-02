@@ -209,12 +209,12 @@ the card already handle any entity. Not now.
 
 ### 5.5 MCP (phase 3)
 
-`@orpc/mcp` registers `b1.find/schema/read/write/copy`; its `filter` leaves `b1.apply` out. Writes are
-annotated destructive. Confirm mode over MCP: `@orpc/mcp`'s elicitation if it has one (the sample's
-pattern), otherwise the proposal's answer carries a link to approve it in Confire. Until then an MCP
-call follows the same two switches with no file exception (Confire cannot see what an external AI
-read), so phase 3 must revisit whether auto mode applies over MCP at all. Decided when phase 3 starts;
-nothing else in this design depends on it.
+Decided 2026-11-02 (assistant spec §4.10). MCP hosts the chat's own tools through
+`@tanstack/ai-mcp/server`, so `b1_find/schema/read/write/copy` are the same tools with the same names.
+`b1.post` is never one. Over MCP auto mode never applies, because Confire cannot see what an external AI
+read: `b1_write`/`b1_copy` always prepare the proposal, then ask the user through MCP elicitation with a
+server-built before → after. They post with `b1.post` only on the user's accept. A client that cannot
+elicit posts nothing.
 
 ### 5.6 The chat
 
@@ -255,7 +255,7 @@ made as the agent's SAP user. The user's toggle lives by the chat box, not in Se
 12. Double-post on a lost response is a known ceiling (`ponytail:`), not solved now.
 13. The sensitive-read list blocks row reads only; a schema (`entities.metadata`, `b1.schema`) stays
     readable — field names are not the data. `b1.find` hides the sets from non-admins.
-14. An MCP call follows the same switches with no file exception until phase 3 revisits it.
+14. An MCP call never auto-posts: every SAP write over MCP is confirmed by the user through elicitation (§5.5).
 
 ## 7. Left to the builder
 

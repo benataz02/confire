@@ -1,6 +1,6 @@
 import { evaluate, parse } from "./dsl";
 import type { Entries, ModelDef, Option, ResolvedLookups, TableRows, Val } from "./model";
-import { derivedKey, derivedColumns, isTableGroup, refKeyCols, requiredColumn, structureId } from "./model";
+import { derivedKey, derivedColumns, refKeyCols, requiredColumn, structureId } from "./model";
 import { evalTableRows, tableAggregates } from "./tables";
 
 export type Bindings = {
@@ -128,16 +128,15 @@ function settle(
   const hiddenStructure = new Set<string>();
   const nextTables = new Set<string>();
   const inHidden = new Set<string>();
+  const tableKeys = new Set((model.tables ?? []).map((t) => t.key));
   for (const s of model.structure.sections) {
     const on = shows(s.visibleWhen);
     if (!on) hiddenStructure.add(structureId(s.key));
     for (const g of s.groups) {
-      if (isTableGroup(g)) {
-        if (!on) nextTables.add(g.table);
-      } else if (!on || !shows(g.visibleWhen)) {
-        hiddenStructure.add(structureId(s.key, g.key));
-        for (const k of g.params) inHidden.add(k);
-      }
+      if (on && shows(g.visibleWhen)) continue;
+      hiddenStructure.add(structureId(s.key, g.key));
+      // Table keys share the parameters' namespace, so one list serves both.
+      for (const k of g.params) (tableKeys.has(k) ? nextTables : inHidden).add(k);
     }
   }
   for (const p of model.parameters) visible[p.key] = !inHidden.has(p.key) && shows(p.visibleWhen);
@@ -350,12 +349,13 @@ export function missingInputs(
     const title = t.title || t.key;
     if (t.role === "items" && !rows.length)
       out.push({ key: t.key, code: "table_empty", params: [title], message: `${title}: add at least one row` });
-    // Typed cells read raw — evalTableRows zero-fills them — and computed ones evaluated, so a
-    // formula that yields a value counts as an answer.
+    // Typed cells and query picks read raw — evalTableRows zero-fills them. A formula's result
+    // counts as an answer, and so does a select's first option (cellDefault).
     const evald = evalTableRows(t, rows, prop.values, lookups.tables);
     for (const c of t.columns) {
       if (!requiredColumn(t, c)) continue;
-      const empty = rows.flatMap((r, i) => (blank(c.cell.kind === "formula" ? evald[i]![c.key] : r[c.key]) ? [i + 1] : []));
+      const answered = c.cell.kind === "formula" || (c.cell.kind === "options" && c.cell.ref.source !== "query");
+      const empty = rows.flatMap((r, i) => (blank(answered ? evald[i]![c.key] : r[c.key]) ? [i + 1] : []));
       if (!empty.length) continue;
       const col = c.label || c.key;
       out.push({

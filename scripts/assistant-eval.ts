@@ -80,8 +80,8 @@ async function main(): Promise<void> {
     const form = formState(model.definition, lookups, propagate(model.definition, lookups, {}, {}), {});
     const pages = byProject.get(p.id)!.reduce((n, f) => n + pagesOf(f.data), 0);
     // twice: the intake proposal reads the same pages
-    estimate += 2 * costOf(ASSISTANT_MODEL, { input: pages * 1500 + modelBlock(model.definition, form).length / 4, cacheRead: 0, cacheWrite: 0, output: 1000 });
-    cases.push({ p, model, form });
+    estimate += 2 * costOf(ASSISTANT_MODEL, { input: pages * 1500 + modelBlock(model.definition, form, lookups.tables).length / 4, cacheRead: 0, cacheWrite: 0, output: 1000 });
+    cases.push({ p, model, form, tables: lookups.tables });
   }
   console.log(`${cases.length} case(s) on ${ASSISTANT_MODEL}, estimated $${estimate.toFixed(2)}`);
   if (!go) {
@@ -92,13 +92,13 @@ async function main(): Promise<void> {
 
   const started = new Date();
   const totals = { filled: 0, asked: 0, total: 0, differs: 0, proposed: 0 };
-  for (const { p, model, form } of cases) {
+  for (const { p, model, form, tables } of cases) {
     const refs = byProject.get(p.id)!.map((f) => ({ kind: "project" as const, id: f.id, name: f.name, mime: f.mime }));
     const parts = await fileParts(p.tenantId, refs, { projectId: p.id });
     // Confire's own spend, metered apart: it never counts against the workspace's limit or its
     // assisted configurations.
     const meter = { tenantId: EVAL, userId: EVAL, threadId: null, projectId: null, kind: "extract" as const };
-    const x = await readExtraction({ def: model.definition, form, parts, text: "", meter });
+    const x = await readExtraction({ def: model.definition, form, tables, parts, text: "", meter });
     // The first call too: does it propose the model the configuration was made with? No SAP read is
     // wanted here, so its headers name no session and the customer lookup fails quietly.
     const proposal = await readRequest({ headers: new Headers(), tenantId: p.tenantId }, { parts, text: "", meter });

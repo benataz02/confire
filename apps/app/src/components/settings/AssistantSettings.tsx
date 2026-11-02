@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BusyIndicator, Card, CardHeader, FlexBox, Label, MessageStrip, ProgressIndicator, Switch, Text,
+  BusyIndicator, Button, Card, CardHeader, FlexBox, Input, Label, MessageStrip, ProgressIndicator, Switch, Text,
 } from "@ui5/webcomponents-react";
 import { money } from "@confire/ui/money.ts";
 import { toast } from "@confire/ui/toast.ts";
@@ -8,8 +8,8 @@ import { useI18n } from "../../i18n.ts";
 import { orpc } from "../../orpc.ts";
 
 // Settings → Assistant (assistant spec §4.7): the workspace's switch, saying where the data goes, the
-// workspace's half of auto mode for SAP writes (b1-tools spec §5.7), and this month's spend against the
-// limit. The operator reads across workspaces with SQL (DEPLOY.md).
+// workspace's half of auto mode for SAP writes (b1-tools spec §5.7), External AI (MCP) with its connector
+// address (assistant spec §4.10), and this month's spend against the limit. The operator reads across workspaces with SQL (DEPLOY.md).
 
 const BODY = { padding: "1rem", gap: "0.75rem" } as const;
 
@@ -18,6 +18,7 @@ export function AssistantSettings() {
     <>
       <SwitchCard />
       <AutoWriteCard />
+      <McpCard />
       <UsageCard />
     </>
   );
@@ -75,6 +76,45 @@ function AutoWriteCard() {
         {save.error ? <MessageStrip design="Negative" hideCloseButton>{save.error.message}</MessageStrip> : null}
         <Text>{i18n.getText("ASSISTANT_AUTO_INFO")}</Text>
         <Text style={{ color: "var(--sapContent_LabelColor)" }}>{i18n.getText("ASSISTANT_AUTO_SAP_USER")}</Text>
+      </FlexBox>
+    </Card>
+  );
+}
+
+/** The users' own Claude or ChatGPT over MCP: off until an admin turns it on. The address is the same
+ *  for every workspace; the sign-in says whose. */
+function McpCard() {
+  const i18n = useI18n();
+  const qc = useQueryClient();
+  const q = useQuery(orpc.assistant.settings.queryOptions());
+  const save = useMutation(orpc.assistant.saveSettings.mutationOptions({
+    onSuccess: () => {
+      toast(i18n.getText("ASSISTANT_SAVED"));
+      void qc.invalidateQueries({ queryKey: orpc.assistant.key() });
+    },
+  }));
+  const on = save.isPending ? save.variables?.mcp : q.data?.mcp;
+  return (
+    <Card header={<CardHeader titleText={i18n.getText("ASSISTANT_MCP")} subtitleText={i18n.getText("ASSISTANT_MCP_SUB")}
+      action={q.data ? (
+        <Switch checked={on} disabled={save.isPending} accessibleName={i18n.getText("ASSISTANT_MCP")}
+          onChange={(e) => save.mutate({ assistant: q.data.assistant, mcp: e.target.checked })} />
+      ) : undefined} />}>
+      <FlexBox direction="Column" style={BODY}>
+        {save.error ? <MessageStrip design="Negative" hideCloseButton>{save.error.message}</MessageStrip> : null}
+        <Text>{i18n.getText("ASSISTANT_MCP_INFO")}</Text>
+        {q.data && on ? (
+          <FlexBox direction="Column" style={{ gap: "0.25rem" }}>
+            <Label for="mcp-url">{i18n.getText("ASSISTANT_MCP_ADDRESS")}</Label>
+            <FlexBox style={{ gap: "0.5rem" }}>
+              <Input id="mcp-url" readonly value={q.data.mcpUrl} style={{ flex: 1 }} />
+              <Button icon="copy" onClick={() => void navigator.clipboard.writeText(q.data.mcpUrl).then(() => toast(i18n.getText("ASSISTANT_MCP_COPIED")))}>
+                {i18n.getText("ASSISTANT_MCP_COPY")}
+              </Button>
+            </FlexBox>
+            <Text style={{ color: "var(--sapContent_LabelColor)" }}>{i18n.getText("ASSISTANT_MCP_HOW")}</Text>
+          </FlexBox>
+        ) : null}
       </FlexBox>
     </Card>
   );

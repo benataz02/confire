@@ -9,7 +9,7 @@ import getLocale from "@ui5/webcomponents-base/dist/locale/getLocale.js";
 /** Never a slug: the staff SPA's own top-level pages, the server's routes, a few names kept back, the mail names. */
 const RESERVED = new Set([
   "login", "signup", "forgot-password", "reset-password", "onboarding",
-  "api", "rpc", "files", "assets", "download",
+  "api", "rpc", "files", "assets", "download", "oauth", "mcp",
   "app", "portal", "www", "auth", "admin", "static",
   "notify", "noreply", "no-reply", "postmaster", "abuse", "hostmaster", "webmaster", "security", "mailer-daemon",
 ]);

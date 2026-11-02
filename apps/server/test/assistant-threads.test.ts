@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ModelMessage } from "@tanstack/ai";
 import { and, eq } from "drizzle-orm";
 import { db, assistantFile, configModel, configProjectEvent, projectFile } from "@confire/db";
-import { assistantFileRoutes, copyToProject, type FileRef } from "../src/assistant/files.ts";
+import { assistantFileRoutes, copyToProject, filePart, unlabeled, type FileRef } from "../src/assistant/files.ts";
 import {
   appendMessages, clearThread, dehydrate, hydrate, lastDrop, newThread, ownThread, threadFor, withThread,
 } from "../src/assistant/threads.ts";
@@ -24,6 +24,14 @@ async function world() {
   const { id: projectId } = await call(router.configs.create, { modelId: m!.id, name: "Cable", customer: null }, ctx);
   return { tenantId, slug, a, b, projectId };
 }
+
+// The adapter spreads a text part's metadata onto Claude's block, which refuses `fileLabel` (400).
+test("a file label reaches the model without its metadata; the file keeps its own", () => {
+  const ref: FileRef = { kind: "assistant", id: crypto.randomUUID(), name: "drawing.pdf", mime: "application/pdf" };
+  const doc = filePart(ref, PDF)!;
+  const label = { type: "text" as const, content: "File: drawing.pdf", metadata: { fileLabel: true } };
+  expect(unlabeled([label, doc])).toEqual([{ type: "text", content: "File: drawing.pdf" }, doc]);
+});
 
 describe.skipIf(!process.env.DATABASE_URL)("threads", () => {
   test("one thread per (user, configuration); general threads are the user's own", async () => {

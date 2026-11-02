@@ -13,7 +13,7 @@ const model: ModelDef = {
     { key: "coated", label: "Coated", type: "boolean", ui: "checkbox", defaultExpr: "false", priceExpr: "coated ? 5 : 0" },
     { key: "color", label: "Color", type: "string", ui: "input", visibleWhen: "coated", mandatory: true },
   ],
-  structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["size", "coated", "color"] }, { table: "holes" }] }] },
+  structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["size", "coated", "color"] }, { key: "holes_g", title: "", params: ["holes"] }] }] },
   computed: [{ key: "area", expr: "size_w * 2" }],
   tables: [{
     role: "calc", key: "holes", title: "Holes",

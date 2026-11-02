@@ -1,8 +1,11 @@
 import { createAuthClient } from "better-auth/react";
 import { organizationClient } from "better-auth/client/plugins";
+import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 
-// baseURL defaults to the current origin; auth lives at /api/auth (proxied in dev).
-export const authClient = createAuthClient({ plugins: [organizationClient()] });
+// baseURL defaults to the current origin; auth lives at /api/auth (proxied in dev). oauthProviderClient:
+// on the pages an MCP sign-in passes through (/login, /oauth/consent) it adds the signed OAuth query to
+// each call, so Better Auth continues the authorization after sign-in (assistant spec §4.10).
+export const authClient = createAuthClient({ plugins: [organizationClient(), oauthProviderClient()] });
 
 export type Session = Awaited<ReturnType<typeof authClient.getSession>>["data"];
 

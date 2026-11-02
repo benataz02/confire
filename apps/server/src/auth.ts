@@ -2,13 +2,15 @@ import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins/organization";
+import { jwt } from "better-auth/plugins/jwt";
+import { mcp } from "@better-auth/mcp";
 import { createAccessControl } from "better-auth/plugins/access";
 import { adminAc, defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
 import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "@confire/db/client";
 import * as schema from "@confire/db/schema";
 import { EXTERNAL_ROLES } from "@confire/db/schema";
-import { authUrl, cookieDomain, portalUrl, tenantSlug } from "./tenant.ts";
+import { authUrl, cookieDomain, mcpUrl, portalUrl, tenantSlug } from "./tenant.ts";
 import { authMail } from "./mail/auth-mail.tsx";
 import { t } from "./i18n/index.ts";
 
@@ -122,6 +124,47 @@ const orgPlugin = organization({
   // new tenant has nothing to be given.
 });
 
+/** The organization a user is staff of — at most one (organizationLimit) — or undefined. */
+export async function staffOrgOf(userId: string): Promise<string | undefined> {
+  const [row] = await db.select({ id: schema.member.organizationId }).from(schema.member)
+    .where(and(eq(schema.member.userId, userId), notInArray(schema.member.role, EXTERNAL_ROLES))).limit(1);
+  return row?.id;
+}
+
+/** The token claim naming the workspace an MCP token is for (spec §4.10). */
+export const TENANT_CLAIM = "tenant";
+
+// The MCP authorization server (assistant spec §4.10): Claude or ChatGPT signs in as the user over
+// OAuth and gets a JWT bound to `mcpUrl`. The workspace is the consent's reference — the user's one
+// staff membership — written into the token, so a token is one workspace's and a consent is stored per
+// workspace. mcp.ts still joins the membership live on every call.
+const mcpPlugin = mcp({
+  resource: mcpUrl,
+  loginPage: "/login",
+  consentPage: "/oauth/consent",
+  // Open dynamic registration: what Claude and ChatGPT use. Every client is public (PKCE) and every
+  // grant is the user's click on the consent page. "infer" registers CLI clients (Claude Code's
+  // localhost callback) as native instead of refusing them.
+  // ponytail: no CIMD — it makes this server fetch an address a client names; add @better-auth/cimd
+  // with an SSRF-safe transport when a client requires it.
+  allowDynamicClientRegistration: true,
+  allowUnauthenticatedClientRegistration: true,
+  clientRegistrationDefaultApplicationType: "infer",
+  postLogin: {
+    // ponytail: one workspace per staff user, so there is nothing to pick; a workspace picker here when
+    // a user can be staff of two.
+    page: "/login",
+    shouldRedirect: () => false,
+    // Refused before any token exists: a customer (portal_* only) or someone with no workspace.
+    consentReferenceId: async ({ user }) => {
+      const org = await staffOrgOf(user.id);
+      if (!org) throw new APIError("FORBIDDEN", { error: "access_denied", error_description: t("NOT_A_MEMBER") });
+      return org;
+    },
+  },
+  customAccessTokenClaims: ({ referenceId }) => (referenceId ? { [TENANT_CLAIM]: referenceId } : {}),
+});
+
 // The one Better Auth instance, for staff and customers alike. Both processes mount it on /api/auth;
 // the tenant boundary is not the session but the membership join behind it (orpc/base.ts staff,
 // portal/orpc/base.ts customers). The secret comes from BETTER_AUTH_SECRET, which Better Auth reads
@@ -159,7 +202,7 @@ export const auth = betterAuth({
       mapProfileToUser: (profile) => ({ emailVerified: microsoftEmailVerified(profile as unknown as Record<string, unknown>) }),
     },
   },
-  plugins: [orgPlugin],
+  plugins: [orgPlugin, jwt(), mcpPlugin],
   disabledPaths: Object.values(orgPlugin.endpoints)
     .map((e) => e.path)
     .filter((p): p is string => !!p && !BROWSER_ORG_PATHS.has(p)),

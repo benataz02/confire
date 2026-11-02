@@ -1,6 +1,6 @@
-export { ModelDefZ, LookupRefZ, ParamZ, ConstraintZ, BomLineZ, OperationZ, ValZ, EntriesZ, ODataQueryZ, QuerySourceZ, KeyZ, TableColumnZ, TableDefZ, TableRowsZ, GroupZ, TableGroupZ, FieldGroupZ, isTableGroup, structureId, aggregateKey, historyKey, historyFields, derivedColumns, displayColumns, refKeyCols, derivedKey, itemsTable, placedTables, requiredColumn, REQUIRED_ITEM_COLS, QTY_COL, ITEM_COL, ITEM_NAME_COL, COST_COL, PRICE_COL } from "./model";
-export type { Constraint, Entries, Group, TableGroup, FieldGroup, LookupRef, ModelDef, ODataQuery, Option, Param, QuerySource, ResolvedLookups, ResolvedTable, ItemsTable, TableColumn, TableDef, TableRows, Val } from "./model";
-export { columnOptions, evalTableRows, itemSplit, splitShares, splitWeights, tableAggregates, typedPrice } from "./tables";
+export { ModelDefZ, LookupRefZ, ParamZ, ConstraintZ, BomLineZ, OperationZ, ValZ, EntriesZ, ODataQueryZ, QuerySourceZ, KeyZ, TableColumnZ, TableDefZ, TableRowsZ, GroupZ, structureId, aggregateKey, historyKey, historyFields, derivedColumns, displayColumns, refKeyCols, derivedKey, itemsTable, placedTables, requiredColumn, REQUIRED_ITEM_COLS, QTY_COL, ITEM_COL, ITEM_NAME_COL, COST_COL, PRICE_COL } from "./model";
+export type { Constraint, Entries, Group, LookupRef, ModelDef, ODataQuery, Option, Param, QuerySource, ResolvedLookups, ResolvedTable, ItemsTable, TableColumn, TableDef, TableRows, Val } from "./model";
+export { cellDefault, columnOptions, evalTableRows, itemSplit, splitShares, splitWeights, tableAggregates, typedPrice } from "./tables";
 export type { ItemLine } from "./tables";
 export { DslError, evaluate, parse, tokenize } from "./dsl";
 export type { Ast, Scope } from "./dsl";

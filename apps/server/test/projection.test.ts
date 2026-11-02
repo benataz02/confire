@@ -18,7 +18,7 @@ const model: ModelDef = {
     { key: "secret", label: "Internal", type: "number", ui: "input", visibleWhen: "grade == \"X\"", defaultExpr: "41 + 1" },
     { key: "locked", label: "Locked", type: "number", ui: "input", readonly: true, defaultExpr: "3" },
   ],
-  structure: { sections: [{ key: "s", title: "S", groups: [{ key: "g", title: "G", params: ["grade", "secret", "locked"] }, { table: "items" }] }] },
+  structure: { sections: [{ key: "s", title: "S", groups: [{ key: "g", title: "G", params: ["grade", "secret", "locked"] }, { key: "items_g", title: "", params: ["items"] }] }] },
   computed: [{ key: "margin", expr: "0.4" }],
   constraints: [{ kind: "expr", assert: "grade != \"Z\"", message: "Z is out" }],
   bom: [{ id: "b", itemCode: '"BODY"', qty: "1" }],

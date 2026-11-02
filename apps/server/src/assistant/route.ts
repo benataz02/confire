@@ -18,6 +18,7 @@ import { modelBlock } from "./extract.ts";
 import { modelOptions, textAdapter } from "./model.ts";
 import { CONFIGURE_CHAT, GENERAL, languageLine, LANGUAGES, pageFor, SYSTEM } from "./pages.ts";
 import { appendMessages, dehydrate, hydrate, ownThread, releaseLease, takeLease, withoutThinking } from "./threads.ts";
+import { unlabeled } from "./files.ts";
 import { ASK_USER, B1_WRITES, toolsFor } from "./tools.ts";
 import { assertAssistant, meter, rateLimit, REFUSAL_STATUS, type Meter } from "./usage.ts";
 import { localizeError, t } from "../i18n/index.ts";
@@ -125,7 +126,7 @@ export function assistantRoutes(): Hono {
       if (page.kind === "configure" && thread.projectId) {
         const where = and(eq(configProject.id, thread.projectId), eq(configProject.tenantId, tenantId), internalVisible)!;
         const { live, view } = await configView(tenantId, where).catch(() => ({ live: null, view: null }));
-        if (live && view) { block = modelBlock(live.model.definition, view.form); name = view.project.name; }
+        if (live && view) { block = modelBlock(live.model.definition, view.form, live.lookups.tables); name = view.project.name; }
       }
     } catch (e) {
       await releaseLease(thread.id);
@@ -157,7 +158,7 @@ export function assistantRoutes(): Hono {
     const stream = chat({
       adapter: textAdapter(),
       ...ids,
-      messages: [...hydrated.map(withoutThinking), user],
+      messages: [...hydrated.map((h) => withoutThinking(Array.isArray(h.content) ? { ...h, content: unlabeled(h.content) } : h)), user],
       systemPrompts: [
         { content: SYSTEM, metadata: CACHE },
         ...(block ? [{ content: block, metadata: CACHE }] : []),

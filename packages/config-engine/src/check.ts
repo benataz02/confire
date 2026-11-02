@@ -1,5 +1,5 @@
-import { type Ast, DslError, parse } from "./dsl";
-import { aggregateKey, derivedKey, historyFields, historyKey, type ModelDef, type TableDef, derivedColumns, refKeyCols, isTableGroup, COST_COL, PRICE_COL, QTY_COL } from "./model";
+import { type Ast, assertCallArity, DslError, parse } from "./dsl";
+import { aggregateKey, derivedKey, historyFields, historyKey, type ModelDef, type TableDef, derivedColumns, refKeyCols, COST_COL, PRICE_COL, QTY_COL } from "./model";
 
 export type Issue = { path: string; message: string; from?: number; to?: number };
 
@@ -44,6 +44,9 @@ function collectRefs(n: Ast, out: Ref[]): void {
       collectRefs(n.b, out);
       return;
     case "call":
+      // Before the arguments: a bad arity is why the formula cannot run, and evaluate throws
+      // the same error. Caught by checkExpr, so the editor shows it instead of saving a blank.
+      assertCallArity(n);
       out.push({ name: n.name, from: n.from, to: n.to, kind: "call" });
       for (const a of n.args) collectRefs(a, out);
       return;
@@ -218,35 +221,30 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   };
   for (const k of computedKeys) visit(k, []);
 
-  // A hidden section's tables count no rows, and the items grid's rows are the quotation's lines.
+  // A hidden section's or group's tables count no rows, and the items grid's rows are the quotation's lines.
   const itemsKey = tableDefs.find((t) => t.role === "items")?.key;
+  const holdsItems = (g: { params: string[] }) => itemsKey !== undefined && g.params.includes(itemsKey);
   model.structure.sections.forEach((s, i) => {
     checkExpr(s.visibleWhen, `structure.sections[${i}].visibleWhen`, base);
-    if (s.visibleWhen !== undefined && s.groups.some((g) => isTableGroup(g) && g.table === itemsKey))
+    if (s.visibleWhen !== undefined && s.groups.some(holdsItems))
       issues.push({ path: `structure.sections[${i}].visibleWhen`, message: "This section holds the item grid, which is always shown — move the grid or put the rule on its groups." });
     s.groups.forEach((g, j) => {
-      if (!isTableGroup(g)) checkExpr(g.visibleWhen, `structure.sections[${i}].groups[${j}].visibleWhen`, base);
+      checkExpr(g.visibleWhen, `structure.sections[${i}].groups[${j}].visibleWhen`, base);
+      if (g.visibleWhen !== undefined && holdsItems(g))
+        issues.push({ path: `structure.sections[${i}].groups[${j}].visibleWhen`, message: "This group holds the item grid, which is always shown — move the grid or put the rule on its fields." });
     });
   });
 
-  // structure references. A group is either a table (naming one TableDef) or a list of parameter
-  // keys — never both, so the two arms are checked separately.
+  // structure references: a group's key is a parameter's or a table's, each placed once.
   const seenPlaced = new Set<string>();
-  for (const g of model.structure.sections.flatMap((s) => s.groups)) {
-    if (isTableGroup(g)) {
-      if (!seenTable.has(g.table)) issues.push({ path: "structure", message: `structure references unknown table '${g.table}'` });
-      else if (seenPlaced.has(g.table)) issues.push({ path: "structure", message: `table '${g.table}' is placed more than once` });
-      seenPlaced.add(g.table);
-      continue;
-    }
+  for (const g of model.structure.sections.flatMap((s) => s.groups))
     for (const k of g.params) {
-      // A table key here is a model saved before tables became groups: still not a parameter, and
-      // placedTables() drops it, so the form's trailing catch-all section is what still shows it.
-      if (seenTable.has(k)) issues.push({ path: "structure", message: `table '${k}' sits in group '${g.key}' — place it as a group of its own` });
-      else if (!base.has(k) || compSet.has(k) || derivedSet.has(k))
+      if (seenTable.has(k)) {
+        if (seenPlaced.has(k)) issues.push({ path: "structure", message: `table '${k}' is placed more than once` });
+        seenPlaced.add(k);
+      } else if (!base.has(k) || compSet.has(k) || derivedSet.has(k))
         issues.push({ path: "structure", message: `structure references unknown parameter '${k}'` });
     }
-  }
 
   // LOOKUP table names when statically known (first arg is a string literal)
   const tables = new Set(knownTables.map((t) => t.name));
@@ -435,7 +433,7 @@ function* exprsOf(model: ModelDef): Generator<string> {
   for (const c of model.computed) yield c.expr;
   for (const s of model.structure.sections) {
     if (s.visibleWhen) yield s.visibleWhen;
-    for (const g of s.groups) if (!isTableGroup(g) && g.visibleWhen) yield g.visibleWhen;
+    for (const g of s.groups) if (g.visibleWhen) yield g.visibleWhen;
   }
   for (const c of model.constraints) if (c.kind === "expr") { if (c.when) yield c.when; yield c.assert; }
   for (const l of model.bom) for (const e of [l.itemCode, l.condition, l.qty]) if (e) yield e;

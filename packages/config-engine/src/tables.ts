@@ -22,6 +22,17 @@ import {
  *  the salesperson types. Missing cells read as the type's zero. */
 const zeroOf = (t: TableColumn["type"]): Val => (t === "number" ? 0 : t === "boolean" ? false : "");
 
+/** What an unfilled cell reads as. A select — a manual list or a masterdata table — always has an
+ *  answer, so formulas compute from its first option. A query pick and a plain input read as the
+ *  type's zero: a query's first cached row is one page of a sync, not a choice. */
+export const cellDefault = (c: TableColumn, tables?: Record<string, ResolvedTable>): Val => {
+  if (c.cell.kind === "options" && c.cell.ref.source !== "query") {
+    const first = columnOptions(c, tables ?? {})[0];
+    if (first) return first.value;
+  }
+  return zeroOf(c.type);
+};
+
 const numOf = (v: Val | undefined): number => (typeof v === "number" ? v : 0);
 
 /** Options for an `options` cell: a manual ref carries its own list, a table/query ref reads the
@@ -86,7 +97,7 @@ export function evalTableRows(
     const out: Record<string, Val> = {};
     for (const c of def.columns) {
       if (c.cell.kind === "formula") continue;
-      const v = row[c.key] ?? zeroOf(c.type);
+      const v = row[c.key] ?? cellDefault(c, tables);
       out[c.key] = v;
       vars[c.key] = v;
       // derived cells go into `out` as well as `vars`: basisExpr reads the returned row.

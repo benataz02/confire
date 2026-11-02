@@ -1,0 +1,13 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index cea254bc60c04485128168a00b62098e87ddc628..7547e28448e540274f305052006f1563af232aca 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -4,7 +4,7 @@ import { DPOP_SIGNING_ALGORITHMS, createDpopReplayStore, isInsufficientScopeErro
+ function isLoopbackHost(hostname) {
+ 	const ipv4Octets = hostname.split(".");
+ 	const isIpv4Loopback = ipv4Octets.length === 4 && ipv4Octets[0] === "127" && ipv4Octets.every((octet) => /^\d+$/.test(octet) && Number(octet) <= 255);
+-	return hostname === "localhost" || hostname === "[::1]" || isIpv4Loopback;
++	return hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "[::1]" || isIpv4Loopback;
+ }
+ /**
+ * Validates the canonical protected-resource identifier accepted by MCP.

@@ -15,7 +15,8 @@ bun install
 bun run dev                             # sign in at http://localhost:5173/login; staff app
                                         # localhost:5173/<slug>/ (server :3000), portal
                                         # localhost:5180/<slug>/ (server :3001), the marketing
-                                        # site localhost:4321, agent :4000
+                                        # site localhost:4321, agent :4000, MCP
+                                        # http://mcp.localhost (port 80 -> :3000)
                                         # (Go: `go run . run` in apps/agent — Go must be installed)
 bun run dev:pair                        # pair a real SAP server's agent with dev: a public quick
                                         # tunnel to :3000; on that server run `confire-agent.exe
@@ -32,7 +33,9 @@ bun run test:site                       # the site's tests; the dist ones need b
 ```
 
 The Better Auth CLI is the `auth` package (`@better-auth/cli` stopped at 1.4). Its version is pinned
-in `apps/server/package.json` and moves together with `better-auth`.
+in `apps/server/package.json` and moves together with `better-auth` — exact in every package that
+lists it, with `@better-auth/mcp` and `@better-auth/oauth-provider` (1.7.15: the first with
+`clientRegistrationDefaultApplicationType`, which MCP CLIs' localhost callbacks need).
 
 There is no lint step. Type-checking is the gate, and it is **per project** — there is no root
 tsconfig that covers everything, so a change can typecheck in one package and break another:
@@ -325,7 +328,7 @@ link (`sendOnSignIn`). The test harness verifies its users directly before signi
 ## The assistant
 
 `apps/server/src/assistant/` and `apps/app/src/assistant/` (`docs/superpowers/specs/2026-10-24-ai-assistant-design.md`;
-phases 1–2 built, MCP is phase 3). Claude through TanStack AI (`@tanstack/ai` + `-anthropic` on the
+phases 1–3 built; MCP is §4.10). Claude through TanStack AI (`@tanstack/ai` + `-anthropic` on the
 server, `@tanstack/ai-react` in the app); `model.ts` is the one provider seam (`ASSISTANT_MODEL`,
 default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and the preload drops
 `ANTHROPIC_API_KEY`). Staff only: the portal has no assistant.
@@ -395,6 +398,23 @@ default `claude-sonnet-5-5`; tests swap in `fakeText` with `useTestAdapter`, and
   operator's fix — the panel and Settings say which), or this month's cost reached
   `ASSISTANT_MONTHLY_LIMIT_USD` (default 25). `rateLimit` is 20 calls a
   minute per user. Env read with `||`, not `??`: compose passes an unset variable as `""`.
+- **MCP** (`mcp.ts`, spec §4.10): the user's own Claude/ChatGPT on `https://mcp.<DOMAIN>` (`mcpUrl`, dev
+  `http://mcp.localhost`), one address for every workspace. It is its own host: `index.ts` sends it to
+  `mcp.ts` before the staff app (MCP at `/`, nothing else). Dev's port 80 is `bun run dev`'s `dev:mcp`
+  forwarder (needs `net.ipv4.ip_unprivileged_port_start=80` once); `patches/` lets `@better-auth/mcp`
+  take plain http on `*.localhost`, not only `localhost`. **Better Auth is the authorization server and decides the tenant**: `jwt()` + `@better-auth/mcp`'s
+  `mcp()` (`auth.ts`, open DCR, consent page `/oauth/consent`); `postLogin.consentReferenceId` is the user's
+  one staff organization and `customAccessTokenClaims` writes it as the `tenant` claim. `requireMcpAuth`
+  verifies the JWT (JWKS over loopback); `mcp.ts` then joins the membership live, checks the *External AI*
+  switch (`assistant_settings.mcp`, `MCP_OFF`) and builds the tools' headers itself (`x-tenant` from the
+  token, never the request) plus `InitialContext.mcpUserId`, which `userProcedure`'s `requireUser` reads
+  instead of a cookie (`sessionProcedure` stays cookie-only). The server is `@tanstack/ai-mcp/server`'s
+  `createMCPServer` over **the chat's own tools** (`mcpTools`, `MCP_TOOL_NAMES`: the chat's set less the
+  thread's), so caps, sources and customers-only hold over MCP too; each reads its call off `ctx.context`
+  (`CtxOf`). **No SAP write over MCP without the user's accept**: auto mode never applies to an MCP call
+  (`autoWrite`), and `b1_write`/`b1_copy`/`post_quotation` (destructive) ask through MCP elicitation
+  (`requestInput`) with a server-built before → after, then post with `b1.post` / `createQuote`. The
+  `rateLimit` window is shared with the chat. A client that cannot elicit posts nothing (ponytail).
 - **The panel** (`AssistantPanel.tsx`) is shell state (`AssistantProvider` around `AppShell`), floating
   over the page's right edge. **AI configuration** (`AssistantPage.tsx`, the home tile) is a page of its
   own: one chat under a `Bar` (the title's menu pins, renames, deletes); its chats are found with the

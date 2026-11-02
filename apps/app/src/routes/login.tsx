@@ -89,7 +89,10 @@ function SignIn() {
       if (res.error) throw new Error(res.error.message ?? i18n.getText("SHELL_AUTH_SIGN_IN_FAILED"));
       return res.data;
     },
-    onSuccess: async () => {
+    onSuccess: async (data) => {
+      // An MCP client's sign-in: Better Auth answers where the authorization goes on, and its client
+      // already navigates there — dispatching too would race it to the workspace.
+      if ((data as { redirect?: boolean } | null)?.redirect) return;
       // staleTime:0 is load-bearing: a cached `null` counts as a cache hit, so ensureQueryData
       // would never refetch after sign-in. Then re-run beforeLoad: signed in, it dispatches.
       await queryClient.fetchQuery({ ...sessionQuery, staleTime: 0 });

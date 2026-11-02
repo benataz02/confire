@@ -4,6 +4,7 @@
 # challenge.
 #   app.{$DOMAIN}       sign-in, the /login dispatcher, and the staff app  -> server:3000
 #   portal.{$DOMAIN}    the customer portal                                 -> portal:3001
+#   mcp.{$DOMAIN}       the MCP connector (users' own Claude/ChatGPT)        -> server:3000 (split by host)
 #   {$DOMAIN}           the marketing site, static files (apps/site; spec 2026-10-30-marketing-site-design.md)
 #   www.{$DOMAIN}       -> {$DOMAIN}
 # The session cookie is on {$DOMAIN}, so every host under it receives it: never point a name under
@@ -21,6 +22,13 @@ app.{$DOMAIN} {
 portal.{$DOMAIN} {
 	encode zstd gzip
 	reverse_proxy portal:3001
+}
+
+# The MCP connector, one address for every workspace (assistant spec §4.10): the token says whose. The
+# staff process answers this host with MCP only (mcp.ts; index.ts splits it off by host before the app).
+# No `encode`: MCP answers may be a server-sent event stream.
+mcp.{$DOMAIN} {
+	reverse_proxy server:3000
 }
 
 # The site is files Caddy serves itself, so a crashed or restarting app never takes it down. They

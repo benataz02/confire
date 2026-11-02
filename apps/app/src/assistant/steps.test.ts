@@ -17,7 +17,8 @@ test("thinking and tool calls join one run of steps until a text", () => {
 
 test("a decision tool is a card of its own and splits the run", () => {
   expect(kinds([tool("entities_rows"), tool("ask_user")])).toEqual(["steps:1", "card"]);
-  expect(kinds([tool("read_request"), tool("extract_values"), tool("propose_quotation")])).toEqual(["card", "steps:1", "card"]);
+  // A read's values are shown for the user to check, never folded away.
+  expect(kinds([tool("read_request"), tool("configs_get"), tool("extract_values"), tool("propose_quotation")])).toEqual(["card", "steps:1", "card", "card"]);
   // A SAP write is a decision (its proposal's Post/Discard); its reads are steps.
   expect(kinds([tool("b1_find"), tool("b1_read"), tool("b1_write"), tool("b1_copy")])).toEqual(["steps:2", "card", "card"]);
 });

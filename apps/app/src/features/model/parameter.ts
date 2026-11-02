@@ -1,4 +1,4 @@
-import { checkModel, isTableGroup, type ModelDef, type Param } from "@confire/config-engine";
+import { checkModel, type ModelDef, type Param } from "@confire/config-engine";
 import type { RecordIssues, RecordMessage } from "@confire/ui/object-page/useObjectRecord.ts";
 import type { Row, Section } from "@confire/ui/types.ts";
 import { issueText, modelWithParam, type TableCols } from "../../components/model-builder/exprHelpers.ts";
@@ -114,11 +114,11 @@ export function paramIssues(r: Row, draft: ModelDef, tables: TableCols[], isNew:
 
 /** The parameter written back over the one the page opened, or appended (and placed) when new.
  *  A parameter exists only placed, and the position is the URL's, which a reload can leave behind
- *  (a group added unsaved is gone): a position holding no field group means the last one. With no
- *  field group at all there is nowhere to put it, so nothing is added — Add is disabled then. */
+ *  (a group added unsaved is gone): a position holding no group means the last one. With no
+ *  group at all there is nowhere to put it, so nothing is added — Add is disabled then. */
 export function commitParam(d: ModelDef, p: Param, openedAs: string | undefined, place?: { s: number; g: number }): ModelDef {
   if (openedAs !== undefined) return { ...d, parameters: d.parameters.map((x) => (x.key === openedAs ? p : x)) };
-  const groups = d.structure.sections.flatMap((s, si) => s.groups.flatMap((g, gi) => (isTableGroup(g) ? [] : [{ s: si, g: gi }])));
+  const groups = d.structure.sections.flatMap((s, si) => s.groups.map((_, gi) => ({ s: si, g: gi })));
   const at = groups.find((x) => x.s === place?.s && x.g === place.g) ?? groups.at(-1);
   return at ? placeParam({ ...d, parameters: [...d.parameters, p] }, p.key, at.s, at.g) : d;
 }

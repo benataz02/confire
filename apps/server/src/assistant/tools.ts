@@ -11,7 +11,9 @@ import { configView } from "../config-view.ts";
 import { internalVisible } from "../project-lifecycle.ts";
 import { configsRouter } from "../orpc/routers/configs.ts";
 import { entitiesRouter } from "../orpc/routers/entities.ts";
-import { b1Router } from "../orpc/routers/b1.ts";
+import { b1Router, type Proposal } from "../orpc/routers/b1.ts";
+import { QUOTE_HEADER, type quoteDraft } from "../config-quote.ts";
+import { ToolInputRequiredError } from "@tanstack/ai-mcp/server";
 import { homeRouter } from "../orpc/routers/home.ts";
 import { requestsRouter, timelineRouter } from "../orpc/routers/requests.ts";
 import { startFromThread } from "../orpc/routers/assistant.ts";
@@ -50,8 +52,23 @@ const capped = (out: unknown) => {
   return Array.isArray(o?.rows) ? { ...o, rows: o.rows.slice(0, LIST_CAP) } : out;
 };
 
-/** A procedure as a tool: `configs.get` is `configs_get` (the name MCP derives too). */
-export function procedureTool(path: string, p: AnyProcedure, ctx: { headers: Headers; thread?: { id: string } }, o: {
+/** What a tool's procedure call runs as: the chat request's headers (and its thread), or over MCP the
+ *  token's user. */
+export type CallCtx = { headers: Headers; thread?: { id: string }; mcpUserId?: string };
+/** The chat builds its tools per run around one CallCtx; MCP builds them once (mcp.ts) and reads the
+ *  CallCtx off each tool call, which carries its own request's (createMCPServer's `ctx.context`). */
+export type CtxOf = CallCtx | ((call: unknown) => CallCtx);
+const resolve = (ctx: CtxOf, call: unknown): CallCtx => (typeof ctx === "function" ? ctx(call) : ctx);
+// The thread and the MCP user ride in the call's context, which no request can fill: b1.write reads
+// the thread for auto mode's file exception, and the MCP user is who the call is (orpc/base.ts).
+const contextOf = (c: CallCtx) => ({
+  headers: c.headers,
+  ...(c.thread ? { assistantThreadId: c.thread.id } : {}),
+  ...(c.mcpUserId ? { mcpUserId: c.mcpUserId } : {}),
+});
+
+/** A procedure as a tool: `configs.get` is `configs_get`, the same name in the chat and over MCP. */
+export function procedureTool(path: string, p: AnyProcedure, ctx: CtxOf, o: {
   name?: string; input?: z.ZodType; describe?: string; slim?: (out: unknown) => unknown; cap?: boolean;
   prepare?: (input: Record<string, unknown>) => Record<string, unknown>;
 } = {}): AnyServerTool {
@@ -61,13 +78,12 @@ export function procedureTool(path: string, p: AnyProcedure, ctx: { headers: Hea
     o.cap ? `At most ${LIST_CAP} rows; \`total\` says how many match.` : "",
   ].filter(Boolean).join(" ");
   const inputSchema = o.input ?? (p["~orpc"].inputSchemas?.at(-1) as z.ZodType | undefined) ?? z.object({});
-  return toolDefinition({ name: o.name ?? path.replaceAll(".", "_"), description, inputSchema }).server(async (args: unknown) => {
+  return toolDefinition({ name: o.name ?? path.replaceAll(".", "_"), description, inputSchema }).server(async (args: unknown, toolCall: unknown) => {
+    const c = resolve(ctx, toolCall);
     let input = (args ?? {}) as Record<string, unknown>;
     if (o.cap) input = { ...input, top: Math.min(Number(input.top ?? LIST_CAP) || LIST_CAP, LIST_CAP) };
     if (o.prepare) input = o.prepare(input);
-    // The thread rides in the call's context, which no request can fill: b1.write reads it for auto
-    // mode's file exception.
-    let out = await run(() => call(p, input, { context: { headers: ctx.headers, ...(ctx.thread ? { assistantThreadId: ctx.thread.id } : {}) } }));
+    let out = await run(() => call(p, input, { context: contextOf(c) }));
     if (o.cap) out = capped(out);
     return o.slim ? o.slim(out) : out;
   }) as AnyServerTool;
@@ -88,7 +104,7 @@ export function missingSources(input: CalcInput & Record<string, unknown>): stri
 }
 
 /** `configs.calculate` with a source required for every written value: no value from nowhere. */
-export function sourcedCalculate(ctx: ToolCtx): AnyServerTool {
+export function sourcedCalculate(ctx: CtxOf): AnyServerTool {
   const base = configsRouter.calculate["~orpc"].inputSchemas!.at(-1) as unknown as z.ZodObject;
   // No margin: it is the shop's commercial call, not a value read off a request.
   const input = base.omit({ margin: true }).extend({
@@ -123,7 +139,7 @@ type SapEntity = keyof typeof CARD_FIELDS;
 
 /** SAP reads for the chat: three entity sets, the card's fields always in, the total asked for.
  *  Business partners are customers only: the chat looks them up to be a configuration's customer. */
-export const readSap = (ctx: ToolCtx): AnyServerTool =>
+export const readSap = (ctx: CtxOf): AnyServerTool =>
   procedureTool("entities.rows", entitiesRouter.rows as AnyProcedure, ctx, {
     cap: true,
     input: z.object({
@@ -221,7 +237,7 @@ function allTools(ctx: ToolCtx): Record<string, AnyServerTool> {
       // missing. A view that cannot be built yet leaves the run a configs_get away from it.
       const where = and(eq(configProject.id, r.id), eq(configProject.tenantId, ctx.tenantId), internalVisible)!;
       const v = await configView(ctx.tenantId, where).catch(() => null);
-      return v ? { ...r, model: modelBlock(v.live.model.definition, v.view.form), missing: v.view.missing.map((m) => m.message) } : r;
+      return v ? { ...r, model: modelBlock(v.live.model.definition, v.view.form, v.live.lookups.tables), missing: v.view.missing.map((m) => m.message) } : r;
     })) as AnyServerTool,
     requests_rows: t("requests.rows", requestsRouter.rows, { cap: true }),
     home_overview: t("home.overview", homeRouter.overview),
@@ -255,4 +271,137 @@ export function toolsFor(page: { tools: string[] }, ctx: ToolCtx): AnyServerTool
     if (!tool) throw new Error(`No assistant tool '${n}'`);
     return tool;
   });
+}
+
+// --- MCP (assistant spec §4.10) ------------------------------------------------------------------
+
+/** What the user's AI may call over MCP: the chat's tools, less those that need a Confire thread
+ *  (ask_user — its own chat asks; read_request/extract_values — it reads the files itself;
+ *  propose_quotation — it draws a card), with configs_create bare (no thread to adopt it, `via: "mcp"`),
+ *  plus the SAP writes, each confirmed by the user before it posts. `b1.post` is never a tool. */
+export function mcpTools(ctx: (call: unknown) => CallCtx): AnyServerTool[] {
+  const t = (path: string, p: unknown, o?: Parameters<typeof procedureTool>[3]) => procedureTool(path, p as AnyProcedure, ctx, o);
+  return [
+    t("configs.models", configsRouter.models),
+    t("configs.rows", configsRouter.rows, { cap: true }),
+    t("configs.get", configsRouter.get, { slim: slimGet }),
+    t("configs.create", configsRouter.create),
+    sourcedCalculate(ctx),
+    t("configs.queryPage", configsRouter.queryPage, { cap: true }),
+    t("configs.similar", configsRouter.similar),
+    t("configs.select", configsRouter.select),
+    t("requests.rows", requestsRouter.rows, { cap: true }),
+    t("timeline.list", timelineRouter.list),
+    t("home.overview", homeRouter.overview),
+    readSap(ctx),
+    t("b1.find", b1Router.find),
+    t("b1.schema", b1Router.schema),
+    t("b1.read", b1Router.read),
+    confirmedB1("b1_write", b1Router.write as AnyProcedure, ctx),
+    confirmedB1("b1_copy", b1Router.copy as AnyProcedure, ctx),
+    postQuotation(ctx),
+  ];
+}
+
+/** The names mcpTools registers: the MCP surface, which the tests hold to exactly. */
+export const MCP_TOOL_NAMES = [
+  "configs_models", "configs_rows", "configs_get", "configs_create", "configs_calculate", "configs_queryPage",
+  "configs_similar", "configs_select", "requests_rows", "timeline_list", "home_overview", "entities_rows",
+  "b1_find", "b1_schema", "b1_read", "b1_write", "b1_copy", "post_quotation",
+] as const;
+
+const CONFIRM_NOTE = "It posts nothing by itself: Confire asks the user to confirm in this client, showing exactly what will be written, and posts only when they accept. Tell the user in one sentence what you are about to propose before you call it, and never say it was posted unless the answer has `written`.";
+const DESTRUCTIVE = { annotations: { destructiveHint: true, readOnlyHint: false, idempotentHint: false, openWorldHint: false } };
+
+/** One value as the confirmation shows it. */
+const shown = (v: unknown): string => {
+  if (v === null || v === undefined || v === "") return "—";
+  const s = typeof v === "string" ? v : JSON.stringify(v);
+  return s.length > 300 ? `${s.slice(0, 300)}…` : s;
+};
+
+/** The confirmation of a proposal, built here from what will be posted, never from the AI's words. */
+export function proposalMessage(p: Proposal): string {
+  const rows = Object.entries(p.changes ?? {}).map(([k, c]) => p.op === "update" ? `• ${k}: ${shown(c.before)} → ${shown(c.after)}` : `• ${k}: ${shown(c.after)}`);
+  return [`${p.title ?? `${p.op} ${p.entity}`} — post to SAP?`, ...rows].join("\n");
+}
+
+type QuoteDraft = Awaited<ReturnType<typeof quoteDraft>>;
+/** The quotation as it will be posted: the customer, the currency and every line, with the AI's header
+ *  over the draft's — QUOTE_HEADER lets it set CardCode and DocCurrency, so the user sees both. */
+export function quotationMessage(d: QuoteDraft, header: Record<string, unknown> = {}): string {
+  const h: Record<string, unknown> = { ...d.data, ...header };
+  const lines = (h.DocumentLines as Record<string, unknown>[] | undefined) ?? [];
+  const head = Object.entries(h).filter(([k]) => k !== "DocumentLines").map(([k, v]) => {
+    const changed = k in header && header[k] !== d.data[k];
+    return `• ${k}: ${shown(v)}${changed ? ` (the configuration says ${shown(d.data[k])})` : ""}`;
+  });
+  const body = lines.map((l) => `  – ${shown(l.ItemCode ?? l.ItemDescription)} × ${shown(l.Quantity)} @ ${shown(l.UnitPrice ?? l.Price)}`);
+  return [
+    d.replaces ? `Update SAP quotation ${d.replaces.docEntry} for “${d.name}”?` : `Post a SAP quotation for “${d.name}”?`,
+    ...head, `• Lines (${lines.length}):`, ...body, `• Total: ${shown(d.totals.value)}`,
+  ].join("\n");
+}
+
+/** @tanstack/ai-mcp's error for a declined or cancelled input request (its `inputDeclinedMessage`,
+ *  which the package does not export). */
+const inputDeclinedMessage = "The user did not accept the input request.";
+
+/** Ask the user to confirm, through the MCP client (elicitation). Resolves when they accept; answers why
+ *  not otherwise. Spec 2026 ends the call here and runs the tool again with the answer, so everything
+ *  before this runs twice — preparing a proposal reads SAP again, and its ETag decides. */
+async function confirmed(toolCall: unknown, message: string): Promise<{ posted: false; note: string } | null> {
+  const ask = (toolCall as { context?: { requestInput?: (r: { message: string }) => Promise<unknown> } })?.context?.requestInput;
+  if (!ask) return { posted: false, note: "Not posted: this connection cannot ask the user to confirm." };
+  try {
+    await ask({ message });
+    return null;
+  } catch (e) {
+    if (e instanceof ToolInputRequiredError) throw e;
+    if (e instanceof Error && e.message === inputDeclinedMessage) return { posted: false, note: "Not posted: the user declined." };
+    // ponytail: elicitation only — an approval page in Confire for MCP clients that cannot elicit.
+    return { posted: false, note: "Not posted: this MCP client cannot ask the user to confirm a write, so nothing reaches SAP from it. The user can make the change in Confire." };
+  }
+}
+
+/** b1_write/b1_copy over MCP: the same procedure (auto mode never applies to an MCP call, auto.ts), so it
+ *  answers a proposal; the user confirms it; then b1.post posts exactly that proposal, re-checked with
+ *  its ETag (a record changed since is CONFLICT). */
+function confirmedB1(name: "b1_write" | "b1_copy", p: AnyProcedure, ctx: (call: unknown) => CallCtx): AnyServerTool {
+  const meta = getOpenAPIMeta(p);
+  return toolDefinition({
+    name,
+    description: `${(meta?.description ?? "").split("Unless auto mode is on")[0]!.trim()} ${CONFIRM_NOTE}`,
+    inputSchema: p["~orpc"].inputSchemas!.at(-1) as z.ZodType,
+    metadata: DESTRUCTIVE,
+  }).server(async (args: unknown, toolCall: unknown) => {
+    const context = contextOf(ctx(toolCall));
+    const out = await run(() => call(p, args, { context })) as { proposal?: Proposal };
+    if (!out.proposal) return out; // written already: cannot happen over MCP (autoWrite), kept honest
+    const no = await confirmed(toolCall, proposalMessage(out.proposal));
+    if (no) return no;
+    return run(() => call(b1Router.post as AnyProcedure, { proposal: out.proposal }, { context }));
+  }) as AnyServerTool;
+}
+
+/** The quotation over MCP: the draft as the quote page would post it, confirmed by the user, then
+ *  createQuote with the draft's commandId (a retry is idempotent; picks moved since = CONFLICT). */
+function postQuotation(ctx: (call: unknown) => CallCtx): AnyServerTool {
+  return toolDefinition({
+    name: "post_quotation",
+    description: `Post this configuration's quotation (its picks, priced by Confire) to SAP as a Sales Quotation, or update the open one of a reopened request. \`header\` may set ${[...QUOTE_HEADER].join(", ")}. ${CONFIRM_NOTE}`,
+    inputSchema: z.object({
+      projectId: z.uuid().describe("The configuration's id"),
+      header: z.record(z.string(), z.unknown()).optional().describe("Header fields to set, SAP's names; only the ones listed"),
+    }),
+    metadata: DESTRUCTIVE,
+  }).server(async (args: unknown, toolCall: unknown) => {
+    const { projectId, header } = args as { projectId: string; header?: Record<string, unknown> };
+    const context = contextOf(ctx(toolCall));
+    const draft = await run(() => call(configsRouter.quoteDraft as AnyProcedure, { projectId }, { context })) as QuoteDraft;
+    if (draft.quoted) return { posted: false, note: `Already quoted: SAP quotation ${draft.quoted.docEntry}.` };
+    const no = await confirmed(toolCall, quotationMessage(draft, header));
+    if (no) return no;
+    return run(() => call(configsRouter.createQuote as AnyProcedure, { projectId, commandId: draft.commandId, header }, { context }));
+  }) as AnyServerTool;
 }

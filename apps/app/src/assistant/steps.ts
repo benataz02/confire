@@ -13,8 +13,9 @@ export type Block =
   | { kind: "card"; part: ToolCall }
   | { kind: "steps"; steps: Step[] };
 
-/** The tools whose result asks the user for a decision: their card is drawn in the chat. */
-export const DECISION: ReadonlySet<string> = new Set(["read_request", "ask_user", "propose_quotation", "b1_write", "b1_copy"]);
+/** The tools whose result asks the user for a decision, or to check what was written for them (a
+ *  read's values, each with its source, so a wrong one is corrected): their card is drawn in the chat. */
+export const DECISION: ReadonlySet<string> = new Set(["read_request", "extract_values", "ask_user", "propose_quotation", "b1_write", "b1_copy"]);
 
 // A drop's file label rides on the text part's metadata, which the client type does not declare.
 const shown = (p: Extract<Part, { type: "text" }>) =>

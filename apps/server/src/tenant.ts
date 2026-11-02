@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
  *  decides what a path's first segment means. */
 const RESERVED = new Set([
   "login", "signup", "forgot-password", "reset-password", "onboarding",
-  "api", "rpc", "files", "assets", "download",
+  "api", "rpc", "files", "assets", "download", "oauth", "mcp",
   "app", "portal", "www", "auth", "admin", "static",
   "notify", "noreply", "no-reply", "postmaster", "abuse", "hostmaster", "webmaster", "security", "mailer-daemon",
 ]);
@@ -34,6 +34,14 @@ const domain = domainOf(process.env.DOMAIN);
 /** The staff app's origin and the sign-in host: Better Auth's baseURL, so its OAuth callbacks and
  *  every mailed link. */
 export const authUrl = domain ? `https://app.${domain}` : "http://localhost:5173";
+
+/** The MCP connector address (assistant spec §4.10), one for every workspace, and the token audience:
+ *  its own host, served by the staff process (mcp.ts routes on the host). Dev is `http://mcp.localhost`
+ *  — `*.localhost` is loopback, and OAuth allows plain http there — which `bun run dev` forwards from
+ *  port 80 to the staff server (scripts/dev-mcp.ts). The trailing slash is load-bearing: clients send
+ *  `resource` as `new URL(<the PRM's resource>).href`, which always has it, and Better Auth matches the
+ *  identifier exactly — without it, authorize answers "invalid_target: … is not configured". */
+export const mcpUrl = domain ? `https://mcp.${domain}/` : "http://mcp.localhost/";
 
 /** The customer portal's origin. */
 export const portalUrl = domain ? `https://portal.${domain}` : "http://localhost:5180";

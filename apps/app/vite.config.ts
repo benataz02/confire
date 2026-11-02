@@ -27,6 +27,8 @@ export default defineConfig({
       "/api": "http://localhost:3000",
       "/files": "http://localhost:3000",
       "/download": "http://localhost:3000",
+      // OAuth discovery for MCP clients (mcp.ts): the issuer is this origin.
+      "/.well-known": "http://localhost:3000",
     },
   },
 });

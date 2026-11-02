@@ -43,7 +43,10 @@ export function ProposalCard({ p, ctx }: { p: Proposal; ctx: CardCtx }) {
   if (created) {
     return (
       <Card header={<CardHeader titleText={t("ASSISTANT_PROPOSAL_CREATED", name)} interactive
-        onClick={() => void navigate({ to: "/$slug/configs/$id", params: { id: created } })} />} />
+        onClick={() => void navigate({ to: "/$slug/configs/$id", params: { id: created } })} />}>
+        {/* the read after Create failed: the configuration exists, so say so here, not on a form gone */}
+        {error ? <MessageStrip design="Negative" hideCloseButton style={{ margin: "0 1rem 0.75rem", width: "auto" }}>{error}</MessageStrip> : null}
+      </Card>
     );
   }
   if (state === "dismissed") return <Text style={NOTICE}>{t("ASSISTANT_PROPOSAL_DISMISSED")}</Text>;

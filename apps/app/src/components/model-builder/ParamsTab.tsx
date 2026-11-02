@@ -7,7 +7,7 @@ import {
   type SplitButtonDomRef,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/AddColumn.js";
-import { isTableGroup, itemsTable } from "@confire/config-engine";
+import { itemsTable } from "@confire/config-engine";
 import type { Issue, ModelDef, Param, TableDef } from "@confire/config-engine";
 import { confirm } from "@confire/ui/confirm.ts";
 import type { ParamSearch } from "./paramRoute.ts";
@@ -18,8 +18,8 @@ import { DuplicateDialog } from "./DuplicateDialog.tsx";
 import { FormulaDialog } from "./FormulaDialog.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import {
-  applyMove, canDrop, copyKeys, deleteNodes, duplicateNodes, isItemsRow, outermost, parseRowKey, placeTable, rowKeyOf,
-  setHeading, tableKeyAt, uniqueKey, type CopyKey, type Heading, type Placement, type RowRef,
+  applyMove, canDrop, copyKeys, deleteNodes, duplicateNodes, isItemsRow, outermost, parseRowKey, placeParam, rowKeyOf,
+  setHeading, uniqueKey, type CopyKey, type Heading, type Placement, type RowRef,
 } from "./structureOps.ts";
 import { useI18n } from "../../i18n.ts";
 import { copy, issueFor, rowOf, type Translate } from "./builderMessages.ts";
@@ -95,11 +95,10 @@ const ADD_ICON: Record<AddKind, string> = {
   formula: "fx", calc: "table-view", items: "product",
 };
 
-/** A table is a group in the model; the glyph follows its role (item grid or calculation table). */
+/** A table's glyph follows its role (item grid or calculation table). */
 function rowKind(ref: RowRef, draft: ModelDef): AddKind {
   if (ref.kind !== "table") return ref.kind;
-  const key = tableKeyAt(draft, ref.s, ref.g);
-  return (draft.tables ?? []).find((tb) => tb.key === key)?.role === "items" ? "items" : "calc";
+  return (draft.tables ?? []).find((tb) => tb.key === ref.key)?.role === "items" ? "items" : "calc";
 }
 
 /** Kind glyph. Image mode keeps the kind in the accessible name: Details no longer spells it. */
@@ -199,7 +198,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
   // A formula draws under the parameter it is tied to. One tied to none (a model older than the
   // tie) or to a parameter placed nowhere draws under the last placed one, the one row guaranteed
   // to be there to hang it on.
-  const placed = draft.structure.sections.flatMap((s) => s.groups.flatMap((g) => (isTableGroup(g) ? [] : g.params)));
+  const placed = draft.structure.sections.flatMap((s) => s.groups.flatMap((g) => g.params.filter((k) => !defOf(k))));
   const lastParam = placed.at(-1);
   const drawnUnder = (i: number) => {
     const p = draft.computed[i]?.param;
@@ -213,10 +212,10 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
   // Includes levels a collapsed parent hides, so Collapse all stays collapsed once that parent opens.
   const allCollapseIds = draft.structure.sections.flatMap((s) => [
     collapseId.section(s.key),
-    ...s.groups.flatMap((g) => (isTableGroup(g) ? [] : [
+    ...s.groups.flatMap((g) => [
       collapseId.group(s.key, g.key),
       ...g.params.flatMap((k) => (formulaAnchors.has(k) ? [collapseId.param(k)] : [])),
-    ])),
+    ]),
   ]);
 
   // A row's first issue (the same row the message's link lands on). A collapsed row also shows the
@@ -229,11 +228,9 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
   const errorOf = (ref: RowRef) => issueAt.get(rowKeyOf(ref));
   const paramError = (k: string) => errorOf({ kind: "param", key: k })
     ?? formulas.filter((i) => drawnUnder(i) === k).map((i) => errorOf({ kind: "formula", i })).find(Boolean);
-  const groupError = (s: number, g: number) => {
-    const grp = draft.structure.sections[s]!.groups[g]!;
-    return isTableGroup(grp) ? errorOf({ kind: "table", s, g })
-      : errorOf({ kind: "group", s, g }) ?? grp.params.map(paramError).find(Boolean);
-  };
+  const leafError = (k: string) => (defOf(k) ? errorOf({ kind: "table", key: k }) : paramError(k));
+  const groupError = (s: number, g: number) =>
+    errorOf({ kind: "group", s, g }) ?? draft.structure.sections[s]!.groups[g]!.params.map(leafError).find(Boolean);
 
   const ruled = (key: string, rule?: string) => (rule ? `${key} · ${t("MODEL_VISIBLE_WHEN")}: ${rule}` : key);
   draft.structure.sections.forEach((s, si) => {
@@ -245,19 +242,6 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
     });
     if (collapsed.has(sId)) return;
     s.groups.forEach((g, gi) => {
-      // A table is a group, so it draws at group depth with no children and no collapse chevron.
-      if (isTableGroup(g)) {
-        const def = defOf(g.table);
-        const cols = def
-          ? t(def.columns.length === 1 ? "MODEL_COLUMNS_ONE" : "MODEL_COLUMNS_MANY", String(def.columns.length))
-          : "";
-        rows.push({
-          kind: "struct", key: rowKeyOf({ kind: "table", s: si, g: gi }), depth: 1, label: def?.title || g.table,
-          detail: def ? cols : t("MODEL_MISSING_TABLE"),
-          ref: { kind: "table", s: si, g: gi }, at: { s: si }, error: groupError(si, gi),
-        });
-        return;
-      }
       const gId = collapseId.group(s.key, g.key);
       const gRef: RowRef = { kind: "group", s: si, g: gi };
       rows.push({
@@ -266,6 +250,17 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
       });
       if (collapsed.has(gId)) return;
       g.params.forEach((k) => {
+        // A table is a field like a parameter: same depth, no children, no collapse chevron.
+        const def = defOf(k);
+        if (def) {
+          const ref: RowRef = { kind: "table", key: k };
+          rows.push({
+            kind: "struct", key: rowKeyOf(ref), depth: 2, label: def.title || k,
+            detail: t(def.columns.length === 1 ? "MODEL_COLUMNS_ONE" : "MODEL_COLUMNS_MANY", String(def.columns.length)),
+            ref, at: { s: si, g: gi }, error: errorOf(ref),
+          });
+          return;
+        }
         const p = draft.parameters.find((x) => x.key === k);
         const own = formulas.filter((i) => drawnUnder(i) === k);
         const pId = collapseId.param(k);
@@ -301,7 +296,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
     if (ref.kind === "section") {
       const sec = draft.structure.sections[ref.s];
       const groups = sec?.groups.length ?? 0;
-      const params = sec?.groups.reduce((n, g) => n + (isTableGroup(g) ? 0 : g.params.length), 0) ?? 0;
+      const params = sec?.groups.reduce((n, g) => n + g.params.length, 0) ?? 0;
       if (groups > 0) {
         const groupsPhrase = t(groups === 1 ? "MODEL_GROUPS_ONE" : "MODEL_GROUPS_MANY", String(groups));
         const andParams = params
@@ -311,12 +306,10 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
       }
     } else if (ref.kind === "group") {
       const grp = draft.structure.sections[ref.s]?.groups[ref.g];
-      const params = grp && !isTableGroup(grp) ? grp.params.length : 0;
-      if (params) message = t(params === 1 ? "MODEL_DELETE_GROUP_ONE" : "MODEL_DELETE_GROUP_MANY", grp && !isTableGroup(grp) ? grp.title : "", String(params));
+      const params = grp?.params.length ?? 0;
+      if (params) message = t(params === 1 ? "MODEL_DELETE_GROUP_ONE" : "MODEL_DELETE_GROUP_MANY", grp?.title ?? "", String(params));
     } else if (ref.kind === "table") {
-      const key = tableKeyAt(draft, ref.s, ref.g) ?? "";
-      const def = defOf(key);
-      message = t("MODEL_DELETE_TABLE_MSG", def?.title || key, `${key}_count`);
+      message = t("MODEL_DELETE_TABLE_MSG", defOf(ref.key)?.title || ref.key, `${ref.key}_count`);
     } else if (ref.kind === "param") {
       const p = draft.parameters.find((x) => x.key === ref.key);
       message = t("MODEL_DELETE_PARAM_MSG", p?.label || ref.key);
@@ -356,7 +349,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
       sections: d.structure.sections.map((sec, i) => i !== s ? sec : {
         ...sec,
         groups: [...sec.groups, {
-          key: uniqueKey("group", sec.groups.flatMap((g) => (isTableGroup(g) ? [] : [g.key]))),
+          key: uniqueKey("group", sec.groups.map((g) => g.key)),
           title: copy(t, "MODEL_NEW_GROUP", "New group"), params: [],
         }],
       }),
@@ -368,10 +361,11 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
   const saveFormula = (at: number | undefined, f: ModelDef["computed"][number]) => update((d) => ({
     ...d, computed: at === undefined ? [...d.computed, f] : d.computed.map((x, j) => (j === at ? f : x)),
   }));
-  // A table is a group, so it is added to a section, not into one.
-  const addTable = (role: "calc" | "items", s: number) => update((d) => {
-    const table = role === "items" ? localizeItems(itemsTable(), t) : newCalcTable((d.tables ?? []).map((x) => x.key), t);
-    return placeTable({ ...d, tables: [...(d.tables ?? []), table] }, table.key, s);
+  // A table goes into a group, like a parameter. Its key is taken from the whole expression scope.
+  const addTable = (role: "calc" | "items", at: { s: number; g: number }) => update((d) => {
+    const taken = [...(d.tables ?? []).map((x) => x.key), ...d.parameters.map((p) => p.key), ...d.computed.map((c) => c.key)];
+    const table = role === "items" ? localizeItems(itemsTable(), t) : newCalcTable(taken, t);
+    return placeParam({ ...d, tables: [...(d.tables ?? []), table] }, table.key, at.s, at.g);
   });
   // checkModel allows at most one items table, and requires exactly one.
   const hasItems = (draft.tables ?? []).some((t) => t.role === "items");
@@ -381,9 +375,9 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
   // (or beside the picked formula), else under the last parameter of where a parameter would land.
   const one = picked.length === 1 && picked[0]!.kind === "struct" ? picked[0]!.at : undefined;
   const sections = draft.structure.sections;
-  const fieldGroups = (s: number) => sections[s]?.groups.flatMap((g, gi) => (isTableGroup(g) ? [] : [gi])) ?? [];
+  const fieldGroups = (s: number) => sections[s]?.groups.map((_, gi) => gi) ?? [];
   const lastIn = (s: number, g?: number) =>
-    sections[s]?.groups.flatMap((x, gi) => (isTableGroup(x) || (g !== undefined && gi !== g) ? [] : x.params)).at(-1);
+    sections[s]?.groups.flatMap((x, gi) => (g !== undefined && gi !== g ? [] : x.params.filter((k) => !defOf(k)))).at(-1);
   const pickedRow = picked.length === 1 ? picked[0]! : undefined;
   const formulaParam = pickedRow?.ref.kind === "param" ? pickedRow.ref.key
     : pickedRow?.kind === "formula" ? drawnUnder(pickedRow.idx)
@@ -394,7 +388,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
       .map((s) => ({ s, g: fieldGroups(s).at(-1) }))
       .find((x): x is { s: number; g: number } => x.g !== undefined);
   const addable: Record<AddKind, boolean> = {
-    section: true, group: intoS >= 0, param: !!intoG, formula: !!formulaParam, calc: intoS >= 0, items: intoS >= 0 && !hasItems,
+    section: true, group: intoS >= 0, param: !!intoG, formula: !!formulaParam, calc: !!intoG, items: !!intoG && !hasItems,
   };
   const add = (what: AddKind) => {
     if (!addable[what]) return;
@@ -402,7 +396,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
     else if (what === "formula") addFormula(formulaParam!);
     else if (what === "param") openParam(intoG!);
     else if (what === "group") addGroup(intoS);
-    else addTable(what, intoS);
+    else addTable(what, intoG!);
   };
 
   return (
@@ -501,16 +495,14 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
         onRowClick={(e) => {
           const ref = parseRowKey(((e.detail.row as unknown) as HTMLElement).getAttribute("row-key")!);
           if (ref.kind === "formula") return setFormula({ at: ref.i, initial: draft.computed[ref.i]! });
-          if (ref.kind === "table") {
-            const key = tableKeyAt(draft, ref.s, ref.g);
-            if (key) openTable(key);
-          } else if (ref.kind === "param") {
+          if (ref.kind === "table") openTable(ref.key);
+          else if (ref.kind === "param") {
             const p = draft.parameters.find((x) => x.key === ref.key);
             if (p) openParam({ key: p.key });
           } else {
             const sec = draft.structure.sections[ref.s];
             const grp = ref.kind === "group" ? sec?.groups[ref.g] : undefined;
-            const node = ref.kind === "section" ? sec : grp && !isTableGroup(grp) ? grp : undefined;
+            const node = ref.kind === "section" ? sec : grp;
             setTitleEdit({
               at: ref.kind === "section" ? { s: ref.s } : { s: ref.s, g: ref.g },
               initial: { title: node?.title ?? "", ...(node?.visibleWhen === undefined ? {} : { visibleWhen: node.visibleWhen }) },

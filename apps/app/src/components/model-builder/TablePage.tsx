@@ -1,8 +1,10 @@
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { CheckBox, ComboBox, ComboBoxItem, Input, Option, Select, Text } from "@ui5/webcomponents-react";
 import {
-  QTY_COL, REQUIRED_ITEM_COLS, RESERVED_LINE_FIELDS, type LookupRef, type TableColumn, type TableDef,
+  Bar, Button, CheckBox, ComboBox, ComboBoxItem, Dialog, Icon, Input, Option, Select, Text,
+} from "@ui5/webcomponents-react";
+import {
+  QTY_COL, REQUIRED_ITEM_COLS, RESERVED_LINE_FIELDS, type LookupRef, type ModelDef, type TableColumn, type TableDef,
 } from "@confire/config-engine";
 import { EditGrid } from "@confire/ui/list-report/EditGrid.tsx";
 import { GridForm } from "@confire/ui/list-report/Grid.tsx";
@@ -17,18 +19,10 @@ import { useI18n } from "../../i18n.ts";
 import { copy, type Translate } from "./builderMessages.ts";
 import { builderControls } from "./controls.tsx";
 import { useModelDraft } from "./draftScope.tsx";
-import { masterdataRef, modelWithTable, sourceBadge, type TableCols } from "./exprHelpers.ts";
-import { NONE, W, optValue } from "./ParamForm.tsx";
+import { ExprInput } from "./ExprInput.tsx";
+import { masterdataRef, modelWithTable, rowVars, sourceBadge, type TableCols } from "./exprHelpers.ts";
+import { ManualList, NONE, W, optValue } from "./ParamForm.tsx";
 import type { TableSearch } from "./paramRoute.ts";
-
-/** A manual option list, as one comma-separated field. Enough for "circular, rectangular"; a list
- *  worth maintaining belongs in masterdata, where it is shared across models. */
-const manualText = (ref: Extract<LookupRef, { source: "manual" }>) => ref.options.map((o) => String(o.value)).join(", ");
-const parseManual = (type: TableColumn["type"], text: string): LookupRef => ({
-  source: "manual",
-  options: text.split(",").map((s) => s.trim()).filter(Boolean)
-    .map((v) => ({ value: type === "number" ? Number(v) : type === "boolean" ? v === "true" : v })),
-});
 
 /** One table of the open model, a record of its own. Save writes it into the model record, saves the
  *  model and returns; placement is the structure tree's job. */
@@ -99,6 +93,9 @@ function TableFields({ tb, tables, checked, edit }: {
   }, [deferred, checked, i18n]);
   const locked = lockedColumns(tb);
   const items = tb.role === "items";
+  // The column whose formula is open in FormulaCellDialog.
+  const [formulaAt, setFormulaAt] = useState<number>();
+  const formulaCol = formulaAt === undefined ? undefined : tb.columns[formulaAt];
 
   // Only the column mapping depends on SAP. It failing must not block model authoring, so the map
   // cell falls back to a free-text field rather than this page refusing to render. The same cached
@@ -144,10 +141,12 @@ function TableFields({ tb, tables, checked, edit }: {
       const col = c.formData as TableColumn;
       const j = c.rowIndex ?? 0;
       if (col.cell.kind === "formula")
-        return exprs.rowExpr!({
-          ...c, value: col.cell.expr, formData: { columns: tb.columns.slice(0, j) },
-          field: { ...c.field, required: true }, onChange: (v) => c.patch({ cell: { kind: "formula", expr: (v as string | undefined) ?? "" } }),
-        });
+        // Read-only here: a grid cell is too narrow to write a formula in, so it opens the dialog.
+        return (
+          <Input style={W} readonly value={col.cell.expr} accessibleName={col.label || col.key} onClick={() => setFormulaAt(j)}
+            valueState={c.error ? "Negative" : "None"} valueStateMessage={<div>{c.error}</div>}
+            icon={<Icon name="edit" mode="Interactive" accessibleName={tr("MODEL_FORMULA_EXPR")} onClick={() => setFormulaAt(j)} />} />
+        );
       if (col.cell.kind === "options")
         return <OptionsCell lookup={col.cell.ref} type={col.type} tables={tables} error={c.error}
           onChange={(ref) => c.patch({ cell: { kind: "options", ref } })} />;
@@ -156,10 +155,9 @@ function TableFields({ tb, tables, checked, edit }: {
     // Code, name and quantity are what make a row a quotation line: ticked, and not the author's to untick.
     columnRequired: (c) => {
       const key = String(c.formData.key);
-      return (
+      return REQUIRED_ITEM_COLS.has(key) ? <Text>{tr("MODEL_YES")}</Text> : (
         <CheckBox accessibleName={tr("MODEL_IS_MANDATORY", String(c.formData.label || key))}
-          checked={!!c.value || REQUIRED_ITEM_COLS.has(key)} disabled={REQUIRED_ITEM_COLS.has(key)}
-          onChange={(e) => c.onChange(e.target.checked || undefined)} />
+          checked={!!c.value} onChange={(e) => c.onChange(e.target.checked || undefined)} />
       );
     },
     // Quantity is not the author's to map: config-quote.ts writes DocumentLine.Quantity itself (row
@@ -177,7 +175,7 @@ function TableFields({ tb, tables, checked, edit }: {
     // A Form of its own for the card padding the definition gets, as the shared table sections do.
     <div data-field="columns">
       <GridForm name={tr("MODEL_FIELDS")}>
-        <EditGrid title={tr("MODEL_FIELDS")} table="columns" columns={columns} rows={rows} errors={errors}
+        <EditGrid title={tr("MODEL_FIELDS")} table="columns" noExport columns={columns} rows={rows} errors={errors}
           controls={controls}
           newRow={(all) => newColumn(all.map((r) => String(r.key)), copy(tr, "MODEL_DEFAULT_FIELD", "Field")) as unknown as Row}
           onChange={(next) => {
@@ -190,7 +188,59 @@ function TableFields({ tb, tables, checked, edit }: {
             } as Partial<TableDef>);
           }} />
       </GridForm>
+      {/* Outside the grid, as ParamsTab's FormulaDialog: inside a cell, the table's row handlers get
+          the dialog's clicks (React events bubble through the component tree) and the cell can
+          remount under it. */}
+      {formulaAt !== undefined && formulaCol?.cell.kind === "formula" ? (
+        <FormulaCellDialog initial={formulaCol.cell.expr} label={formulaCol.label || formulaCol.key}
+          extraVars={rowVars(tb.columns.slice(0, formulaAt), tables)} tables={tables}
+          check={(expr) => {
+            const r = checked({ ...tb, columns: tb.columns.with(formulaAt, { ...formulaCol, cell: { kind: "formula", expr } }) } as unknown as Row);
+            return { scope: r.scope, issue: r.mine.find((x) => x.path === `tables[${r.at}].columns[${formulaAt}].cell`) };
+          }}
+          onCancel={() => setFormulaAt(undefined)}
+          onOk={(expr) => {
+            edit({ columns: tb.columns.with(formulaAt, { ...formulaCol, cell: { kind: "formula", expr } }) });
+            setFormulaAt(undefined);
+          }} />
+      ) : null}
     </div>
+  );
+}
+
+/** A table column's formula. Buffer-and-commit like FormulaDialog, checked as it will be saved. */
+function FormulaCellDialog({ initial, label, extraVars, tables, check, onCancel, onOk }: {
+  initial: string;
+  label: string;
+  /** this row's earlier columns, which the formula may read */
+  extraVars: string[];
+  tables: TableCols[];
+  /** the model with this expression in place, and checkModel's verdict on it */
+  check: (expr: string) => { scope: ModelDef; issue?: ReturnType<typeof checkTable>["mine"][number] };
+  onCancel: () => void;
+  onOk: (expr: string) => void;
+}) {
+  const i18n = useI18n();
+  const t = (key: string) => i18n.getText(key);
+  const [draft, setDraft] = useState(initial);
+  const res = useMemo(() => check(draft), [draft]);
+  const ok = !!draft.trim() && !res.issue;
+  return (
+    <Dialog open onClose={onCancel} className="confire-pd" headerText={`${t("MODEL_FORMULA")} · ${label}`}
+      style={{ width: "min(40rem, 96vw)" }}
+      footer={
+        <Bar design="Footer" endContent={
+          <>
+            <Button design="Emphasized" disabled={!ok} onClick={() => onOk(draft)}>{t("MODEL_SAVE")}</Button>
+            <Button design="Transparent" onClick={onCancel}>{t("MODEL_CANCEL")}</Button>
+          </>
+        } />
+      }>
+      <div style={{ padding: "1rem" }}>
+        <ExprInput value={draft} model={res.scope} tables={tables} extraVars={extraVars} rows={4}
+          issue={draft.trim() ? res.issue : undefined} onChange={(v) => setDraft(v ?? "")} />
+      </div>
+    </Dialog>
   );
 }
 
@@ -220,8 +270,7 @@ function OptionsCell({ lookup, type, tables, error, onChange }: {
         ))}
       </Select>
       {lookup.source === "manual" ? (
-        <Input style={{ flex: 2 }} placeholder={i18n.getText("MODEL_MANUAL_PH")} value={manualText(lookup)}
-          onInput={(e) => onChange(parseManual(type, e.target.value))} />
+        <ManualList style={{ flex: 2 }} ref_={lookup} type={type} accessibleName={i18n.getText("MODEL_OPTIONS")} onChange={onChange} />
       ) : null}
     </div>
   );
@@ -255,10 +304,10 @@ function LineFieldHelp({ value, fields, loading, error, onChange }: {
   // picker both need focus first, so nothing waits on them.
   const i18n = useI18n();
   const [used, setUsed] = useState(false);
+  if (loading) return <Text>{value || i18n.getText("MODEL_READING_SAP")}</Text>;
   if (!fields)
     return (
-      <Input style={W} value={value} disabled={loading}
-        placeholder={loading ? i18n.getText("MODEL_READING_SAP") : i18n.getText("MODEL_SAP_UNREACHABLE")}
+      <Input style={W} value={value} placeholder={i18n.getText("MODEL_SAP_UNREACHABLE")}
         valueState={error ? "Negative" : "None"} valueStateMessage={<div>{error}</div>}
         onInput={(e) => onChange(e.target.value)} />
     );

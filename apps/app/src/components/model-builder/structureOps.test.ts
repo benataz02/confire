@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { checkModel, isTableGroup, placedTables, type ModelDef } from "@confire/config-engine";
+import { checkModel, placedTables, type ModelDef } from "@confire/config-engine";
 import { starterModel } from "./starterModel.ts";
 import { commitParam } from "../../features/model/parameter.ts";
 
@@ -11,10 +11,10 @@ const PRICE_LIST_ONLY = [{
 }];
 import {
   applyMove, canDrop, copyKeyIssues, copyKeys, deleteNodes, duplicateNodes, isItemsRow, outermost, parseRowKey,
-  placeParam, placeTable, renameIdents, rowKeyOf, tableKeyAt,
+  placeParam, renameIdents, rowKeyOf,
 } from "./structureOps.ts";
 
-/** Two sections: [fields "g", table "items"] and [fields "g2"]. */
+/** Two sections: [group "g": width, items] and [group "g2": empty]. */
 function model(): ModelDef {
   const m = starterModel("T");
   return {
@@ -22,7 +22,7 @@ function model(): ModelDef {
     parameters: [{ key: "width", label: "Width", type: "number", ui: "input" }],
     structure: {
       sections: [
-        { key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["width"] }, { table: "items" }] },
+        { key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["width", "items"] }] },
         { key: "other", title: "Other", groups: [{ key: "g2", title: "G2", params: [] }] },
       ],
     },
@@ -30,44 +30,36 @@ function model(): ModelDef {
 }
 
 const groupKinds = (m: ModelDef, s: number) =>
-  m.structure.sections[s]!.groups.map((g) => (isTableGroup(g) ? `table:${g.table}` : `group:${g.key}`));
+  m.structure.sections[s]!.groups.map((g) => `${g.key}:${g.params.join(",")}`);
 
 test("the fixture is a model the save gate accepts", () => {
   expect(checkModel(model(), [])).toEqual(PRICE_LIST_ONLY);
   expect(placedTables(model())).toEqual(["items"]);
 });
 
-test("a table row key round-trips through its position", () => {
-  const ref = parseRowKey("t:0.1");
-  expect(ref).toEqual({ kind: "table", s: 0, g: 1 });
-  expect(rowKeyOf(ref)).toBe("t:0.1");
-  expect(tableKeyAt(model(), 0, 1)).toBe("items");
-  expect(tableKeyAt(model(), 0, 0)).toBeUndefined();
+test("a table row key round-trips through its key", () => {
+  const ref = parseRowKey("t:items");
+  expect(ref).toEqual({ kind: "table", key: "items" });
+  expect(rowKeyOf(ref)).toBe("t:items");
 });
 
-test("a table drags like a group, not like a field", () => {
+test("a table drags like a parameter", () => {
   const m = model();
-  // beside another group, and into a section
-  expect(canDrop(m, "t:0.1", "g:0.0", "Before")).toBe(true);
-  expect(canDrop(m, "t:0.1", "s:1", "On")).toBe(true);
-  // but never into a group, nor beside a parameter
-  expect(canDrop(m, "t:0.1", "g:0.0", "On")).toBe(false);
-  expect(canDrop(m, "t:0.1", "p:width", "After")).toBe(false);
+  // into a group, and beside a parameter or another table
+  expect(canDrop(m, "t:items", "g:1.0", "On")).toBe(true);
+  expect(canDrop(m, "t:items", "p:width", "Before")).toBe(true);
+  expect(canDrop(m, "p:width", "t:items", "After")).toBe(true);
+  // but never beside a group, into a section, or onto a field
+  expect(canDrop(m, "t:items", "g:0.0", "Before")).toBe(false);
+  expect(canDrop(m, "t:items", "s:1", "On")).toBe(false);
+  expect(canDrop(m, "t:items", "p:width", "On")).toBe(false);
 });
 
-test("a parameter cannot be dropped onto a table group", () => {
-  const m = model();
-  expect(canDrop(m, "p:width", "g:1.0", "On")).toBe(true);
-  // g:0.1 IS the table group — a drop there would have nowhere to go
-  expect(canDrop(m, "p:width", "g:0.1", "On")).toBe(false);
-});
-
-test("moving a table to another section keeps its key", () => {
-  // A field group moved across sections gets uniquified; a table group must not, or it would
-  // point at a table that does not exist.
-  const moved = applyMove(model(), "t:0.1", "s:1", "On");
-  expect(groupKinds(moved, 0)).toEqual(["group:g"]);
-  expect(groupKinds(moved, 1)).toEqual(["group:g2", "table:items"]);
+test("moving a table places it once, where it was dropped", () => {
+  const moved = applyMove(model(), "t:items", "g:1.0", "On");
+  expect(groupKinds(moved, 0)).toEqual(["g:width"]);
+  expect(groupKinds(moved, 1)).toEqual(["g2:items"]);
+  expect(groupKinds(applyMove(model(), "t:items", "p:width", "Before"), 0)).toEqual(["g:items,width"]);
   expect(placedTables(moved)).toEqual(["items"]);
   expect(checkModel(moved, [])).toEqual(PRICE_LIST_ONLY);
 });
@@ -77,23 +69,14 @@ test("a field group moved into a section that already has its key is renamed", (
   m.structure.sections[1]!.groups.push({ key: "g", title: "Clash", params: [] });
   // "g" and "g2" are both taken in section 1, so the incoming group lands as "g3".
   const moved = applyMove(m, "g:0.0", "s:1", "On");
-  expect(groupKinds(moved, 1)).toEqual(["group:g2", "group:g", "group:g3"]);
+  expect(groupKinds(moved, 1)).toEqual(["g2:", "g:", "g3:width,items"]);
 });
 
-test("placeTable never leaves the same table in two groups", () => {
-  const once = placeTable(model(), "items", 1);
-  expect(groupKinds(once, 0)).toEqual(["group:g"]);
-  expect(groupKinds(once, 1)).toEqual(["group:g2", "table:items"]);
-  // placing again moves it rather than duplicating
-  const twice = placeTable(once, "items", 0);
-  expect(placedTables(twice)).toEqual(["items"]);
-  expect(groupKinds(twice, 1)).toEqual(["group:g2"]);
-});
-
-test("deleting a table group removes it from the section without touching parameters", () => {
-  const gone = deleteNodes(model(), [{ kind: "table", s: 0, g: 1 }]);
-  expect(groupKinds(gone, 0)).toEqual(["group:g"]);
+test("deleting a table removes its def and its place without touching parameters", () => {
+  const gone = deleteNodes(model(), [{ kind: "table", key: "items" }]);
+  expect(groupKinds(gone, 0)).toEqual(["g:width"]);
   expect(placedTables(gone)).toEqual([]);
+  expect(gone.tables).toEqual([]);
   expect(gone.parameters.map((p) => p.key)).toEqual(["width"]);
 });
 
@@ -107,8 +90,9 @@ test("deleteNodes drops the defs a section held", () => {
 test("deleteNodes takes several positions at once without one shifting the next", () => {
   const m = model();
   m.computed = [{ key: "a", expr: "1" }, { key: "b", expr: "2" }, { key: "c", expr: "3" }];
+  m.structure.sections[0]!.groups.push({ key: "t", title: "", params: [] });
   const gone = deleteNodes(m, [{ kind: "group", s: 0, g: 0 }, { kind: "group", s: 1, g: 0 }, { kind: "formula", i: 0 }, { kind: "formula", i: 2 }]);
-  expect(groupKinds(gone, 0)).toEqual(["table:items"]);
+  expect(groupKinds(gone, 0)).toEqual(["t:"]);
   expect(groupKinds(gone, 1)).toEqual([]);
   expect(gone.computed.map((c) => c.key)).toEqual(["b"]);
   expect(gone.parameters).toEqual([]);
@@ -158,7 +142,7 @@ test("a formula drags onto a parameter, which ties it, or beside a formula, whos
 });
 
 test("the items grid is the one row that is neither deleted nor copied", () => {
-  expect(isItemsRow(model(), { kind: "table", s: 0, g: 1 })).toBe(true);
+  expect(isItemsRow(model(), { kind: "table", key: "items" })).toBe(true);
   expect(isItemsRow(model(), { kind: "group", s: 0, g: 0 })).toBe(false);
 });
 
@@ -174,6 +158,11 @@ test("a copied section takes its content, renamed, and lands after the last sect
   const out = duplicateNodes(m, refs, keys);
   expect(out.structure.sections.map((s) => s.key)).toEqual(["main", "other", "rest", "main2", "rest2"]);
   expect(out.structure.sections[3]!.groups).toEqual([{ key: "g", title: "G", params: ["width2", "height2"] }]);
+  // a calculation table goes along like a parameter, renamed in the one key namespace
+  const calc = { ...model().tables![0]!, key: "holes", role: "calc" as const };
+  m.tables = [...m.tables!, calc];
+  m.structure.sections[0]!.groups[0]!.params.push("holes");
+  expect(copyKeys(m, [{ kind: "group", s: 0, g: 0 }]).map((k) => `${k.kind}:${k.key}`)).toContain("table:holes2");
   // a copied section's and group's rules read the copies too
   expect(out.structure.sections[4]).toEqual({ key: "rest2", title: "Rest", groups: [{ key: "r", title: "R", params: [], visibleWhen: "width2 > 1" }], visibleWhen: "height2 > 0" });
   // the copy reads the copy; the string literal is not a reference
@@ -187,8 +176,8 @@ test("copied groups, parameters and formulas go to the bottom of where their sou
   m.computed = [{ key: "area", expr: "width * 2" }, { key: "x", expr: "1" }];
   const refs = [{ kind: "group", s: 1, g: 0 }, { kind: "param", key: "width" }, { kind: "formula", i: 0 }] as const;
   const out = duplicateNodes(m, [...refs], copyKeys(m, [...refs]));
-  expect(groupKinds(out, 1)).toEqual(["group:g2", "group:g3"]);
-  expect((out.structure.sections[0]!.groups[0] as { params: string[] }).params).toEqual(["width", "width2"]);
+  expect(groupKinds(out, 1)).toEqual(["g2:", "g3:"]);
+  expect(out.structure.sections[0]!.groups[0]!.params).toEqual(["width", "items", "width2"]);
   expect(out.computed).toEqual([...m.computed, { key: "area2", expr: "width2 * 2" }]);
 });
 
@@ -213,20 +202,20 @@ test("renameIdents leaves an expression it cannot read alone", () => {
   expect(renameIdents("max(a, ab)", new Map([["a", "b"]]))).toBe("max(b, ab)");
 });
 
-test("placeParam lands in a field group, not a table group", () => {
+test("placeParam moves a key into a group", () => {
   const m = placeParam(model(), "width", 1, 0);
   expect(m.structure.sections[1]!.groups[0]).toEqual({ key: "g2", title: "G2", params: ["width"] });
-  expect(groupKinds(m, 0)).toEqual(["group:g", "table:items"]);
+  expect(groupKinds(m, 0)).toEqual(["g:items"]);
 });
 
 // The parameter page's position is the URL's, and a reload drops a group added unsaved: a new
 // parameter still lands in a group, never in none.
-test("a new parameter whose position holds no field group lands in the last one", () => {
+test("a new parameter whose position holds no group lands in the last one", () => {
   const p = { key: "len", label: "Len", type: "number" as const, ui: "input" as const };
   for (const place of [undefined, { s: 0, g: 1 }, { s: 5, g: 0 }]) {
     const m = commitParam(model(), p, undefined, place);
     expect(m.structure.sections[1]!.groups[0]).toEqual({ key: "g2", title: "G2", params: ["len"] });
   }
-  const noGroup = { ...model(), structure: { sections: [{ key: "main", title: "Main", groups: [{ table: "items" }] }] } };
+  const noGroup = { ...model(), structure: { sections: [{ key: "main", title: "Main", groups: [] }] } };
   expect(commitParam(noGroup, p, undefined, { s: 0, g: 0 })).toBe(noGroup);
 });

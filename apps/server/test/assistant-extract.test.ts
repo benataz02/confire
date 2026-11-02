@@ -5,9 +5,10 @@ import { fakeText, type FakeResponseStep } from "@tanstack/ai/testing";
 import { db, aiUsage, assistantSettings, configModel, configProject, projectFile } from "@confire/db";
 import { itemsTable, type FormState, type ModelDef, type Val } from "@confire/config-engine";
 import {
-  extractInto, extractionSchema, modelBlock, planApply, type Extraction, type FileSource,
+  extractInto, extractionSchema, fromWire, modelBlock, planApply, type Extraction, type FileSource,
 } from "../src/assistant/extract.ts";
 import type { FileRef } from "../src/assistant/files.ts";
+import { nameTerms } from "../src/assistant/intake.ts";
 import { useTestAdapter } from "../src/assistant/model.ts";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
@@ -123,34 +124,94 @@ test("one key read twice two ways is ambiguous; unsure and notes pass through", 
 });
 
 test("a read-only parameter is never in the schema", () => {
-  const schema = extractionSchema(DEF, FORM);
+  const schema = extractionSchema(DEF);
   expect(schema.safeParse(x({ set: [s("fixed", 4)] })).success).toBe(false);
   expect(schema.safeParse(x({ set: [s("width", 4)] })).success).toBe(true);
 });
 
+/** The input-mode JSON Schema TanStack AI sends Anthropic. */
+const sent = (d: ModelDef) =>
+  (extractionSchema(d) as unknown as { "~standard": { jsonSchema: { input: (o: object) => unknown } } })["~standard"].jsonSchema.input({ target: "draft-07" });
+
 describe("schema", () => {
-  const json = JSON.stringify(z.toJSONSchema(extractionSchema(DEF, FORM)));
-  test("enums for short lists, string for query and long lists, no bounds keywords", () => {
+  const json = JSON.stringify(z.toJSONSchema(extractionSchema(DEF)));
+  test("keys are enums, no bounds keywords; a value off its list is planApply's question", () => {
     expect(json).not.toMatch(/"minimum"|"maximum"|"minLength"|"exclusiveMinimum"/);
-    expect(json).toContain('"enum":["S","L"]');
-    expect(extractionSchema(DEF, FORM).safeParse(x({ set: [s("size", "M")] })).success).toBe(false);
-    expect(extractionSchema(DEF, FORM).safeParse(x({ set: [s("item", "anything")] })).success).toBe(true);
+    expect(extractionSchema(DEF).safeParse(x({ set: [s("nope", "M")] })).success).toBe(false);
+    expect(extractionSchema(DEF).safeParse(x({ set: [s("item", "anything")] })).success).toBe(true);
+    expect(planApply(DEF, view(), x({ set: [s("size", "M")] }), all).questions[0]).toMatchObject({ key: "size", why: "not_an_option" });
   });
   test("no open-ended objects: Claude takes additionalProperties false only", () => {
     expect(json).not.toMatch(/"additionalProperties":\{/);
     expect(json).not.toContain('"oneOf"');
+  });
+  test("at most 16 union-typed parameters, whatever the model's size (Anthropic's limit)", () => {
+    const big: ModelDef = { ...DEF, parameters: Array.from({ length: 80 }, (_, i) => ({ key: `p${i}`, label: `P${i}`, type: "number" as const, ui: "input" as const })) };
+    let unions = 0;
+    const walk = (n: unknown) => {
+      if (!n || typeof n !== "object") return;
+      const o = n as Record<string, unknown>;
+      if (Array.isArray(o.anyOf) || Array.isArray(o.type)) unions++;
+      Object.values(o).forEach(walk);
+    };
+    walk(sent(big));
+    expect(unions).toBeLessThanOrEqual(16);
+  });
+  test("every object is closed in the input-mode schema TanStack AI sends", () => {
+    // TanStack AI converts in zod's input mode and closes only direct object children, never an
+    // anyOf's members: a plain z.object there was Anthropic's 400 and no read ran.
+    const open: string[] = [];
+    const walk = (n: unknown, at: string) => {
+      if (!n || typeof n !== "object") return;
+      const o = n as Record<string, unknown>;
+      if (o.type === "object" && o.additionalProperties !== false) open.push(at);
+      for (const [k, v] of Object.entries(o)) walk(v, `${at}.${k}`);
+    };
+    walk(sent(DEF), "$");
+    expect(open).toEqual([]);
   });
 });
 
 test("modelBlock is stable and names help, rules and allowed values", () => {
   const b = modelBlock(DEF, FORM);
   expect(b).toBe(modelBlock(DEF, FORM));
-  for (const part of ["Welded steel brackets", "width", "Nominal size on the drawing", "No S in steel", "S (Small)", "10–500", 'SAP list "items_q"', "itemcode", "1 if not given"])
+  for (const part of ["Welded steel brackets", "width", "Nominal size on the drawing", "No S in steel", "S (Small)", "10–500", 'SAP list "items_q"', "itemcode", "per piece, 1 if not given"])
     expect(b).toContain(part);
   expect(b).not.toContain("fixed");
   // a rule eliminating an option changes the form, not the block: it stays cacheable
   const ruled = { ...FORM, fields: { ...FORM.fields, size: { ...FORM.fields.size!, options: [{ value: "S", label: "Small", unavailable: "No S in steel" }, { value: "L", label: "Large" }] } } };
   expect(modelBlock(DEF, ruled)).toBe(b);
+});
+
+test("fromWire: real pages, table cells as records of the table's columns, obvious types fixed", () => {
+  const src = { file: "RFQ.pdf", page: 0, quote: "x" };
+  const e = fromWire(DEF, {
+    set: [{ key: "width", value: "120", source: src }, { key: "item", value: 42, source: { ...src, page: 2 } }],
+    batches: { qtys: [1], source: src },
+    tables: [{ table: "items", rows: [[{ column: "itemcode", value: "A" }, { column: "quantity", value: 2 }, { column: "bogus", value: 1 }]], source: src }],
+    unsure: [], notes: [],
+  });
+  expect(e.set.map((r) => [r.value, r.source.page])).toEqual([[120, null], [42, 2]]); // a query value stays as read
+  expect(e.batches!.source.page).toBeNull();
+  expect(e.tables[0]!.rows).toEqual([{ itemcode: "A", quantity: 2 }]);
+});
+
+test("a short list is written out with every column, so a row is picked by what the drawing says", () => {
+  const tables = {
+    items_q: { columns: ["ItemCode", "ItemName", "PurchaseUnitHeight"], labels: { PurchaseUnitHeight: "Espesor" },
+      rows: [["AL_2", "Aluminio 5005 2mm", 2], ["AL_3", "Aluminio 5005 3mm", 3]] },
+  };
+  const b = modelBlock(DEF, FORM, tables);
+  expect(b).toContain('One row from the SAP list "items_q" (the value is its first column), listed below.');
+  expect(b).toContain("Rows: ItemCode | ItemName | PurchaseUnitHeight (Espesor)");
+  expect(b).toContain("- AL_3 | Aluminio 5005 3mm | 3");
+  // a list with more to page is not written out: it stays searched by text
+  expect(modelBlock(DEF, FORM, { items_q: { ...tables.items_q, nextSkip: 100 } })).toContain("searched by text");
+});
+
+test("a customer name is tried as read, then shorter, and upper-cased", () => {
+  expect(nameTerms("Fagor Arrasate S. Coop.")).toEqual(["Fagor Arrasate S. Coop.", "FAGOR ARRASATE S. COOP.", "Fagor Arrasate", "FAGOR ARRASATE"]);
+  expect(nameTerms("ACME")).toEqual(["ACME"]);
 });
 
 // --- the call and its write (DB) -----------------------------------------------------------------

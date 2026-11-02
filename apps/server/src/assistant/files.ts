@@ -75,6 +75,16 @@ export async function fileParts(tenantId: string, refs: FileRef[], fence: Fence 
   });
 }
 
+/**
+ * Parts as the model is sent them: each file label without its `fileLabel`, which only the panel and
+ * `lastDrop` read. The adapter spreads a text part's metadata onto the wire block (an image's or a
+ * document's it picks), and Claude refuses a field it does not know — "messages.0.content.0.text.
+ * fileLabel: Extra inputs are not permitted" (400, verified 2026-11-02). The stored part keeps it.
+ */
+export const unlabeled = (parts: ContentPart[]): ContentPart[] =>
+  parts.map((p) => (p.type === "text" && (p.metadata as { fileLabel?: boolean } | undefined)?.fileLabel
+    ? { type: "text", content: p.content } : p));
+
 /** The drop's upload, past the RPC body cap: `POST /files/<slug>/assistant/<threadId>?name=`, the
  *  raw body. Staff only, into their own thread; ≤ 10 MB, a PDF, PNG or JPEG by its bytes. Mounted by
  *  the staff process beside the project file routes. */

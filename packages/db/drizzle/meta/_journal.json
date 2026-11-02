@@ -78,6 +78,20 @@
       "when": 1793604841849,
       "tag": "0010_assistant_b1_auto_write",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793614196904,
+      "tag": "0011_mcp_oauth",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793622936780,
+      "tag": "0012_tables_in_groups",
+      "breakpoints": true
     }
   ]
 }

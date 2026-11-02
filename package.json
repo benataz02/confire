@@ -27,12 +27,13 @@
     "db:generate": "bun --cwd packages/db drizzle-kit generate",
     "db:studio": "bun --env-file=../../.env --cwd packages/db drizzle-kit studio",
     "auth:generate": "bun --cwd apps/server better-auth-generate",
-    "dev": "bun run --parallel dev:server dev:app dev:portal-server dev:portal dev:site",
+    "dev": "bun run --parallel dev:server dev:app dev:portal-server dev:portal dev:site dev:mcp",
     "dev:server": "bun run --hot --preload ./apps/server/src/instrument.ts apps/server/src/index.ts",
     "dev:app": "bun --cwd apps/app dev",
     "dev:portal-server": "bun run --hot --preload ./apps/server/src/instrument.ts apps/server/src/portal/index.ts",
     "dev:portal": "bun --cwd apps/portal dev",
     "dev:site": "bun --cwd apps/site dev",
+    "dev:mcp": "bun scripts/dev-mcp.ts",
     "build:app": "bun --cwd apps/app build",
     "build:portal": "bun --cwd apps/portal build",
     "build:site": "bun --cwd apps/site build",
@@ -51,6 +52,7 @@
     "dev:pair": "cloudflared tunnel --url http://localhost:3000"
   },
   "patchedDependencies": {
-    "@ui5/webcomponents-base@2.27.2": "patches/@ui5%2Fwebcomponents-base@2.27.2.patch"
+    "@ui5/webcomponents-base@2.27.2": "patches/@ui5%2Fwebcomponents-base@2.27.2.patch",
+    "@better-auth/mcp@1.7.15": "patches/@better-auth%2Fmcp@1.7.15.patch"
   }
 }
