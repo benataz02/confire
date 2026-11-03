@@ -85,7 +85,7 @@ function Home() {
         ...(reports ?? []).map((r): TileProps => ({
           title: r.title || t("REPORT_UNTITLED"), subtitle: r.subtitle ?? undefined, icon: "business-objects-experience",
           value: r.value === null ? undefined : formatValue(r.value, r.format, r.currency, formatLocale()),
-          state: r.state === "Negative" ? "Negative" : undefined, to: `/reports/${r.id}`,
+          to: `/reports/${r.id}`,
         })),
       ],
     },

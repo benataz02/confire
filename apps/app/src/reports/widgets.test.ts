@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chartComponent, chartProps, filterRows, formatValue, type ChartResult } from "./widgets.ts";
+import { chartComponent, chartProps, filterRows, formatValue, reportMessages, type ChartResult, type Result } from "./widgets.ts";
 
 // A report's results as UI5 chart props (reports spec §6.2). Pure: which component, which accessors,
 // the click filter and the numbers' formats.
@@ -45,4 +45,21 @@ test("formatValue: null is a dash, money compact with its currency, percent", ()
   expect(formatValue(612, "number", null, "en")).toBe("612");
   // A currency Intl does not know is written after the number.
   expect(formatValue(5, "money", "XX$", "en")).toBe("5 XX$");
+});
+
+test("messages: a partial dataset, a fallback, a failed run, and a table cut at its cap — never silent", () => {
+  const t = (k: string, ...a: string[]) => `${k}(${a.join("|")})`;
+  const result = {
+    readAt: "2026-11-03T10:00:00Z", company: null, currency: null, warnings: [],
+    datasets: { d: { rows: 1, partial: { read: 20000, total: 25000 }, fellBack: true } },
+    widgets: [{ kind: "table", title: "Docs", columns: ["a"], groupBy: [], rows: [], total: null, partial: true }],
+  } as unknown as Result;
+  const m = reportMessages(result, "boom", "Report", t);
+  expect(m.map((x) => [x.type, x.text])).toEqual([
+    ["Negative", "REPORT_FAILED()"],
+    ["Critical", "REPORT_PARTIAL(d)"],
+    ["Information", "REPORT_FELL_BACK(d)"],
+    ["Critical", "REPORT_TABLE_PARTIAL(Docs)"],
+  ]);
+  expect(reportMessages(null, null, "Report", t)).toEqual([]);
 });

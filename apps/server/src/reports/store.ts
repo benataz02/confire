@@ -58,12 +58,21 @@ export async function savedReports(tenantId: string, userId: string): Promise<St
     .orderBy(desc(assistantReport.updatedAt)) as StoredReport[];
 }
 
-/** A run's result, and with `def` the definition it ran (the chat's `set`). */
-export async function storeRun(id: string, result: ReportResult, def?: ReportDef): Promise<void> {
+/** The chat's `set`: the definition and its run. The title follows the definition's until the user
+ *  renames the report (a title that is neither empty nor the stored definition's is theirs). */
+export async function storeRun(id: string, result: ReportResult, def: ReportDef): Promise<void> {
   await db.update(assistantReport).set({
-    lastResult: result, lastRunAt: new Date(result.readAt),
-    ...(def ? { definition: def, title: def.title, updatedAt: new Date() } : {}),
+    lastResult: result, lastRunAt: new Date(result.readAt), definition: def, updatedAt: new Date(),
+    title: sql`case when ${assistantReport.title} = '' or ${assistantReport.title} = coalesce(${assistantReport.definition}->>'title', '')
+      then ${def.title} else ${assistantReport.title} end`,
   }).where(eq(assistantReport.id, id));
+}
+
+/** A live or background run's result — only while the report still has the definition that ran: a
+ *  refresh that started before the chat changed the report never overwrites the newer result. */
+export async function storeResult(id: string, result: ReportResult, ran: ReportDef): Promise<void> {
+  await db.update(assistantReport).set({ lastResult: result, lastRunAt: new Date(result.readAt) })
+    .where(and(eq(assistantReport.id, id), sql`${assistantReport.definition} = ${JSON.stringify(ran)}::jsonb`));
 }
 
 export async function setReport(tenantId: string, userId: string, id: string, set: { saved?: boolean; title?: string }): Promise<void> {

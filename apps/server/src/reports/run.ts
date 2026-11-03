@@ -4,6 +4,8 @@ import type { Dataset, FilterCond, ReportDef } from "@confire/db";
 import { tenantConnector, tenantCurrency } from "../b1.ts";
 import { entityList, entitySchema } from "../entity-meta.ts";
 import { compileAggregate, compileLinesAggregate, compileLinesRows, compileList, flattenJoined } from "../entity-list.ts";
+import { compileListSql } from "../list-sql.ts";
+import { CONFIRE_FIELDS, type ConfireEntity } from "./confire.ts";
 import { evaluate, toParts, withDerived, type PartRow, type TableData } from "./aggregate.ts";
 import { readConfire } from "./confire.ts";
 import { resolveFilter } from "./dates.ts";
@@ -25,6 +27,7 @@ const LOOKUP_BATCH = 50;
 const CONFIRE_CAP = MAX_PAGES * PAGE;
 
 type Rows = Record<string, unknown>[];
+type Orderby = { field: string; dir: "asc" | "desc" }[];
 
 /** Where a run reads from: the tenant's SAP (null when none is paired), its schemas (null = no such
  *  set), and Confire's own rows. Injected, so the runner is tested without an agent. */
@@ -33,7 +36,7 @@ export type Sources = {
   company: string | null;
   currency: string | null;
   schema: (entity: string) => Promise<B1EntitySchema | null>;
-  confire: (entity: string, filter: FilterCond[], select: string[], cap: number) => Promise<{ rows: Rows; total: number }>;
+  confire: (entity: string, filter: FilterCond[], select: string[], cap: number, orderby?: Orderby) => Promise<{ rows: Rows; total: number }>;
 };
 
 /** Every problem with a definition, one per line: the chat's refusal, which it corrects in one turn. */
@@ -59,6 +62,9 @@ export async function runWith(src: Sources, def: ReportDef, role: string, today:
   for (const e of entities) schemas.set(e, await src.schema(e));
   const problems = checkReport(def, schemas, role);
   if (problems.length) throw new ReportInvalid(problems);
+  const plan = planReads(def, today);
+  const grammar = dryCompile(def, plan.reads, schemas, today);
+  if (grammar.length) throw new ReportInvalid(grammar);
 
   const stats: Record<string, DatasetStat> = Object.fromEntries(Object.keys(def.datasets).map((k) => [k, { rows: 0, partial: null, fellBack: false }]));
   const fellBack = new Set<string>();
@@ -69,10 +75,10 @@ export async function runWith(src: Sources, def: ReportDef, role: string, today:
   };
 
   /** Rows of a source, every page up to `maxPages`; the total from `$count` where B1 gives one. */
-  const readRows = async (entity: string, lines: boolean, filter: FilterCond[], fields: string[], orderby: { field: string; dir: "asc" | "desc" }[], maxPages: number) => {
+  const readRows = async (entity: string, lines: boolean, filter: FilterCond[], fields: string[], orderby: Orderby, maxPages: number) => {
     const schema = schemas.get(entity)!;
     if (lines) {
-      const first = await b1!.crossJoin(compileLinesRows(schema, entity, filter, fields, { pageSize: PAGE }));
+      const first = await b1!.crossJoin(compileLinesRows(schema, entity, filter, fields, { pageSize: PAGE, orderby }));
       const { rows, truncated } = await followPages(b1!, first, { pageSize: PAGE, maxPages });
       return { rows: rows.map((r) => flattenJoined(r, entity)), truncated, total: null as number | null };
     }
@@ -112,7 +118,6 @@ export async function runWith(src: Sources, def: ReportDef, role: string, today:
     return toParts(rows, r.agg);
   };
 
-  const plan = planReads(def, today);
   const data = new Map<string, PartRow[]>();
   // ponytail: sequential; parallel once a live agent is shown to take concurrent requests on one SAP session.
   for (const r of plan.reads) data.set(r.key, await totalsOf(r));
@@ -130,8 +135,8 @@ export async function runWith(src: Sources, def: ReportDef, role: string, today:
     for (const [i, s] of ds.from.entries()) {
       const filter = resolveFilter([...ds.filter, ...s.filter], today);
       const got = s.source === "confire"
-        ? await src.confire(s.entity, filter, raw, TABLE_ROWS).then((x) => ({ rows: x.rows, truncated: x.total > x.rows.length, total: x.total as number | null }))
-        : await readRows(s.entity, ds.lines, filter, raw, s.source === "b1" ? orderby.filter((o) => !o.field.startsWith("Lines.") || ds.lines) : [], TABLE_PAGES);
+        ? await src.confire(s.entity, filter, raw, TABLE_ROWS, orderby).then((x) => ({ rows: x.rows, truncated: x.total > x.rows.length, total: x.total as number | null }))
+        : await readRows(s.entity, ds.lines, filter, raw, orderby, TABLE_PAGES);
       partial ||= got.truncated;
       total = total === null || got.total === null ? null : total + got.total;
       all.push(...got.rows.map((x) => ({ ...x, [SOURCE]: sourceLabel(ds, i), _entity: s.entity })));
@@ -169,6 +174,42 @@ export async function runWith(src: Sources, def: ReportDef, role: string, today:
     readAt: today.toISOString(), company: src.company, currency: src.currency,
     datasets: stats, widgets: evaluate(def, plan, data, tables, today), warnings,
   };
+}
+
+/** Every query the run will send, compiled before the first is: a value SAP's grammar cannot take (an
+ *  array on `eq`, text on a number field, a date that is not one) is a problem the model fixes in one
+ *  turn, not "the tool failed" halfway through. */
+function dryCompile(def: ReportDef, reads: Read[], schemas: Map<string, B1EntitySchema | null>, today: Date): string[] {
+  const out: string[] = [];
+  const attempt = (where: string, fn: () => unknown) => {
+    try { fn(); } catch (e) { out.push(`${where}: ${e instanceof Error ? e.message : String(e)}`); }
+  };
+  const compileFor = (id: string, i: number, filter: FilterCond[], fields: string[], agg?: Read["agg"]) => {
+    const ds = def.datasets[id]!;
+    const s = ds.from[i]!;
+    const where = `Dataset ${id} (${s.entity})`;
+    // One condition at a time, so each bad one is named; then the totals and rows without a filter.
+    if (s.source === "confire") {
+      for (const c of filter) attempt(where, () => compileListSql(CONFIRE_FIELDS[s.entity as ConfireEntity], { select: [], filter: [c], orderby: [] }));
+      return;
+    }
+    const schema = schemas.get(s.entity)!;
+    if (ds.lines) {
+      for (const c of filter) attempt(where, () => compileLinesRows(schema, s.entity, [c], [], { pageSize: PAGE }));
+      if (agg) attempt(where, () => compileLinesAggregate(schema, s.entity, [], agg, { pageSize: PAGE }));
+      attempt(where, () => compileLinesRows(schema, s.entity, [], fields, { pageSize: PAGE }));
+    } else {
+      for (const c of filter) attempt(where, () => compileList(schema, { select: [], filter: [c], orderby: [] }, { pageSize: PAGE }));
+      if (agg) attempt(where, () => compileAggregate(schema, [], agg, { pageSize: PAGE }));
+    }
+  };
+  for (const r of reads) compileFor(r.dataset, r.source, r.filter, fieldsOf(r), r.agg);
+  for (const w of def.widgets) {
+    if (w.kind !== "table") continue;
+    const ds = def.datasets[w.dataset]!;
+    ds.from.forEach((s, i) => compileFor(w.dataset, i, resolveFilter([...ds.filter, ...s.filter], today), []));
+  }
+  return [...new Set(out)];
 }
 
 async function attachLookup(b1: B1Transport, schema: B1EntitySchema, l: Dataset["lookups"][number], rows: PartRow[]): Promise<void> {
@@ -210,7 +251,7 @@ export async function runReport(ctx: { tenantId: string; role: string }, def: Re
       names ??= new Set((await entityList(ctx.tenantId, conn!.b1)).map((e) => e.name));
       return names.has(entity) ? entitySchema(ctx.tenantId, conn!.b1, entity) : null;
     },
-    confire: (entity, filter, select, cap) => readConfire(ctx.tenantId, entity, filter, select, cap),
+    confire: (entity, filter, select, cap, orderby) => readConfire(ctx.tenantId, entity, filter, select, cap, orderby),
   };
   return runWith(src, def, ctx.role, today);
 }

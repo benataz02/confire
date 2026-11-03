@@ -7,14 +7,14 @@ import {
   RadialChart, ScatterChart,
 } from "@ui5/webcomponents-react-charts";
 import { Grid, type GridState } from "@confire/ui/list-report/Grid.tsx";
-import { PageMessages, type PageMessage } from "@confire/ui/PageMessages.tsx";
+import { PageMessages } from "@confire/ui/PageMessages.tsx";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { formatLocale } from "@confire/ui/format.ts";
 import type { ListColumn, Row } from "@confire/ui/types.ts";
 import { b1Feature } from "../features/b1/index.ts";
 import { useI18n } from "../i18n.ts";
 import {
-  chartComponent, chartProps, filterRows, formatValue,
+  chartComponent, chartProps, filterRows, formatValue, reportMessages,
   type ChartComponent, type ChartResult, type Format, type KpiResult, type Report, type Result, type TableResult,
 } from "./widgets.ts";
 
@@ -47,16 +47,8 @@ export function ReportView({ report, result, busy, failed, actions, onChip, onRe
   const [filter, setFilter] = useState<Filter | null>(null);
   const def = report.definition;
 
-  const messages = useMemo((): PageMessage[] => {
-    const group = def?.title ?? "";
-    const out: PageMessage[] = [];
-    if (failed) out.push({ id: "failed", type: "Negative", text: t("REPORT_FAILED"), detail: failed, group });
-    for (const [id, st] of Object.entries(result?.datasets ?? {})) {
-      if (st.partial) out.push({ id: `p:${id}`, type: "Critical", text: t("REPORT_PARTIAL", id), detail: t("REPORT_PARTIAL_DETAIL", String(st.partial.read), st.partial.total === null ? "…" : String(st.partial.total)), group });
-      if (st.fellBack) out.push({ id: `f:${id}`, type: "Information", text: t("REPORT_FELL_BACK", id), detail: t("REPORT_FELL_BACK_DETAIL"), group });
-    }
-    return out;
-  }, [result, failed, def?.title]); // eslint-disable-line react-hooks/exhaustive-deps
+  const title = report.title || def?.title || "";
+  const messages = useMemo(() => reportMessages(result, failed, title, t), [result, failed, title]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!def) return null;
   const read = result ? new Date(result.readAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }) : "";
@@ -69,7 +61,7 @@ export function ReportView({ report, result, busy, failed, actions, onChip, onRe
     <FlexBox direction="Column" style={{ gap: "1rem", padding: "1rem 1.5rem 2rem", fontFamily: "var(--sapFontFamily)" }}>
       <FlexBox justifyContent="SpaceBetween" alignItems="Start" wrap="Wrap" style={{ gap: "0.5rem" }}>
         <FlexBox direction="Column" style={{ gap: "0.25rem" }}>
-          <Title level="H3">{def.title}</Title>
+          <Title level="H3">{title}</Title>
           {def.subtitle ? <Text>{def.subtitle}</Text> : null}
           {result ? <Text style={muted}>{t("REPORT_LIVE", read, new Intl.NumberFormat(locale).format(rows))}</Text> : null}
         </FlexBox>
@@ -101,7 +93,7 @@ export function ReportView({ report, result, busy, failed, actions, onChip, onRe
               ))}
             </div>
           ) : null}
-          {tables.map((tr, i) => <ReportTable key={i} tr={tr} title={def.title} filter={filter} onClear={() => setFilter(null)} t={t} />)}
+          {tables.map((tr, i) => <ReportTable key={i} tr={tr} title={title} filter={filter} onClear={() => setFilter(null)} t={t} />)}
         </>
       ) : (
         // Loading: the draft's own layout, each chart's placeholder shimmering.
@@ -164,7 +156,8 @@ function ChartCard({ c, fmt, t, active, onPick }: {
     body = <C {...common} {...chartProps(shown, (v, f) => fmt(v, f))} />;
   }
   return (
-    <Card style={c.size === "wide" ? { gridColumn: "span 2" } : undefined}
+    // A wide chart takes the whole row: `span 2` overflows when only one track fits (a laptop with the chat docked).
+    <Card style={c.size === "wide" ? { gridColumn: "1 / -1" } : undefined}
       header={<CardHeader titleText={c.title} subtitleText={c.note ?? (active ? t("REPORT_FILTER", String(label(active))) : undefined)} />}>
       <div style={{ padding: "0 0.5rem 0.5rem" }}>{body}</div>
     </Card>

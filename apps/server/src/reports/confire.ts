@@ -34,10 +34,11 @@ export type ConfireEntity = keyof typeof CONFIRE_FIELDS;
 /** At most `cap` rows of the named fields (dates as ISO text, as B1 sends them), and how many match. */
 export async function readConfire(
   tenantId: string, entity: string, filter: FilterCond[], select: string[], cap: number,
+  orderby: { field: string; dir: "asc" | "desc" }[] = [],
 ): Promise<{ rows: Record<string, unknown>[]; total: number }> {
   const fields: SqlFields = CONFIRE_FIELDS[entity as ConfireEntity];
   if (!fields) throw new Error(`${entity} is not a Confire source`);
-  const { where } = compileQuery(fields, { select: [], filter, orderby: [] });
+  const { where, orderBy } = compileQuery(fields, { select: [], filter, orderby });
   const names = (select.length ? select : Object.keys(fields)).filter((n) => fields[n]);
   const cols: Record<string, Column | SQL> = Object.fromEntries(names.map((n) => [n, fields[n]!.col]));
   const rows = await db.select({ ...cols, _total: TOTAL }).from(configProject)
@@ -45,6 +46,7 @@ export async function readConfire(
     .leftJoin(creator, eq(creator.id, configProject.createdBy))
     .leftJoin(assignee, eq(assignee.id, configProject.assigneeId))
     .where(and(eq(configProject.tenantId, tenantId), internalVisible, where))
+    .orderBy(...orderBy)
     .limit(cap);
   const total = Number((rows[0] as { _total?: number } | undefined)?._total ?? 0);
   return {

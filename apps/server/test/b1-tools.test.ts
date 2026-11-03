@@ -173,6 +173,11 @@ describe.skipIf(!process.env.DATABASE_URL)("b1 tools", () => {
       .toContain("Cardcode (did you mean CardCode?)");
   });
 
+  test("b1.read: aggregate with a free-text search is refused, never a total over every record", async () => {
+    const w = await world();
+    expect(await code(call(router.b1.read, { entity: "Orders", query: { search: "ACME" }, aggregate: { groupBy: [], measures: [{ agg: "count", as: "n" }] } }, w.staff))).toBe("BAD_REQUEST");
+  });
+
   test("b1.read follows nextLink: 600 rows are two pages", async () => {
     const w = await world();
     agent.store.Orders = Array.from({ length: 600 }, (_, i) => ({ ...order(), DocEntry: i + 1 }));

@@ -225,4 +225,7 @@ export const eu: Partial<Record<keyof typeof en, string>> = {
   EXTRACT_NOTHING: "Ez dago irakurtzeko ezer: jaregin PDF, PNG edo JPEG bat, edo itsatsi testua",
   REPORT_CHAT_ONLY: "Txostenak txostenaren txatean sortzen dira, bere orrian",
   REPORT_NOT_DRAFTED: "Oraindik ez dago exekutatzekorik: eskatu txostena laguntzaileari lehenik",
+  CHAT_IS_REPORT: "Txat hau txosten batena da: hasi konfigurazioa AA orritik",
+  FILTER_NEEDS_DATE: "'{0}'(r)en iragazkiak data bat behar du (UUUU-HH-EE), ez '{1}'",
+  AGGREGATE_NO_SEARCH: "Guztizko batek ez du testu askeko bilaketarik onartzen: murriztu iragazkiekin",
 };

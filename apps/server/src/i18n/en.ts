@@ -238,4 +238,7 @@ export const en = {
   EXTRACT_NOTHING: "Nothing to read: drop a PDF, PNG or JPEG, or paste the text",
   REPORT_CHAT_ONLY: "Reports are built in a report's chat, on its page",
   REPORT_NOT_DRAFTED: "Nothing to run yet: ask the assistant for the report first",
+  CHAT_IS_REPORT: "This chat belongs to a report: start a configuration from the AI page",
+  FILTER_NEEDS_DATE: "Filter on '{0}' needs a date (YYYY-MM-DD), not '{1}'",
+  AGGREGATE_NO_SEARCH: "A total cannot take a free-text search: narrow it with filters instead",
 };

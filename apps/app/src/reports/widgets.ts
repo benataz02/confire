@@ -1,3 +1,4 @@
+import type { PageMessage } from "@confire/ui/PageMessages.tsx";
 import type { client } from "../orpc.ts";
 
 // A report's results as UI5 chart props (reports spec §6.2). Pure — the page picks the component by
@@ -66,4 +67,20 @@ export function formatValue(v: number | null | undefined, f: Format, currency: s
     }
   }
   return new Intl.NumberFormat(locale, compact).format(v);
+}
+
+/** The page's messages (reports spec §3.3: never a silent part of the data): a failed run, each
+ *  dataset read partly or totalled by Confire, each table cut at its 2,000 rows. */
+export function reportMessages(result: Result | null, failed: string | null, group: string, t: (k: string, ...a: string[]) => string): PageMessage[] {
+  const out: PageMessage[] = [];
+  if (failed) out.push({ id: "failed", type: "Negative", text: t("REPORT_FAILED"), detail: failed, group });
+  for (const [id, st] of Object.entries(result?.datasets ?? {})) {
+    if (st.partial) out.push({ id: `p:${id}`, type: "Critical", text: t("REPORT_PARTIAL", id), detail: t("REPORT_PARTIAL_DETAIL", String(st.partial.read), st.partial.total === null ? "…" : String(st.partial.total)), group });
+    if (st.fellBack) out.push({ id: `f:${id}`, type: "Information", text: t("REPORT_FELL_BACK", id), detail: t("REPORT_FELL_BACK_DETAIL"), group });
+  }
+  (result?.widgets ?? []).forEach((w, i) => {
+    if (w.kind === "table" && w.partial)
+      out.push({ id: `t:${i}`, type: "Critical", text: t("REPORT_TABLE_PARTIAL", w.title), detail: t("REPORT_TABLE_PARTIAL_DETAIL", String(w.rows.length), w.total === null ? "…" : String(w.total)), group });
+  });
+  return out;
 }

@@ -35,11 +35,15 @@ export function ReportPage({ id }: { id: string }) {
   const [live, setLive] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  // Each report_set is a new generation: a live run that started before one is not drawn over it.
+  const generation = useRef(0);
   const runLive = async () => {
+    const g = generation.current;
     setBusy(true);
     setFailed(null);
     try {
-      setLive(await client.reports.run({ id }));
+      const r = await client.reports.run({ id });
+      if (g === generation.current) setLive(r);
       void qc.invalidateQueries({ queryKey: orpc.reports.tiles.key() });
     } catch (e) {
       setFailed(refusalText(i18n, e));
@@ -54,16 +58,22 @@ export function ReportPage({ id }: { id: string }) {
     void runLive();
   }, [report.data?.definition]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** The chat changed the report: show what it stored, docking the chat the first time. */
+  /** The chat changed the report: show what it stored, docking the chat the first time there is a
+   *  report to show — a refused first call (the model fixes and calls again) docks nothing. */
+  const dockedNow = useRef(false);
+  dockedNow.current = !!docked;
   const onTool = (name: string) => {
     if (name !== "report_set") return;
+    generation.current++;
     ran.current = true; // what report_set stored is already live
     setLive(null);
     setFailed(null);
-    void report.refetch();
-    if (docked) return;
-    if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) { setDocked(true); return; }
-    document.startViewTransition(() => { flushSync(() => setDocked(true)); });
+    void report.refetch().then((r) => {
+      if (!r.data?.definition || dockedNow.current) return;
+      dockedNow.current = true;
+      if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) { setDocked(true); return; }
+      document.startViewTransition(() => { flushSync(() => setDocked(true)); });
+    });
   };
 
   const [prefill, setPrefill] = useState<{ text: string; at: number } | undefined>();

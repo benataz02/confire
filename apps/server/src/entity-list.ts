@@ -16,6 +16,9 @@ import { t } from "./i18n/index.ts";
 export const scalarFields = (schema: B1EntitySchema): B1Field[] =>
   schema.fields.filter((f) => f.kind !== "collection");
 
+const DATE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+const TIME = /^\d{2}:\d{2}(:\d{2})?$/;
+
 const literal = (f: B1Field, value: string | number | boolean): string => {
   switch (f.kind) {
     case "number":
@@ -30,8 +33,13 @@ const literal = (f: B1Field, value: string | number | boolean): string => {
     // OData v4 date/time literals are unquoted. A quoted DocDate (`DocDate ge '2026-01-01'`)
     // is the form verified against live b1s/v2; this compiler leaves them bare.
     // ponytail: if one of the two 400s in the field, make both match whichever wins.
+    // Bare, so held to the literal's own shape: anything else would be more OData — a portal
+    // client's `2000-01-01) or (DocEntry gt 0` would have outlived the CardCode fence after it.
     case "date":
+      if (!DATE.test(String(value))) throw new Error(t("FILTER_NEEDS_DATE", f.name, String(value)));
+      return String(value);
     case "time":
+      if (!TIME.test(String(value))) throw new Error(t("FILTER_NEEDS_DATE", f.name, String(value)));
       return String(value);
     default:
       return `'${escapeLiteral(String(value))}'`;
@@ -202,9 +210,11 @@ export function compileLinesAggregate(
 /** The rows of a document set with its lines (the report runner's fallback and tables): the named
  *  fields, each from its side of the join, as flattenJoined reads them back. */
 export function compileLinesRows(
-  header: B1EntitySchema, set: string, filter: FilterCond[], fields: string[], opts: { pageSize: number },
+  header: B1EntitySchema, set: string, filter: FilterCond[], fields: string[],
+  opts: { pageSize: number; orderby?: { field: string; dir: "asc" | "desc" }[] },
 ): CrossJoinSpec {
   const l = linesOf(header, set, filter);
+  const orderby = (opts.orderby ?? []).map((o) => `${l.at(o.field).path}${o.dir === "desc" ? " desc" : ""}`).join(",");
   const picked = fields.map(l.at);
   const head = [...new Set([...header.keys, ...picked.filter((p) => !p.line).map((p) => p.name)])];
   const line = [...new Set(["LineNum", ...picked.filter((p) => p.line).map((p) => p.name)])];
@@ -212,6 +222,7 @@ export function compileLinesRows(
     entities: l.entities,
     expand: [{ entity: set, select: head }, { entity: `${set}/${LINES}`, select: line }],
     filter: l.filter,
+    ...(orderby ? { orderby } : {}),
     maxPageSize: opts.pageSize,
   };
 }

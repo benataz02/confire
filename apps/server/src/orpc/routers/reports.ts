@@ -8,7 +8,7 @@ import { tenantCompany, viaB1 } from "../../b1.ts";
 import { ownThread, withThread } from "../../assistant/threads.ts";
 import { summarize } from "../../reports/aggregate.ts";
 import { ReportInvalid, runReport } from "../../reports/run.ts";
-import { deleteReport, getReport, savedReports, setReport, storeRun, blankReport, type StoredReport } from "../../reports/store.ts";
+import { deleteReport, getReport, savedReports, setReport, storeResult, storeRun, blankReport, type StoredReport } from "../../reports/store.ts";
 import type { KpiResult, ReportResult } from "../../reports/types.ts";
 import { t } from "../../i18n/index.ts";
 
@@ -38,7 +38,7 @@ function refreshStale(ctx: { tenantId: string; role: string }, reports: StoredRe
   void (async () => {
     for (const r of stale) {
       try {
-        await storeRun(r.id, await runReport(ctx, r.definition!));
+        await storeResult(r.id, await runReport(ctx, r.definition!), r.definition!);
       } catch (e) {
         if (!(e instanceof ReportInvalid)) Sentry.captureException(e);
       } finally {
@@ -78,7 +78,7 @@ export const reportsRouter = {
     const r = await getReport(context.tenantId, context.userId, input.id);
     if (!r.definition) throw new ORPCError("BAD_REQUEST", { message: t("REPORT_NOT_DRAFTED") });
     const result = await run(context, r.definition);
-    await storeRun(r.id, result);
+    await storeResult(r.id, result, r.definition);
     return result;
   }),
 
@@ -107,8 +107,9 @@ export const reportsRouter = {
       const fresh = !!r.lastResult && r.lastResult.company === company;
       return {
         id: r.id, title: r.title, subtitle: r.definition?.subtitle ?? null,
+        // No good/bad colour: whether a figure going down is bad depends on the measure (overdue
+        // invoices falling is good news), which the definition does not say.
         value: fresh ? kpi?.value ?? null : null, format: kpi?.format ?? "number", currency: r.lastResult?.currency ?? null,
-        state: !fresh || kpi?.deviation == null || kpi.deviation === 0 ? null : kpi.deviation < 0 ? "Negative" as const : "Positive" as const,
       };
     });
   }),

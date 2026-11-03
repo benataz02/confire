@@ -146,3 +146,14 @@ test("SAP not connected: a b1 dataset is refused, a Confire-only report runs", a
   const confire = ONE([{ kind: "kpi", title: "q", value: { dataset: "c", agg: "sum", field: "quotedValue", label: "q" } }], { c: { from: [{ source: "confire", entity: "Configurations" }] } });
   expect(((await runWith(off, confire, "member", today)).widgets[0] as KpiResult).value).toBe(5);
 });
+
+test("a filter SAP's grammar cannot take is a refusal the model can fix, before any read", async () => {
+  const { src, calls } = fakeSap({});
+  const bad = ONE([{ kind: "kpi", title: "n", value: { dataset: "d", agg: "count", label: "n" } }],
+    { d: { from: [{ source: "b1", entity: "Quotations" }], filter: [{ field: "DocumentStatus", op: "eq", value: ["bost_Open"] }, { field: "DocTotal", op: "gt", value: "abc" }] } });
+  const e = (await runWith(src, bad, "member", today).catch((x: unknown) => x)) as ReportInvalid;
+  expect(e).toBeInstanceOf(ReportInvalid);
+  expect(e.problems.join("\n")).toContain("DocumentStatus");
+  expect(e.problems.join("\n")).toContain("abc");
+  expect(calls).toEqual([]);
+});

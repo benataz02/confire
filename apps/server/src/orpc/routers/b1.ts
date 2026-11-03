@@ -222,6 +222,8 @@ export const b1Router = {
       const query = normal(input.query);
       checkQueryNames(schema, query, input.aggregate);
       if (input.aggregate) {
+        // A total over a search would be a total over every record: `$apply` takes filters only.
+        if (query.search?.trim()) throw new ORPCError("BAD_REQUEST", { message: t("AGGREGATE_NO_SEARCH") });
         const page = await readRows(c.b1, schema, input.entity, { query, pageSize: NARROW_CAP, cursor: input.cursor, aggregate: input.aggregate },
           { tenantId: context.tenantId, key: "b1-tool" });
         return { rows: page.rows.slice(0, NARROW_CAP), keys: [], total: page.total, nextCursor: page.nextCursor };

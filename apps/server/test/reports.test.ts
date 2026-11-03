@@ -2,6 +2,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, assistantReport, configModel, configProject, sapConnection } from "@confire/db";
 import { router } from "../src/orpc/router.ts";
+import { auth } from "../src/auth.ts";
+import { serve } from "../src/serve.ts";
+import { Hono } from "hono";
+import { storeResult } from "../src/reports/store.ts";
 import { appendMessages, blankThread, listThreads, ownThread, releaseLease, takeLease, threadFor } from "../src/assistant/threads.ts";
 import type { ReportResult } from "../src/reports/types.ts";
 import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
@@ -131,5 +135,49 @@ describe.skipIf(!process.env.DATABASE_URL)("reports", () => {
         { kind: "kpi", title: "All", value: { dataset: "c", agg: "count", label: "n" } }] };
     const out = await call(router.reports.set, { definition: def }, w.chat);
     expect(out.widgets).toEqual([{ kpi: "Quoted", value: 150, compare: null }, { kpi: "All", value: 2, compare: null }]);
+  });
+
+  test("a live run gets two minutes before Bun's idle timeout; other calls keep it", async () => {
+    const app = serve({ auth, router, title: "t", routes: new Hono(), spaDist: "/nonexistent", port: 0, origin: "http://localhost" });
+    const seen: number[] = [];
+    const env = { timeout: (_r: Request, s: number) => { seen.push(s); } };
+    await app.fetch(new Request("http://localhost/rpc/reports/run", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }), env as never);
+    await app.fetch(new Request("http://localhost/rpc/reports/tiles", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }), env as never);
+    expect(seen).toEqual([120]);
+  });
+
+  test("a run of an older definition never overwrites the newer one's result", async () => {
+    const w = await world();
+    await call(router.reports.set, { definition: DEF }, w.chat);
+    const old = await call(router.reports.get, { id: w.r.id }, w.staff);
+    agent.store["Quotations#apply"] = [{ sum_DocTotal: 7 }];
+    await call(router.reports.set, { definition: { ...DEF, title: "Only Spain" } }, w.chat);
+    await storeResult(w.r.id, old.lastResult!, old.definition!);
+    const now = await call(router.reports.get, { id: w.r.id }, w.staff);
+    expect(now.lastResult!.widgets[0]).toMatchObject({ value: 7 });
+  });
+
+  test("a report's chat never becomes a configuration's", async () => {
+    const w = await world();
+    const [m] = await db.insert(configModel).values({ tenantId: w.tenantId, name: "Cable", definition: TEST_MODEL }).returning({ id: configModel.id });
+    expect(await code(call(router.assistant.start, { threadId: w.r.threadId, modelId: m!.id, name: "x", customer: null }, w.staff))).not.toBe("ok");
+    expect((await ownThread(w.tenantId, w.u.userId, w.r.threadId)).projectId).toBeNull();
+  });
+
+  test("a rename stands when the chat changes the report", async () => {
+    const w = await world();
+    await call(router.reports.set, { definition: DEF }, w.chat);
+    await call(router.reports.rename, { id: w.r.id, title: "My quotes" }, w.staff);
+    await call(router.reports.set, { definition: { ...DEF, subtitle: "Spain" } }, w.chat);
+    expect((await call(router.reports.get, { id: w.r.id }, w.staff)).title).toBe("My quotes");
+  });
+
+  test("a tile carries no good/bad colour: whether down is bad depends on the measure", async () => {
+    const w = await world();
+    const def = { ...DEF, widgets: [{ kind: "kpi", title: "v", value: { dataset: "q", agg: "sum", field: "DocTotal", label: "v" }, compare: { dataset: "q", agg: "sum", field: "DocTotal", label: "c" } }] };
+    await call(router.reports.set, { definition: def }, w.chat);
+    await call(router.reports.save, { id: w.r.id, saved: true }, w.staff);
+    const [tile] = await call(router.reports.tiles, {}, w.staff);
+    expect(tile).not.toHaveProperty("state");
   });
 });

@@ -480,7 +480,9 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
       {files.map((f, i) => <Token key={`${f.name}${i}`} data-i={i} text={f.name} />)}
     </Tokenizer>
   ) : null;
-  const attach = (
+  // A report's chat reads SAP and Confire, never a client's files: a drop there would start a
+  // configuration in a report's chat (the server refuses that too, CHAT_IS_REPORT).
+  const attach = kind === "report" ? null : (
     <>
       <input ref={picker} type="file" multiple accept={READABLE.join(",")} hidden
         onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
@@ -549,9 +551,9 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
         fontFamily: "var(--sapFontFamily)", fontSize: "var(--sapFontSize)", color: "var(--sapTextColor)",
         outline: dragging ? "2px dashed var(--sapContent_FocusColor)" : "none", outlineOffset: "-0.5rem",
       }}
-      onDragOver={(e) => { if (disabled) return; e.preventDefault(); setDragging(true); }}
+      onDragOver={(e) => { if (disabled || kind === "report") return; e.preventDefault(); setDragging(true); }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
-      onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled) addFiles(e.dataTransfer.files); }}>
+      onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled && kind !== "report") addFiles(e.dataTransfer.files); }}>
       {page && empty ? <WavingDots /> : null}
       {head?.({ busy, projectId, empty })}
       {page && empty ? (

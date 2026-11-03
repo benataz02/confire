@@ -225,4 +225,7 @@ export const es: Partial<Record<keyof typeof en, string>> = {
   EXTRACT_NOTHING: "No hay nada que leer: suelte un PDF, PNG o JPEG, o pegue el texto",
   REPORT_CHAT_ONLY: "Los informes se crean en el chat del informe, en su página",
   REPORT_NOT_DRAFTED: "Aún no hay nada que ejecutar: pide primero el informe al asistente",
+  CHAT_IS_REPORT: "Este chat es de un informe: inicia la configuración desde la página de IA",
+  FILTER_NEEDS_DATE: "El filtro sobre '{0}' necesita una fecha (AAAA-MM-DD), no '{1}'",
+  AGGREGATE_NO_SEARCH: "Un total no admite una búsqueda de texto libre: acótalo con filtros",
 };

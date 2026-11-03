@@ -63,6 +63,8 @@ export async function startFromThread(
   input: { modelId: string; name: string; customer?: z.infer<typeof Customer> | null },
 ): Promise<{ id: string }> {
   if (t.projectId) throw new ORPCError("BAD_REQUEST", { message: text("CHAT_HAS_CONFIG") });
+  // A report's chat stays the report's (reports spec §4): it never adopts a configuration.
+  if (t.reportId) throw new ORPCError("BAD_REQUEST", { message: text("CHAT_IS_REPORT") });
   const { id } = await createProject(ctx.tenantId, ctx.userId, input, "assistant");
   await linkProject(t.id, id);
   t.projectId = id;
