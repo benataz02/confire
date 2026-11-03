@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { boolean, index, integer, jsonb, numeric, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { bytea, configProject } from "./configurator.ts";
+import { assistantReport } from "./report.ts";
 
 // The assistant (spec docs/superpowers/specs/2026-10-24-ai-assistant-design.md §4.7): the workspace
 // switch, the chat threads and their dropped files, and the meter. Written only by
@@ -32,6 +33,8 @@ export const assistantThread = pgTable(
     tenantId: text("tenant_id").notNull(),
     userId: text("user_id").notNull(),
     projectId: uuid("project_id").references(() => configProject.id, { onDelete: "cascade" }),
+    /** A report's chat (reports spec §4): one per (user, report); deleting the report deletes it. */
+    reportId: uuid("report_id").references(() => assistantReport.id, { onDelete: "cascade" }),
     title: text("title").notNull().default(""),
     pinned: boolean("pinned").notNull().default(false),
     messages: jsonb("messages").$type<Record<string, unknown>[]>().notNull().default([]),
@@ -42,6 +45,7 @@ export const assistantThread = pgTable(
   },
   (t) => [
     uniqueIndex("assistant_thread_project_uq").on(t.tenantId, t.userId, t.projectId).where(sql`${t.projectId} is not null`),
+    uniqueIndex("assistant_thread_report_uq").on(t.tenantId, t.userId, t.reportId).where(sql`${t.reportId} is not null`),
     index("assistant_thread_user_idx").on(t.tenantId, t.userId, t.updatedAt),
   ],
 );
