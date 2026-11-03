@@ -141,6 +141,9 @@ are read only where rows are shown.
   after.
 - **Every page, still.** Grouped answers page like rows: the runner follows B1's sealed
   `@odata.nextLink` (`readRows`' cursor, `readNext`) until there is none, page size 500.
+- **Live check (2026-11-03, pending):** `$apply` on an entity set and over a crossjoin has not yet run
+  against a live B1. The runner's fallback makes a refusal visible (a "SAP did not total …" message on
+  the page) rather than wrong; record here what a paired B1 answers, and any verified error text.
 - **Rows only for the table**, at most the 2,000 it shows, in the table's sort; `partial: { read,
   total }` (`$count`) when there are more. A table is the one place the first page's count matters.
 - **Lines.** Header + lines totals are `$apply` over `$crossjoin(<Set>,<Set>/DocumentLines)` with the

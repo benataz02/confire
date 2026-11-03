@@ -377,7 +377,10 @@ only: the portal has no assistant.
   `b1_find`/`b1_schema`/`b1_read`/`b1_write`/`b1_copy` are the `b1` router's procedures as they are,
   written once for the chat and for MCP later — so their caps (20 rows), strict field names (a wrong
   one refused with the closest real ones, before `compileList`) and proposals live in the handlers, and
-  `tools.ts` adds nothing to them. Reads cover every entity set but `ADMIN_ONLY_READS`
+  `tools.ts` adds nothing to them. `b1_read`'s `aggregate` (`groupBy` + `measures`, `AggSpecZ`) is
+  computed by SAP: `compileAggregate` (`entity-list.ts`) writes `$apply=filter(…)/groupby(…)` — the
+  filter inside `$apply`, as OData runs `$filter` after it — so a total is never the model's own sum.
+  Reads cover every entity set but `ADMIN_ONLY_READS`
   (`entity-profiles.ts`, `assertReadable`, `entities.*` too). Writes are the curated entities with
   every schema field (`entity-write.ts`' `schema` rule). **A write is a proposal** — `{ proposal }`,
   nothing posted, the run ends on it (`untilAsked`) and `B1WriteCard` shows it before → after with
@@ -437,6 +440,20 @@ only: the portal has no assistant.
   (`autoWrite`), and `b1_write`/`b1_copy`/`post_quotation` (destructive) ask through MCP elicitation
   (`requestInput`) with a server-built before → after, then post with `b1.post` / `createQuote`. The
   `rateLimit` window is shared with the chat. A client that cannot elicit posts nothing (ponytail).
+- **Reports** (`apps/server/src/reports/`, `apps/app/src/reports/`,
+  `docs/superpowers/specs/2026-11-03-assistant-reports-design.md`): *New report* (home → Reports) is a
+  report's own chat (`assistant_thread.report_id`, one per `assistant_report`), whose one tool is
+  `report_set` = `reports.set`, refused unless the call's context carries a report thread. The model
+  writes a `ReportDef` (datasets, lookups, derives, widgets — `@confire/db` `report.ts`); the server
+  computes every figure: `validate.ts` refuses with every problem at once, `plan.ts` turns measures into
+  `$apply` reads (a date grouped by day, bucketed in `aggregate.ts` by its text), `run.ts` follows every
+  `nextLink` (40 pages a read, then `partial`), falls back to reading rows when B1 refuses `$apply`
+  (`toParts` makes them the same partials), attaches lookups 50 keys a read and reads tables' rows
+  (2,000). The chat gets `summarize`, never rows; its second system block is `REPORT_GUIDE`. The page
+  docks the chat right on the first `report_set` (a view transition), runs the report live on open, and
+  *Save to home* makes it a tile: `reports.tiles` shows the last run's first KPI (hidden after a company
+  switch) and re-runs stale ones off the request path. A report over Confire's Configurations taints
+  the chat (auto mode). Not an MCP tool.
 - **The panel** (`AssistantPanel.tsx`) is shell state (`AssistantProvider` around `AppShell`), floating
   over the page's right edge. **AI configuration** (`AssistantPage.tsx`, the home tile) is a page of its
   own: one chat under a `Bar` (the title's menu pins, renames, deletes); its chats are found with the
