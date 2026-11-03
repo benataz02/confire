@@ -78,17 +78,18 @@ Dataset = {
   lines?: boolean;
   select: string[];                                          // header (and `Lines.*`) fields to read
   filter?: FilterCond[];                                     // ANDed onto every source
-  /** related entities: `CardCode` → BusinessPartners' Country, GroupCode; may chain off an earlier
-   *  lookup (`ItemCode.ItemsGroupCode` → ItemGroups' GroupName) */
-  lookups?: { field: string; entity: string; key?: string; select: string[] }[];
+  /** related entities, one named value each: `{ name: "country", field: "CardCode",
+   *  entity: "BusinessPartners", key: "CardCode", value: "Country" }`; `field` may name an earlier
+   *  lookup (`itemGroup` → ItemGroups' GroupName) */
+  lookups?: { name: string; field: string; entity: string; key: string; value: string }[];
   /** derived fields: date buckets and value buckets, named so widgets can group by them */
-  derive?: ({ name: string; field: string; bucket: "day" | "week" | "month" | "quarter" | "year"
-             | { ranges: number[] } | { ageDays: number[] } }
-           | { name: string; field: string; minus: string })[];   // net = DocTotal minus VatSum
+  derive?: { name: string; field: string; bucket: "day" | "week" | "month" | "quarter" | "year"
+             | { ranges: number[] } | { ageDays: number[] } }[];
 }
 
 Measure = { dataset: DatasetId; agg: "sum" | "count" | "countDistinct" | "avg" | "min" | "max";
-            field?: string; filter?: FilterCond[]; label: string; format?: "money" | "number" | "percent" }
+            field?: string; minus?: string /* sum/avg only: net = DocTotal minus VatSum */;
+            filter?: FilterCond[]; label: string; format?: "money" | "number" | "percent" }
 
 Widget =
   | { kind: "kpi"; title: string; value: Measure; per?: Measure /* ratio: value ÷ per */;
@@ -117,6 +118,7 @@ every problem (as `config-patch.ts` does), so the model corrects itself in one t
 - each B1 entity is readable by the caller (`assertReadable`), each field and filter field is in its
   schema — the strict-name check `b1.read` already has (`checkQueryNames`), which answers the closest
   real names; Confire fields are the Confire source's (§3.5);
+- a widget's dimension and series hold at most one date bucket between them;
 - every widget names a dataset that exists and fields the dataset has (selected, `Lines.*`, looked
   up, derived, or `_source`);
 - a chart's measures from different datasets each have its dimension;
@@ -132,10 +134,11 @@ are read only where rows are shown.
 - **Totals in SAP (`$apply`).** Every KPI and chart measure is asked of the Service Layer as
   `$apply=groupby((…),aggregate(… with sum as …))` (§3.4): a KPI is one call, a breakdown by customer
   one small grouped answer. The Service Layer has no `month()` in `$apply`, so a **time dimension is
-  split into its buckets' date ranges**, one aggregate call per bucket (12–24 for a monthly chart;
-  `@today`-relative ranges resolved first). Measures recombine across calls (sum, count, min, max;
-  avg = pushed sum ÷ pushed count); a `countDistinct` across buckets is asked per bucket and never
-  summed.
+  grouped by its date field itself** — one row per day and group, a few hundred a year — and bucketed
+  into weeks, months or ages on Confire's side (by the date's text, never through a timezone). One
+  call per (dataset, filter), however many buckets. Measures recombine (sum, count, min, max; avg =
+  pushed sum ÷ pushed count); a `countDistinct` field joins the grouping and is counted distinct
+  after.
 - **Every page, still.** Grouped answers page like rows: the runner follows B1's sealed
   `@odata.nextLink` (`readRows`' cursor, `readNext`) until there is none, page size 500.
 - **Rows only for the table**, at most the 2,000 it shows, in the table's sort; `partial: { read,
@@ -185,8 +188,8 @@ report agree. No agent change: the allowlist forwards any GET (`allow.go`).
 ### 3.5 The Confire source
 
 One entity, `Configurations` (`config_project` ⋈ model, customer), with reporting fields: name,
-model, customer code/name, status, channel (`portal` when `portalCardCode` is set, `assistant`,
-`manual`), created/updated/quoted dates, `quotedValue`, `quotedCost`, margin, creator, assignee.
+model, customer code/name, status, channel (`portal` when `portalCardCode` is set, else `internal`;
+nothing records whether the assistant started one), created/updated/quoted dates, `quotedValue`, `quotedCost`, margin, creator, assignee.
 A `SqlFields` map like `configs.ts`' `configFields`, but its own (the list's map is the list's).
 Client requests are configurations with channel `portal`.
 
@@ -339,8 +342,8 @@ first drafts look like the mockup.
 ## 10. Calls made in the design (not the user's)
 
 - The server computes every figure from a definition the model writes (the codebase's rule).
-- SAP does the totals (`$apply`), a time dimension split into one call per bucket; rows only for
-  the table (2,000); reading rows with a 20,000 cap is the fallback where `$apply` is refused.
+- SAP does the totals (`$apply`), a time dimension grouped by day and bucketed on our side; rows
+  only for the table (2,000); reading rows with a 20,000 cap is the fallback where `$apply` is refused.
 - `b1_read` gets the same `aggregate` (the user asked whether to extend it; recommended and taken).
 - Home tiles show the last run, refreshed in the background after 60 minutes; opening is live.
 - Reports are personal; sharing is a later step.
