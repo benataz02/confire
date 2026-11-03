@@ -20,4 +20,5 @@ const app = serve({
   origin: authUrl,
 });
 
-export default { ...app, fetch: (req: Request) => (isMcpHost(req) ? mcpHost.fetch(req) : app.fetch(req)) };
+// The server goes on as Hono's env: the assistant's stream switches its idle timeout off (route.ts).
+export default { ...app, fetch: (req: Request, server: Bun.Server<undefined>) => (isMcpHost(req) ? mcpHost.fetch(req) : app.fetch(req, server)) };

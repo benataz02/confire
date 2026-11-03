@@ -168,6 +168,10 @@ export const REFUSAL_EVENT = "confire.refusal";
 export function assistantRoutes(): Hono {
   const app = new Hono();
   app.post("/api/assistant", async (c) => {
+    // Bun closes a socket idle for 10 s, and the stream is silent while the model reads a long turn
+    // (two 40k-token b1_reads) and thinks: no timeout for this request. The env is the Bun server
+    // (index.ts); tests calling `.request()` have none. A disconnect still aborts the run (abortController).
+    (c.env as { timeout?: (req: Request, seconds: number) => void } | undefined)?.timeout?.(c.req.raw, 0);
     const headers = c.req.raw.headers;
     const session = await auth.api.getSession({ headers, query: { disableCookieCache: true } });
     if (!session) return c.json({ code: "UNAUTHORIZED", message: t("SIGN_IN_AGAIN") }, 401);
