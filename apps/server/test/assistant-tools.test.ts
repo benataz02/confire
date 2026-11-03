@@ -5,6 +5,8 @@ import { requireAdmin } from "../src/orpc/base.ts";
 import { CHAT_TOOLS, GENERAL, pageFor } from "../src/assistant/pages.ts";
 import { CARD_FIELDS, chatTools, LIST_CAP, missingSources, procedureOf, type ToolCtx } from "../src/assistant/tools.ts";
 import { newThread } from "../src/assistant/threads.ts";
+import { readsClientContent } from "../src/assistant/auto.ts";
+import { PIPELINE_INPUT } from "./fixtures/pipeline-report.ts";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
@@ -129,4 +131,11 @@ describe.skipIf(!process.env.DATABASE_URL)("through the builders", () => {
     expect(v.model).toMatchObject({ id: w.modelId, name: "Cable" });
     expect(v.model.definition).toBeUndefined();
   });
+});
+
+test("a report over Confire's configurations reads client content; one over SAP alone does not", async () => {
+  const confire = { ...PIPELINE_INPUT, datasets: { c: { from: [{ source: "confire", entity: "Configurations" }] } } };
+  expect(await readsClientContent("t", "report_set", { definition: confire })).toBe(true);
+  expect(await readsClientContent("t", "report_set", { definition: PIPELINE_INPUT })).toBe(false);
+  expect(await readsClientContent("t", "report_set", { definition: null })).toBe(false);
 });

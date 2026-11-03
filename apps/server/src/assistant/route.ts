@@ -19,7 +19,7 @@ import { TENANT_HEADER } from "../tenant.ts";
 import { chatHasClientContent, readsClientContent } from "./auto.ts";
 import { modelBlock } from "./extract.ts";
 import { ASSISTANT_MODEL, CHAT_EFFORT, modelOptions, textAdapter } from "./model.ts";
-import { CONFIGURE_CHAT, contextText, GENERAL, LANGUAGES, pageFor, SYSTEM } from "./pages.ts";
+import { CONFIGURE_CHAT, contextText, GENERAL, LANGUAGES, pageFor, REPORT, REPORT_GUIDE, SYSTEM } from "./pages.ts";
 import {
   appendMessages, dehydrate, hydrate, ownThread, releaseLease, renewLease, replayable, takeLease, type MessageMeta,
 } from "./threads.ts";
@@ -209,8 +209,10 @@ export function assistantRoutes(): Hono {
     // configuration's chat works on it from any page (one the chat just created, the panel on another
     // page), and a configure page whose thread is no configuration's is a general page.
     const hinted = pageFor(props.route.routeId);
-    const page = thread.projectId ? (hinted.kind === "configure" ? hinted : CONFIGURE_CHAT)
-      : hinted.kind === "configure" ? GENERAL : hinted;
+    // A report's chat is the report's on any page; no other chat is a report page's.
+    const page = thread.reportId ? REPORT
+      : thread.projectId ? (hinted.kind === "configure" ? hinted : CONFIGURE_CHAT)
+      : hinted.kind === "configure" || hinted.kind === "report" ? GENERAL : hinted;
     let hydrated: ModelMessage[];
     let block: string | null = null;
     let name: string | undefined;
@@ -218,6 +220,7 @@ export function assistantRoutes(): Hono {
     try {
       hydrated = await hydrate(tenantId, thread.messages, { threadId: thread.id, ...(thread.projectId ? { projectId: thread.projectId } : {}) });
       taint.client = await chatHasClientContent(tenantId, userId, thread.id);
+      if (thread.reportId) block = REPORT_GUIDE;
       if (thread.projectId) {
         const where = and(eq(configProject.id, thread.projectId), eq(configProject.tenantId, tenantId), internalVisible)!;
         const { live, view } = await configView(tenantId, where).catch(() => ({ live: null, view: null }));

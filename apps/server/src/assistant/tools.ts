@@ -15,6 +15,7 @@ import { b1Router, type Proposal } from "../orpc/routers/b1.ts";
 import { QUOTE_HEADER, type quoteDraft } from "../config-quote.ts";
 import { ToolInputRequiredError } from "@tanstack/ai-mcp/server";
 import { homeRouter } from "../orpc/routers/home.ts";
+import { reportsRouter } from "../orpc/routers/reports.ts";
 import { requestsRouter, timelineRouter } from "../orpc/routers/requests.ts";
 import { startFromThread } from "../orpc/routers/assistant.ts";
 import { extractInto, modelBlock } from "./extract.ts";
@@ -251,6 +252,8 @@ function allTools(ctx: ToolCtx): Record<string, AnyServerTool> {
     entities_rows: readSap(ctx),
     ...Object.fromEntries(B1_TOOLS.map((n) => [n, t(`b1.${n.slice(3)}`, b1Router[n.slice(3) as keyof typeof b1Router])])),
     propose_quotation: proposeQuotation(ctx),
+    // The report of a report's chat (reports spec §5.1): the procedure refuses any other chat.
+    report_set: t("reports.set", reportsRouter.set, { name: "report_set" }),
     [ASK_USER]: askUser,
     ...rerunTools(ctx),
   };
@@ -263,7 +266,7 @@ export function procedureOf(name: string): AnyProcedure | undefined {
     configs_similar: configsRouter.similar, configs_select: configsRouter.select, configs_models: configsRouter.models,
     configs_rows: configsRouter.rows, configs_create: configsRouter.create, requests_rows: requestsRouter.rows,
     home_overview: homeRouter.overview, timeline_list: timelineRouter.list, entities_rows: entitiesRouter.rows,
-    propose_quotation: configsRouter.quoteDraft,
+    propose_quotation: configsRouter.quoteDraft, report_set: reportsRouter.set,
     ...Object.fromEntries(B1_TOOLS.map((n) => [n, b1Router[n.slice(3) as keyof typeof b1Router]])),
   };
   return map[name] as AnyProcedure | undefined;

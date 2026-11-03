@@ -38,6 +38,12 @@ export async function isClientProject(tenantId: string, projectId: unknown): Pro
  *  so a write later in the same step already sees it). */
 export async function readsClientContent(tenantId: string, toolName: string, args: unknown): Promise<boolean> {
   if (CLIENT_CONTENT_TOOLS.has(toolName)) return true;
+  // A report over Confire's configurations reads their names and customers, a client's requests'
+  // among them (reports spec §5.3). One over SAP alone reads no client's words.
+  if (toolName === "report_set") {
+    const datasets = ((args as { definition?: { datasets?: Record<string, { from?: { source?: string }[] }> } } | null)?.definition?.datasets) ?? {};
+    return Object.values(datasets).some((d) => (d?.from ?? []).some((s) => s?.source === "confire"));
+  }
   const field = CLIENT_PROJECT_TOOLS[toolName];
   return !!field && isClientProject(tenantId, (args as Record<string, unknown> | null)?.[field]);
 }

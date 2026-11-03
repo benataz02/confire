@@ -292,4 +292,47 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/assistant", () => {
     const r = await w.post({ messages: [{ id: "a0", role: "assistant", content: "x" }] });
     expect(r.status).toBe(400);
   });
+
+  // Reports (reports spec §5): a report's chat gets the guide and builds with report_set.
+  const CONFIRE_REPORT = {
+    title: "Configurations", assumptions: [{ label: "Data", value: "every configuration" }],
+    datasets: { c: { from: [{ source: "confire", entity: "Configurations" }] } },
+    widgets: [{ kind: "kpi", title: "All", value: { dataset: "c", agg: "count", label: "n" } }],
+  };
+  const reportOf = (w: Awaited<ReturnType<typeof world>>) =>
+    call(router.reports.create, {}, { context: { headers: tenantHeaders(w.slug, w.u.cookie) } });
+
+  test("a report's chat gets the report guide as its second system block and report_set in its tools", async () => {
+    const w = await world();
+    const r = await reportOf(w);
+    let system = ""; let tools: string[] = [];
+    w.fake.setResponses([({ request }) => { system = JSON.stringify(request.systemPrompts); tools = (request.tools ?? []).map((x) => x.name); return { text: "ok" }; }]);
+    await (await w.post({ threadId: r.threadId, text: "sales pipeline by month", route: { routeId: "/$slug/reports/$id", params: { id: r.id } } })).text();
+    expect(system).toContain("over-deliver");
+    expect(tools).toContain("report_set");
+    const t = await w.stored(r.threadId);
+    expect(JSON.stringify(note(t.messages[0]!))).toContain("report");
+  });
+
+  test("report_set stores the report and answers a summary without rows", async () => {
+    const w = await world();
+    const r = await reportOf(w);
+    w.fake.setResponses([{ toolCalls: [{ name: "report_set", input: { definition: CONFIRE_REPORT } }] }, { text: "Here is a first draft." }]);
+    await (await w.post({ threadId: r.threadId, text: "how many configurations?" })).text();
+    const t = await w.stored(r.threadId);
+    const result = t.messages.find((m) => m.role === "tool")!;
+    expect(String(result.content)).toContain("\"kpi\":\"All\"");
+    expect(String(result.content)).not.toContain("\"rows\":[");
+    const got = await call(router.reports.get, { id: r.id }, { context: { headers: tenantHeaders(w.slug, w.u.cookie) } });
+    expect(got.definition?.title).toBe("Configurations");
+    expect(got.lastResult).not.toBeNull();
+  });
+
+  test("report_set on a general chat is refused", async () => {
+    const w = await world();
+    w.fake.setResponses([{ toolCalls: [{ name: "report_set", input: { definition: CONFIRE_REPORT } }] }, { text: "ok" }]);
+    await (await w.post({ text: "a report please" })).text();
+    const result = (await w.stored()).messages.find((m) => m.role === "tool")!;
+    expect(String(result.content)).toContain("report's chat");
+  });
 });
