@@ -236,4 +236,6 @@ export const en = {
   CHAT_EMPTY: "Send a message",
   CHAT_TOO_LONG: "A message can be up to {0} characters",
   EXTRACT_NOTHING: "Nothing to read: drop a PDF, PNG or JPEG, or paste the text",
+  REPORT_CHAT_ONLY: "Reports are built in a report's chat, on its page",
+  REPORT_NOT_DRAFTED: "Nothing to run yet: ask the assistant for the report first",
 };

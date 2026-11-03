@@ -130,7 +130,7 @@ export const scenarioEstimate = () => costOf(ASSISTANT_MODEL, { input: 25_000, c
 /** One scenario's run: the real tools' names, descriptions and schemas, each answering the scenario's
  *  fixture; the chat's own prompt, options and loop. Nothing is stored or metered in the database. */
 export async function runScenario(s: Scenario, effort: Effort): Promise<{ transcript: Transcript; calls: number; cost: number }> {
-  const thread = { id: "eval", tenantId: "eval", userId: "eval", projectId: null, messages: [] };
+  const thread = { id: "eval", tenantId: "eval", userId: "eval", projectId: null, reportId: null, messages: [] };
   const meter = { tenantId: "eval", userId: "eval", threadId: null, projectId: null, kind: "chat" as const };
   const real = chatTools({ headers: new Headers(), tenantId: "eval", userId: "eval", thread, meter, taint: { client: false } });
   const t: Transcript = { calls: [], text: "" };

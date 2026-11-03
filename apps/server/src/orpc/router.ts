@@ -9,6 +9,7 @@ import { portalCompaniesRouter, portalInvitationsRouter, portalSettingsRouter } 
 import { requestsRouter, timelineRouter } from "./routers/requests.ts";
 import { notificationsRouter } from "./routers/notifications.ts";
 import { homeRouter } from "./routers/home.ts";
+import { reportsRouter } from "./routers/reports.ts";
 import { assistantRouter } from "./routers/assistant.ts";
 import { sessionProcedure, membershipOf } from "./base.ts";
 import { tenantCurrency } from "../b1.ts";
@@ -46,6 +47,7 @@ export const router = {
   notifications: notificationsRouter,
   home: homeRouter,
   assistant: assistantRouter,
+  reports: reportsRouter,
 };
 
 export type AppRouter = typeof router;

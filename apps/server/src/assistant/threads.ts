@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import type { ContentPart, ModelMessage } from "@tanstack/ai";
 import { and, desc, eq, ilike, isNull, or, lt, sql } from "drizzle-orm";
-import { db, assistantFile, assistantThread, configProject } from "@confire/db";
+import { db, assistantFile, assistantReport, assistantThread, configProject } from "@confire/db";
 import { internalVisible } from "../project-lifecycle.ts";
 import { fileBytes, type Fence, type FileMeta, type FileRef } from "./files.ts";
 import { t as text } from "../i18n/index.ts";
@@ -10,11 +10,12 @@ import { t as text } from "../i18n/index.ts";
 // from the client. Append-only — Sonnet 5.5 refuses edited history (preserved thinking), so nothing
 // here rewrites or deletes a stored message — and one run at a time per thread, under a lease.
 
-export type Thread = { id: string; tenantId: string; userId: string; projectId: string | null; messages: ModelMessage[] };
+/** `projectId`: a configuration's chat; `reportId`: a report's (reports spec §4); neither: a general chat. */
+export type Thread = { id: string; tenantId: string; userId: string; projectId: string | null; reportId: string | null; messages: ModelMessage[] };
 
 const cols = {
   id: assistantThread.id, tenantId: assistantThread.tenantId, userId: assistantThread.userId,
-  projectId: assistantThread.projectId, messages: assistantThread.messages,
+  projectId: assistantThread.projectId, reportId: assistantThread.reportId, messages: assistantThread.messages,
 };
 // The one cast: @confire/db types the column loosely so it takes no @tanstack/ai dependency.
 const asThread = (r: { messages: Record<string, unknown>[] } & Omit<Thread, "messages">): Thread =>
@@ -35,7 +36,7 @@ export async function threadFor(tenantId: string, userId: string, projectId: str
     return asThread(t!);
   }
   const [latest] = await db.select(cols).from(assistantThread)
-    .where(and(eq(assistantThread.tenantId, tenantId), eq(assistantThread.userId, userId), isNull(assistantThread.projectId)))
+    .where(and(eq(assistantThread.tenantId, tenantId), eq(assistantThread.userId, userId), isNull(assistantThread.projectId), isNull(assistantThread.reportId)))
     .orderBy(desc(assistantThread.updatedAt), desc(assistantThread.createdAt)).limit(1);
   return latest ? asThread(latest) : newThread(tenantId, userId);
 }
@@ -51,6 +52,8 @@ export async function newThread(tenantId: string, userId: string): Promise<Threa
 export async function blankThread(tenantId: string, userId: string): Promise<Thread> {
   const [t] = await db.update(assistantThread).set({ updatedAt: new Date() }).where(and(
     eq(assistantThread.tenantId, tenantId), eq(assistantThread.userId, userId), isNull(assistantThread.projectId),
+    // A report's blank chat is its New report page's, never the AI page's.
+    isNull(assistantThread.reportId),
     sql`jsonb_array_length(${assistantThread.messages}) = 0`,
     or(isNull(assistantThread.busyUntil), lt(assistantThread.busyUntil, sql`now()`)),
     sql`not exists (select 1 from ${assistantFile} where ${assistantFile.threadId} = ${assistantThread.id})`,
@@ -58,7 +61,10 @@ export async function blankThread(tenantId: string, userId: string): Promise<Thr
   return t ? asThread(t) : newThread(tenantId, userId);
 }
 
-export type ThreadRow = { id: string; title: string; projectId: string | null; projectName: string | null; pinned: boolean; updatedAt: Date };
+export type ThreadRow = {
+  id: string; title: string; projectId: string | null; projectName: string | null;
+  reportId: string | null; reportTitle: string | null; pinned: boolean; updatedAt: Date;
+};
 
 /** The AI page's list: the user's chats with anything in them, pinned first, then the latest. `q`
  *  matches the title, the configuration's name, and the words of the chat — the user's and the
@@ -75,13 +81,15 @@ export async function listThreads(tenantId: string, userId: string, q?: string):
     end ilike ${like})`;
   return db.select({
     id: assistantThread.id, title: assistantThread.title, projectId: assistantThread.projectId,
-    projectName: configProject.name, pinned: assistantThread.pinned, updatedAt: assistantThread.updatedAt,
+    projectName: configProject.name, reportId: assistantThread.reportId, reportTitle: assistantReport.title,
+    pinned: assistantThread.pinned, updatedAt: assistantThread.updatedAt,
   }).from(assistantThread)
     .leftJoin(configProject, eq(configProject.id, assistantThread.projectId))
+    .leftJoin(assistantReport, eq(assistantReport.id, assistantThread.reportId))
     .where(and(
       eq(assistantThread.tenantId, tenantId), eq(assistantThread.userId, userId),
       sql`jsonb_array_length(${assistantThread.messages}) > 0`,
-      like ? or(ilike(assistantThread.title, like), ilike(configProject.name, like), said) : undefined,
+      like ? or(ilike(assistantThread.title, like), ilike(configProject.name, like), ilike(assistantReport.title, like), said) : undefined,
     ))
     .orderBy(desc(assistantThread.pinned), desc(assistantThread.updatedAt))
     .limit(100);
