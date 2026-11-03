@@ -31,6 +31,20 @@ export const ListQueryZ = z.object({
 });
 export type ListQuery = z.infer<typeof ListQueryZ>;
 
+/** A total SAP computes (`$apply`): b1.read's `aggregate` and a report's measures. */
+export const AggZ = z.enum(["sum", "count", "countDistinct", "avg", "min", "max"]);
+export type Agg = z.infer<typeof AggZ>;
+/** What to total and by what: the grouping fields, then one alias per total. */
+export const AggSpecZ = z.object({
+  groupBy: z.array(z.string()).max(8).describe("Fields to group by; empty = one total over every matching record"),
+  measures: z.array(z.object({
+    field: z.string().optional().describe("The field to total; none for count"),
+    agg: AggZ,
+    as: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).describe("The total's name in the answer, e.g. total"),
+  })).min(1).max(12),
+});
+export type AggSpec = z.infer<typeof AggSpecZ>;
+
 // --- view state --------------------------------------------------------------------------------
 // One combined variant per list: the Beas grid-view and filter-view payloads in one document, with
 // Beas's own field names, so a view restores the filters and the table layout together.

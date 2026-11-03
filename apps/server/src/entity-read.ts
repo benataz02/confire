@@ -3,8 +3,8 @@ import {
   andFilter, coerceKey, countOf, nextLinkOf, rowsOf,
   type B1EntitySchema, type B1Transport, type Key,
 } from "@confire/b1";
-import type { ListQuery } from "@confire/db";
-import { compileList } from "./entity-list.ts";
+import type { AggSpec, ListQuery } from "@confire/db";
+import { compileAggregate, compileList } from "./entity-list.ts";
 import { decryptSecret, encryptSecret } from "./crypto.ts";
 import { viaB1 } from "./b1.ts";
 import { t } from "./i18n/index.ts";
@@ -59,6 +59,8 @@ export type RowsArgs = {
   /** no `$select`: whole rows, collections included. B1 refuses some collections in `$select`
    *  (`ItemPrices`), so a read that wants one asks for the row and projects it afterwards. */
   wholeRows?: boolean;
+  /** totals instead of rows: `$apply` over the query's filter (reports spec §3.4); no `$count` */
+  aggregate?: AggSpec;
 };
 
 /**
@@ -86,11 +88,13 @@ export async function readRows(
   } else {
     let q;
     try {
-      q = compileList(schema, a.query, { pageSize: a.pageSize, count: a.count });
+      q = a.aggregate
+        ? compileAggregate(schema, a.query.filter, a.aggregate, { pageSize: a.pageSize, extraFilter })
+        : compileList(schema, a.query, { pageSize: a.pageSize, count: a.count });
     } catch (e) {
       return bad(e);
     }
-    if (extraFilter) q.filter = andFilter(q.filter, extraFilter);
+    if (extraFilter && !a.aggregate) q.filter = andFilter(q.filter, extraFilter);
     if (a.wholeRows) delete q.select;
     res = await viaB1(() => b1.readEntitySet(entity, q));
   }

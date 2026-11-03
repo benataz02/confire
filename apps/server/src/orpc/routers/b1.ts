@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { openapi } from "@orpc/openapi";
 import { z } from "zod";
-import { ListQueryZ, type ListQuery } from "@confire/db";
+import { AggSpecZ, ListQueryZ, type AggSpec, type ListQuery } from "@confire/db";
 import { CATEGORY_NAMES, categoriesOf, type B1EntitySchema, type B1Field, type Key } from "@confire/b1";
 import { userProcedure } from "../base.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
@@ -52,14 +52,15 @@ function compact(f: B1Field, required: Set<string>): CompactField {
 /** Every name a list query uses must be the schema's — checked before compileList, which drops an
  *  unknown select/orderby on purpose (a saved view outliving a UDF). A select may name a collection;
  *  a filter, a sort or a search field only a scalar. */
-function checkQueryNames(schema: B1EntitySchema, q: ListQuery): void {
+function checkQueryNames(schema: B1EntitySchema, q: ListQuery, agg?: AggSpec): void {
   const all = schema.fields.map((f) => f.name);
   const scalars = scalarFields(schema).map((f) => f.name);
   const allSet = new Set(all);
   const scalarSet = new Set(scalars);
   const wrong = [
     ...q.select.filter((n) => !allSet.has(n)).map((name) => ({ name, among: all })),
-    ...[...q.filter.map((c) => c.field), ...q.orderby.map((o) => o.field), ...(q.searchFields ?? [])]
+    ...[...q.filter.map((c) => c.field), ...q.orderby.map((o) => o.field), ...(q.searchFields ?? []),
+      ...(agg ? [...agg.groupBy, ...agg.measures.flatMap((m) => (m.field ? [m.field] : []))] : [])]
       .filter((n) => !scalarSet.has(n)).map((name) => ({ name, among: scalars })),
   ];
   const seen = new Set<string>();
@@ -204,13 +205,14 @@ export const b1Router = {
   read: userProcedure
     .meta(openapi({
       summary: "Read SAP records",
-      description: `Read SAP Business One records live, by SAP's own names: Quotations, Orders, DeliveryNotes, Invoices (key DocEntry; DocNum is the number people say), BusinessPartners (CardCode), Items (ItemCode), or any other set b1_find finds. With \`key\`: that one record, whole, with its \`etag\`. Else a list: \`query.select\` names fields (empty = every scalar field; a collection such as DocumentLines only when named), \`query.filter\` narrows (eq, ne, gt, ge, lt, le, contains, startswith, in), \`query.orderby\` sorts, \`query.search\` is free text over string fields. Enum values are SAP's member names (bost_Open, cCustomer). One call answers up to ${NARROW_CAP} rows when \`query.select\` names only scalar fields, else ${LIST_CAP}: to read many records, name the few fields you need. \`total\` says how many match and \`nextCursor\` reads the next page. A wrong field name is refused with the closest real ones.`,
+      description: `Read SAP Business One records live, by SAP's own names: Quotations, Orders, DeliveryNotes, Invoices (key DocEntry; DocNum is the number people say), BusinessPartners (CardCode), Items (ItemCode), or any other set b1_find finds. With \`key\`: that one record, whole, with its \`etag\`. Else a list: \`query.select\` names fields (empty = every scalar field; a collection such as DocumentLines only when named), \`query.filter\` narrows (eq, ne, gt, ge, lt, le, contains, startswith, in), \`query.orderby\` sorts, \`query.search\` is free text over string fields. Enum values are SAP's member names (bost_Open, cCustomer). One call answers up to ${NARROW_CAP} rows when \`query.select\` names only scalar fields, else ${LIST_CAP}: to read many records, name the few fields you need. \`total\` says how many match and \`nextCursor\` reads the next page. A wrong field name is refused with the closest real ones. \`aggregate\` asks SAP for totals instead of rows — \`groupBy\` fields and \`measures\` (\`sum\`, \`count\`, \`countDistinct\`, \`avg\`, \`min\`, \`max\`, each named by \`as\`); \`query.filter\` applies first. Use it for any total: never add rows up yourself.`,
     }))
     .input(z.object({
       entity: EntityZ.describe("SAP's entity set name"),
       key: KeyZ.optional().describe("One record's key: a number (DocEntry), a code (CardCode, ItemCode), or an object for a composite key"),
       query: QueryZ.optional().describe("A list's fields, filters, sort and search"),
       cursor: z.string().optional().describe("The previous answer's nextCursor"),
+      aggregate: AggSpecZ.optional().describe("Totals computed by SAP instead of rows"),
     }))
     .handler(async ({ input, context }) => {
       assertReadable(input.entity, context.role);
@@ -218,7 +220,12 @@ export const b1Router = {
       const schema = await schemaOf(c, input.entity);
       if (input.key !== undefined) return readOne(c.b1, schema, input.entity, input.key);
       const query = normal(input.query);
-      checkQueryNames(schema, query);
+      checkQueryNames(schema, query, input.aggregate);
+      if (input.aggregate) {
+        const page = await readRows(c.b1, schema, input.entity, { query, pageSize: NARROW_CAP, cursor: input.cursor, aggregate: input.aggregate },
+          { tenantId: context.tenantId, key: "b1-tool" });
+        return { rows: page.rows.slice(0, NARROW_CAP), keys: [], total: page.total, nextCursor: page.nextCursor };
+      }
       const collections = new Set(schema.fields.filter((f) => f.kind === "collection").map((f) => f.name));
       const wholeRows = query.select.some((n) => collections.has(n));
       // A narrow row is a few tokens, a whole one a few thousand: the cap follows the row's width, and

@@ -162,6 +162,27 @@ describe.skipIf(!process.env.DATABASE_URL)("b1 tools", () => {
     expect((await call(router.b1.read, { entity: "Orders", key: 3 }, w.staff)).row).toMatchObject({ DocEntry: 3 });
   });
 
+  test("b1.read: aggregate goes to SAP as $apply, names checked, totals paged", async () => {
+    const w = await world();
+    agent.store["Orders#apply"] = [{ CardCode: "C1", a0: 10 }, { CardCode: "C2", a0: 7 }];
+    const out = await call(router.b1.read, { entity: "Orders", query: { filter: [{ field: "CardCode", op: "ne", value: "X" }] },
+      aggregate: { groupBy: ["CardCode"], measures: [{ field: "DocTotal", agg: "sum", as: "a0" }] } }, w.staff);
+    expect(out.rows).toEqual([{ CardCode: "C1", a0: 10 }, { CardCode: "C2", a0: 7 }]);
+    expect((agent.calls.at(-1)!.body as { query: { apply?: string } }).query.apply).toBe("filter(CardCode ne 'X')/groupby((CardCode),aggregate(DocTotal with sum as a0))");
+    expect(await message(call(router.b1.read, { entity: "Orders", aggregate: { groupBy: ["Cardcode"], measures: [{ agg: "count", as: "n" }] } }, w.staff)))
+      .toContain("Cardcode (did you mean CardCode?)");
+  });
+
+  test("b1.read follows nextLink: 600 rows are two pages", async () => {
+    const w = await world();
+    agent.store.Orders = Array.from({ length: 600 }, (_, i) => ({ ...order(), DocEntry: i + 1 }));
+    const p1 = await call(router.b1.read, { entity: "Orders", query: { select: ["DocNum"] } }, w.staff);
+    expect(p1.rows).toHaveLength(500);
+    const p2 = await call(router.b1.read, { entity: "Orders", query: { select: ["DocNum"] }, cursor: p1.nextCursor }, w.staff);
+    expect(p2.rows).toHaveLength(100);
+    expect(p2.nextCursor).toBeUndefined();
+  });
+
   test("read scope: a member's row reads of EmployeesInfo are FORBIDDEN, an admin's pass; b1.find hides it", async () => {
     const m = await world("member");
     expect(await code(call(router.b1.read, { entity: "EmployeesInfo", query: {} }, m.staff))).toBe("FORBIDDEN");

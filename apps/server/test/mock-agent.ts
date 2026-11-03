@@ -22,6 +22,9 @@ export type MockAgent = {
   missingUdf: Set<string>;
   /** the company agent.json names; a call built for another one answers 409 COMPANY_CHANGED */
   company: { db: string };
+  /** entity sets (or crossjoin leads) whose `$apply` B1 refuses with a 400; any other `$apply`
+   *  answers the fixture rows in `store["<set>#apply"]` (the mock computes no totals) */
+  noApply: Set<string>;
   stop: () => void;
 };
 
@@ -42,16 +45,17 @@ function operationOf(method: string, path: string, headers: Record<string, strin
     ...(params.$orderby ? { orderby: params.$orderby } : {}),
     ...(params.$top ? { top: Number(params.$top) } : {}),
     ...(params.$skip ? { skip: Number(params.$skip) } : {}),
+    ...(params.$apply ? { apply: params.$apply } : {}),
     ...(/odata\.maxpagesize=(\d+)/.test(headers.Prefer ?? "") ? { maxPageSize: Number(/odata\.maxpagesize=(\d+)/.exec(headers.Prefer!)![1]) } : {}),
   };
   if (target.startsWith("$metadata")) return { route: "/metadata", body: {} };
   const cj = /^\$crossjoin\((.*)\)$/.exec(target);
-  if (cj) return { route: "/cross-join", body: { entities: cj[1]!.split(","), filter: params.$filter } };
+  if (cj) return { route: "/cross-join", body: { entities: cj[1]!.split(","), filter: params.$filter, query, target, qs } };
   const m = /^([A-Za-z_][A-Za-z0-9_]*)(?:\((.*)\))?(?:\/([A-Za-z_]+))?$/.exec(target);
   if (!m) return { route: `/unknown ${method} ${target}`, body: {} };
   const [, entitySet, rawKey, action] = m;
   const key = rawKey === undefined ? undefined : keyOf(rawKey);
-  if (method === "GET") return key === undefined ? { route: "/entity-set", body: { entitySet, query } } : { route: "/entity", body: { entitySet, key, query } };
+  if (method === "GET") return key === undefined ? { route: "/entity-set", body: { entitySet, query, target, qs } } : { route: "/entity", body: { entitySet, key, query } };
   if (method === "POST" && action) return { route: "/action", body: { entitySet, key, name: action } };
   if (method === "POST") return { route: "/create", body: { entitySet, data, prefer: headers.Prefer } };
   if (method === "PATCH")
@@ -69,8 +73,21 @@ function applyFilter(rows: Record<string, unknown>[], filter: string | undefined
   return rows.filter((r) => String(r[m[1]!] ?? "") === m[2]!.replace(/''/g, "'") && (!m[3] || r[m[3]] !== Number(m[4])));
 }
 
+/** One page of `rows` as B1 serves it: `Prefer: odata.maxpagesize` (0 = none, default 20) per page,
+ *  `$top` over all, and an `@odata.nextLink` (the same query, `$skip` on) while rows remain. */
+function page(rows: Record<string, unknown>[], body: Record<string, any>) {
+  const size = body.query?.maxPageSize === 0 ? Infinity : body.query?.maxPageSize ?? 20;
+  const skip = body.query?.skip ?? 0;
+  const all = rows.slice(0, body.query?.top ?? Infinity);
+  const value = all.slice(skip, skip + size);
+  const more = skip + value.length < all.length;
+  const qs = String(body.qs ?? "").split("&").filter((kv) => kv && !kv.startsWith("$skip=")).concat(`$skip=${skip + value.length}`).join("&");
+  return { value, ...(more ? { "@odata.nextLink": `${body.target}?${qs}` } : {}) };
+}
+
 export function startMockAgent(store: MockStore = {}): MockAgent {
   const calls: MockAgent["calls"] = [];
+  const noApply = new Set<string>();
   const company = { db: "SBODEMO" };
   const missingUdf = new Set<string>();
   const metadata = { xml: "" };
@@ -103,9 +120,11 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
           // B1 answers a filter on a UDF that does not exist in the company with a 400.
           if (filter && missingUdf.has(body.entitySet) && /U_[A-Za-z0-9_]+/.test(filter))
             return fail(400, -1000, `Property '${/U_[A-Za-z0-9_]+/.exec(filter)![0]}' of '${body.entitySet}' is invalid`);
-          // B1's paging: `Prefer: odata.maxpagesize` (0 = none, default 20) per page, `$top` over all.
-          const page = body.query?.maxPageSize === 0 ? Infinity : body.query?.maxPageSize ?? 20;
-          return Response.json({ status: 200, data: { value: applyFilter(rows, filter).slice(0, Math.min(page, body.query?.top ?? Infinity)) } });
+          if (body.query?.apply) {
+            if (noApply.has(body.entitySet)) return fail(400, -1000, "Invalid $apply");
+            return Response.json({ status: 200, data: page(store[`${body.entitySet}#apply`] ?? [], body) });
+          }
+          return Response.json({ status: 200, data: page(applyFilter(rows, filter), body) });
         }
         case "/create": {
           // A service action (SeriesService_GetDocumentSeries) answers with its fixture rows.
@@ -158,12 +177,17 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
           // parse the $filter — the filter's shape is asserted by doc-chain.test.ts, which is
           // pure and does not need a server.
           const [lead] = body.entities as string[];
+          if (body.query?.apply) {
+            if (noApply.has(lead!)) return fail(400, -1000, "Invalid $apply");
+            return Response.json({ status: 200, data: page(store[`${lead}#apply`] ?? [], body) });
+          }
           const docs = store[lead!] ?? [];
           const value = docs.flatMap((d) =>
             ((d.DocumentLines as Record<string, unknown>[] | undefined) ?? [{}]).map((l) => ({
               [lead!]: d, [`${lead}/DocumentLines`]: l,
             })));
-          return Response.json({ status: 200, data: { value } });
+          // Paged only when asked (a report's fallback read); the doc-chain walk sends `$top` alone.
+          return Response.json({ status: 200, data: body.query?.maxPageSize !== undefined ? page(value, body) : { value } });
         }
         case "/print": {
           if (!["Quotations", "Orders", "DeliveryNotes", "Invoices"].includes(body.entity))
@@ -184,7 +208,7 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
 
   return {
     url: `http://localhost:${server.port}`,
-    store, calls, missingUdf, metadata, company,
+    store, calls, missingUdf, metadata, company, noApply,
     stop: () => void server.stop(true),
   };
 }
