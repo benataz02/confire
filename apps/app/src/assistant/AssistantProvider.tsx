@@ -40,7 +40,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setAll((all) => (sameKeys(all[projectId], keys) ? all : { ...all, [projectId]: keys })), []);
   const value = useMemo(() => ({ open, toggle, close, dirty, setDirty, questionKeys, setQuestionKeys }),
     [open, toggle, close, dirty, questionKeys, setQuestionKeys]);
-  const onAiPage = useRouterState({ select: (s) => s.matches.some((m) => m.routeId.startsWith("/$slug/assistant")) });
+  // The AI page and a report's page draw their own chat: no second one floats over them.
+  const onAiPage = useRouterState({ select: (s) => s.matches.some((m) => m.routeId.startsWith("/$slug/assistant") || m.routeId.startsWith("/$slug/reports")) });
   return (
     <Ctx.Provider value={value}>
       {children}

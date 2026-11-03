@@ -39,7 +39,8 @@ const AUTO_WRITE_KEY = "assistant:autoWrite";
 // and tool calls, each tool's card behind its line), and a card in the chat only where the user decides
 // (steps.ts DECISION). One question on screen at a time. Every colour is a theme parameter, set inline.
 
-export type Kind = "configure" | "general" | "model";
+/** `report`: a report's chat on its page (reports spec §6.2) — its own welcome and starters. */
+export type Kind = "configure" | "general" | "model" | "report";
 export const kindOf = (r: RouteContext): Kind =>
   r.projectId ? "configure" : r.routeId.startsWith("/$slug/models/") ? "model" : "general";
 
@@ -194,9 +195,13 @@ const READING = "max(1rem, (100% - 48rem) / 2)";
 
 /** The chat: its messages, steps and cards, the question and candidates cards, the chat box. `page` is
  *  the AI page (no form beside it); `head` draws above it with what the chat is doing. */
-export function ChatView({ thread, route, kind, page = false, head }: {
+export function ChatView({ thread, route, kind, page = false, head, onTool, prefill }: {
   thread: Thread; route: RouteContext; kind: Kind; page?: boolean;
   head?: (s: HeadState) => ReactNode;
+  /** Once per tool call, when its result first arrives (not for the history it opened with). */
+  onTool?: (name: string) => void;
+  /** Put this text in the box and focus it, each time `at` changes (a report's chip). */
+  prefill?: { text: string; at: number };
 }) {
   const shell = useAssistantShell();
   const i18n = useI18n();
@@ -297,6 +302,19 @@ export function ChatView({ thread, route, kind, page = false, head }: {
   }, [chat.messages]);
 
   const results = useMemo(() => toolParts(chat.messages), [chat.messages]);
+  // The history it opened with is not news: only results arriving from here on reach onTool.
+  const toolsSeen = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const done = chat.messages.flatMap((m) => m.parts.flatMap((p) =>
+      p.type === "tool-call" && (p.output !== undefined || results.has(p.id)) ? [{ id: p.id, name: p.name }] : []));
+    if (!toolsSeen.current) { toolsSeen.current = new Set(done.map((d) => d.id)); return; }
+    for (const d of done) if (!toolsSeen.current.has(d.id)) { toolsSeen.current.add(d.id); onTool?.(d.name); }
+  }, [chat.messages, results]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!prefill) return;
+    setText(prefill.text);
+    setTimeout(() => input.current?.focus(), 0);
+  }, [prefill?.at]); // eslint-disable-line react-hooks/exhaustive-deps
   // One answer per run: its model turns are consecutive assistant messages, drawn as one so its steps
   // fold together. Keyed by the first, so a run that grows never remounts what it already drew.
   const turns = useMemo(() => chat.messages.reduce<{ key: string; m: UIMessage }[]>((out, m) => {
@@ -473,7 +491,7 @@ export function ChatView({ thread, route, kind, page = false, head }: {
   // Enter sends, Shift+Enter breaks the line: a pasted email keeps its lines.
   const field = (
     <TextArea ref={input} growing growingMaxRows={8} rows={page && empty ? 3 : 1} value={text} style={page ? BARE_FIELD : ROW_FIELD}
-      disabled={disabled} readonly={busy} placeholder={t("ASSISTANT_PLACEHOLDER")} accessibleName={t("ASSISTANT_PLACEHOLDER")}
+      disabled={disabled} readonly={busy} placeholder={t(kind === "report" ? "REPORT_PLACEHOLDER" : "ASSISTANT_PLACEHOLDER")} accessibleName={t(kind === "report" ? "REPORT_PLACEHOLDER" : "ASSISTANT_PLACEHOLDER")}
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
       onInput={(e) => setText(e.target.value)}
       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(text); } }} />
@@ -517,7 +535,8 @@ export function ChatView({ thread, route, kind, page = false, head }: {
     </>
   );
 
-  const prompts = kind === "configure" ? ["ASSISTANT_PROMPT_MISSING", "ASSISTANT_PROMPT_UNAVAILABLE"]
+  const prompts = kind === "report" ? ["REPORT_PROMPT_PIPELINE", "REPORT_PROMPT_STOCK", "REPORT_PROMPT_OVERDUE", "REPORT_PROMPT_TOP_ITEMS"]
+    : kind === "configure" ? ["ASSISTANT_PROMPT_MISSING", "ASSISTANT_PROMPT_UNAVAILABLE"]
     : page ? [] : ["ASSISTANT_PROMPT_WAITING", "ASSISTANT_PROMPT_MONTH"];
   const firstName = (me.data?.user?.name || me.data?.user?.email || "").split(/[ @]/)[0] ?? "";
   const inline = page ? READING : "1rem";
@@ -538,9 +557,10 @@ export function ChatView({ thread, route, kind, page = false, head }: {
       {page && empty ? (
         <FlexBox direction="Column" justifyContent="Center"
           style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBlock: "1.5rem clamp(1.5rem, 18vh, 10rem)", paddingInline: inline }}>
-          <HeroBanner style={BANNER} headerText={t("ASSISTANT_HELLO", firstName)} overlineText={t("ASSISTANT_PAGE_TITLE")}>
+          <HeroBanner style={BANNER} headerText={kind === "report" ? t("REPORT_ASK") : t("ASSISTANT_HELLO", firstName)}
+            overlineText={t(kind === "report" ? "REPORT_NEW" : "ASSISTANT_PAGE_TITLE")}>
             <FlexBox direction="Column" gap="1rem">
-              <Text style={{ color: "inherit" }}>{t(kind === "configure" ? "ASSISTANT_WELCOME_CONFIGURE" : "ASSISTANT_WELCOME_START")}</Text>
+              <Text style={{ color: "inherit" }}>{t(kind === "report" ? "REPORT_WELCOME" : kind === "configure" ? "ASSISTANT_WELCOME_CONFIGURE" : "ASSISTANT_WELCOME_START")}</Text>
               {notices}
               {dropStrip}
               {composer}

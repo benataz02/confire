@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentType, type CSSProperties } from "react";
+import { useMemo, useState, type ComponentType, type CSSProperties, type ReactNode } from "react";
 import {
   AnalyticalCardHeader, Button, Card, CardHeader, FlexBox, NumericSideIndicator, Tag, Text, Title,
 } from "@ui5/webcomponents-react";
@@ -33,8 +33,10 @@ const muted: CSSProperties = { color: "var(--sapContent_LabelColor)" };
 
 export type Filter = { dimension: string; value: string };
 
-export function ReportView({ report, result, busy, failed, onChip, onRefresh, onSave }: {
+export function ReportView({ report, result, busy, failed, actions, onChip, onRefresh, onSave }: {
   report: Report; result: Result | null; busy: boolean; failed: string | null;
+  /** the page's own actions (rename, delete), after Save */
+  actions?: ReactNode;
   onChip: (label: string) => void; onRefresh: () => void; onSave: (saved: boolean) => void;
 }) {
   const i18n = useI18n();
@@ -76,6 +78,7 @@ export function ReportView({ report, result, busy, failed, onChip, onRefresh, on
           <Button design="Transparent" icon="refresh" disabled={busy} onClick={onRefresh}>{t("REPORT_REFRESH")}</Button>
           <Button design={report.saved ? "Default" : "Emphasized"} icon={report.saved ? "accept" : "add-favorite"}
             onClick={() => onSave(!report.saved)}>{t(report.saved ? "REPORT_SAVED" : "REPORT_SAVE")}</Button>
+          {actions}
         </FlexBox>
       </FlexBox>
 
@@ -173,6 +176,7 @@ const isDate = (v: unknown) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.te
 function ReportTable({ tr, title, filter, onClear, t }: { tr: TableResult; title: string; filter: Filter | null; onClear: () => void; t: T }) {
   const nav = useEntityNav();
   const [state, setState] = useState<GridState>({ columns: tr.columns, sortBy: [], groupBy: tr.groupBy, columnWidths: {} });
+  // ponytail: SAP's field names as headers (DocNum, CardName); the B1 schema's labels if users find them cryptic.
   const columns: ListColumn[] = tr.columns.map((key) => {
     const sample = tr.rows.find((r) => r[key] !== null && r[key] !== undefined)?.[key];
     return {

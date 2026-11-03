@@ -108,8 +108,10 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
   const hits = <T,>(s: string, rows: T[] | undefined, hit: (r: T) => SearchHit, allowed = true) =>
     on(s, allowed) ? (rows ?? []).slice(0, cap).map(hit) : [];
   const needle = q.trim().toLowerCase();
-  const chatHit = (r: { id: string; title: string; projectName: string | null }) => ({
-    text: r.title || r.projectName || t("ASSISTANT_UNTITLED"), description: join(r.projectName), icon: "ai", to: `/assistant/${r.id}`,
+  // A report's chat opens its report, the chat docked beside it.
+  const chatHit = (r: { id: string; title: string; projectName: string | null; reportId: string | null; reportTitle: string | null }) => ({
+    text: r.title || r.reportTitle || r.projectName || t("ASSISTANT_UNTITLED"), description: join(r.reportTitle ?? r.projectName),
+    icon: r.reportId ? "business-objects-experience" : "ai", to: r.reportId ? `/reports/${r.reportId}` : `/assistant/${r.id}`,
   });
   // The empty field: scoped to chats, the AI page's list (pinned first, as there); else what was
   // picked here last under this scope.

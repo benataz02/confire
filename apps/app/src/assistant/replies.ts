@@ -15,9 +15,9 @@ export type ReplyView = Pick<ConfigView, "missing"> & {
 
 const MAX = 4;
 
-export function nextReplies(a: { kind: "configure" | "general" | "model"; view?: ReplyView; asking?: boolean }, t: (key: string) => string): string[] {
+export function nextReplies(a: { kind: "configure" | "general" | "model" | "report"; view?: ReplyView; asking?: boolean }, t: (key: string) => string): string[] {
   if (a.kind === "general") return [t("ASSISTANT_REPLY_WAITING"), t("ASSISTANT_REPLY_DRAFTS")];
-  if (a.kind === "model") return [];
+  if (a.kind === "model" || a.kind === "report") return [];
   const v = a.view;
   const keys = [
     v?.missing.length && !a.asking ? "ASSISTANT_REPLY_MISSING" : null,

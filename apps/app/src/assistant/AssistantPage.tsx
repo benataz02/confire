@@ -19,7 +19,7 @@ import type { Thread } from "./useAssistant.ts";
 // `/assistant/<chat>` one of theirs. The panel is not drawn here (AssistantProvider), so leaving
 // mid-answer stops the answer, as Stop does.
 
-type Row = { id: string; title: string; projectId: string | null; projectName: string | null; pinned: boolean; updatedAt: Date };
+type Row = { id: string; title: string; projectId: string | null; projectName: string | null; reportTitle: string | null; pinned: boolean; updatedAt: Date };
 type Action = "pin" | "rename" | "delete";
 
 export function AssistantPage({ threadId }: { threadId: string | null }) {
@@ -41,7 +41,7 @@ export function AssistantPage({ threadId }: { threadId: string | null }) {
 
   // The user's chats: what names the open one and says whether it is pinned.
   const all = useQuery(orpc.assistant.threads.queryOptions({ input: undefined }));
-  const label = (r: Row) => r.title || r.projectName || t("ASSISTANT_UNTITLED");
+  const label = (r: Row) => r.title || r.reportTitle || r.projectName || t("ASSISTANT_UNTITLED");
   const current = all.data?.find((r) => r.id === threadId);
   const [menu, setMenu] = useState<HTMLElement | null>(null);
   const picked = useRef<Action | null>(null);

@@ -33,3 +33,7 @@ test("never more than 4; general pages have their own; no view yet, nothing page
   expect(nextReplies({ kind: "configure" }, t)).toEqual(["ASSISTANT_REPLY_SIMILAR"]);
   expect(nextReplies({ kind: "model" }, t)).toEqual([]);
 });
+
+test("a report's chat offers no quick replies: the report and its chips are the next step", () => {
+  expect(nextReplies({ kind: "report" }, (k) => k)).toEqual([]);
+});

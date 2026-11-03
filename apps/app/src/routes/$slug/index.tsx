@@ -6,6 +6,7 @@ import { formatLocale } from "@confire/ui/format.ts";
 import { useI18n } from "../../i18n.ts";
 import { B1_FEATURES } from "../../features/b1/index.ts";
 import { B1_NAV_KEY } from "../../components/AppShell.tsx";
+import { formatValue } from "../../reports/widgets.ts";
 import "./-home.css";
 
 // The workspace home: the caller's own figures in the HeroBanner, then the side nav's groups as
@@ -56,6 +57,8 @@ function Home() {
   const currency = useCurrency();
   const { data: me } = useQuery(meQuery);
   const { data: o } = useQuery(orpc.home.overview.queryOptions());
+  // The user's saved reports, each its last run's headline: no SAP call here (reports spec §6.1).
+  const { data: reports } = useQuery(orpc.reports.tiles.queryOptions());
 
   const firstName = (me?.user?.name || me?.user?.email || "").split(/[ @]/)[0]!;
   const hour = new Date().getHours();
@@ -73,6 +76,17 @@ function Home() {
           { title: t("NAV_MODELS"), icon: "tree", value: o?.models, to: "/models" },
           { title: t("NAV_MASTERDATA"), subtitle: t("HOME_SYNC_ERRORS"), icon: "table-view", value: o?.syncErrors, state: flag(o?.syncErrors, "Negative"), to: "/masterdata" },
         ] : []),
+      ],
+    },
+    {
+      title: t("HOME_REPORTS"),
+      tiles: [
+        { title: t("HOME_NEW_REPORT"), subtitle: t("HOME_NEW_REPORT_SUB"), icon: "add-document", to: "/reports/new" },
+        ...(reports ?? []).map((r): TileProps => ({
+          title: r.title || t("REPORT_UNTITLED"), subtitle: r.subtitle ?? undefined, icon: "business-objects-experience",
+          value: r.value === null ? undefined : formatValue(r.value, r.format, r.currency, formatLocale()),
+          state: r.state === "Negative" ? "Negative" : undefined, to: `/reports/${r.id}`,
+        })),
       ],
     },
     {
@@ -117,7 +131,7 @@ function Home() {
         <section key={g.title}>
           <Title level="H4" style={{ marginBottom: "0.75rem" }}>{g.title}</Title>
           <div className="cf-tiles">
-            {g.tiles.map((tile) => <Tile key={tile.title} {...tile} />)}
+            {g.tiles.map((tile) => <Tile key={tile.to ?? tile.title} {...tile} />)}
           </div>
         </section>
       ))}
