@@ -170,9 +170,9 @@ const LINES = "DocumentLines";
  *  the DocEntry equality as the join (doc-chain.ts). A dataset names line fields `Lines.<field>`.
  *  unverified (reports spec §3.3): `$apply` over a crossjoin, in the documented `Entity(prop with …)`
  *  form; the runner falls back to reading rows when B1 refuses it. */
-export function compileLinesAggregate(
-  header: B1EntitySchema, set: string, filter: FilterCond[], agg: AggSpec, opts: { pageSize: number },
-): CrossJoinSpec {
+/** A document set and its lines as one dataset: names `X` (the header's) and `Lines.X`, their
+ *  crossjoin paths, and the filter with the DocEntry equality that is the join. */
+function linesOf(header: B1EntitySchema, set: string, filter: FilterCond[]) {
   const lines = header.fields.find((f) => f.name === LINES && f.kind === "collection")?.fields ?? [];
   const byName = new Map<string, B1Field>([
     ...scalarFields(header).map((f) => [f.name, f] as const),
@@ -182,14 +182,38 @@ export function compileLinesAggregate(
     const f = byName.get(name);
     if (!f) throw new Error(t("FILTER_FIELD_NOT_ON", name, set));
     return name.startsWith("Lines.")
-      ? { entity: `${set}/${LINES}`, name: f.name, path: `${set}/${LINES}/${f.name}` }
-      : { entity: set, name: f.name, path: `${set}/${f.name}` };
+      ? { entity: `${set}/${LINES}`, name: f.name, path: `${set}/${LINES}/${f.name}`, line: true }
+      : { entity: set, name: f.name, path: `${set}/${f.name}`, line: false };
   };
   const join = `${set}/DocEntry eq ${set}/${LINES}/DocEntry`;
   const own = compileFilter(byName, filter, set, (n) => at(n).path);
-  const apply = applyText(own ? `${join} and (${own})` : join, agg.groupBy.map((n) => at(n).path),
-    agg.measures.map((m) => measureText(m, (n) => { const a = at(n); return { name: a.name, wrap: a.entity }; })));
-  return { entities: [set, `${set}/${LINES}`], expand: [], apply, maxPageSize: opts.pageSize };
+  return { at, filter: own ? `${join} and (${own})` : join, entities: [set, `${set}/${LINES}`] };
+}
+
+export function compileLinesAggregate(
+  header: B1EntitySchema, set: string, filter: FilterCond[], agg: AggSpec, opts: { pageSize: number },
+): CrossJoinSpec {
+  const l = linesOf(header, set, filter);
+  const apply = applyText(l.filter, agg.groupBy.map((n) => l.at(n).path),
+    agg.measures.map((m) => measureText(m, (n) => { const a = l.at(n); return { name: a.name, wrap: a.entity }; })));
+  return { entities: l.entities, expand: [], apply, maxPageSize: opts.pageSize };
+}
+
+/** The rows of a document set with its lines (the report runner's fallback and tables): the named
+ *  fields, each from its side of the join, as flattenJoined reads them back. */
+export function compileLinesRows(
+  header: B1EntitySchema, set: string, filter: FilterCond[], fields: string[], opts: { pageSize: number },
+): CrossJoinSpec {
+  const l = linesOf(header, set, filter);
+  const picked = fields.map(l.at);
+  const head = [...new Set([...header.keys, ...picked.filter((p) => !p.line).map((p) => p.name)])];
+  const line = [...new Set(["LineNum", ...picked.filter((p) => p.line).map((p) => p.name)])];
+  return {
+    entities: l.entities,
+    expand: [{ entity: set, select: head }, { entity: `${set}/${LINES}`, select: line }],
+    filter: l.filter,
+    maxPageSize: opts.pageSize,
+  };
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
