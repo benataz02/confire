@@ -14,6 +14,9 @@ export type QueryOptions = {
   count?: boolean;
   /** `Prefer: odata.maxpagesize` — rows per page. 0 means "no server paging". */
   maxPageSize?: number;
+  /** `$apply` — SAP-side totals (`filter(…)/groupby((…),aggregate(…))`), built by the server's
+   *  compileAggregate, never taken from a request. */
+  apply?: string;
 };
 
 /** $crossjoin as data, not a hand-built string. The only way to filter a document by its lines:
@@ -25,6 +28,9 @@ export type CrossJoinSpec = {
   filter?: string;
   orderby?: string;
   top?: number;
+  apply?: string;
+  /** `Prefer: odata.maxpagesize`, as for an entity set read */
+  maxPageSize?: number;
 };
 
 export type B1Response = {

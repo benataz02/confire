@@ -76,6 +76,9 @@ export function queryString(q?: QueryOptions): string {
   const parts: string[] = [];
   const set = (k: string, v: string) => parts.push(`${k}=${encodeURIComponent(v)}`);
   if (q.filter) set("$filter", q.filter);
+  // unverified (reports spec §3.3): $apply encoded like $filter; if a live B1 400s on it, compose it
+  // unencoded as crossJoinPath does $expand.
+  if (q.apply) set("$apply", q.apply);
   if (q.select?.length) set("$select", q.select.map((c) => assertName(c, "column")).join(","));
   if (q.orderby) set("$orderby", q.orderby);
   if (q.top !== undefined) set("$top", String(q.top));
@@ -110,6 +113,7 @@ export function crossJoinPath(spec: CrossJoinSpec): string {
   const parts: string[] = [];
   if (expand) parts.push(`$expand=${expand}`);
   if (spec.filter) parts.push(`$filter=${encodeURIComponent(spec.filter)}`);
+  if (spec.apply) parts.push(`$apply=${encodeURIComponent(spec.apply)}`);
   if (spec.orderby) parts.push(`$orderby=${encodeURIComponent(spec.orderby)}`);
   if (spec.top !== undefined) parts.push(`$top=${spec.top}`);
   return withQuery(`$crossjoin(${entities.join(",")})`, parts.join("&"));

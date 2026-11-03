@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DirectTransport, nextLinkOf, type B1Request } from "../src/index.ts";
+import { DirectTransport, followPages, nextLinkOf, type B1Request } from "../src/index.ts";
 
 // The Service Layer pages server-side at 20 rows unless asked otherwise, and that default is
 // invisible: you get 20 rows and an @odata.nextLink, which looks exactly like a short last page to
@@ -60,5 +60,32 @@ describe("nextLinkOf is the 'there is more' signal", () => {
   test("a full page that is genuinely the last one has no nextLink — the row count cannot tell", () => {
     // 20 rows returned for $top=20 used to mean "probably more"; B1 says otherwise.
     expect(nextLinkOf({ value: new Array(20).fill({}) })).toBeUndefined();
+  });
+});
+
+describe("$apply", () => {
+  test("an entity set read carries $apply after $filter, the value encoded like $filter", async () => {
+    const { calls, t } = spy();
+    await t.readEntitySet("Orders", { apply: "groupby((CardCode),aggregate(DocTotal with sum as a0))", maxPageSize: 500 });
+    expect(calls[0]!.path).toBe(`Orders?$apply=${encodeURIComponent("groupby((CardCode),aggregate(DocTotal with sum as a0))")}`);
+    expect(calls[0]!.headers).toEqual({ Prefer: "odata.maxpagesize=500" });
+  });
+
+  test("a crossjoin carries $apply and pages with Prefer", async () => {
+    const { calls, t } = spy();
+    await t.crossJoin({ entities: ["Orders", "Orders/DocumentLines"], expand: [], apply: "aggregate($count as n)", maxPageSize: 500 });
+    expect(calls[0]!.path).toBe(`$crossjoin(Orders,Orders/DocumentLines)?$apply=${encodeURIComponent("aggregate($count as n)")}`);
+    expect(calls[0]!.headers).toEqual({ Prefer: "odata.maxpagesize=500" });
+  });
+});
+
+describe("followPages", () => {
+  test("follows every nextLink from a first page it did not read, and stops at maxPages", async () => {
+    const pages = [{ value: [{ i: 2 }], "@odata.nextLink": "Orders?$skip=2" }, { value: [{ i: 3 }] }];
+    const t = new DirectTransport(async () => ({ status: 200, data: pages.shift() }));
+    const first = { status: 200, data: { value: [{ i: 1 }], "@odata.nextLink": "Orders?$skip=1" } };
+    expect(await followPages(t, first, { pageSize: 1, maxPages: 10 })).toEqual({ rows: [{ i: 1 }, { i: 2 }, { i: 3 }], truncated: false });
+    const capped = await followPages(t, { status: 200, data: { value: [{ i: 1 }], "@odata.nextLink": "x" } }, { pageSize: 1, maxPages: 1 });
+    expect(capped.truncated).toBe(true);
   });
 });

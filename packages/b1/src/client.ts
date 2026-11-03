@@ -39,7 +39,7 @@ export class DirectTransport implements B1Transport {
   }
 
   crossJoin(spec: CrossJoinSpec): Promise<B1Response> {
-    return this.get(crossJoinPath(spec));
+    return this.get(crossJoinPath(spec), pageHeader({ maxPageSize: spec.maxPageSize }));
   }
 
   /** The one method that passes a B1-supplied link on. The agent resolves every path under the
