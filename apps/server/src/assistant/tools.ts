@@ -21,6 +21,7 @@ import { extractInto, modelBlock } from "./extract.ts";
 import { fileParts } from "./files.ts";
 import { CUSTOMERS_ONLY, readRequest } from "./intake.ts";
 import { lastDrop, type Thread } from "./threads.ts";
+import { CHAT_TOOLS } from "./pages.ts";
 import type { Meter } from "./usage.ts";
 
 // The chat's tools (assistant spec §4.5): the existing procedures, called through their own builders
@@ -31,7 +32,10 @@ import type { Meter } from "./usage.ts";
 // procedures as they are — MCP gets them bare, so their caps and proposals live in the handlers. Only
 // b1_write/b1_copy write to SAP, and outside auto mode they answer a proposal the user posts.
 
-export type ToolCtx = { headers: Headers; tenantId: string; userId: string; thread: Thread; meter: Meter };
+/** `taint.client` turns true once the run reads something a client wrote (route.ts' guard): from then
+ *  on its SAP writes are proposals whatever auto mode says (auto.ts). */
+export type Taint = { client: boolean };
+export type ToolCtx = { headers: Headers; tenantId: string; userId: string; thread: Thread; meter: Meter; taint: Taint };
 
 export { LIST_CAP };
 
@@ -54,16 +58,18 @@ const capped = (out: unknown) => {
 
 /** What a tool's procedure call runs as: the chat request's headers (and its thread), or over MCP the
  *  token's user. */
-export type CallCtx = { headers: Headers; thread?: { id: string }; mcpUserId?: string };
+export type CallCtx = { headers: Headers; thread?: { id: string }; taint?: Taint; mcpUserId?: string };
 /** The chat builds its tools per run around one CallCtx; MCP builds them once (mcp.ts) and reads the
  *  CallCtx off each tool call, which carries its own request's (createMCPServer's `ctx.context`). */
 export type CtxOf = CallCtx | ((call: unknown) => CallCtx);
 const resolve = (ctx: CtxOf, call: unknown): CallCtx => (typeof ctx === "function" ? ctx(call) : ctx);
-// The thread and the MCP user ride in the call's context, which no request can fill: b1.write reads
-// the thread for auto mode's file exception, and the MCP user is who the call is (orpc/base.ts).
+// The thread, its taint and the MCP user ride in the call's context, which no request can fill:
+// b1.write reads the thread and the taint for auto mode's client-content exception, and the MCP user
+// is who the call is (orpc/base.ts). The taint is read when the call runs, not when the tool is built.
 const contextOf = (c: CallCtx) => ({
   headers: c.headers,
   ...(c.thread ? { assistantThreadId: c.thread.id } : {}),
+  ...(c.taint?.client ? { assistantClientContent: true } : {}),
   ...(c.mcpUserId ? { mcpUserId: c.mcpUserId } : {}),
 });
 
@@ -170,7 +176,7 @@ function rerunTools(ctx: ToolCtx): Record<string, AnyServerTool> {
     }).server(async () => {
       const d = drop();
       const parts = await fileParts(ctx.tenantId, d.refs, { threadId: ctx.thread.id, ...(ctx.thread.projectId ? { projectId: ctx.thread.projectId } : {}) });
-      return run(() => readRequest(ctx, { parts, text: d.text, meter: { ...ctx.meter, kind: "extract" } }));
+      return run(() => readRequest(ctx, { parts, text: d.text, meter: { ...ctx.meter, kind: "intake" } }));
     }) as AnyServerTool,
     extract_values: toolDefinition({
       name: "extract_values",
@@ -263,10 +269,10 @@ export function procedureOf(name: string): AnyProcedure | undefined {
   return map[name] as AnyProcedure | undefined;
 }
 
-/** A page's tools, in its order. */
-export function toolsFor(page: { tools: string[] }, ctx: ToolCtx): AnyServerTool[] {
+/** A chat run's tools: `CHAT_TOOLS`, in its (sorted) order — the same on every page. */
+export function chatTools(ctx: ToolCtx): AnyServerTool[] {
   const all = allTools(ctx);
-  return page.tools.map((n) => {
+  return CHAT_TOOLS.map((n) => {
     const tool = all[n];
     if (!tool) throw new Error(`No assistant tool '${n}'`);
     return tool;

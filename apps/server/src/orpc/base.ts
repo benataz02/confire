@@ -10,8 +10,11 @@ export interface InitialContext {
   headers: Headers;
   /** Set only by the assistant's chat when its tools call a procedure (tools.ts `procedureTool`):
    *  the thread the call runs in. The RPC and OpenAPI handlers never fill it from a request, so a
-   *  browser cannot set it. b1.write/b1.copy read it for auto mode's file exception. */
+   *  browser cannot set it. b1.write/b1.copy read it for auto mode's client-content exception. */
   assistantThreadId?: string;
+  /** Set only by the chat with assistantThreadId: its run has read something a client wrote (a
+   *  request's comments, entries or name) — auto mode's exception, like a client's files. */
+  assistantClientContent?: boolean;
   /** Set only by the MCP route (mcp.ts) once Better Auth has verified the bearer token: the token's
    *  user. Like assistantThreadId, no handler fills it from a request, so a cookie or header cannot. */
   mcpUserId?: string;

@@ -2,38 +2,43 @@ import { ORPCError } from "@orpc/server";
 import type { ChatMiddleware, TokenUsage } from "@tanstack/ai";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { db, aiUsage, assistantSettings, type AiUsageKind } from "@confire/db";
-import { ASSISTANT_MODEL, available } from "./model.ts";
+import { ASSISTANT_MODEL, available, INTAKE_MODEL } from "./model.ts";
 import { t as text } from "../i18n/index.ts";
 
 // The meter, the monthly limit, the switch and the rate limit (assistant spec §4.7, §4.8). One row per
 // model call; the limit is what it protects, the count of assisted configurations what gets reported.
 
-/** $ per million tokens. Verified 2026-10-24 on platform.claude.com/docs/en/about-claude/pricing. */
-type Price = { input: number; cacheWrite: number; cacheRead: number; output: number; over100k?: Omit<Price, "over100k"> };
+/** $ per million tokens; `cacheWrite` is the 5-minute write, `cacheWrite1h` the 1-hour one. Checked
+ *  2026-11-02 against the Claude API skill's pricing (Sonnet 5.5 cache reads are $0.20, not 0.1x). */
+type Price = { input: number; cacheWrite: number; cacheWrite1h: number; cacheRead: number; output: number; over100k?: Omit<Price, "over100k"> };
 export const PRICES: Record<string, Price> = {
-  "claude-sonnet-5-5": { input: 2, cacheWrite: 2.5, cacheRead: 0.10, output: 10 },
+  "claude-sonnet-5-5": { input: 2, cacheWrite: 2.5, cacheWrite1h: 4, cacheRead: 0.20, output: 10 },
+  "claude-opus-5-5": { input: 4, cacheWrite: 5, cacheWrite1h: 8, cacheRead: 0.20, output: 20 },
   "claude-haiku-5-5": {
-    input: 0.10, cacheWrite: 0.125, cacheRead: 0.01, output: 0.50,
-    over100k: { input: 0.50, cacheWrite: 0.625, cacheRead: 0.05, output: 2.50 },
+    input: 0.10, cacheWrite: 0.125, cacheWrite1h: 0.20, cacheRead: 0.01, output: 0.50,
+    over100k: { input: 0.50, cacheWrite: 0.625, cacheWrite1h: 1, cacheRead: 0.05, output: 2.50 },
   },
 };
-if (!PRICES[ASSISTANT_MODEL]) throw new Error(`ASSISTANT_MODEL ${ASSISTANT_MODEL} has no price in usage.ts`);
+for (const m of [ASSISTANT_MODEL, INTAKE_MODEL])
+  if (!PRICES[m]) throw new Error(`Assistant model ${m} has no price in usage.ts`);
 
-export type Tokens = { input: number; cacheRead: number; cacheWrite: number; output: number };
+/** `cacheWrite` counts every write; `cacheWrite1h` is the 1-hour part of it. */
+export type Tokens = { input: number; cacheRead: number; cacheWrite: number; cacheWrite1h?: number; output: number };
 
 /** TanStack's usage counts the cache parts inside `promptTokens`; the meter keeps them apart. */
 export function tokensOf(u: TokenUsage): Tokens {
   const cacheRead = u.promptTokensDetails?.cachedTokens ?? 0;
   const cacheWrite = u.promptTokensDetails?.cacheWriteTokens ?? 0;
-  return { input: u.promptTokens - cacheRead - cacheWrite, cacheRead, cacheWrite, output: u.completionTokens };
+  const cacheWrite1h = u.promptTokensDetails?.cacheWrite1hTokens ?? 0;
+  return { input: u.promptTokens - cacheRead - cacheWrite, cacheRead, cacheWrite, cacheWrite1h, output: u.completionTokens };
 }
 
-/** USD. A model without a row (a test's fake) is priced as the configured one.
- *  ponytail: 1h cache writes priced as 5m; split when promptCache "long" is used. */
+/** USD. A model without a row (a test's fake) is priced as the configured one. */
 export function costOf(model: string, t: Tokens): number {
   const p = PRICES[model] ?? PRICES[ASSISTANT_MODEL]!;
   const r = p.over100k && t.input + t.cacheRead + t.cacheWrite > 100_000 ? p.over100k : p;
-  return (t.input * r.input + t.cacheWrite * r.cacheWrite + t.cacheRead * r.cacheRead + t.output * r.output) / 1e6;
+  const long = Math.min(t.cacheWrite1h ?? 0, t.cacheWrite);
+  return (t.input * r.input + (t.cacheWrite - long) * r.cacheWrite + long * r.cacheWrite1h + t.cacheRead * r.cacheRead + t.output * r.output) / 1e6;
 }
 
 /** Who a run is billed to. Mutable: a run that creates a configuration sets `projectId` midway. */
@@ -86,13 +91,21 @@ export async function offReason(tenantId: string): Promise<"switch" | "no_key" |
   return available() ? null : "no_key";
 }
 
+export const overLimit = async (tenantId: string): Promise<boolean> => (await monthUsage(tenantId)).cost >= MONTHLY_LIMIT_USD;
+
 /** Before any model call: the workspace's switch, a provider to call, and money left this month. */
 export async function assertAssistant(tenantId: string): Promise<void> {
   const off = await offReason(tenantId);
   if (off === "switch") throw new ORPCError("ASSISTANT_OFF", { message: text("ASSISTANT_OFF") });
   if (off === "no_key") throw new ORPCError("ASSISTANT_UNAVAILABLE", { message: text("ASSISTANT_UNAVAILABLE") });
-  if ((await monthUsage(tenantId)).cost >= MONTHLY_LIMIT_USD)
-    throw new ORPCError("ASSISTANT_LIMIT", { message: text("ASSISTANT_LIMIT") });
+  if (await overLimit(tenantId)) throw new ORPCError("ASSISTANT_LIMIT", { message: text("ASSISTANT_LIMIT") });
+}
+
+/** The limit inside a run: a chat's loop takes up to 12 model calls, and other runs spend meanwhile,
+ *  so the month's spend is read again before each further call. Over it, the loop stops after the
+ *  tools it just ran (their results are kept) — the next turn is then refused before any call. */
+export function budget(tenantId: string): ChatMiddleware {
+  return { name: "budget", onShouldContinue: async () => !(await overLimit(tenantId)) };
 }
 
 // ponytail: per process; a shared store when there is more than one staff process.

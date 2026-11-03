@@ -23,7 +23,7 @@ export const assistantSettings = pgTable("assistant_settings", {
 // `messages` is TanStack AI's ModelMessage[], typed loosely so this package takes no @tanstack/ai
 // dependency (threads.ts casts at its boundary). Append-only: Sonnet 5.5 refuses edited history
 // (preserved thinking), so nothing rewrites or deletes a stored message. `busyUntil` is the one-run
-// lease (`withThread`). Stored file parts carry a reference, never their bytes. The AI page lists them
+// lease (`withThread`) and `leaseId` its holder: only the run that took it renews or releases it. Stored file parts carry a reference, never their bytes. The AI page lists them
 // (pinned first, then `updatedAt`); a rename or a pin leaves `updatedAt` alone so the list stays put.
 export const assistantThread = pgTable(
   "assistant_thread",
@@ -36,6 +36,7 @@ export const assistantThread = pgTable(
     pinned: boolean("pinned").notNull().default(false),
     messages: jsonb("messages").$type<Record<string, unknown>[]>().notNull().default([]),
     busyUntil: timestamp("busy_until", { withTimezone: true }),
+    leaseId: uuid("lease_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -58,7 +59,7 @@ export const assistantFile = pgTable("assistant_file", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export type AiUsageKind = "extract" | "chat";
+export type AiUsageKind = "intake" | "extract" | "chat";
 
 // The meter: one row per model call. No foreign keys on purpose — a billing row outlives its thread
 // and its project. An "assisted configuration" is a distinct projectId here.

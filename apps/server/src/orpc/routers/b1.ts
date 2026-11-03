@@ -130,7 +130,7 @@ function written(p: Posted) {
   };
 }
 
-type Ctx = { tenantId: string; userId: string; assistantThreadId?: string; mcpUserId?: string };
+type Ctx = { tenantId: string; userId: string; assistantThreadId?: string; assistantClientContent?: boolean; mcpUserId?: string };
 
 /** Post it, or answer it as a proposal: auto mode decides (§5.3). */
 async function postOrPropose(c: Ctx, w: WriteCtx, p: Prepared) {

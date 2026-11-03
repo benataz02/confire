@@ -2,45 +2,44 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, configModel, configProject, entityMeta } from "@confire/db";
 import { requireAdmin } from "../src/orpc/base.ts";
-import { GENERAL, PAGES, pageFor } from "../src/assistant/pages.ts";
-import { CARD_FIELDS, LIST_CAP, missingSources, procedureOf, toolsFor, type ToolCtx } from "../src/assistant/tools.ts";
+import { CHAT_TOOLS, GENERAL, pageFor } from "../src/assistant/pages.ts";
+import { CARD_FIELDS, chatTools, LIST_CAP, missingSources, procedureOf, type ToolCtx } from "../src/assistant/tools.ts";
 import { newThread } from "../src/assistant/threads.ts";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
 // The chat's tools (spec §4.3, §4.5): the existing procedures, run through their own builders with
-// the request's headers, picked per page. The route is a hint; the builders are the permission.
+// the request's headers, the same set on every page. The route is a hint; the builders are the permission.
 
 const CHAT = { chat: "make it 200 wide" };
 const NO_QUERY = { select: [], filter: [], orderby: [] };
 
-test("registry: a configuration page configures; unknown routes get the general set", () => {
-  expect(pageFor("/$slug/configs/$id").tools).toContain("configs_calculate");
+test("registry: a configuration page configures; unknown routes are general", () => {
   expect(pageFor("/$slug/configs/$id").kind).toBe("configure");
   expect(pageFor("/$slug/models/$id").kind).toBe("model");
   expect(pageFor("/$slug/whatever").kind).toBe("general");
   expect(pageFor("/$slug/whatever")).toBe(GENERAL);
-  // The AI page: the general set to start one, for the bare page and a chat alike (`$id` is the chat;
-  // the route makes a configuration's chat CONFIGURE_CHAT).
-  expect(pageFor("/$slug/assistant/").tools).toContain("configs_create");
+  // The AI page: general, for the bare page and a chat alike (`$id` is the chat; the route makes a
+  // configuration's chat CONFIGURE_CHAT).
+  expect(pageFor("/$slug/assistant/").kind).toBe("general");
   expect(pageFor("/$slug/assistant/$id").kind).toBe("general");
+  expect(CHAT_TOOLS).toContain("configs_create");
+  expect([...CHAT_TOOLS]).toEqual([...CHAT_TOOLS].sort()); // a fixed order: the prompt prefix stays the same
 });
 
 test("no tool posts, and no tool is admin-only", () => {
-  for (const page of [...Object.values(PAGES), GENERAL]) {
-    expect(page.tools).not.toContain("configs_createQuote");
-    for (const name of page.tools) {
-      const p = procedureOf(name);
-      expect(p?.["~orpc"].orderedMiddlewares.some((m) => m.middleware === requireAdmin) ?? false).toBe(false);
-    }
+  expect(CHAT_TOOLS).not.toContain("configs_createQuote");
+  for (const name of CHAT_TOOLS) {
+    const p = procedureOf(name);
+    expect(p?.["~orpc"].orderedMiddlewares.some((m) => m.middleware === requireAdmin) ?? false).toBe(false);
   }
   // the check itself can see an admin procedure
   expect(router.assistant.settings["~orpc"].orderedMiddlewares.some((m) => m.middleware === requireAdmin)).toBe(true);
 });
 
-test("every page re-runs the intake steps and may ask: its history may hold their calls", () => {
-  for (const page of [...Object.values(PAGES), GENERAL]) expect(page.tools).toEqual(expect.arrayContaining(["read_request", "extract_values", "ask_user"]));
+test("the chat re-runs the intake steps and may ask: its history may hold their calls", () => {
+  expect(CHAT_TOOLS).toEqual(expect.arrayContaining(["read_request", "extract_values", "ask_user"]));
 });
 
 test("missingSources names every unsourced write", () => {
@@ -62,9 +61,9 @@ describe.skipIf(!process.env.DATABASE_URL)("through the builders", () => {
     const headers = tenantHeaders(slug, u.cookie);
     const { id } = await call(router.configs.create, { modelId: m!.id, name: "Cable", customer: null }, { context: { headers } });
     const thread = await newThread(tenantId, u.userId);
-    const ctx: ToolCtx = { headers, tenantId, userId: u.userId, thread, meter: { tenantId, userId: u.userId, threadId: thread.id, projectId: null, kind: "chat" } };
+    const ctx: ToolCtx = { headers, tenantId, userId: u.userId, thread, meter: { tenantId, userId: u.userId, threadId: thread.id, projectId: null, kind: "chat" }, taint: { client: false } };
     const tool = (name: string, c = ctx) => {
-      const t = toolsFor({ ...GENERAL, tools: [name] }, c)[0]!;
+      const t = chatTools(c).find((x) => x.name === name)!;
       return (input: unknown) => (t as unknown as { execute: (i: unknown) => Promise<any> }).execute(input);
     };
     return { tenantId, slug, u, modelId: m!.id, id, ctx, tool };
@@ -87,7 +86,7 @@ describe.skipIf(!process.env.DATABASE_URL)("through the builders", () => {
   });
 
   test("every tool's procedure has at most one input schema", () => {
-    for (const name of new Set([...Object.values(PAGES), GENERAL].flatMap((p) => p.tools)))
+    for (const name of CHAT_TOOLS)
       expect(procedureOf(name)?.["~orpc"].inputSchemas?.length ?? 0).toBeLessThanOrEqual(1);
   });
 

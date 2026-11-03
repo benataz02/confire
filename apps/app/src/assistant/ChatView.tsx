@@ -207,7 +207,7 @@ export function ChatView({ thread, route, kind, page = false, head }: {
   const { language } = useLanguage();
   const me = useQuery(meQuery);
   const status = useQuery(orpc.assistant.status.queryOptions());
-  const { chat, refusal, clearRefusal } = useAssistantChat(thread);
+  const { chat, refusal, declined, clearRefusal } = useAssistantChat(thread);
   const invalidate = useAssistantInvalidate();
   const qc = useQueryClient();
   const [text, setText] = useState("");
@@ -579,6 +579,9 @@ export function ChatView({ thread, route, kind, page = false, head }: {
             })}
             {pending ? <Working text={pending} />
               : chat.isLoading && last?.role === "user" ? <Working text={t("ASSISTANT_WORKING")} /> : null}
+            {declined && !busy && !failed ? (
+              <MessageStrip design="Information" hideCloseButton>{t("ASSISTANT_DECLINED")}</MessageStrip>
+            ) : null}
             {failed ? (
               <MessageStrip design="Negative" hideCloseButton>
                 {refusal && i18n.getText(`ASSISTANT_ERR_${refusal.code}`) !== `ASSISTANT_ERR_${refusal.code}`

@@ -1,20 +1,24 @@
-// Where the assistant is (assistant spec §4.3): the page's route id picks the tools the model may call
-// and a short prompt section about what the user is doing there — unless the thread is a
-// configuration's, which works on it from any page (route.ts). A hint, never a permission: every
-// tool still runs through its procedure's builder. One plain map; the model builder's assistant
-// (later) is one more entry plus its tools.
+// Where the assistant is (assistant spec §4.3): the page's route id picks a short note about what the
+// user is doing there — unless the thread is a configuration's, which works on it from any page
+// (route.ts). The note rides in the user's turn (route.ts `contextPart`), never in the system prompts,
+// and every page has the same tools (`CHAT_TOOLS`): what the model is sent before the conversation
+// stays the same from turn to turn, so the prompt cache and the thinking of earlier turns hold. A
+// hint, never a permission: every tool still runs through its procedure's builder.
 
 export type PageKind = "configure" | "general" | "model";
-export type Page = { kind: PageKind; tools: string[]; section: (p: { projectId?: string; name?: string; dirty: boolean }) => string };
+export type Page = { kind: PageKind; section: (p: { projectId?: string; name?: string; dirty: boolean }) => string };
 
-/** In every set: a thread's history holds their calls (see tools.ts rerunTools), and any page may ask. */
-const ALWAYS = ["read_request", "extract_values", "ask_user"];
-
-/** SAP itself (b1-tools spec §5.6): read anything, write the curated records — proposals unless auto. */
-const B1 = ["b1_find", "b1_schema", "b1_read", "b1_write", "b1_copy"];
-
-/** Working on one configuration: every set has them, so a chat that creates one goes straight on with it. */
-const CONFIG_TOOLS = ["configs_get", "configs_calculate", "configs_queryPage", "configs_similar", "configs_select", "propose_quotation"];
+/** Every chat run's tools, by name, sorted: one fixed list on every page. A thread's history holds the
+ *  calls of any of them (a request naming a tool it does not define is refused), and a chat that
+ *  creates a configuration goes straight on with it. Over MCP the set is `MCP_TOOL_NAMES`. */
+export const CHAT_TOOLS: readonly string[] = [
+  "configs_models", "configs_create", "configs_rows", "requests_rows", "home_overview", "timeline_list", "entities_rows",
+  // SAP itself (b1-tools spec §5.6): read anything, write the curated records — proposals unless auto.
+  "b1_find", "b1_schema", "b1_read", "b1_write", "b1_copy",
+  // Working on one configuration.
+  "configs_get", "configs_calculate", "configs_queryPage", "configs_similar", "configs_select", "propose_quotation",
+  "read_request", "extract_values", "ask_user",
+].toSorted();
 
 const about = (p: { projectId?: string; name?: string }) =>
   `This chat is about the configuration "${p.name ?? ""}" (id ${p.projectId}). Read it with configs_get before answering about it: the user may have changed it since you last looked.`;
@@ -22,7 +26,6 @@ const WRITE = "To fill a field, write it with configs_calculate, quoting its sou
 
 const configure: Page = {
   kind: "configure",
-  tools: [...CONFIG_TOOLS, ...ALWAYS],
   section: (p) => [
     about(p),
     "The user has its page open beside this chat and edits it too: a table they can fill in its grid there, or tell you the rows to write.",
@@ -33,13 +36,11 @@ const configure: Page = {
 
 const model: Page = {
   kind: "model",
-  tools: ["configs_models", "configs_rows", ...ALWAYS],
-  section: () => "The user is in the model builder. You cannot change models here; answer general questions only.",
+  section: () => "The user is in the model builder. You cannot change models here, and you change nothing in SAP or in a configuration from here; answer general questions only.",
 };
 
 export const GENERAL: Page = {
   kind: "general",
-  tools: ["configs_models", "configs_create", "configs_rows", "requests_rows", "home_overview", "timeline_list", "entities_rows", ...B1, ...CONFIG_TOOLS, ...ALWAYS],
   section: () => "The user is in the staff app, outside any one configuration: on the home page or a list. You can start a configuration from the files dropped in this chat or from what the user tells you, answer about configurations, clients' requests and anything in SAP, and create, change or copy SAP records. Once you create a configuration, this chat is that configuration's: go on with it here, the user need not open it.",
 };
 
@@ -70,8 +71,8 @@ export const PAGES: Record<string, Page> = {
 
 export const pageFor = (routeId: string): Page => PAGES[routeId] ?? GENERAL;
 
-/** Frozen: it carries the cache breakpoint. The page section, the language and the model block come
- *  after it. */
+/** Frozen: it carries the cache breakpoint, with the model block after it. The page section and the
+ *  language are the user turn's context. */
 export const SYSTEM = `You are the assistant in Confire, a quoting tool for manufacturers that runs on SAP Business One. You help the manufacturer's salespeople turn a client's request into a configured, priced quotation. Many are new and still learning the products' rules.
 
 How you work:
@@ -97,7 +98,13 @@ How you answer:
 - The user sees your tool calls as short steps, collapsed once you answer; their results are not shown. Say what matters in your answer. For a look-up, name at most 5 rows, one per line, by their name or number and the one figure that matters; the user can open the step for the rest. Never write a table.
 - When the user must choose between known options (which customer, which option of a field, which of two readings, which model), call ask_user and stop. Never list the options in text.
 - When the user is unsure of a value, read what similar past quotes used with configs_similar, and offer it through ask_user.
-- Keep answers short and plain. Name fields by their labels, not their keys.`;
+- Keep answers short and plain. Name fields by their labels, not their keys.
+
+Each user turn opens with a <context> note from Confire, not from the user: the page they are on and the language to answer in. The latest note is what holds now.`;
 
 export const LANGUAGES = { en: "English", es: "Spanish", eu: "Basque" } as const;
 export const languageLine = (l: keyof typeof LANGUAGES) => `Answer in ${LANGUAGES[l]}.`;
+
+/** The note that opens each user turn: Confire's, not the user's words (SYSTEM says how to read it). */
+export const contextText = (section: string, language: keyof typeof LANGUAGES) =>
+  `<context>\n${section}\n${languageLine(language)}\n</context>`;
