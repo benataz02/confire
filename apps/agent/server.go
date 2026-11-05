@@ -16,9 +16,9 @@ import (
 
 // The wire (spec 2026-10-21 §6.1):
 //
-//	GET  /health                 no auth   { ok, version, companyDb, services: { b1, beas, print }, tunnel?, error? }
+//	GET  /health                 no auth   { ok, version, companyDb, services: { b1, beas, print: { gateway, crystal } }, tunnel?, error? }
 //	POST /{b1|beas}/request      Bearer    { method, path, headers?, body? } → { status, data }
-//	POST /print                  Bearer    { entity, docEntry } → { pdf, fileName }
+//	POST /print                  Bearer    { entity, docEntry, layout, engine? } → { pdf, fileName }
 //
 // Errors are { error: { status, code, message } }. Every Bearer call carries X-Confire-Company: a
 // call built for another company than agent.json's is refused with 409 COMPANY_CHANGED before it
@@ -54,7 +54,7 @@ func newAgent(cfg *Config, lg *log.Logger) (*Agent, error) {
 		if err != nil {
 			return nil, fmt.Errorf("print: %w", err)
 		}
-		a.gateway = &Gateway{newSession("print", base, "login", "", "session", cfg.CompanyDb, cfg.Print.User, cfg.Print.Pass, lg), cfg.Print.Layouts}
+		a.gateway = &Gateway{s: newSession("print", base, "login", "", "session", cfg.CompanyDb, cfg.Print.User, cfg.Print.Pass, lg)}
 	}
 	return a, nil
 }
@@ -117,13 +117,9 @@ func (a *Agent) guard(next http.Handler) http.Handler {
 }
 
 func (a *Agent) health(w http.ResponseWriter, _ *http.Request) {
-	print := []string{}
-	if a.gateway != nil {
-		print = a.gateway.Printable()
-	}
 	out := map[string]any{
 		"ok": a.b1.LastError() == nil, "version": version, "companyDb": a.cfg.CompanyDb,
-		"services": map[string]any{"b1": true, "beas": a.beas != nil, "print": print},
+		"services": map[string]any{"b1": true, "beas": a.beas != nil, "print": map[string]bool{"gateway": a.gateway != nil, "crystal": false}},
 	}
 	if err := a.b1.LastError(); err != nil {
 		out["error"] = err.Error()
@@ -190,25 +186,69 @@ func (a *Agent) request(s *Session, what string) http.HandlerFunc {
 	}
 }
 
+// printPrefix is what may be printed (entity-profiles.ts PRINTABLE) and each one's B1 report type
+// prefix: a layout code is that prefix and digits (QUT20009), so a layout of another document type
+// is refused here, whatever the caller says.
+var printPrefix = map[string]string{"Quotations": "QUT", "Orders": "RDR", "DeliveryNotes": "DLN", "Invoices": "INV"}
+
+// objectType is B1's object type per entity, for layouts with an ObjectId@ parameter.
+var objectType = map[string]int{"Quotations": 23, "Orders": 17, "DeliveryNotes": 15, "Invoices": 13}
+
 func (a *Agent) print(w http.ResponseWriter, r *http.Request) {
-	if a.gateway == nil {
-		fail(w, http.StatusServiceUnavailable, &SAPError{Status: 503, Message: "Printing is not configured on the SAP server's agent. Add it in the agent's setup."})
-		return
-	}
 	var in struct {
 		Entity   string  `json:"entity"`
 		DocEntry float64 `json:"docEntry"`
+		Layout   string  `json:"layout"`
+		Engine   string  `json:"engine"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.DocEntry < 1 || in.DocEntry != float64(int64(in.DocEntry)) {
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		fail(w, http.StatusBadRequest, &SAPError{Status: 400, Message: "Not a print request"})
+		return
+	}
+	prefix, ok := printPrefix[in.Entity]
+	if !ok {
+		fail(w, http.StatusBadRequest, &SAPError{Status: 400, Message: fmt.Sprintf("%s cannot be printed", in.Entity)})
+		return
+	}
+	if in.DocEntry < 1 || in.DocEntry != float64(int64(in.DocEntry)) {
 		fail(w, http.StatusBadRequest, &SAPError{Status: 400, Message: "Not a document key"})
 		return
 	}
-	pdf, name, err := a.gateway.Export(in.Entity, int64(in.DocEntry))
-	if err != nil {
-		sapFail(w, err)
+	if !layoutOf(prefix, in.Layout) {
+		fail(w, http.StatusForbidden, refuse("layout %q for %s", in.Layout, in.Entity).(*SAPError))
 		return
 	}
-	reply(w, map[string]string{"pdf": pdf, "fileName": name})
+	switch in.Engine {
+	case "", "gateway":
+		if a.gateway == nil {
+			fail(w, http.StatusServiceUnavailable, &SAPError{Status: 503, Message: "Printing through the SAP API Gateway is not configured on the SAP server's agent. Add it in the agent's setup."})
+			return
+		}
+		pdf, err := a.gateway.Export(in.Layout, int64(in.DocEntry))
+		if err != nil {
+			sapFail(w, err)
+			return
+		}
+		reply(w, map[string]string{"pdf": pdf, "fileName": fmt.Sprintf("%s-%d.pdf", in.Entity, int64(in.DocEntry))})
+	case "crystal":
+		fail(w, http.StatusServiceUnavailable, &SAPError{Status: 503, Message: "Direct printing is not set up on the SAP server's agent. Add it in the agent's setup."})
+	default:
+		fail(w, http.StatusBadRequest, &SAPError{Status: 400, Message: fmt.Sprintf("No print engine %q", in.Engine)})
+	}
+}
+
+// layoutOf: the layout is the entity's type prefix, its 1 (service) or 2 (items) and up to 8 digits.
+func layoutOf(prefix, layout string) bool {
+	digits, ok := strings.CutPrefix(layout, prefix)
+	if !ok || len(digits) < 2 || len(digits) > 9 {
+		return false
+	}
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *Agent) logout() {

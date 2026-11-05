@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,9 +38,6 @@ type wizard struct {
 	lines bool       // the busy step has printed a trace line
 	start time.Time  // when the busy step began
 }
-
-// printable is what Confire may print (entity-profiles.ts PRINTABLE), in the order asked.
-var printable = []string{"Quotations", "Orders", "DeliveryNotes", "Invoices"}
 
 func newWizard(path, server string) *wizard {
 	vt := initConsole()
@@ -362,14 +358,11 @@ func (w *wizard) beas(cfg *Config) *Service {
 
 func (w *wizard) print(cfg *Config) *Print {
 	fmt.Fprintln(w.out, w.heading("Printing (SAP API Gateway)"))
+	fmt.Fprintln(w.out, w.dim("  Each document prints with its default layout in SAP Business One."))
 	next := *cfg
-	p := &Print{Layouts: map[string]string{}}
+	p := &Print{}
 	if cfg.Print != nil {
 		*p = *cfg.Print
-		p.Layouts = maps.Clone(cfg.Print.Layouts)
-		if p.Layouts == nil {
-			p.Layouts = map[string]string{}
-		}
 	}
 	next.Print = p
 	host := "localhost"
@@ -380,17 +373,6 @@ func (w *wizard) print(cfg *Config) *Print {
 		p.URL = w.must("URL", or(p.URL, "https://"+host+":60020"))
 		p.User = w.must("User", or(p.User, cfg.B1.User))
 		p.Pass = w.password("Password", p.Pass, cfg.B1.Pass)
-		for _, e := range printable {
-			label := "Layout for " + e + " (blank = not printable)"
-			if p.Layouts[e] != "" {
-				label = "Layout for " + e + " (- = not printable)"
-			}
-			if v := w.ask(label, p.Layouts[e]); v == "" || v == "-" {
-				delete(p.Layouts, e)
-			} else {
-				p.Layouts[e] = v
-			}
-		}
 		if w.test("signed in", func() error { return w.testPrint(&next) }) {
 			return p
 		}

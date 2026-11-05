@@ -37,14 +37,13 @@ type Service struct {
 	Pass string `json:"pass"`
 }
 
-// Print is the SAP B1 API Gateway's Reporting Service.
+// Print is the SAP B1 API Gateway's Reporting Service. It holds no layouts: Confire sends the
+// document's default one with each print (print spec §5.1), and an old agent.json's `layouts` key is
+// skipped on load like any unknown key.
 type Print struct {
 	URL  string `json:"url"`
 	User string `json:"user"`
 	Pass string `json:"pass"`
-	// Layouts maps an entity set to the Crystal layout DocCode that prints it; one without a layout
-	// is not printable.
-	Layouts map[string]string `json:"layouts"`
 }
 
 const b1BasePath = "/b1s/v2/"
