@@ -351,8 +351,11 @@ or later; on 2012 R2 the Universal C Runtime, KB2999226, which cloudflared needs
 2. Answer its questions. Each section is tested with a real login before it is kept:
    - **SAP B1 Service Layer**: URL (`https://localhost:50000`), company database, user, password.
    - **Beas**: optional. Its URL including its path, bearer (its own `Login`, the default) or basic sign-in, user, password.
-   - **Printing** (SAP API Gateway): optional. URL (`https://<SL host>:60020`), user, password, and the
-     Crystal layout code per document type. A blank layout means that type is not printable.
+   - **Printing** (SAP API Gateway): optional. URL (`https://<SL host>:60020`), user, password. Each
+     document prints with its default layout in SAP B1 (Report and Layout Manager; a customer's own
+     default wins), which must be a Crystal layout: Confire refuses a PLD default and names it. Agents
+     before this asked for a layout per document type; Confire now ignores those, so check each
+     company's defaults for quotations, orders, deliveries and invoices when it updates.
    - **The pairing code**, last, so a long SAP section cannot use up its hour.
 3. It installs itself: `C:\Program Files\Confire\Agent\` (with `cloudflared` embedded), the service
    `ConfireAgent` (automatic start, restarts on failure), and `C:\ProgramData\Confire\agent.json`
@@ -384,7 +387,8 @@ Run the exe again (double-click, or `confire-agent setup` in an elevated prompt)
   `companyDb` in `agent.json` and restarting the `ConfireAgent` service does the same. **Portal clients
   then see the documents of their CardCode in the new company.** Between copies of one company (test ↔
   production) that is the same partner; in an unrelated company it may be someone else.
-- **Change SAP B1 / Beas / printing**: credentials, URLs, layouts. No new code needed.
+- **Change SAP B1 / Beas / printing**: credentials, URLs. No new code needed. A print layout is
+  changed in SAP B1 itself (the document type's default); Confire picks it up within 2 hours.
 - **Pair again**: needs a new code. Use it to move a workspace to another server: pairing the new one
   retires the old tunnel and replaces the agent secret, so a forgotten old server stops serving.
 - **Update**: offered when the exe you run is newer than the installed one. It keeps its settings.

@@ -77,7 +77,8 @@ function Settings() {
 
 /** The paired SAP server as Confire sees it now (spec 2026-10-21 §7): reached or not, the agent's
  *  version against the bundled build, what is configured on the box — and a new pairing code, which
- *  is how a server is replaced. Nothing here is edited: SAP settings live on the SAP server. */
+ *  is how a server is replaced. SAP settings live on the SAP server; the one thing chosen here is
+ *  which of the box's print engines Confire uses (print spec §5.1). */
 function AgentCard() {
   const i18n = useI18n();
   const code = useMutation(orpc.sap.pairingCode.mutationOptions());
@@ -122,25 +123,28 @@ function AgentCard() {
                 <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_AGENT_PRINTING")}</Label>}>
                   <Text>{engines || none}</Text>
                 </FormItem>
-                <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_AGENT_PRINT_ENGINE")}</Label>}>
-                  {/* Remounted after a refused switch: UI5 keeps the clicked item selected, and React
-                      never rewrites a `selected` prop that did not change. */}
-                  <SegmentedButton key={`${s.printEngine}|${engine.error ? engine.submittedAt : 0}`}
-                    accessibleName={i18n.getText("ADMIN_AGENT_PRINT_ENGINE")} itemsFitContent
-                    onSelectionChange={(e) => {
-                      const next = (e.detail.selectedItems[0] as HTMLElement | undefined)?.dataset.engine as "gateway" | "crystal" | undefined;
-                      if (next && next !== s.printEngine) engine.mutate({ engine: next });
-                    }}>
-                    <SegmentedButtonItem data-engine="gateway" selected={s.printEngine === "gateway"} disabled={engine.isPending}>
-                      {i18n.getText("ADMIN_AGENT_PRINT_GATEWAY")}
-                    </SegmentedButtonItem>
-                    <SegmentedButtonItem data-engine="crystal" selected={s.printEngine === "crystal"}
-                      disabled={engine.isPending || !(s.connected && s.services?.print.crystal)}
-                      tooltip={s.connected && s.services?.print.crystal ? undefined : i18n.getText("ADMIN_AGENT_PRINT_DIRECT_HINT")}>
-                      {i18n.getText("ADMIN_AGENT_PRINT_DIRECT")}
-                    </SegmentedButtonItem>
-                  </SegmentedButton>
-                </FormItem>
+                {/* The choice only once there is one: an agent reports Direct after its setup step. */}
+                {s.services?.print.crystal || s.printEngine === "crystal" ? (
+                  <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_AGENT_PRINT_ENGINE")}</Label>}>
+                    {/* Remounted after a refused switch: UI5 keeps the clicked item selected, and React
+                        never rewrites a `selected` prop that did not change. */}
+                    <SegmentedButton key={`${s.printEngine}|${engine.error ? engine.submittedAt : 0}`}
+                      accessibleName={i18n.getText("ADMIN_AGENT_PRINT_ENGINE")} itemsFitContent
+                      onSelectionChange={(e) => {
+                        const next = (e.detail.selectedItems[0] as HTMLElement | undefined)?.dataset.engine as "gateway" | "crystal" | undefined;
+                        if (next && next !== s.printEngine) engine.mutate({ engine: next });
+                      }}>
+                      <SegmentedButtonItem data-engine="gateway" selected={s.printEngine === "gateway"} disabled={engine.isPending}>
+                        {i18n.getText("ADMIN_AGENT_PRINT_GATEWAY")}
+                      </SegmentedButtonItem>
+                      <SegmentedButtonItem data-engine="crystal" selected={s.printEngine === "crystal"}
+                        disabled={engine.isPending || !(s.connected && s.services?.print.crystal)}
+                        tooltip={s.connected && s.services?.print.crystal ? undefined : i18n.getText("ADMIN_AGENT_PRINT_DIRECT_HINT")}>
+                        {i18n.getText("ADMIN_AGENT_PRINT_DIRECT")}
+                      </SegmentedButtonItem>
+                    </SegmentedButton>
+                  </FormItem>
+                ) : null}
                 <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_AGENT_LAST_OK")}</Label>}>
                   <Text>{s.lastOkAt ? s.lastOkAt.toLocaleString(formatLocale()) : none}</Text>
                 </FormItem>

@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Bar, Button, Dialog, Modals, Text } from "@ui5/webcomponents-react";
 import { useUiI18n } from "./i18n.ts";
 import { useUiSource } from "./source.tsx";
+import { printErrorText } from "./printErrors.ts";
 
 // The one place printing exists in the UI, for both apps. Everything that can print a SAP document
 // — an object page, a list report's count bar, a timeline row — renders this and nothing else, so
@@ -14,17 +15,6 @@ import { useUiSource } from "./source.tsx";
 // PRINTABLE list is restated here rather than imported. The server's PRINTABLE is the real
 // boundary; this only decides whether to draw a button.
 export const PRINTABLE_ENTITIES = new Set(["Quotations", "Orders", "DeliveryNotes", "Invoices"]);
-
-/** An oRPC error code (b1.ts toOrpcError) -> the sentence a user reads. BAD_REQUEST is SAP refusing
- *  the export (no print layout for the document type, the API Gateway's own 400), like BAD_GATEWAY. */
-const ERROR_TEXT: Record<string, string> = {
-  SERVICE_UNAVAILABLE: "UI_PREVIEW_ERR_UNAVAILABLE",
-  BAD_GATEWAY: "UI_PREVIEW_ERR_SAP",
-  BAD_REQUEST: "UI_PREVIEW_ERR_SAP",
-  NOT_FOUND: "UI_PREVIEW_ERR_NOT_FOUND",
-  CONFLICT: "UI_PREVIEW_ERR_CONFLICT",
-  FORBIDDEN: "UI_PREVIEW_ERR_FORBIDDEN",
-};
 
 /** base64 -> a blob URL the browser's own PDF viewer can open.
  *  // ponytail: iframe + the browser's viewer; a real viewer only if someone needs annotations. */
@@ -48,7 +38,7 @@ export function PrintActions({ entity, docEntry, disabled }: { entity: string; d
         titleText: i18n.getText("UI_PREVIEW_FAILED"),
         children: (
           <>
-            <Text>{i18n.getText(ERROR_TEXT[code] ?? "UI_PREVIEW_ERR_OTHER")}</Text>
+            <Text>{i18n.getText(printErrorText(code))}</Text>
             {e.message ? (
               <Text style={{ display: "block", marginTop: "0.75rem", color: "var(--sapContent_LabelColor)", fontSize: "var(--sapFontSmallSize)" }}>
                 {i18n.getText("UI_ERROR_DETAILS", e.message)}
