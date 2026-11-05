@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   BusyIndicator, Card, CardHeader, Form, FormGroup, FormItem, Button, Label, MessageStrip, FlexBox, ObjectStatus,
-  Tab, TabContainer, Text,
+  SegmentedButton, SegmentedButtonItem, Tab, TabContainer, Text,
 } from "@ui5/webcomponents-react";
 import { NotificationSettings } from "@confire/ui/notifications/Notifications.tsx";
 import { formatLocale } from "@confire/ui/format.ts";
@@ -84,6 +84,12 @@ function AgentCard() {
   // Polls while a code is on screen, so the card turns green when the new server pairs.
   const status = useQuery({ ...orpc.sap.agentStatus.queryOptions(), refetchInterval: code.data ? 3000 : false });
   const s = status.data;
+  // The print engine (print spec §5.1): Direct only once the agent reports it set up on the box.
+  const engine = useMutation({ ...orpc.sap.setPrintEngine.mutationOptions(), onSuccess: () => void status.refetch() });
+  const engines = [
+    s?.services?.print.gateway ? i18n.getText("ADMIN_AGENT_PRINT_GATEWAY") : null,
+    s?.services?.print.crystal ? i18n.getText("ADMIN_AGENT_PRINT_DIRECT") : null,
+  ].filter(Boolean).join(", ");
   // The code is spent once an agent redeems it (or it expires): its row goes, the card drops it.
   const reset = code.reset;
   const wasPending = useRef(false);
@@ -114,7 +120,26 @@ function AgentCard() {
                 <FormItem labelContent={<Label showColon>SAP B1</Label>}><Text>{s.services?.b1 ? "✓" : none}</Text></FormItem>
                 <FormItem labelContent={<Label showColon>Beas</Label>}><Text>{s.services?.beas ? "✓" : none}</Text></FormItem>
                 <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_AGENT_PRINTING")}</Label>}>
-                  <Text>{s.services?.print.length ? s.services.print.join(", ") : none}</Text>
+                  <Text>{engines || none}</Text>
+                </FormItem>
+                <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_AGENT_PRINT_ENGINE")}</Label>}>
+                  {/* Remounted after a refused switch: UI5 keeps the clicked item selected, and React
+                      never rewrites a `selected` prop that did not change. */}
+                  <SegmentedButton key={`${s.printEngine}|${engine.error ? engine.submittedAt : 0}`}
+                    accessibleName={i18n.getText("ADMIN_AGENT_PRINT_ENGINE")} itemsFitContent
+                    onSelectionChange={(e) => {
+                      const next = (e.detail.selectedItems[0] as HTMLElement | undefined)?.dataset.engine as "gateway" | "crystal" | undefined;
+                      if (next && next !== s.printEngine) engine.mutate({ engine: next });
+                    }}>
+                    <SegmentedButtonItem data-engine="gateway" selected={s.printEngine === "gateway"} disabled={engine.isPending}>
+                      {i18n.getText("ADMIN_AGENT_PRINT_GATEWAY")}
+                    </SegmentedButtonItem>
+                    <SegmentedButtonItem data-engine="crystal" selected={s.printEngine === "crystal"}
+                      disabled={engine.isPending || !(s.connected && s.services?.print.crystal)}
+                      tooltip={s.connected && s.services?.print.crystal ? undefined : i18n.getText("ADMIN_AGENT_PRINT_DIRECT_HINT")}>
+                      {i18n.getText("ADMIN_AGENT_PRINT_DIRECT")}
+                    </SegmentedButtonItem>
+                  </SegmentedButton>
                 </FormItem>
                 <FormItem labelContent={<Label showColon>{i18n.getText("ADMIN_AGENT_LAST_OK")}</Label>}>
                   <Text>{s.lastOkAt ? s.lastOkAt.toLocaleString(formatLocale()) : none}</Text>
@@ -137,6 +162,7 @@ function AgentCard() {
           </Button>
         )}
         {code.error ? <MessageStrip design="Negative" hideCloseButton>{code.error.message}</MessageStrip> : null}
+        {engine.error ? <MessageStrip design="Negative" hideCloseButton>{engine.error.message}</MessageStrip> : null}
       </FlexBox>
     </Card>
   );
