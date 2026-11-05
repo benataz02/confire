@@ -140,6 +140,7 @@ export const es: Partial<Record<keyof typeof en, string>> = {
   SEARCH_FIELD_NOT_TEXT: "El campo de búsqueda «{0}» no es un campo de texto de esta lista",
   PRINT_NOT_PRINTABLE: "{0} no se puede imprimir",
   PRINT_NOT_CRYSTAL: "El formato de impresión por defecto {0} no es de Crystal Reports. Defina un formato Crystal como predeterminado en SAP Business One (Gestor de informes y formatos).",
+  PRINT_DIRECT_NOT_SET_UP: "La impresión directa no está configurada en el servidor SAP. Ejecute primero allí la configuración del agente (Impresión directa).",
 
   SAP_NOT_PAIRED: "Todavía no hay ningún agente de SAP vinculado a este espacio de trabajo. Un administrador lo vincula en Configuración → Agente de SAP.",
   SAP_AGENT_SECRET: "El agente de SAP ha rechazado el secreto de Confire: otro espacio de trabajo u otro servidor se ha vinculado desde entonces. Vuelva a vincularlo en Configuración → Agente de SAP.",

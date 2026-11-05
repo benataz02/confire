@@ -124,8 +124,21 @@ export function isNewer(a: string | null | undefined, b: string | null | undefin
 
 type Health = {
   ok: boolean; version: string; companyDb: string;
-  services: { b1: boolean; beas: boolean; print: string[] };
+  // An agent before Direct printing sends the entities its layouts print; a newer one its engines.
+  services: { b1: boolean; beas: boolean; print: unknown };
 };
+type AgentServices = { b1: boolean; beas: boolean; print: { gateway: boolean; crystal: boolean } };
+
+/** The print engines an agent's /health reports, from either shape: an old agent's entity list
+ *  means the Gateway is set up when it names any, and it never has Direct. */
+export function printServices(p: unknown): { gateway: boolean; crystal: boolean } {
+  if (Array.isArray(p)) return { gateway: p.length > 0, crystal: false };
+  const o = p && typeof p === "object" ? (p as Record<string, unknown>) : {};
+  return { gateway: o.gateway === true, crystal: o.crystal === true };
+}
+
+const servicesOf = (h: Health | null): AgentServices | null =>
+  h?.services ? { b1: h.services.b1, beas: h.services.beas, print: printServices(h.services.print) } : null;
 
 /** Confire's UDFs in a SAP company: the dedup key on quotations (createQuote) and on business
  *  partners (portal onboarding), and a configured part's code on document lines (buildQuoteLines,
@@ -178,7 +191,7 @@ export function ensureUdfs(tenantId: string, conn: Connector): Promise<void> {
  * (ensureUdfs). The onboarding page polls this instead of trusting that a row exists.
  */
 export async function agentStatus(tenantId: string) {
-  const [row] = await db.select({ lastOkAt: sapConnection.lastOkAt, companyDb: sapConnection.companyDb })
+  const [row] = await db.select({ lastOkAt: sapConnection.lastOkAt, companyDb: sapConnection.companyDb, printEngine: sapConnection.printEngine })
     .from(sapConnection).where(eq(sapConnection.tenantId, tenantId)).limit(1);
   // A code on screen that no agent has redeemed yet: Settings watches it turn false.
   const [pending] = await db.select({ id: verification.id }).from(verification)
@@ -186,7 +199,7 @@ export async function agentStatus(tenantId: string) {
     .limit(1);
   const base = {
     latestVersion: bundledAgentVersion, version: null as string | null, companyDb: row?.companyDb ?? null,
-    services: null as Health["services"] | null, pairingPending: !!pending,
+    services: null as AgentServices | null, pairingPending: !!pending, printEngine: row?.printEngine ?? "gateway",
   };
   if (!row) return { ...base, paired: false, connected: false, updateAvailable: false, lastOkAt: null, error: null };
 
@@ -204,14 +217,14 @@ export async function agentStatus(tenantId: string) {
       .set({ status: "ok", lastOkAt, lastError: null, ...(typeof cur === "string" && cur ? { localCurrency: cur } : {}) })
       .where(eq(sapConnection.tenantId, tenantId));
     return {
-      ...base, paired: true, connected: true, version: health.version, companyDb: health.companyDb, services: health.services,
+      ...base, paired: true, connected: true, version: health.version, companyDb: health.companyDb, services: servicesOf(health),
       updateAvailable: isNewer(bundledAgentVersion, health.version), lastOkAt, error: null,
     };
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     await db.update(sapConnection).set({ status: "error", lastError: error }).where(eq(sapConnection.tenantId, tenantId));
     return {
-      ...base, paired: true, connected: false, version: health?.version ?? null, services: health?.services ?? null,
+      ...base, paired: true, connected: false, version: health?.version ?? null, services: servicesOf(health),
       updateAvailable: isNewer(bundledAgentVersion, health?.version), lastOkAt: row.lastOkAt, error,
     };
   }

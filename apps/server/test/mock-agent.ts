@@ -29,6 +29,8 @@ export type MockAgent = {
   defaultLayouts: Record<string, string>;
   /** layout codes GetReportLayout calls PLD forms rather than Crystal */
   pldLayouts: Set<string>;
+  /** what /health reports as `services.print`: an old agent's entity list, or `{ gateway, crystal }` */
+  health: { print: unknown };
   stop: () => void;
 };
 
@@ -99,6 +101,7 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
   const metadata = { xml: "" };
   const defaultLayouts: Record<string, string> = {};
   const pldLayouts = new Set<string>();
+  const health: { print: unknown } = { print: ["Quotations"] };
   let nextDocEntry = 1;
   let nextEtag = 1000; // clear of any etag a fixture hand-writes
 
@@ -110,7 +113,7 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
     async fetch(req) {
       const { pathname } = new URL(req.url);
       if (pathname === "/health")
-        return Response.json({ ok: true, version: "test", companyDb: company.db, services: { b1: true, beas: false, print: ["Quotations"] } });
+        return Response.json({ ok: true, version: "test", companyDb: company.db, services: { b1: true, beas: false, print: health.print } });
       if (req.headers.get("authorization") !== `Bearer ${SECRET}`) return fail(401, null, "Bad agent secret");
       // Before anything touches the store, as the real agent checks before it touches SAP.
       if (req.headers.get("x-confire-company") !== company.db)
@@ -236,7 +239,7 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
 
   return {
     url: `http://localhost:${server.port}`,
-    store, calls, missingUdf, metadata, company, noApply, defaultLayouts, pldLayouts,
+    store, calls, missingUdf, metadata, company, noApply, defaultLayouts, pldLayouts, health,
     stop: () => void server.stop(true),
   };
 }

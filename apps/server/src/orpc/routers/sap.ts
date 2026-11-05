@@ -2,13 +2,14 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { verifyOAuthQueryParams } from "@better-auth/oauth-provider";
 import { and, eq, notInArray } from "drizzle-orm";
-import { db, EXTERNAL_ROLES, member, oauthClient, organization } from "@confire/db";
+import { db, EXTERNAL_ROLES, member, oauthClient, organization, sapConnection } from "@confire/db";
 import { auth } from "../../auth.ts";
 import { adminProcedure, sessionProcedure } from "../base.ts";
 import { sapConnectionExists } from "../../seed-agent.ts";
 import { agentStatus, issuePairingCode } from "../../agent-pairing.ts";
 import { portalSeats } from "../../portal/members.ts";
 import { appTenantUrl, portalTenantUrl } from "../../tenant.ts";
+import { t } from "../../i18n/index.ts";
 
 /** Workspace setup has no workspace in its path — the user's one staff membership is the tenant.
  *  Customer seats are members too, and never count (auth.ts' organizationLimit). */
@@ -75,6 +76,19 @@ export const sapRouter = {
   // onboarding has no workspace in its path yet, so it resolves the user's one staff workspace.
   pairingCode: adminProcedure.handler(({ context }) => issuePairingCode(context.tenantId)),
   agentStatus: adminProcedure.handler(({ context }) => agentStatus(context.tenantId)),
+  // Settings → SAP agent's Printing choice (print spec §5.1). Direct only while the paired agent
+  // reports it set up — which an agent too old to know the engine never does — so the order is the
+  // box's setup first, then this switch. The Gateway can always be chosen back.
+  setPrintEngine: adminProcedure
+    .input(z.object({ engine: z.enum(["gateway", "crystal"]) }))
+    .handler(async ({ input, context }) => {
+      if (input.engine === "crystal") {
+        const s = await agentStatus(context.tenantId);
+        if (!s.connected || !s.services?.print.crystal) throw new ORPCError("PRECONDITION_FAILED", { message: t("PRINT_DIRECT_NOT_SET_UP") });
+      }
+      await db.update(sapConnection).set({ printEngine: input.engine }).where(eq(sapConnection.tenantId, context.tenantId));
+      return { engine: input.engine };
+    }),
   onboardingPairingCode: sessionProcedure.handler(async ({ context }) => issuePairingCode(await ownedTenant(context.user.id))),
   onboardingAgentStatus: sessionProcedure.handler(async ({ context }) => agentStatus(await ownedTenant(context.user.id))),
 };

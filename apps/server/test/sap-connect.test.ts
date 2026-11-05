@@ -148,7 +148,8 @@ describe.skipIf(!process.env.DATABASE_URL)("sap.agentStatus", () => {
     const green = await status();
     expect(green).toMatchObject({
       paired: true, connected: true, version: "test", companyDb: agent.company.db,
-      services: { b1: true, beas: false, print: ["Quotations"] }, updateAvailable: false, error: null, pairingPending: false,
+      services: { b1: true, beas: false, print: { gateway: true, crystal: false } }, printEngine: "gateway",
+      updateAvailable: false, error: null, pairingPending: false,
     });
     expect(green.lastOkAt).toBeInstanceOf(Date);
 
@@ -166,6 +167,33 @@ describe.skipIf(!process.env.DATABASE_URL)("sap.agentStatus", () => {
     expect(red).toMatchObject({ paired: true, connected: false });
     expect(red.error).toContain("Agent unreachable");
     expect((await db.select().from(sapConnection).where(eq(sapConnection.tenantId, tenantId)))[0]).toMatchObject({ status: "error" });
+  });
+
+  test("Direct printing can be chosen only once the agent reports it set up", async () => {
+    const { tenantId, slug } = await makeTenant();
+    const admin = await makeUser("admin", tenantId);
+    await upsertSapConnection(tenantId, { agentUrl: agent.url, secret: "test-agent-secret", companyDb: "SBODEMO" });
+    const ctx = { context: { headers: tenantHeaders(slug, admin.cookie) } };
+    try {
+      // An old agent's health (print: ["Quotations"]) has no Direct engine.
+      expect(await code(call(router.sap.setPrintEngine, { engine: "crystal" }, ctx))).toBe("PRECONDITION_FAILED");
+      agent.health.print = { gateway: true, crystal: true };
+      expect(await call(router.sap.setPrintEngine, { engine: "crystal" }, ctx)).toEqual({ engine: "crystal" });
+      expect((await call(router.sap.agentStatus, undefined, ctx)).printEngine).toBe("crystal");
+      // The Gateway can always be chosen back, whatever the agent has.
+      agent.health.print = { gateway: false, crystal: false };
+      expect(await call(router.sap.setPrintEngine, { engine: "gateway" }, ctx)).toEqual({ engine: "gateway" });
+      expect((await db.select().from(sapConnection).where(eq(sapConnection.tenantId, tenantId)))[0]!.printEngine).toBe("gateway");
+    } finally {
+      agent.health.print = ["Quotations"];
+    }
+  });
+
+  test("a member cannot switch the engine", async () => {
+    const { tenantId, slug } = await makeTenant();
+    const member = await makeUser("member", tenantId);
+    expect(await code(call(router.sap.setPrintEngine, { engine: "gateway" }, { context: { headers: tenantHeaders(slug, member.cookie) } })))
+      .toBe("FORBIDDEN");
   });
 });
 
