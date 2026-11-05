@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { B1EntitySchema, B1Field } from "@confire/b1";
-import { compileAggregate, compileLinesAggregate, compileLinesRows, compileList, flattenJoined } from "../src/entity-list.ts";
+import { compileAggregate, compileLinesRows, compileList, flattenJoined } from "../src/entity-list.ts";
 
 // SAP-side totals (reports spec §3.4): the `$apply` text b1.read and the report runner send. Pure.
 
@@ -37,14 +37,6 @@ test("a fence ANDed after compilation lands inside filter()", () => {
     .toBe("filter(CardCode eq 'C1')/aggregate($count as n)");
 });
 
-test("lines: the DocEntry join first, prefixed names, line measures on the lines path", () => {
-  const s = compileLinesAggregate(ORDERS, "Orders", [{ field: "Lines.ItemCode", op: "eq", value: "A" }],
-    { groupBy: ["DocDate", "Lines.ItemCode"], measures: [{ field: "Lines.LineTotal", agg: "sum", as: "a0" }] }, { pageSize: 500 });
-  expect(s.entities).toEqual(["Orders", "Orders/DocumentLines"]);
-  expect(s.apply).toBe("filter(Orders/DocEntry eq Orders/DocumentLines/DocEntry and (Orders/DocumentLines/ItemCode eq 'A'))/groupby((Orders/DocDate,Orders/DocumentLines/ItemCode),aggregate(Orders/DocumentLines(LineTotal with sum as a0)))");
-  expect(s.maxPageSize).toBe(500);
-});
-
 test("flattenJoined reads both answer shapes", () => {
   expect(flattenJoined({ Orders: { DocDate: "2026-11-01" }, "Orders/DocumentLines": { ItemCode: "A" }, a0: 5 }, "Orders"))
     .toEqual({ DocDate: "2026-11-01", "Lines.ItemCode": "A", a0: 5 });
@@ -56,8 +48,13 @@ test("a date or time value is a date or a time, never more OData (a fence ANDed 
   const q = (value: string) => compileList(ORDERS, { select: [], filter: [{ field: "DocDate", op: "ge", value }], orderby: [] }, { pageSize: 20 });
   expect(() => q("2000-01-01) or (DocEntry gt 0")).toThrow();
   expect(() => q("@today-12M")).toThrow();
-  expect(q("2026-01-01").filter).toBe("DocDate ge 2026-01-01");
-  expect(q("2026-01-01T10:00:00Z").filter).toBe("DocDate ge 2026-01-01T10:00:00Z");
+  expect(q("2026-01-01").filter).toBe("DocDate ge '2026-01-01'");
+  expect(q("2026-01-01T10:00:00Z").filter).toBe("DocDate ge '2026-01-01T10:00:00Z'");
+});
+
+test("a date inside $apply is quoted: B1's filter() refuses a bare one with 201", () => {
+  expect(compileAggregate(ORDERS, [{ field: "DocDate", op: "lt", value: "2026-11-03" }], { groupBy: [], measures: [{ agg: "count", as: "n" }] }, { pageSize: 500 }).apply)
+    .toBe("filter(DocDate lt '2026-11-03')/aggregate($count as n)");
 });
 
 test("lines rows sort on their side of the join", () => {

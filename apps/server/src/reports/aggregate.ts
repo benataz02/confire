@@ -215,7 +215,9 @@ export function summarize(r: ReportResult) {
     widgets: r.widgets.map((w) => w.kind === "kpi" ? { kpi: w.title, value: w.value, compare: w.compare }
       : w.kind === "chart" ? { chart: w.title, categories: w.rows.length, top: w.rows.slice(0, 5) }
       : { table: w.title, total: w.total ?? w.rows.length }),
-    datasets: r.datasets,
+    // Without `rows`: it adds up every grouped read's rows (one per customer, per month…), which the
+    // model took for the documents read ("397 rows, 481 invoices counted — I don't know why").
+    datasets: Object.fromEntries(Object.entries(r.datasets).map(([id, d]) => [id, { partial: d.partial, fellBack: d.fellBack }])),
     warnings: r.warnings,
   };
 }

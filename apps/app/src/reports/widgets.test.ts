@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chartComponent, chartProps, filterRows, formatValue, reportMessages, type ChartResult, type Result } from "./widgets.ts";
+import { chartComponent, chartProps, filterBar, filterRows, formatValue, reportConstraints, reportMessages, type ChartResult, type Result } from "./widgets.ts";
 
 // A report's results as UI5 chart props (reports spec §6.2). Pure: which component, which accessors,
 // the click filter and the numbers' formats.
@@ -62,4 +62,34 @@ test("messages: a partial dataset, a fallback, a failed run, and a table cut at 
     ["Critical", "REPORT_TABLE_PARTIAL(Docs)"],
   ]);
   expect(reportMessages(null, null, "Report", t)).toEqual([]);
+});
+
+test("the filter bar: a value help by the field's entity set, options as they come, the run's values", () => {
+  const { pool, values } = filterBar([
+    { field: "CardCode", label: "Customer", type: "string", value: ["C1"], declared: true, default: ["C1"], lookup: { entitySet: "BusinessPartners", keyField: "CardCode" } },
+    { field: "DocumentStatus", label: "Status", type: "enum", value: null, declared: false, options: [{ value: "bost_Open", label: "Open" }] },
+    { field: "Project", label: "Project", type: "string", value: "", declared: false, lookup: { entitySet: "Projects", keyField: "Code" } },
+  ]);
+  expect(pool[0]!.cfl?.dialogConfig.source).toEqual({ kind: "entity", entitySet: "BusinessPartners" });
+  expect(pool[1]!.options).toEqual([{ value: "bost_Open", label: "Open" }]);
+  expect(pool[2]!.cfl).toBeUndefined();
+  expect(pool.map((f) => [f.visible, f.defaultValue])).toEqual([[true, ["C1"]], [false, undefined], [false, undefined]]);
+  expect(values).toEqual({ CardCode: ["C1"] });
+});
+
+test("the report's metadata: sets merged, lines as Lines.X; the bar labels an undeclared field by it", () => {
+  const f = (Label: string, extra = {}) => ({ Type: "string", EdmType: "Edm.String", Label, ...extra }) as never;
+  const meta = reportConstraints([
+    { name: "Quotations", label: "", keys: [], writable: true, fields: { DocNum: f("Document No."), DocumentLines: f("Lines", { Fields: { ItemCode: f("Item No.") } }) } },
+    undefined,
+    { name: "Orders", label: "", keys: [], writable: true, fields: { DocNum: f("Order No."), CardName: f("Customer Name") } },
+  ]);
+  expect(Object.fromEntries(Object.entries(meta).map(([k, v]) => [k, v.Label]))).toEqual({
+    DocNum: "Document No.", "Lines.ItemCode": "Item No.", CardName: "Customer Name",
+  });
+  const { pool } = filterBar([
+    { field: "DocNum", label: "Number", type: "number", value: null, declared: true },
+    { field: "CardName", label: "CardName", type: "string", value: null, declared: false },
+  ], meta);
+  expect(pool.map((p) => p.label)).toEqual(["Number", "Customer Name"]);
 });

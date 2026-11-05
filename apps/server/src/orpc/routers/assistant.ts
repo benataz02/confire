@@ -5,15 +5,14 @@ import { db, assistantSettings } from "@confire/db";
 import { adminProcedure, userProcedure } from "../base.ts";
 import { createProject, Customer } from "./configs.ts";
 import { extractInto } from "../../assistant/extract.ts";
-import { copyToProject, fileParts, type FileRef } from "../../assistant/files.ts";
-import { readRequest } from "../../assistant/intake.ts";
+import { copyToProject, fileParts, FileRefZ, type FileRef } from "../../assistant/files.ts";
 import { ASSISTANT_MODEL, available } from "../../assistant/model.ts";
 import {
   appendMessages, blankThread, clearThread, deleteThread, dehydrate, lastDrop, linkProject, listThreads, ownThread, setThread,
   threadFor, withThread, type Thread, withoutContext,
 } from "../../assistant/threads.ts";
 import { userAutoWrite, workspaceAutoWrite } from "../../assistant/auto.ts";
-import { assertAssistant, assistantOn, MONTHLY_LIMIT_USD, monthUsage, offReason, rateLimit } from "../../assistant/usage.ts";
+import { assistantOn, MONTHLY_LIMIT_USD, monthUsage, offReason, rateLimit, usageReport } from "../../assistant/usage.ts";
 import { t as text } from "../../i18n/index.ts";
 import { mcpUrl } from "../../tenant.ts";
 import { eq } from "drizzle-orm";
@@ -22,17 +21,11 @@ import { eq } from "drizzle-orm";
 const mcpOn = async (tenantId: string) =>
   (await db.select({ mcp: assistantSettings.mcp }).from(assistantSettings).where(eq(assistantSettings.tenantId, tenantId)).limit(1))[0]?.mcp ?? false;
 
-// The assistant's fixed steps (spec §4.1), called by the panel: read the request (`intake`), start
-// the configuration it proposes (`start`, no model call), read its values (`extract`). Each step's
+// The assistant's fixed steps (spec §4.1), called by the panel: start the configuration read_request
+// proposed (`start`, no model call) and read its values (`extract`, a drop on a configuration's page).
+// A drop anywhere else is a chat turn (route.ts), which decides what the files are for. Each step's
 // result is written into the thread as a tool call and its result, so the chat and the panel read
-// one history and the chat model can refer back to them. The chat itself is assistant/route.ts.
-
-const FileRefZ = z.object({
-  kind: z.enum(["assistant", "project"]),
-  id: z.uuid(),
-  name: z.string().min(1),
-  mime: z.string(),
-});
+// one history and the chat model can refer back to them.
 
 const isAdmin = (role: string) => role === "admin" || role === "owner";
 
@@ -62,9 +55,12 @@ export async function startFromThread(
   ctx: { tenantId: string; userId: string }, t: Thread,
   input: { modelId: string; name: string; customer?: z.infer<typeof Customer> | null },
 ): Promise<{ id: string }> {
-  if (t.projectId) throw new ORPCError("BAD_REQUEST", { message: text("CHAT_HAS_CONFIG") });
+  // Read again: a chat run's thread is as it was when the run began, and a report_set earlier in the
+  // same run may have made it a report's.
+  const now = await ownThread(ctx.tenantId, ctx.userId, t.id);
+  if (now.projectId) throw new ORPCError("BAD_REQUEST", { message: text("CHAT_HAS_CONFIG") });
   // A report's chat stays the report's (reports spec §4): it never adopts a configuration.
-  if (t.reportId) throw new ORPCError("BAD_REQUEST", { message: text("CHAT_IS_REPORT") });
+  if (now.reportId) throw new ORPCError("BAD_REQUEST", { message: text("CHAT_IS_REPORT") });
   const { id } = await createProject(ctx.tenantId, ctx.userId, input, "assistant");
   await linkProject(t.id, id);
   t.projectId = id;
@@ -97,7 +93,7 @@ export const assistantRouter = {
       const t = input.id
         ? await ownThread(context.tenantId, context.userId, input.id)
         : await threadFor(context.tenantId, context.userId, input.projectId ?? null);
-      return { id: t.id, projectId: t.projectId, messages: modelMessagesToUIMessages(withoutContext(t.messages)) };
+      return { id: t.id, projectId: t.projectId, reportId: t.reportId, messages: modelMessagesToUIMessages(withoutContext(t.messages)) };
     }),
 
   /** New chat: a blank general thread, or with a configuration its thread started over. */
@@ -125,24 +121,6 @@ export const assistantRouter = {
   deleteThread: userProcedure
     .input(z.object({ id: z.uuid() }))
     .handler(({ input, context }) => deleteThread(context.tenantId, context.userId, input.id)),
-
-  /** Read a drop: propose model, customer and name. Nothing is created. */
-  intake: userProcedure
-    .input(z.object({ threadId: z.uuid(), text: z.string().max(50_000), refs: z.array(FileRefZ).min(1).max(10) }))
-    .handler(async ({ input, context }) => {
-      const t = await ownThread(context.tenantId, context.userId, input.threadId);
-      return withThread(t.id, async () => {
-        await assertAssistant(context.tenantId);
-        rateLimit(context.userId);
-        const parts = await fileParts(context.tenantId, input.refs as FileRef[], { threadId: t.id, ...(t.projectId ? { projectId: t.projectId } : {}) });
-        const proposal = await readRequest({ headers: context.headers, tenantId: context.tenantId }, {
-          parts, text: input.text,
-          meter: { tenantId: context.tenantId, userId: context.userId, threadId: t.id, projectId: t.projectId, kind: "intake" },
-        });
-        const messages = await append(t.id, [userMessage(parts, input.text), ...toolPair("read_request", proposal)], proposal.name);
-        return { messages, proposal };
-      });
-    }),
 
   /** Create the confirmed configuration from a general thread: the thread becomes its thread, and the
    *  drop becomes its files. No model call. */
@@ -203,4 +181,7 @@ export const assistantRouter = {
   usage: adminProcedure.handler(async ({ context }) => ({
     ...(await monthUsage(context.tenantId)), limit: MONTHLY_LIMIT_USD, model: ASSISTANT_MODEL,
   })),
+
+  /** The AI usage page: this month by day, kind and user, and the last six months. */
+  usageReport: adminProcedure.handler(({ context }) => usageReport(context.tenantId)),
 };

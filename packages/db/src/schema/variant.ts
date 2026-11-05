@@ -48,7 +48,7 @@ export type AggSpec = z.infer<typeof AggSpecZ>;
 // --- view state --------------------------------------------------------------------------------
 // One combined variant per list: the Beas grid-view and filter-view payloads in one document, with
 // Beas's own field names, so a view restores the filters and the table layout together.
-const FilterValueZ = z.union([
+export const FilterValueZ = z.union([
   z.string(), z.number(), z.boolean(), z.null(),
   z.array(z.union([z.string(), z.number()])),
   z.object({ from: z.string(), to: z.string() }),

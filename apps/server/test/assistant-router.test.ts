@@ -3,14 +3,17 @@ import { mcpUrl } from "../src/tenant.ts";
 import { and, eq } from "drizzle-orm";
 import { fakeText, type FakeTextAdapter } from "@tanstack/ai/testing";
 import { db, aiUsage, assistantSettings, assistantThread, configModel, configProject, configProjectEvent, projectFile } from "@confire/db";
-import type { FileRef } from "../src/assistant/files.ts";
+import { fileParts, type FileRef } from "../src/assistant/files.ts";
+import { readRequest } from "../src/assistant/intake.ts";
+import { appendMessages, dehydrate } from "../src/assistant/threads.ts";
 import { useTestAdapter } from "../src/assistant/model.ts";
 import { MONTHLY_LIMIT_USD } from "../src/assistant/usage.ts";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
 
-// The assistant's procedures (spec §4.1): the fixed intake steps the panel runs — read the request,
-// start the configuration, read its values — plus the switch and the month's usage for admins.
+// The assistant's procedures (spec §4.1): the fixed steps — start the configuration read_request
+// proposed, read its values — plus the switch and the month's usage for admins. A drop is a chat turn
+// (route.ts), stored here as the route stores it (`dropTurn`).
 
 const codeOf = (p: Promise<unknown>) => p.then(() => "OK", (e: { code?: string }) => e.code);
 const PDF = Buffer.from("%PDF-1.7 RFQ ACME bracket");
@@ -41,33 +44,38 @@ async function drop(w: Awaited<ReturnType<typeof world>>) {
   return { threadId, ref };
 }
 
+/** The drop's turn as the chat route stores it: the files, then the user's words. */
+async function dropTurn(w: Awaited<ReturnType<typeof world>>, threadId: string, refs: FileRef[], text: string) {
+  const parts = await fileParts(w.tenantId, refs, { threadId });
+  await appendMessages(threadId, [dehydrate({ role: "user", content: [...parts, { type: "text", content: text }] })], text);
+  return parts;
+}
+
 const proposalFor = (fake: FakeTextAdapter<string>, modelId: string | null, name = "ACME – Cable 3 m") =>
   fake.setResponses([{ text: JSON.stringify({ modelId, why: "A cable is asked for", customer: { name: "ACME", emailDomain: "acme.test" }, name }) }]);
 
 describe.skipIf(!process.env.DATABASE_URL)("assistant router", () => {
-  test("intake proposes, appends user + read_request pair, meters, titles the thread", async () => {
+  test("read_request proposes the tenant's model, never a foreign id, and meters", async () => {
     const w = await world();
     const { threadId, ref } = await drop(w);
+    const parts = await dropTurn(w, threadId, [ref], "Please quote 50 cables");
+    const meter = { tenantId: w.tenantId, userId: w.member.userId, threadId, projectId: null, kind: "intake" as const };
     proposalFor(w.fake, w.modelId);
-    const r = await call(router.assistant.intake, { threadId, text: "Please quote 50 cables", refs: [ref] }, w.staff);
-    expect(r.proposal).toMatchObject({ model: { id: w.modelId, name: "Cable" }, name: "ACME – Cable 3 m", customers: [] });
-    expect(r.proposal.customerError).toBeTruthy(); // no SAP here: the card's value help still works
-    expect(r.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    const p = await readRequest({ headers: w.staff.context.headers, tenantId: w.tenantId }, { parts, text: "Please quote 50 cables", meter });
+    expect(p).toMatchObject({ model: { id: w.modelId, name: "Cable" }, name: "ACME – Cable 3 m", customers: [] });
+    expect(p.customerError).toBeTruthy(); // no SAP here: the card's value help still works
     const [t] = await db.select().from(assistantThread).where(eq(assistantThread.id, threadId));
-    expect(t!.title).toBe("ACME – Cable 3 m");
-    expect(t!.messages.map((m) => m.role)).toEqual(["user", "assistant", "tool"]);
     expect(JSON.stringify(t!.messages)).not.toContain(PDF.toString("base64"));
     expect(await db.select().from(aiUsage).where(and(eq(aiUsage.tenantId, w.tenantId), eq(aiUsage.threadId, threadId)))).toHaveLength(1);
     // the request names a model that is not this tenant's: no proposal, never a foreign id
     proposalFor(w.fake, null);
-    expect((await call(router.assistant.intake, { threadId, text: "x", refs: [ref] }, w.staff)).proposal.model).toBeNull();
+    expect((await readRequest({ headers: w.staff.context.headers, tenantId: w.tenantId }, { parts, text: "x", meter })).model).toBeNull();
   });
 
   test("start creates with via: assistant, links the thread, copies the drop's files", async () => {
     const w = await world();
     const { threadId, ref } = await drop(w);
-    proposalFor(w.fake, w.modelId);
-    await call(router.assistant.intake, { threadId, text: "50 cables", refs: [ref] }, w.staff);
+    await dropTurn(w, threadId, [ref], "50 cables");
     const { id } = await call(router.assistant.start, { threadId, modelId: w.modelId, name: "ACME – Cable", customer: null }, w.staff);
     const events = await db.select().from(configProjectEvent).where(eq(configProjectEvent.projectId, id));
     expect(events.find((e) => e.kind === "created")!.payload).toEqual({ via: "assistant" });
@@ -82,8 +90,7 @@ describe.skipIf(!process.env.DATABASE_URL)("assistant router", () => {
   test("extract after start reads the last drop and appends extract_values", async () => {
     const w = await world();
     const { threadId, ref } = await drop(w);
-    proposalFor(w.fake, w.modelId);
-    await call(router.assistant.intake, { threadId, text: "50 cables", refs: [ref] }, w.staff);
+    await dropTurn(w, threadId, [ref], "50 cables");
     const { id } = await call(router.assistant.start, { threadId, modelId: w.modelId, name: "ACME – Cable", customer: null }, w.staff);
     let sent = "";
     w.fake.setResponses([({ request }) => {
@@ -96,33 +103,12 @@ describe.skipIf(!process.env.DATABASE_URL)("assistant router", () => {
     expect(r.result.applied.map((a) => a.key)).toEqual(["material"]);
     expect((await db.select().from(configProject).where(eq(configProject.id, id)))[0]!.entries).toEqual({ material: "steel" });
     const [t] = await db.select().from(assistantThread).where(eq(assistantThread.id, threadId));
-    expect(t!.messages.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant", "tool"]);
+    expect(t!.messages.map((m) => m.role)).toEqual(["user", "assistant", "tool"]);
     expect(JSON.stringify(t!.messages.at(-2))).toContain("extract_values");
     // a refusal appends nothing
     await db.update(configProject).set({ status: "quoted" }).where(eq(configProject.id, id));
     expect(await codeOf(call(router.assistant.extract, { threadId, projectId: id }, w.staff))).toBe("CONFLICT");
-    expect((await db.select().from(assistantThread).where(eq(assistantThread.id, threadId)))[0]!.messages).toHaveLength(5);
-  });
-
-  test("intake on a general thread reads only its own drop: a project ref elsewhere is not read", async () => {
-    const w = await world();
-    const { threadId, ref } = await drop(w);
-    const { id: other } = await call(router.configs.create, { modelId: w.modelId, name: "Someone else's", customer: null }, w.adminCtx);
-    const [secret] = await db.insert(projectFile).values({ tenantId: w.tenantId, projectId: other, name: "secret.pdf", mime: "application/pdf", size: PDF.length, data: PDF }).returning({ id: projectFile.id });
-    let sent = "";
-    w.fake.setResponses([({ request }) => { sent = JSON.stringify(request.messages); return { text: JSON.stringify({ modelId: null, why: "", customer: { name: null, emailDomain: null }, name: "x" }) }; }]);
-    await call(router.assistant.intake, { threadId, text: "x", refs: [ref, { kind: "project", id: secret!.id, name: "secret.pdf", mime: "application/pdf" }] }, w.staff);
-    expect(sent).toContain("RFQ_ACME.pdf");
-    expect(sent).not.toContain("secret.pdf");
-  });
-
-  test("a forged x-tenant is refused; another user's thread is not found", async () => {
-    const w = await world();
-    const other = await world();
-    const { threadId, ref } = await drop(w);
-    const forged = { context: { headers: tenantHeaders(other.slug, w.member.cookie) } };
-    expect(await codeOf(call(router.assistant.intake, { threadId, text: "x", refs: [ref] }, forged))).toBe("FORBIDDEN");
-    expect(await codeOf(call(router.assistant.intake, { threadId, text: "x", refs: [ref] }, w.adminCtx))).toBe("NOT_FOUND");
+    expect((await db.select().from(assistantThread).where(eq(assistantThread.id, threadId)))[0]!.messages).toHaveLength(3);
   });
 
   test("settings and usage are admin-only; status never throws", async () => {
@@ -152,11 +138,10 @@ describe.skipIf(!process.env.DATABASE_URL)("assistant router", () => {
   test("thread answers the stored history as UI messages", async () => {
     const w = await world();
     const { threadId, ref } = await drop(w);
-    proposalFor(w.fake, w.modelId);
-    await call(router.assistant.intake, { threadId, text: "50 cables", refs: [ref] }, w.staff);
+    await dropTurn(w, threadId, [ref], "50 cables");
     const t = await call(router.assistant.thread, {}, w.staff);
     expect(t.id).toBe(threadId);
-    const toolPart = t.messages.flatMap((m) => m.parts).find((p) => p.type === "tool-call");
-    expect(toolPart).toMatchObject({ name: "read_request" });
+    expect(t.messages.map((m) => m.role)).toEqual(["user"]);
+    expect(t.messages[0]!.parts.find((p) => p.type === "document")).toMatchObject({ metadata: { title: "RFQ_ACME.pdf" } });
   });
 });

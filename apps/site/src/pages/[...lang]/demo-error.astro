@@ -14,7 +14,7 @@ const t = dict[lang].demoError;
     <div class="wrap">
       <h1>{t.heading}</h1>
       <p class="lead">
-        {t.text}
+        {t.text}{" "}
         {SITE.contactEmail ? <>{t.writeTo} <a href={`mailto:${SITE.contactEmail}`}>{SITE.contactEmail}</a>.</> : t.tryLater}
       </p>
       <a class="btn em lg" href={`${localePath(lang, "/")}#demo`}>{t.retry}</a>

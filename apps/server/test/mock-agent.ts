@@ -63,14 +63,16 @@ function operationOf(method: string, path: string, headers: Record<string, strin
   return { route: "/delete", body: { entitySet, key, etag: headers["If-Match"] } };
 }
 
-/** `Field eq 'value'`, optionally `and Field ne <number>` — the only shapes the mock understands,
- *  which is all the dedup check-then-create (and its re-quote variant) needs. Anything else
- *  matches nothing. */
+/** `Field eq 'value'` and `Field ne <number>` clauses joined by `and` — the only shapes the mock
+ *  understands, which is all the dedup check-then-create (and its re-quote variant) and the UDF
+ *  install's lookup need. Anything else matches nothing. */
 function applyFilter(rows: Record<string, unknown>[], filter: string | undefined): Record<string, unknown>[] {
   if (!filter) return rows;
-  const m = /^([A-Za-z_][A-Za-z0-9_]*) eq '(.*?)'(?: and ([A-Za-z_][A-Za-z0-9_]*) ne (\d+))?$/.exec(filter);
-  if (!m) return [];
-  return rows.filter((r) => String(r[m[1]!] ?? "") === m[2]!.replace(/''/g, "'") && (!m[3] || r[m[3]] !== Number(m[4])));
+  const clauses = filter.split(" and ").map((c) => /^([A-Za-z_][A-Za-z0-9_]*) (?:eq '(.*)'|ne (\d+))$/s.exec(c));
+  if (clauses.some((m) => !m)) return [];
+  return rows.filter((r) => clauses.every((m) => m![2] !== undefined
+    ? String(r[m![1]!] ?? "") === m![2].replace(/''/g, "'")
+    : r[m![1]!] !== Number(m![3])));
 }
 
 /** One page of `rows` as B1 serves it: `Prefer: odata.maxpagesize` (0 = none, default 20) per page,
@@ -160,7 +162,17 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
           // ponytail: unverified (spec §16) — the code and text a live B1 gives a PATCH on a closed
           // quotation. Record the real one here once it has been seen.
           if (found.DocumentStatus === "bost_Close") return fail(400, -5002, "Document is already closed");
-          Object.assign(found, body.data, { "@odata.etag": `W/"${nextEtag++}"` });
+          // Lines merge by LineNum, as B1 does, unless B1S-ReplaceCollectionsOnPatch asked to replace them.
+          const { DocumentLines: sent, ...rest } = (body.data ?? {}) as Record<string, unknown>;
+          Object.assign(found, rest, { "@odata.etag": `W/"${nextEtag++}"` });
+          if (Array.isArray(sent)) {
+            const lines = body.replaceCollections || !Array.isArray(found.DocumentLines) ? [] : found.DocumentLines as Record<string, unknown>[];
+            for (const l of sent as Record<string, unknown>[]) {
+              const at = l.LineNum === undefined ? undefined : lines.find((x) => x.LineNum === l.LineNum);
+              if (at) Object.assign(at, l); else lines.push(l);
+            }
+            found.DocumentLines = lines;
+          }
           return Response.json({ status: 204, data: null });
         }
         case "/action": {

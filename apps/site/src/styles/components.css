@@ -27,6 +27,7 @@
 .nav a:hover { background: var(--sapButton_Lite_Hover_Background) }
 .desk { display: none }
 @media (min-width: 1024px) { .nav, .desk { display: inline-flex } .phone { display: none } }
+@media (max-width: 1023px) { .shell .btn { height: 2.75rem } }
 [popover] { border: 1px solid var(--hairline); padding: .375rem; border-radius: .75rem; background: var(--sapGroup_ContentBackground); color: var(--sapTextColor); box-shadow: var(--sapContent_Shadow2) }
 #menu { inset: 4rem .75rem auto auto; width: min(19rem, calc(100vw - 1.5rem)) }
 #lang { inset: 4rem 9rem auto auto; min-width: 11rem }
@@ -39,8 +40,8 @@
 .os .ico { width: .75rem; height: .75rem }
 .st-pos { color: var(--sapPositiveTextColor); background: color-mix(in oklab, var(--sapPositiveElementColor) 14%, transparent) }
 .st-pos .ico { fill: var(--sapPositiveElementColor) }
-.st-inf { color: var(--sapInformationColor); background: color-mix(in oklab, var(--sapInformativeElementColor) 13%, transparent) }
-.st-crit { color: var(--sapCriticalTextColor, var(--sapCriticalElementColor)); background: color-mix(in oklab, var(--sapCriticalElementColor) 14%, transparent) }
+.st-inf { color: var(--sapInformativeTextColor); background: color-mix(in oklab, var(--sapInformativeElementColor) 8%, transparent) }
+.st-crit { color: var(--sapCriticalTextColor, var(--sapCriticalElementColor)); background: color-mix(in oklab, var(--sapCriticalElementColor) 4%, transparent) }
 .st-neg { color: var(--sapNegativeTextColor); background: color-mix(in oklab, var(--sapNegativeElementColor) 13%, transparent) }
 .st-ai { color: var(--ai-ink); background: var(--ai-wash) }
 .st-ai .ico { fill: var(--ai-ink) }
@@ -56,6 +57,9 @@ input, select, textarea { font: inherit; font-size: var(--sapFontLargeSize); col
 input:hover, select:hover, textarea:hover { border-color: var(--sapField_Hover_BorderColor) }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--sapField_Focus_BorderColor); box-shadow: 0 0 0 3px var(--brand-wash) }
 textarea { min-height: 6rem; resize: vertical }
+::placeholder { color: var(--sapField_PlaceholderTextColor); opacity: 1 }
+:is(input, select, textarea):user-invalid { border-color: var(--sapField_InvalidColor) }
+.btn:disabled { cursor: progress; opacity: .7; transform: none }
 .trap { position: absolute; left: -9999px }
 .submit-row { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between }
 
@@ -81,7 +85,8 @@ footer { border-top: 1px solid var(--hairline); padding: 4rem 0 2rem; font-size:
 .foot .about { grid-column: 1 / -1; max-width: 22rem }
 @media (min-width: 900px) { .foot { grid-template-columns: 2fr 1fr 1fr 1fr } .foot .about { grid-column: auto } }
 .foot h2 { font: 700 var(--sapFontSmallSize) var(--sapFontFamily); letter-spacing: .1em; text-transform: uppercase; color: var(--sapContent_LabelColor); margin-bottom: 1rem }
-.foot ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .625rem }
+.foot ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .125rem }
+.foot li > * { display: inline-block; padding-block: .3125rem }
 .foot a, .foot .linkish { color: var(--sapTextColor); text-decoration: none } .foot a:hover, .foot .linkish:hover { color: var(--sapLinkColor) }
 .linkish { font: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left }
 .legal { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--hairline); display: flex; flex-wrap: wrap; gap: .75rem 2rem; justify-content: space-between; color: var(--sapContent_LabelColor); font-size: var(--sapFontSmallSize) }

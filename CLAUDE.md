@@ -3,7 +3,8 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 Confire is a multi-tenant SaaS quoting platform for SME manufacturers running on-prem SAP Business One.
-`AGENTS.md` describes what the product does in plain language; this file is the technical picture.
+Library skills ship inside their npm packages (TanStack Intent: `intent.skills` in the root
+`package.json` lists which); load the matching one before editing — @AGENTS.md
 
 ## Commands
 
@@ -335,21 +336,28 @@ default `claude-sonnet-5-5`, for the chat and the extraction; `ASSISTANT_INTAKE_
 tests swap in `fakeText` with `useTestAdapter`, and the preload drops `ANTHROPIC_API_KEY`). Staff
 only: the portal has no assistant.
 
-- **Two fixed structured calls, then the chat.** A drop in the panel runs `assistant.intake`
-  (`intake.ts`: model, customer, name over the models' descriptions — nothing is created), then
-  `assistant.start` (no model call: `createProject(…, "assistant")`, the thread linked, the drop copied
-  to `project_file`), then `assistant.extract` (`extract.ts`). Typed messages go to the chat,
-  `POST /api/assistant` (`route.ts`, AG-UI over SSE, staff process only). Intake and extract write
-  their results into the thread as tool-call/result pairs, so the chat reads one history; their tools
-  (`read_request`, `extract_values`) are in the chat's tool set because a request naming an undefined
-  tool is refused.
+- **One chat, three agents by skill** (`skills.ts`, `@tanstack/ai-skills`' `withSkills`): `SYSTEM` is the
+  general agent; the model loads the `configure` skill (quoting a request) or the `report` skill (a
+  report, or rebuilding one from a file) with `load_skill` when the ask needs it, and answers anything
+  else with none. A skill arrives as a tool result, so the prefix never changes; the catalog is in
+  `load_skill`'s description (`tool-description`), `SKILLS_FINGERPRINT` is in `prefixHash`, and
+  `load_skill` is never cleared by context editing. A page note says which skill a configuration's or a
+  report's chat needs. Messages go to `POST /api/assistant` (`route.ts`, AG-UI over SSE, staff process
+  only), **a drop included**: its files are uploaded first and ride the turn as `refs` (fenced to the
+  thread, or its configuration; one outside is refused), so the chat decides what they are for — no
+  classifier runs before it. On a configuration's chat a drop is still `assistant.extract`. The
+  configure skill starts from `read_request` (`intake.ts`, Haiku: model, customer, name over the
+  models' descriptions — nothing is created), whose card's Create is `assistant.start` (no model call:
+  `createProject(…, "assistant")`, the thread linked, the drop copied to `project_file`), then
+  `assistant.extract` (`extract.ts`); a run ends on `read_request` as on `ask_user`. Extract writes its
+  result into the thread as a tool-call/result pair, so the chat reads one history.
 - **The prompt prefix stays the same from turn to turn** (`route.ts`): one sorted tool set on every
-  page (`CHAT_TOOLS`, `pages.ts`), then `SYSTEM` and the thread's model block — the two system
+  page (`CHAT_TOOLS`, `pages.ts`, then the middleware's `load_skill`), then `SYSTEM` and the thread's model block — the two system
   markers — and the per-turn page note (`page.section`, the language) as a `pageContext` text part
   opening the stored user turn (`contextText`; the panel, the search and `lastDrop` never show it,
   `withoutContext`). `CHAT_OPTIONS` adds top-level `cache_control` — required: the adapter adds no
   marker of its own once a request has one, so without it the history was never cached — and context
-  editing (old tool results cleared past 80k input tokens, never what was read off files or asked).
+  editing (old tool results cleared past 80k input tokens, never what was read off files, asked, or a skill).
 - **Extraction fills empty fields only.** `modelBlock` (the cache breakpoint: stable per model version,
   it lists options whether a rule rules them out or not) and `extractionSchema` (generated per model:
   objects and `anyOf` only — Claude's structured output takes `additionalProperties: false`, no `oneOf`,
@@ -403,7 +411,12 @@ only: the portal has no assistant.
   name and the chat's text), renamed, pinned and deleted (`deleteThread`, under the lease) — their own
   only. A general New chat is the user's blank thread if there is one (`blankThread`).
   Stored file parts keep a reference (`metadata.file`), never bytes; `hydrate` refills them. File refs
-  are fenced by tenant and by their own project or thread. Only PDF, PNG and JPEG, by their bytes.
+  are fenced by tenant and by their own project or thread. PDF, PNG and JPEG, by their bytes, and
+  spreadsheets (`sheet.ts`, SheetJS from its CDN — npm's is stale): xlsx, xls, ods by bytes, CSV by
+  name and text, read as a text part (Claude's documents are PDFs; the adapter has no `container_upload`
+  for the code sandbox) — each sheet's first 200 rows as CSV, its formulas, and an xlsx's pivot tables
+  by definition (rows, columns, values, filters, source; read off the zip, SheetJS's free build skips
+  them). Stored empty like a file's bytes, made again on `hydrate` (cached per file id).
   Thinking is on and summarized (`reasoning: { level: CHAT_EFFORT, summary: true }`); the thread keeps
   it for the panel. A block is signed against its run's prompts and tools, and replayed into another
   prefix it is a 400 "bound to a different conversation": each stored assistant message carries its
@@ -421,7 +434,8 @@ only: the portal has no assistant.
   `ASSISTANT_MONTHLY_LIMIT_USD` (default 25). `rateLimit` is 20 calls a
   minute per user. Env read with `||`, not `??`: compose passes an unset variable as `""`. Inside a
   chat run the limit is read again before each further model call (`budget`, `onShouldContinue`):
-  over it, the loop stops after the tools it ran. A declined answer (`stop_reason: "refusal"`) is a
+  over it, the loop stops after the tools it ran. Admins read the meter on the AI usage page (`/usage`, the side nav's AI group;
+  `assistant.usageReport`: this month by day, task and user, the last six months against the limit). A declined answer (`stop_reason: "refusal"`) is a
   `confire.refusal` CUSTOM event the panel shows (`REFUSAL_EVENT`).
 - **MCP** (`mcp.ts`, spec §4.10): the user's own Claude/ChatGPT on `https://mcp.<DOMAIN>` (`mcpUrl`, dev
   `http://mcp.localhost`), one address for every workspace. It is its own host: `index.ts` sends it to
@@ -441,22 +455,31 @@ only: the portal has no assistant.
   (`requestInput`) with a server-built before → after, then post with `b1.post` / `createQuote`. The
   `rateLimit` window is shared with the chat. A client that cannot elicit posts nothing (ponytail).
 - **Reports** (`apps/server/src/reports/`, `apps/app/src/reports/`,
-  `docs/superpowers/specs/2026-11-03-assistant-reports-design.md`): *New report* (home → Reports) is a
-  report's own chat (`assistant_thread.report_id`, one per `assistant_report`), whose one tool is
-  `report_set` = `reports.set`, refused unless the call's context carries a report thread. The model
+  `docs/superpowers/specs/2026-11-03-assistant-reports-design.md`): a report is made by its chat — any
+  general chat's first successful `report_set` (= `reports.set`, refused without a chat thread in the
+  call's context and in a configuration's chat) creates the `assistant_report` and links the thread
+  (`assistant_thread.report_id`, `adoptReport`); a report's chat never becomes a configuration's. The model
   writes a `ReportDef` (datasets, lookups, derives, widgets — `@confire/db` `report.ts`); the server
   computes every figure: `validate.ts` refuses with every problem at once, `plan.ts` turns measures into
   `$apply` reads (a date grouped by day, bucketed in `aggregate.ts` by its text), `run.ts` follows every
   `nextLink` (40 pages a read, then `partial`), falls back to reading rows when B1 refuses `$apply`
-  (`toParts` makes them the same partials), attaches lookups 50 keys a read and reads tables' rows
-  (2,000). The chat gets `summarize`, never rows; its second system block is `REPORT_GUIDE`. The page
-  docks the chat right on the first `report_set` (a view transition), runs the report live on open, and
+  (`toParts` makes them the same partials) — always for a lines dataset, as B1's `$apply` over the
+  lines crossjoin names no line field (verified, spec §3.3) — attaches lookups 50 keys a read and reads tables' rows
+  (2,000). The chat gets `summarize`, never rows; the `report` skill is its guide, and asks one
+  brief first (`ask_user`'s `more`: up to four questions in one card). `filters` is the report's filter
+  bar — the list's `FilterHeader` in a card, every header field of the report's data in Adapt
+  Filters (`ReportResult.filters`); `reports.run` takes its values and
+  `barConds` (`plan.ts`) turns them into each dataset's conditions (a measure's own one stands). The AI page docks
+  the chat right on the first `report_set` (a view transition); a report opened later (`/reports/$id`,
+  the same `AssistantPage` in read mode) shows
+  without its chat until *Edit* (a chat search hit, `#chat`, opens it docked); it runs live on open, and
   *Save to home* makes it a tile: `reports.tiles` shows the last run's first KPI (hidden after a company
   switch) and re-runs stale ones off the request path. A report over Confire's Configurations taints
   the chat (auto mode). Not an MCP tool.
 - **The panel** (`AssistantPanel.tsx`) is shell state (`AssistantProvider` around `AppShell`), floating
-  over the page's right edge. **AI configuration** (`AssistantPage.tsx`, the home tile) is a page of its
-  own: one chat under a `Bar` (the title's menu pins, renames, deletes); its chats are found with the
+  over the page's right edge. **The AI page** (`AssistantPage.tsx`, the home tile; *New report* goes
+  there too) is a page of its own: one chat under a `Bar` (the title's menu pins, renames, deletes), with
+  the report beside it once the chat is a report's; its chats are found with the
   shell's search, which the page scopes to Chats and pulses on arrival (`GlobalSearch`),
   `/assistant` = a new one, `/assistant/$id` = the chat's id,
   never a configuration's. Both draw `ChatView.tsx`. The page's empty chat is a `HeroBanner` with the
@@ -656,6 +679,11 @@ line with its cached options, and a stale cache is a page message instead of a f
   produced it, and a recalculate replaces that list. `config_project.b1DocEntry` covers a double
   click; the UDF covers the case where B1 created the document and the response never arrived.
   A missing UDF **refuses to run** rather than risk a double-post — see `docs/sap-b1-durable-writes.md`.
+  Nobody installs the UDFs by hand: `agentStatus` (the onboarding and Settings poll) runs
+  `ensureUdfs` (`agent-pairing.ts`) once per company per process, off its own path — `CONFIRE_UDFS`:
+  `U_CF_Key` on OQUT and OCRD, `U_CF_ItemCode` on QUT1. One row per kind is the install: B1 adds a
+  marketing document's UDF to every document of its kind (verified live: OQUT's reached ORDR…, QUT1's
+  every lines table). Creating one drops the tenant's stored schemas, which never expire on their own.
   `createQuote` (`config-quote.ts`) is create-**or-modify**: a reopened request re-quotes its open
   quotation in place (PATCH + If-Match + replaced lines + a rewritten key; a 412 whose re-read shows
   our key is the lost-response success), and posts a new one once B1 has closed it — then the hash
@@ -664,6 +692,16 @@ line with its cached options, and a stale cache is a page message instead of a f
 - **Document copy** (`doc-copy.ts`): target lines carry `BaseType`/`BaseEntry`/`BaseLine` — that is
   what makes B1 close the source lines instead of creating an unlinked document. The line field
   list is an allowlist; `BaseLine` is the source `LineNum`, not the array index.
+  **A configured part becomes an item on Quotations→Orders**: a quotation line still on a generic
+  item with a code in `U_CF_ItemCode` (`ITEM_UDF` — fixed: a model mapping its item code elsewhere
+  gets no item made) is made real before the order, because B1 will not put another item on a line
+  linked to its base. `planCopy` (`entity-write.ts`, for the draft, the page, the chat, its Post and
+  MCP alike) reads which codes are items by now; posting then creates each missing one as a
+  duplicate of its generic item (`duplicateItem`: all but code, name — the line's description — and
+  what is B1's own), PATCHes the quotation's lines onto them (`swapLine`: merged by LineNum, the
+  line's own figures sent back so nothing re-prices), and only then copies. Each step checks before
+  it writes, so a retry goes on where a failure stopped. The draft page says which items it makes; a
+  proposal lists them and the quotation lines (`proposalOf`).
 
 ## List Report / Object Page
 
@@ -705,7 +743,7 @@ generates a page.
   `pricing.priceList` = checkModel's issue path); its Save is one `models.save` of `diffModel`'s patch
   plus the portal columns when they changed.
 - **Declarations, not templates, where a field will do.** A `Subsection` holds fields, groups or a
-  grid like a `Section`; `Section.fitContent` (tabs only, UI5's rule); `DetailFeature.mode: "tabs"`
+  grid like a `Section`; `DetailFeature.mode: "tabs"`
   puts one section at a time behind a tab bar, the open one in `?section=` (`sectionParam.ts`).
   `FormField.help` is the ⓘ. **Control kinds**: a field's or column's `controlType` names an entry of
   the page's `controls` map (the builder's `expr`, `masterdataQuery`, `batches`… in

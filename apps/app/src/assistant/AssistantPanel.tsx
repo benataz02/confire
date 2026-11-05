@@ -73,7 +73,7 @@ export function AssistantPanel() {
     const input = cleared ? { projectId: cleared } : {};
     try {
       const { id } = await client.assistant.newThread(input);
-      qc.setQueryData(orpc.assistant.thread.queryKey({ input }), { id, projectId: cleared ?? null, messages: [] });
+      qc.setQueryData(orpc.assistant.thread.queryKey({ input }), { id, projectId: cleared ?? null, reportId: null, messages: [] });
     } catch (e) {
       setNewChatError(e);
     }

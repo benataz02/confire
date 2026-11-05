@@ -27,13 +27,16 @@
     "@tanstack/ai": "^1.0.0",
     "@tanstack/ai-anthropic": "^1.0.0",
     "@tanstack/ai-mcp": "1.0.0",
+    "@tanstack/ai-skills": "1.0.0",
     "better-auth": "1.7.15",
     "drizzle-orm": "^0.45.2",
+    "fast-xml-parser": "^5.11.0",
     "hono": "^4.12.26",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-email": "6.11.2",
     "resend": "^6.33.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.6.7"
   },
   "devDependencies": {

@@ -8,7 +8,7 @@ import { orpc } from "../orpc.ts";
 // chat over it. History is the server's — `initialMessages` only paints it; every send carries just
 // the new text and the page it came from.
 
-export type Thread = { id: string; projectId: string | null; messages: UIMessage[] };
+export type Thread = { id: string; projectId: string | null; reportId: string | null; messages: UIMessage[] };
 
 const threadInput = (projectId: string | null) => (projectId ? { projectId } : {});
 

@@ -2,10 +2,10 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db, portalCompany } from "@confire/db";
-import { coerceKey, type B1EntitySchema, type B1Field, type B1Transport, type Key } from "@confire/b1";
+import { B1Error, coerceKey, type B1EntitySchema, type B1Field, type B1Transport, type Key } from "@confire/b1";
 import { entitySchema } from "./entity-meta.ts";
 import { missingRequired, pickEditable, profileOf, type EntityProfile } from "./entity-profiles.ts";
-import { buildCopy, COPY_SELECT, CopyHeaderZ, findFlow } from "./doc-copy.ts";
+import { buildCopy, COPY_SELECT, CopyHeaderZ, duplicateItem, findFlow, onItems, partLines, swapLine, type PartLine } from "./doc-copy.ts";
 import { viaB1 } from "./b1.ts";
 import { bad } from "./entity-read.ts";
 import { t } from "./i18n/index.ts";
@@ -55,6 +55,52 @@ export async function copySources(b1: B1Transport, input: z.infer<typeof CopyZ>)
   const read = await Promise.all([...new Set(input.docEntries)].map((n) =>
     viaB1(() => b1.readEntity(flow.source, n, { select: COPY_SELECT }))));
   return { flow, sources: read.map((r) => r.data as Record<string, unknown>) };
+}
+
+/** A part line and the item it goes on: its own code, or SAP's spelling of an item made since. */
+export type Part = PartLine & { item: string };
+/** An item a copy creates: `from` is the generic item it duplicates. */
+export type NewItem = { code: string; name: string; from: string };
+
+/**
+ * A copy and what it has to make first (doc-copy.ts, "configured parts"): the sources as they will be
+ * once each part line is on its item, those lines, and the items still to create. A code that is an
+ * item by now — made by hand, or by a copy that failed after it — is used, not made again.
+ */
+export async function planCopy(b1: B1Transport, input: z.infer<typeof CopyZ> & { lines?: CopyInput["lines"] }) {
+  const { flow, sources } = await copySources(b1, input);
+  const lines = flow.source === "Quotations" ? partLines(sources, input.lines) : [];
+  const codes = [...new Map(lines.map((l) => [l.code.toUpperCase(), l])).values()];
+  const found = await Promise.all(codes.map((l) => viaB1(() => b1.readEntity("Items", l.code, { select: ["ItemCode"] })
+    .then((r) => (r.data as { ItemCode?: unknown }).ItemCode, (e) => {
+      if (e instanceof B1Error && e.status === 404) return undefined;
+      throw e;
+    }))));
+  const have = new Map(codes.flatMap((l, i) => typeof found[i] === "string" ? [[l.code.toUpperCase(), found[i]] as const] : []));
+  const parts: Part[] = lines.map((l) => ({ ...l, item: have.get(l.code.toUpperCase()) ?? l.code }));
+  const make: NewItem[] = codes.filter((l) => !have.has(l.code.toUpperCase())).map((l) => ({ code: l.code, name: l.name, from: l.generic }));
+  return { flow, sources: onItems(sources, parts), parts, make };
+}
+
+/** Before the copy posts: each item made as a duplicate of its generic one, then each quotation's
+ *  part lines put on their items — read whole for the ETag, and a line already on its item (a retry
+ *  after a failure) left alone. B1 merges the PATCHed lines by LineNum and keeps the rest. */
+async function makeParts(ctx: WriteCtx, parts: Part[], make: NewItem[]): Promise<void> {
+  for (const m of make) {
+    const generic = await viaB1(() => ctx.b1.readEntity("Items", m.from));
+    await viaB1(() => ctx.b1.createEntity("Items", duplicateItem(generic.data as Record<string, unknown>, m.code, m.name), { prefer: "no-content" }));
+  }
+  for (const docEntry of new Set(parts.map((p) => p.docEntry))) {
+    const q = await viaB1(() => ctx.b1.readEntity("Quotations", docEntry));
+    const lines = ((q.data as { DocumentLines?: Record<string, unknown>[] }).DocumentLines ?? []);
+    const swap = parts.filter((p) => p.docEntry === docEntry).flatMap((p) => {
+      const l = lines.find((x) => x.LineNum === p.lineNum);
+      return l && String(l.ItemCode).toUpperCase() !== p.item.toUpperCase() ? [swapLine(l, p.item)] : [];
+    });
+    if (!swap.length) continue;
+    if (!q.etag) throw new ORPCError("BAD_REQUEST", { message: t("ENTITY_NO_ETAG", "Quotations") });
+    await viaB1(() => ctx.b1.updateEntity("Quotations", docEntry, { DocumentLines: swap }, { etag: q.etag }));
+  }
 }
 
 // --- names ---------------------------------------------------------------------------------------
@@ -129,7 +175,7 @@ export type WriteRequest =
 export type Prepared =
   | { op: "create"; entity: string; keys: string[]; payload: Record<string, unknown> }
   | { op: "update"; entity: string; keys: string[]; key: Key; etag: string; payload: Record<string, unknown>; before?: Record<string, unknown> }
-  | { op: "copy"; entity: string; keys: string[]; input: CopyInput; payload: Record<string, unknown> };
+  | { op: "copy"; entity: string; keys: string[]; input: CopyInput; payload: Record<string, unknown>; parts: Part[]; make: NewItem[] };
 
 const schemaOf = (ctx: WriteCtx, entity: string) => viaB1(() => entitySchema(ctx.tenantId, ctx.b1, entity)).catch(bad);
 
@@ -142,14 +188,14 @@ export async function prepareWrite(ctx: WriteCtx, rule: FieldRule, w: WriteReque
   if (w.op === "copy") {
     // A copy keeps its header allowlist (CopyHeaderZ) under either rule: its targets include
     // DeliveryNotes and Invoices, which are not curated.
-    const { flow, sources } = await copySources(ctx.b1, w.input);
+    const { flow, sources, parts, make } = await planCopy(ctx.b1, w.input);
     let payload: Record<string, unknown>;
     try {
       payload = buildCopy(flow, sources, { header: w.input.header, lines: w.input.lines });
     } catch (e) {
       return bad(e);
     }
-    return { op: "copy", entity: flow.target, keys: ["DocEntry"], input: w.input, payload };
+    return { op: "copy", entity: flow.target, keys: ["DocEntry"], input: w.input, payload, parts, make };
   }
 
   const profile = curated(w.entity);
@@ -185,6 +231,8 @@ const keyOfRow = (keys: string[], row: Record<string, unknown>): Key | null => {
  *  read again for its new ETag; a create answers the document (`prefer: representation`). */
 export async function postWrite(ctx: WriteCtx, p: Prepared): Promise<Posted> {
   if (p.op !== "update") {
+    // Item, quotation line, then the order: the only order in which each step can be done again.
+    if (p.op === "copy" && p.parts.length) await makeParts(ctx, p.parts, p.make);
     const res = await viaB1(() => ctx.b1.createEntity(p.entity, p.payload, { prefer: "representation" }));
     const row = res.data as Record<string, unknown>;
     return { entity: p.entity, key: keyOfRow(p.keys, row), row, etag: res.etag ?? null };

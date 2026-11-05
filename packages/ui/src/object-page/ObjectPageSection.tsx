@@ -145,7 +145,7 @@ export function objectPageSection(s: Section, ctx: SectionContext): ReactElement
   });
 
   return (
-    <ObjectPageSection key={s.id} id={s.id} titleText={ctx.titleOf(s)} fitContent={s.fitContent}>
+    <ObjectPageSection key={s.id} id={s.id} titleText={ctx.titleOf(s)}>
       {ctx.banner}
       {tpl ? tpl({ ...ctx, content }) : content}
       {subsections}

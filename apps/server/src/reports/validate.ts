@@ -63,7 +63,6 @@ export function checkReport(def: ReportDef, schemas: Map<string, B1EntitySchema 
         const hint = name.startsWith("Lines.") && !ds.lines ? " — set `lines: true` on the dataset to read document lines" : suggest(name, has);
         out.push(`${s.entity} has no field ${name}${hint}`);
       };
-      for (const n of ds.select) need(n);
       for (const c of [...ds.filter, ...s.filter]) need(c.field);
       ds.lookups.forEach((l, i) => { if (!ds.lookups.slice(0, i).some((x) => x.name === l.field)) need(l.field); });
       for (const d of ds.derive) if (!lookupNames.has(d.field)) need(d.field);
@@ -101,6 +100,20 @@ export function checkReport(def: ReportDef, schemas: Map<string, B1EntitySchema 
     // A measure's filter is pushed down with it: fields of the dataset, or `_source`.
     for (const c of m.filter) if (c.field !== SOURCE) field(c.field);
   };
+
+  // A bar filter applies to the datasets whose every source has its field (run.ts' filterBar).
+  def.filters.forEach((f, i) => {
+    if (def.filters.findIndex((g) => g.field === f.field) !== i) out.push(`Filter ${f.label}: ${f.field} is already a filter`);
+    // ponytail: header fields only — a Lines.* filter would need filterBar to read the lines' schema too.
+    const all = new Set([...raw.values()].flatMap((r) => [...r]).filter((n) => !n.startsWith("Lines.")));
+    if (!all.has(f.field)) out.push(`Filter ${f.label}: ${f.field} is not a field of any dataset (header fields only; lookups and derives are not filters)${suggest(f.field, all)}`);
+     // One place says a field's condition: cleared in the bar, it filters nothing.
+    for (const [id, ds] of Object.entries(def.datasets)) {
+      if ([...ds.filter, ...ds.from.flatMap((s) => s.filter)].some((c) => c.field === f.field)) {
+        out.push(`Dataset ${id}: ${f.field} is the filter bar's (${f.label}) — put its condition in that filter's default, not the dataset's or source's filter`);
+      }
+    }
+  });
 
   def.widgets.forEach((w, i) => {
     const where = `Widget ${i + 1} (${w.title})`;

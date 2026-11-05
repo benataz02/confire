@@ -21,6 +21,7 @@ const url = site + localePath(lang, "/");
 // Structured data (spec §12): who, what, and the FAQ exactly as the page shows it.
 const jsonLd = [
   { "@context": "https://schema.org", "@type": "Organization", name: "Confire", url: `${site}/`, logo: `${site}/logo.png`,
+    founder: { "@type": "Person", name: SITE.founder, knowsAbout: ["SAP Business One", "Beas Manufacturing"] },
     ...(Object.values(SITE.social).some(Boolean) ? { sameAs: Object.values(SITE.social).filter(Boolean) } : {}) },
   { "@context": "https://schema.org", "@type": "WebSite", name: "Confire", url, inLanguage: lang },
   { "@context": "https://schema.org", "@type": "SoftwareApplication", name: "Confire", applicationCategory: "BusinessApplication",

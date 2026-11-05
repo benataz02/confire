@@ -76,8 +76,9 @@ export function queryString(q?: QueryOptions): string {
   const parts: string[] = [];
   const set = (k: string, v: string) => parts.push(`${k}=${encodeURIComponent(v)}`);
   if (q.filter) set("$filter", q.filter);
-  // unverified (reports spec §3.3): $apply encoded like $filter; if a live B1 400s on it, compose it
-  // unencoded as crossJoinPath does $expand.
+  // $apply encoded like $filter: verified on a live b1s/v2 (2026-11-03), on a set and a crossjoin. Its
+  // 400s (code 201 "Not supported query option") are its content, not its encoding — the unencoded
+  // form is refused alike (entity-list.ts' date literal, reports/run.ts' lines).
   if (q.apply) set("$apply", q.apply);
   if (q.select?.length) set("$select", q.select.map((c) => assertName(c, "column")).join(","));
   if (q.orderby) set("$orderby", q.orderby);

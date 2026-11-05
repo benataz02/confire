@@ -1,5 +1,5 @@
-import type { Agg, AggSpec, Dataset, FilterCond, Measure, ReportDef, Widget } from "@confire/db";
-import { resolveFilter } from "./dates.ts";
+import type { Agg, AggSpec, Dataset, FilterCond, FilterValue, Measure, ReportDef, Widget } from "@confire/db";
+import { resolveDate, resolveFilter } from "./dates.ts";
 
 // What to ask SAP for (reports spec §3.3): each widget's measures become pushed-down reads, one per
 // (dataset, source, filter, grouping), their totals merged. A time dimension groups by the date
@@ -45,7 +45,34 @@ function sourcePasses(label: string, conds: FilterCond[]): boolean {
   });
 }
 
-export function planReads(def: ReportDef, today: Date): Plan {
+/** The filter bar's conditions, per dataset: what `scoped` lays over its reads. */
+export type Bar = Record<string, FilterCond[]>;
+
+const nextDay = (iso: string): string => {
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? iso : new Date(d.getTime() + 86_400_000).toISOString().slice(0, 10);
+};
+
+/** One filter bar value as conditions, a list's rules (views.ts' toQuery): a range is `ge` from and
+ *  `lt` the day after to (dates may be tokens), a list `in`, a text `contains` unless the field is
+ *  coded (an enum, a value help), everything else `eq`. An empty value filters nothing. */
+export function barConds(field: string, v: FilterValue | undefined, coded: boolean, today: Date): FilterCond[] {
+  if (v === undefined || v === null || v === "") return [];
+  if (Array.isArray(v)) return v.length ? [{ field, op: "in", value: v }] : [];
+  if (typeof v === "object") {
+    const from = v.from && resolveDate(v.from, today), to = v.to && resolveDate(v.to, today);
+    return [...(from ? [{ field, op: "ge" as const, value: from }] : []), ...(to ? [{ field, op: "lt" as const, value: nextDay(to) }] : [])];
+  }
+  return [{ field, op: typeof v === "string" && !coded ? "contains" : "eq", value: v }];
+}
+
+/** A read's conditions under the bar. A dataset's and a source's own never name a bar field (validate.ts:
+ *  the filter's default says it), but a measure's own (`own`: a compare period) stands, the bar not
+ *  added over it. */
+export const scoped = (base: FilterCond[], own: FilterCond[], bar: FilterCond[]): FilterCond[] =>
+  [...base, ...own, ...bar.filter((c) => !own.some((o) => o.field === c.field))];
+
+export function planReads(def: ReportDef, today: Date, bar: Bar = {}): Plan {
   const reads = new Map<string, Read>();
   // An alias names its total (`sum_DocTotal`), so it is the same in every read: a measure covering two
   // sources finds its number under one name in both, whatever else each read was asked.
@@ -73,7 +100,7 @@ export function planReads(def: ReportDef, today: Date): Plan {
     const keys: string[] = [];
     ds.from.forEach((src, i) => {
       if (!sourcePasses(sourceLabel(ds, i), bySource)) return;
-      const filter = resolveFilter([...ds.filter, ...src.filter, ...own], today);
+      const filter = resolveFilter(scoped([...ds.filter, ...src.filter], own, bar[m.dataset] ?? []), today);
       const key = JSON.stringify([m.dataset, i, filter, groupBy]);
       let r = reads.get(key);
       if (!r) reads.set(key, (r = { key, dataset: m.dataset, source: i, filter, agg: { groupBy, measures: [] } }));

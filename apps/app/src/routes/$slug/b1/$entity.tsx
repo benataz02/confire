@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, redirect, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BusyIndicator, Toolbar, ToolbarButton } from "@ui5/webcomponents-react";
+import { BusyIndicator, MessageStrip, Toolbar, ToolbarButton } from "@ui5/webcomponents-react";
 import { client, orpc, useIsAdmin } from "../../../orpc.ts";
 import { useI18n } from "../../../i18n.ts";
 import { b1Feature } from "../../../features/b1/index.ts";
@@ -30,6 +30,13 @@ export const Route = createFileRoute("/$slug/b1/$entity")({
   beforeLoad: ({ params }) => {
     if (!b1Feature(params.entity)) throw redirect({ to: "/$slug", params });
   },
+  // Free-form: a list's URL filters live here too (`?CardCode=C1,C2`); only Copy to's two are typed.
+  // The default parser turns `docs=5` into a number, hence String().
+  validateSearch: (s: Record<string, unknown>): Record<string, unknown> & { from?: string; docs?: string } => ({
+    ...s,
+    ...(s.from !== undefined && { from: String(s.from) }),
+    ...(s.docs !== undefined && { docs: String(s.docs) }),
+  }),
   component: EntityPage,
 });
 
@@ -159,11 +166,11 @@ function EntityCopy({ feature }: { feature: EntityFeature }) {
   const ui = useUiI18n();
   const qc = useQueryClient();
   const open = useEntityNav();
-  const search = Route.useSearch() as { from?: unknown; docs?: unknown };
+  const search = Route.useSearch();
   const input = {
-    sourceEntity: String(search.from ?? ""),
+    sourceEntity: search.from ?? "",
     targetEntity: feature.entity,
-    docEntries: String(search.docs ?? "").split(",").filter(Boolean).map(Number).filter(Number.isInteger),
+    docEntries: (search.docs ?? "").split(",").filter(Boolean).map(Number).filter(Number.isInteger),
   };
   // A draft is the sources as they were on opening: a refetch would replace the form under the user.
   const draft = useQuery({ ...orpc.entities.copyDraft.queryOptions({ input }), staleTime: Infinity, refetchOnWindowFocus: false, retry: false });
@@ -179,6 +186,12 @@ function EntityCopy({ feature }: { feature: EntityFeature }) {
   return (
     <ObjectPage isNew entity={feature.entity} constraints={draft.data.constraints} data={draft.data.draft}
       sections={sections} header={feature.detail.header} noMessages={feature.detail.noMessages} createLabel={ui.getText("UI_CREATE")}
+      // Configured parts with no item yet: posting makes them items first and puts them on the quotation.
+      notice={draft.data.newItems.length ? (
+        <MessageStrip design="Information" hideCloseButton>
+          {i18n.getText("ADMIN_COPY_NEW_ITEMS", draft.data.newItems.join(", "))}
+        </MessageStrip>
+      ) : undefined}
       onSave={async (diff) => {
         // The diff holds what changed: header fields, and the lines whole once any was edited or
         // deleted. Lines left alone are all of them (an emptied grid never gets here: lines are required).

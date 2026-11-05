@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import type { ChatMiddleware, TokenUsage } from "@tanstack/ai";
-import { and, eq, gte, sql } from "drizzle-orm";
-import { db, aiUsage, assistantSettings, type AiUsageKind } from "@confire/db";
+import { and, eq, gte, sql, type AnyColumn } from "drizzle-orm";
+import { db, aiUsage, assistantSettings, user, type AiUsageKind } from "@confire/db";
 import { ASSISTANT_MODEL, available, INTAKE_MODEL } from "./model.ts";
 import { t as text } from "../i18n/index.ts";
 
@@ -76,6 +76,43 @@ export async function monthUsage(tenantId: string): Promise<{ cost: number; assi
     .from(aiUsage)
     .where(and(eq(aiUsage.tenantId, tenantId), gte(aiUsage.at, THIS_MONTH)));
   return { cost: Number(r?.cost ?? 0), assisted: r?.assisted ?? 0 };
+}
+
+const sum = (col: AnyColumn) => sql<number>`coalesce(sum(${col}), 0)`.mapWith(Number);
+const SUMS = {
+  cost: sum(aiUsage.cost),
+  calls: sql<number>`count(*)`.mapWith(Number),
+  chats: sql<number>`count(distinct ${aiUsage.threadId})`.mapWith(Number),
+  assisted: sql<number>`count(distinct ${aiUsage.projectId})`.mapWith(Number),
+  input: sum(aiUsage.inputTokens), output: sum(aiUsage.outputTokens),
+  cacheRead: sum(aiUsage.cacheReadTokens), cacheWrite: sum(aiUsage.cacheWriteTokens),
+};
+
+/** Cost and calls per day of this month, or per month of the last six, gaps included (generate_series).
+ *  ponytail: days and months in the database's time zone (UTC); a workspace zone if anyone asks. */
+async function series(tenantId: string, step: "day" | "month") {
+  const start = step === "day" ? THIS_MONTH : sql`date_trunc('month', now()) - interval '5 months'`;
+  const { rows } = await db.execute<{ at: string; cost: number; calls: number }>(sql`
+    select to_char(s, ${step === "day" ? "YYYY-MM-DD" : "YYYY-MM"}) as at,
+      coalesce(sum(u.cost), 0)::float8 as cost, count(u.id)::int as calls
+    from generate_series(${start}, now(), ${`1 ${step}`}::interval) s
+    left join ai_usage u on u.tenant_id = ${tenantId} and u.at >= s and u.at < s + ${`1 ${step}`}::interval
+    group by s order by s`);
+  return rows;
+}
+
+/** The usage dashboard: this month's totals and who and what they went to, its days, the last six months. */
+export async function usageReport(tenantId: string) {
+  const month = and(eq(aiUsage.tenantId, tenantId), gte(aiUsage.at, THIS_MONTH));
+  const [[totals], kinds, users, days, months] = await Promise.all([
+    db.select(SUMS).from(aiUsage).where(month),
+    db.select({ kind: aiUsage.kind, ...SUMS }).from(aiUsage).where(month).groupBy(aiUsage.kind),
+    db.select({ userId: aiUsage.userId, name: user.name, ...SUMS }).from(aiUsage).leftJoin(user, eq(user.id, aiUsage.userId))
+      .where(month).groupBy(aiUsage.userId, user.name).orderBy(sql`sum(${aiUsage.cost}) desc`),
+    series(tenantId, "day"),
+    series(tenantId, "month"),
+  ]);
+  return { limit: MONTHLY_LIMIT_USD, model: ASSISTANT_MODEL, totals: totals!, kinds, users, days, months };
 }
 
 export const assistantOn = async (tenantId: string): Promise<boolean> => {

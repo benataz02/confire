@@ -192,9 +192,6 @@ export type Section = {
   groups?: Group[];
   subsections?: Subsection[];
   table?: SectionTable;
-  /** tabs mode only (UI5 honours it nowhere else): the section fills the page's height, for content
-   *  that scrolls itself */
-  fitContent?: boolean;
 };
 
 export type Facet = {

@@ -17,11 +17,11 @@ import { client, meQuery, orpc } from "../orpc.ts";
 import { useAssistantShell } from "./AssistantProvider.tsx";
 import { nextReplies } from "./replies.ts";
 import { routeContext, type RouteContext } from "./routeContext.ts";
-import { useAssistantChat, useAssistantInvalidate, type Thread } from "./useAssistant.ts";
+import { useAssistantChat, useAssistantInvalidate, type Refusal, type Thread } from "./useAssistant.ts";
 import { progressText, renderTool, type CardCtx } from "./cards/registry.tsx";
 import { blocks, type ToolCall } from "./steps.ts";
 import { Steps, type StepResult } from "./Steps.tsx";
-import { READABLE, refuseFile, sendDrop } from "./intake.ts";
+import { ACCEPT, extractDrop, fileIcon, fileOfPart, refuseFile, uploadDrop } from "./intake.ts";
 import { openQuestions, readAwaitsChat } from "./questions.ts";
 import { assistantToggle } from "./toggle.ts";
 import { QuestionCard } from "./cards/QuestionCard.tsx";
@@ -39,7 +39,7 @@ const AUTO_WRITE_KEY = "assistant:autoWrite";
 // and tool calls, each tool's card behind its line), and a card in the chat only where the user decides
 // (steps.ts DECISION). One question on screen at a time. Every colour is a theme parameter, set inline.
 
-/** `report`: a report's chat on its page (reports spec §6.2) — its own welcome and starters. */
+/** `report`: a report's chat, its report beside it (reports spec §6.2). */
 export type Kind = "configure" | "general" | "model" | "report";
 export const kindOf = (r: RouteContext): Kind =>
   r.projectId ? "configure" : r.routeId.startsWith("/$slug/models/") ? "model" : "general";
@@ -67,6 +67,16 @@ export function refusalText(i18n: ReturnType<typeof useI18n>, e: unknown): strin
   const key = `ASSISTANT_ERR_${code}`;
   if (code && i18n.getText(key, String(FILE_MAX_MB)) !== key) return i18n.getText(key, String(FILE_MAX_MB));
   return e instanceof Error ? e.message : i18n.getText("ASSISTANT_FAILED");
+}
+
+/** A failed run as the chat says it: the route's coded refusal, Claude overloaded, else "failed". A
+ *  stream's error carries the API's status as `code` and its body as `rawEvent` (the Anthropic adapter);
+ *  overloaded is 529, or 503 with `overloaded_error`, or that type mid-stream with no status at all. */
+function failureKey(i18n: ReturnType<typeof useI18n>, refusal: Refusal, error: unknown): string {
+  if (refusal && i18n.getText(`ASSISTANT_ERR_${refusal.code}`) !== `ASSISTANT_ERR_${refusal.code}`) return `ASSISTANT_ERR_${refusal.code}`;
+  const e = error as { code?: string; rawEvent?: { error?: { type?: string } } } | undefined;
+  if (e?.code === "529" || e?.code === "503" || e?.rawEvent?.error?.type === "overloaded_error") return "ASSISTANT_ERR_OVERLOADED";
+  return "ASSISTANT_FAILED";
 }
 
 /** A tool call paired with its result, as the card registry takes it. */
@@ -264,19 +274,50 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
     setFiles((fs) => [...fs, ...picked.filter((f) => !refuseFile(f))]);
   };
 
+  /** What every chat turn carries besides the user's words: the page, and files dropped with it. */
+  const body = (refs?: { kind: "assistant" | "project"; id: string; name: string; mime: string }[]) => ({
+    route: { routeId: route.routeId, params: route.params }, dirty: shell.dirty, language: LANGS.has(language) ? language : "en",
+    ...(refs?.length ? { refs } : {}),
+  });
+
+  /** A drop: on a configuration's chat read into it at once; anywhere else one chat turn with the
+   *  user's words, which the chat reads to decide what the files are for. */
   const drop = async (msg: string) => {
-    setPending(t("ASSISTANT_READING", files.map((f) => f.name).join(", ")));
     setDropError(null);
     stick.current = true;
+    if (projectId) {
+      setPending(t("ASSISTANT_READING", files.map((f) => f.name).join(", ")));
+      try {
+        append(await extractDrop({ projectId, threadId: thread.id, files, text: msg }));
+        setFiles([]);
+        setText("");
+      } catch (e) {
+        setDropError(errorText(e));
+      } finally {
+        setPending(null);
+      }
+      return;
+    }
+    setPending(t("ASSISTANT_UPLOADING", files.map((f) => f.name).join(", ")));
+    let refs;
     try {
-      append(await sendDrop({ projectId, threadId: thread.id, files, text: msg }));
-      setFiles([]);
-      setText("");
+      refs = await uploadDrop(thread.id, files);
     } catch (e) {
       setDropError(errorText(e));
+      return;
     } finally {
       setPending(null);
     }
+    setFiles([]);
+    setText("");
+    clearRefusal();
+    // The bubble shows the files as the stored turn will; the server takes only the words and `refs`.
+    void chat.sendMessage({
+      content: [
+        ...refs.map((r) => ({ type: "document" as const, source: { type: "data" as const, value: "", mimeType: r.mime }, metadata: { title: r.name, file: r } })),
+        ...(msg ? [{ type: "text" as const, content: msg }] : []),
+      ],
+    }, { body: body(refs) });
   };
 
   const send = (s: string) => {
@@ -288,9 +329,7 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
       clearRefusal();
       setText("");
       stick.current = true;
-      void chat.sendMessage(msg, {
-        body: { route: { routeId: route.routeId, params: route.params }, dirty: shell.dirty, language: LANGS.has(language) ? language : "en" },
-      });
+      void chat.sendMessage(msg, { body: body() });
     });
   };
 
@@ -330,19 +369,21 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
   const asked = last?.role === "assistant" && last.parts.some((p) => p.type === "tool-call" && (p.name === "ask_user"
     || ((p.name === "b1_write" || p.name === "b1_copy") && !!(p.output ?? parse(results.get(p.id)?.content) as { proposal?: unknown } | undefined)?.proposal)));
   const lastUser = [...chat.messages].reverse().find((m) => m.role === "user");
-  const failed = !busy && (!!chat.error || !!refusal) && last?.role === "user";
+  // Not only a turn with no answer: a stream error opens an (empty) assistant message first, and a run
+  // can fail after steps that ran. The next send clears both.
+  const failed = !busy && (!!chat.error || !!refusal);
 
   // The files on this configuration the chat has not read yet (a client's request comes with its
   // drawing on the timeline): offered as one "Read files" step.
   // By id, and by name: starting a configuration copies the drop to new ids on its timeline.
   const readRefs = new Set(chat.messages.flatMap((m) => m.parts.flatMap((p) => {
-    if (p.type !== "document" && p.type !== "image") return [];
-    const meta = p.metadata as { title?: string; file?: { id: string; name: string } } | undefined;
-    return [meta?.file?.id, meta?.file?.name ?? meta?.title];
+    const f = fileOfPart(p);
+    return f ? [f.file?.id, f.file?.name ?? f.title] : [];
   })));
   const unread = projectId ? (timeline.data?.events ?? []).flatMap((e) => {
     const f = e.kind === "file" ? e.payload as { fileId: string; name: string } | null : null;
-    const mime = f && (/\.pdf$/i.test(f.name) ? "application/pdf" : /\.png$/i.test(f.name) ? "image/png" : /\.jpe?g$/i.test(f.name) ? "image/jpeg" : null);
+    const mime = f && (/\.pdf$/i.test(f.name) ? "application/pdf" : /\.png$/i.test(f.name) ? "image/png" : /\.jpe?g$/i.test(f.name) ? "image/jpeg"
+      : /\.(xlsx|xls|ods|csv)$/i.test(f.name) ? "text/csv" : null);
     return f && mime && !readRefs.has(f.fileId) && !readRefs.has(f.name) ? [{ kind: "project" as const, id: f.fileId, name: f.name, mime }] : [];
   }) : [];
   const readUnread = async () => {
@@ -389,7 +430,7 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
   // configuration's page opens this same chat.
   const link = (id: string) => {
     setThreadProjectId(id);
-    qc.setQueryData(orpc.assistant.thread.queryKey({ input: { projectId: id } }), { id: thread.id, projectId: id, messages: [...latest.current] });
+    qc.setQueryData(orpc.assistant.thread.queryKey({ input: { projectId: id } }), { id: thread.id, projectId: id, reportId: null, messages: [...latest.current] });
     qc.setQueryData(orpc.assistant.thread.queryKey({ input: {} }), (t: Thread | undefined) => (t?.id === thread.id ? { ...t, projectId: id } : t));
   };
   // The proposal card's Create opens the configuration's form; the AI page stays where it is, and
@@ -416,11 +457,11 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
       if (d?.id === thread.id && d.messages !== chat.messages) qc.setQueryData(key, { ...d, projectId: threadProjectId, messages: chat.messages });
   }, [chat.messages, chat.isLoading, threadProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const lastDropMsg = [...chat.messages].reverse().find((m) => m.role === "user" && m.parts.some((p) => p.type === "document" || p.type === "image"));
+  const lastDropMsg = [...chat.messages].reverse().find((m) => m.role === "user" && m.parts.some((p) => !!fileOfPart(p)));
   const cardCtx: CardCtx = {
     projectId: formHere, threadId: thread.id, threadProjectId, onStarted,
     append, setPending,
-    lastFiles: (lastDropMsg?.parts ?? []).flatMap((p) => (p.type === "document" || p.type === "image") ? [String((p.metadata as { title?: string } | undefined)?.title ?? "")] : []),
+    lastFiles: (lastDropMsg?.parts ?? []).flatMap((p) => { const f = fileOfPart(p); return f ? [f.title] : []; }),
     errorText, send, busy,
   };
 
@@ -454,10 +495,10 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
   };
 
   const attachedOf = (m: UIMessage) => m.parts.flatMap((p, i) => {
-    if (p.type !== "document" && p.type !== "image") return [];
-    const title = (p.metadata as { title?: string } | undefined)?.title ?? "";
-    return [<Tag key={i} design="Neutral" wrappingType="None"
-      icon={<Icon name={p.type === "document" ? "pdf-attachment" : "attachment-photo"} />}>{title}</Tag>];
+    const f = fileOfPart(p);
+    if (!f) return [];
+    const mime = f.file?.mime ?? (p.type === "image" ? "image/png" : "application/pdf");
+    return [<Tag key={i} design="Neutral" wrappingType="None" icon={<Icon name={fileIcon(mime)} />}>{f.title}</Tag>];
   });
 
   const notices = (
@@ -480,11 +521,9 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
       {files.map((f, i) => <Token key={`${f.name}${i}`} data-i={i} text={f.name} />)}
     </Tokenizer>
   ) : null;
-  // A report's chat reads SAP and Confire, never a client's files: a drop there would start a
-  // configuration in a report's chat (the server refuses that too, CHAT_IS_REPORT).
-  const attach = kind === "report" ? null : (
+  const attach = (
     <>
-      <input ref={picker} type="file" multiple accept={READABLE.join(",")} hidden
+      <input ref={picker} type="file" multiple accept={ACCEPT} hidden
         onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
       <Button design="Transparent" icon="attachment" tooltip={t("ASSISTANT_ATTACH")} accessibleName={t("ASSISTANT_ATTACH")}
         disabled={disabled || busy} onClick={() => picker.current?.click()} />
@@ -537,9 +576,10 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
     </>
   );
 
-  const prompts = kind === "report" ? ["REPORT_PROMPT_PIPELINE", "REPORT_PROMPT_STOCK", "REPORT_PROMPT_OVERDUE", "REPORT_PROMPT_TOP_ITEMS"]
-    : kind === "configure" ? ["ASSISTANT_PROMPT_MISSING", "ASSISTANT_PROMPT_UNAVAILABLE"]
-    : page ? [] : ["ASSISTANT_PROMPT_WAITING", "ASSISTANT_PROMPT_MONTH"];
+  // The AI page's empty chat offers a report or two; quoting starts from a drop, which the welcome says.
+  const prompts = kind === "configure" ? ["ASSISTANT_PROMPT_MISSING", "ASSISTANT_PROMPT_UNAVAILABLE"]
+    : kind === "report" ? []
+    : page ? ["REPORT_PROMPT_PIPELINE", "REPORT_PROMPT_OVERDUE"] : ["ASSISTANT_PROMPT_WAITING", "ASSISTANT_PROMPT_MONTH"];
   const firstName = (me.data?.user?.name || me.data?.user?.email || "").split(/[ @]/)[0] ?? "";
   const inline = page ? READING : "1rem";
 
@@ -551,18 +591,17 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
         fontFamily: "var(--sapFontFamily)", fontSize: "var(--sapFontSize)", color: "var(--sapTextColor)",
         outline: dragging ? "2px dashed var(--sapContent_FocusColor)" : "none", outlineOffset: "-0.5rem",
       }}
-      onDragOver={(e) => { if (disabled || kind === "report") return; e.preventDefault(); setDragging(true); }}
+      onDragOver={(e) => { if (disabled) return; e.preventDefault(); setDragging(true); }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
-      onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled && kind !== "report") addFiles(e.dataTransfer.files); }}>
+      onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled) addFiles(e.dataTransfer.files); }}>
       {page && empty ? <WavingDots /> : null}
       {head?.({ busy, projectId, empty })}
       {page && empty ? (
         <FlexBox direction="Column" justifyContent="Center"
           style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBlock: "1.5rem clamp(1.5rem, 18vh, 10rem)", paddingInline: inline }}>
-          <HeroBanner style={BANNER} headerText={kind === "report" ? t("REPORT_ASK") : t("ASSISTANT_HELLO", firstName)}
-            overlineText={t(kind === "report" ? "REPORT_NEW" : "ASSISTANT_PAGE_TITLE")}>
+          <HeroBanner style={BANNER} headerText={t("ASSISTANT_HELLO", firstName)} overlineText={t("ASSISTANT_PAGE_TITLE")}>
             <FlexBox direction="Column" gap="1rem">
-              <Text style={{ color: "inherit" }}>{t(kind === "report" ? "REPORT_WELCOME" : kind === "configure" ? "ASSISTANT_WELCOME_CONFIGURE" : "ASSISTANT_WELCOME_START")}</Text>
+              <Text style={{ color: "inherit" }}>{t(kind === "configure" ? "ASSISTANT_WELCOME_CONFIGURE" : "ASSISTANT_WELCOME_START")}</Text>
               {notices}
               {dropStrip}
               {composer}
@@ -606,8 +645,7 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
             ) : null}
             {failed ? (
               <MessageStrip design="Negative" hideCloseButton>
-                {refusal && i18n.getText(`ASSISTANT_ERR_${refusal.code}`) !== `ASSISTANT_ERR_${refusal.code}`
-                  ? t(`ASSISTANT_ERR_${refusal.code}`) : t("ASSISTANT_FAILED")}
+                {t(failureKey(i18n, refusal, chat.error))}
                 {" "}
                 {lastUser ? <Link onClick={() => send(textOf(lastUser))}>{t("ASSISTANT_RETRY")}</Link> : null}
               </MessageStrip>

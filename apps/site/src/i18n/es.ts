@@ -55,7 +55,6 @@ export const es: Dict = {
     },
   },
   why: {
-    eyebrow: "Por qué Confire",
     title: "Ofertar un producto configurado no debería llevar una semana.",
     today: "Hoy",
     todayLead: "Correo, una hoja de cálculo y la única persona que conoce las reglas.",
@@ -65,7 +64,7 @@ export const es: Dict = {
       { title: "Se teclea a mano en SAP", text: "Línea a línea, precio a precio." },
     ],
     todayTime: "2–5 días",
-    todayTimeNote: "por oferta*",
+    todayTimeNote: "por oferta",
     with: "Con Confire",
     withLead: "Una sola pantalla entre la petición y SAP.",
     withSteps: [
@@ -75,10 +74,8 @@ export const es: Dict = {
     ],
     withTime: "Minutos",
     withTimeNote: "del buzón a SAP",
-    footnote: "* Provisional. Sustituir por la cifra de un cliente real.",
   },
   how: {
-    eyebrow: "Cómo funciona",
     title: "Se configura una vez. Se oferta cada día.",
     lead: "Los dos primeros pasos se hacen una vez. El tercero es la nueva rutina de su equipo comercial.",
     steps: [
@@ -88,7 +85,6 @@ export const es: Dict = {
     ],
   },
   product: {
-    eyebrow: "Producto",
     title: "Todo lo que hay entre la petición y la oferta.",
     lead: "Para fabricantes cuyos productos se configuran bajo pedido, no se eligen de un catálogo.",
     ai: {
@@ -152,7 +148,6 @@ export const es: Dict = {
     },
   },
   security: {
-    eyebrow: "Seguridad",
     title: "Su SAP se queda en su servidor.",
     lead: "Confire nunca guarda su acceso a SAP ni tiene una puerta a su red.",
     points: [
@@ -169,21 +164,20 @@ export const es: Dict = {
     online: "En línea",
   },
   faq: {
-    eyebrow: "Preguntas",
     title: "Lo primero que pregunta Sistemas.",
     lead: "¿Otra duda? Plantéela en la demo, con su propia instalación delante.",
     items: [
       { q: "¿Funciona Confire con SAP Business One en local?", a: "Sí, para eso está hecho. Un pequeño agente en su servidor SAP conecta Confire con el Service Layer, sin abrir nada en su cortafuegos." },
       { q: "¿Necesito Beas?", a: "No. Con Beas, Confire también calcula el coste de sus rutas. Sin él, los costes salen de la lista de materiales y de sus listas de precios de SAP." },
-      { q: "¿Qué IA usa y qué ve?", a: "Borrador: Claude, de Anthropic. Ve la petición que usted suelta y el producto que está rellenando, nada más de SAP." },
+      { q: "¿Qué IA usa y qué ve?", a: "Claude, de Anthropic. Ve la petición que usted suelta y el producto que está rellenando, nada más de SAP." },
       { q: "¿Qué pasa si SAP no está disponible?", a: "Sigue configurando y valorando con la copia de sus opciones y precios que guarda Confire. La contabilización en SAP espera a que vuelva." },
       { q: "¿Pueden usarlo mis clientes?", a: "Sí, desde su propio portal y por invitación. Solo ven sus propios documentos." },
-      { q: "¿Cuánto se tarda en ponerlo en marcha?", a: "Borrador: el agente se instala en minutos. Modelar su primer producto es para lo que sirve la demo." },
+      { q: "¿Cuánto se tarda en ponerlo en marcha?", a: "El agente se instala en minutos. Modelar su primer producto es para lo que sirve la demo." },
     ],
   },
   demo: {
-    eyebrow: "Pedir una demo",
     title: "Véalo con uno de sus propios productos.",
+    founder: { role: "Fundador · País Vasco", lead: "Hablará con quien ha creado Confire.", text: "He dirigido cuatro implantaciones completas de SAP Business One y Beas en fabricantes de España y Alemania, y tengo la certificación avanzada de Beas Manufacturing." },
     next: [
       { title: "Respondemos en un día laborable", text: "Para fijar una hora que le venga bien." },
       { title: "Una llamada de 30 minutos", text: "Traiga una petición real de un cliente." },
@@ -200,6 +194,7 @@ export const es: Dict = {
     privacy: "Solo lo usaremos para responderle.",
     privacyLink: "Privacidad",
     submit: "Pedir una demo",
+    sending: "Enviando…",
   },
   footer: {
     about: "Ofertas con IA para fabricantes con SAP Business One.",

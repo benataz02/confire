@@ -108,10 +108,10 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
   const hits = <T,>(s: string, rows: T[] | undefined, hit: (r: T) => SearchHit, allowed = true) =>
     on(s, allowed) ? (rows ?? []).slice(0, cap).map(hit) : [];
   const needle = q.trim().toLowerCase();
-  // A report's chat opens its report, the chat docked beside it.
+  // A report's chat opens its report with the chat docked beside it (`#chat`, AssistantPage).
   const chatHit = (r: { id: string; title: string; projectName: string | null; reportId: string | null; reportTitle: string | null }) => ({
     text: r.title || r.reportTitle || r.projectName || t("ASSISTANT_UNTITLED"), description: join(r.reportTitle ?? r.projectName),
-    icon: r.reportId ? "business-objects-experience" : "ai", to: r.reportId ? `/reports/${r.reportId}` : `/assistant/${r.id}`,
+    icon: r.reportId ? "business-objects-experience" : "ai", to: r.reportId ? `/reports/${r.reportId}#chat` : `/assistant/${r.id}`,
   });
   // The empty field: scoped to chats, the AI page's list (pinned first, as there); else what was
   // picked here last under this scope.
@@ -201,7 +201,8 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
         setQ("");
         setTerm("");
         setOpen(false);
-        go(to);
+        const [path, hash] = to.split("#");
+        go(path!, undefined, hash);
       }}
     >
       {groups.map((g) => {

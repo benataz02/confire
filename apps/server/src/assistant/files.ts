@@ -1,22 +1,37 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import { ORPCError } from "@orpc/server";
 import type { ContentPart } from "@tanstack/ai";
 import { and, eq, inArray } from "drizzle-orm";
 import { db, assistantFile, assistantThread, projectFile } from "@confire/db";
 import { cleanName, FILE_MAX, handle, imageType, readCapped, UUID, whoFor } from "../files.ts";
 import { addFile, type Actor } from "../project-lifecycle.ts";
+import { cachedSheetText, isSheet } from "./sheet.ts";
 import { t as text } from "../i18n/index.ts";
 
 // The files the assistant reads (assistant spec §4.2, §4.9): a configuration's own (`project_file`)
-// and, before a configuration exists, a thread's drop (`assistant_file`). Only PDF, PNG and JPEG,
-// told by their bytes, never by a name or a claimed type.
+// and, before a configuration exists, a thread's drop (`assistant_file`). PDF, PNG and JPEG, which
+// Claude reads as they are, and spreadsheets, which it reads as text (sheet.ts) — told by their bytes,
+// never by a claimed type (a CSV, which has no magic bytes, by its name and its being text).
 
 export type DocType = "application/pdf" | "image/png" | "image/jpeg";
 export const docType = (b: Buffer): DocType | null =>
   b.subarray(0, 5).toString("latin1") === "%PDF-" ? "application/pdf" : imageType(b);
 
+const SHEET_MIME: Record<string, string> = {
+  xls: "application/vnd.ms-excel", ods: "application/vnd.oasis.opendocument.spreadsheet", csv: "text/csv",
+};
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+/** The type the assistant reads the bytes as, or null when it reads none of them. A spreadsheet's
+ *  type is only its label (by its extension): what the bytes are decided whether it is one. */
+export function readableType(b: Buffer, name: string): string | null {
+  return docType(b) ?? (isSheet(b, name) ? SHEET_MIME[name.split(".").pop()?.toLowerCase() ?? ""] ?? XLSX_MIME : null);
+}
+
 /** A file as a thread stores it: a reference, never its bytes. */
 export type FileRef = { kind: "assistant" | "project"; id: string; name: string; mime: string };
+export const FileRefZ = z.object({ kind: z.enum(["assistant", "project"]), id: z.uuid(), name: z.string().min(1), mime: z.string() });
 
 /** Raw bytes per model call: Claude takes 32 MB a request, and base64 grows the bytes by 4/3. */
 export const REQUEST_FILE_CAP = 24 * 1024 * 1024;
@@ -53,10 +68,14 @@ export async function fileBytes(tenantId: string, refs: FileRef[], fence: Fence 
   return new Map(rows.map((r) => [r.id, r.data]));
 }
 
-/** One file as the model reads it, or null when its bytes are no type the assistant reads. */
+/** One file as the model reads it, or null when its bytes are no type the assistant reads. A
+ *  spreadsheet is a text part (Claude's documents are PDFs) carrying its file the same way. */
 export function filePart(ref: FileRef, data: Buffer): ContentPart | null {
   const mime = docType(data);
-  if (!mime) return null;
+  if (!mime) {
+    const text = cachedSheetText(ref.id, ref.name, data);
+    return text === null ? null : { type: "text", content: text, metadata: { title: ref.name, file: ref } satisfies FileMeta };
+  }
   const source = { type: "data" as const, value: data.toString("base64"), mimeType: mime };
   const metadata: FileMeta = { title: ref.name, file: { ...ref, mime } };
   return mime === "application/pdf" ? { type: "document", source, metadata } : { type: "image", source, metadata };
@@ -86,7 +105,7 @@ export const unlabeled = (parts: ContentPart[]): ContentPart[] =>
   parts.map((p) => (p.type === "text" && p.metadata ? { type: "text", content: p.content } : p));
 
 /** The drop's upload, past the RPC body cap: `POST /files/<slug>/assistant/<threadId>?name=`, the
- *  raw body. Staff only, into their own thread; ≤ 10 MB, a PDF, PNG or JPEG by its bytes. Mounted by
+ *  raw body. Staff only, into their own thread; ≤ 10 MB, a type `readableType` reads. Mounted by
  *  the staff process beside the project file routes. */
 export function assistantFileRoutes(): Hono {
   const app = new Hono();
@@ -100,9 +119,9 @@ export function assistantFileRoutes(): Hono {
     if (!t) throw new ORPCError("NOT_FOUND");
     const data = await readCapped(c.req.raw, FILE_MAX);
     if (!data) throw new ORPCError("PAYLOAD_TOO_LARGE", { message: text("FILE_TOO_LARGE") });
-    const mime = docType(data);
-    if (!mime) throw new ORPCError("UNSUPPORTED_MEDIA_TYPE", { message: text("ASSISTANT_FILE_TYPE") });
     const name = cleanName(c.req.query("name"));
+    const mime = readableType(data, name);
+    if (!mime) throw new ORPCError("UNSUPPORTED_MEDIA_TYPE", { message: text("ASSISTANT_FILE_TYPE") });
     const [row] = await db.insert(assistantFile).values({ tenantId: who.tenantId, threadId, name, mime, size: data.length, data })
       .returning({ id: assistantFile.id });
     const ref: FileRef = { kind: "assistant", id: row!.id, name, mime };

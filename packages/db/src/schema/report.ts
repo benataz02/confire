@@ -1,6 +1,6 @@
 import { boolean, index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { AggZ, FilterCondZ } from "./variant.ts";
+import { AggZ, FilterCondZ, FilterValueZ } from "./variant.ts";
 
 // Reports the assistant builds (docs/superpowers/specs/2026-11-03-assistant-reports-design.md). A
 // report is a definition — data, filters, grouping, measures, widgets — written by the chat's
@@ -53,7 +53,6 @@ export const SourceZ = z.object({
 export const DatasetZ = z.object({
   from: z.array(SourceZ).min(1).max(4).describe("Sources with the same fields, read as one; each row's `_source` is its label"),
   lines: z.boolean().default(false).describe("Document lines: line fields are Lines.ItemCode, Lines.LineTotal…"),
-  select: z.array(z.string()).default([]),
   filter: Filters,
   lookups: z.array(LookupZ).max(8).default([]),
   derive: z.array(DeriveZ).max(8).default([]),
@@ -97,11 +96,21 @@ export type KpiWidget = z.infer<typeof KpiWidgetZ>;
 export type ChartWidget = z.infer<typeof ChartWidgetZ>;
 export type TableWidget = z.infer<typeof TableWidgetZ>;
 
+/** The report's filter bar: a field the user filters the whole report by, as on a list. */
+export const ReportFilterZ = z.object({
+  field: z.string().describe("A field of the datasets (SAP's own name, e.g. DocDate, CardCode, SalesPersonCode, or a Configurations field), applied to every dataset that has it"),
+  label: z.string().describe("The filter's label, in the user's language"),
+  default: FilterValueZ.optional().describe("The value on open: a date field takes a range { from: \"@startOfYear\", to: \"@today\" }, a code or enum field a list of values, a text field a text"),
+});
+export type ReportFilter = z.infer<typeof ReportFilterZ>;
+
 export const ReportDefZ = z.object({
   title: z.string().min(1).max(120),
   subtitle: z.string().max(200).optional(),
   assumptions: z.array(z.object({ label: z.string(), value: z.string() })).max(8).default([])
     .describe("How you read the request, one chip each, in the user's language"),
+  filters: z.array(ReportFilterZ).max(8).default([])
+    .describe("The filter bar over the whole report. A value set there replaces the datasets' and sources' own conditions on that field; a measure's own filter on it (a compare period) stays"),
   datasets: z.record(Name, DatasetZ),
   widgets: z.array(WidgetZ).min(1).max(12),
 });

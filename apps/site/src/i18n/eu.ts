@@ -53,7 +53,6 @@ export const eu: Dict = {
     },
   },
   why: {
-    eyebrow: "Zergatik Confire",
     title: "Produktu konfiguratu baten eskaintzak ez luke aste bat behar.",
     today: "Gaur",
     todayLead: "Posta, kalkulu-orri bat eta arauak dakizkien pertsona bakarra.",
@@ -63,7 +62,7 @@ export const eu: Dict = {
       { title: "SAPen eskuz idazten da", text: "Lerroz lerro, prezioz prezio." },
     ],
     todayTime: "2–5 egun",
-    todayTimeNote: "eskaintza bakoitzeko*",
+    todayTimeNote: "eskaintza bakoitzeko",
     with: "Confirerekin",
     withLead: "Pantaila bakarra eskaeraren eta SAPen artean.",
     withSteps: [
@@ -73,10 +72,8 @@ export const eu: Dict = {
     ],
     withTime: "Minutuak",
     withTimeNote: "postontzitik SAPera",
-    footnote: "* Behin-behinekoa. Ordeztu benetako bezero baten datuarekin.",
   },
   how: {
-    eyebrow: "Nola dabilen",
     title: "Behin konfiguratu. Egunero eskaini.",
     lead: "Lehen bi urratsak behin egiten dira. Hirugarrena zure salmenta-taldearen ohitura berria da.",
     steps: [
@@ -86,7 +83,6 @@ export const eu: Dict = {
     ],
   },
   product: {
-    eyebrow: "Produktua",
     title: "Eskaeraren eta eskaintzaren arteko guztia.",
     lead: "Produktuak eskaeraren arabera konfiguratzen dituzten fabrikatzaileentzat, ez katalogo batetik aukeratzen dituztenentzat.",
     ai: {
@@ -150,7 +146,6 @@ export const eu: Dict = {
     },
   },
   security: {
-    eyebrow: "Segurtasuna",
     title: "Zure SAP zure zerbitzarian geratzen da.",
     lead: "Confirek ez du inoiz zure SAPeko saio-daturik gordetzen, ezta zure sarerako aterik ere.",
     points: [
@@ -167,21 +162,20 @@ export const eu: Dict = {
     online: "Linean",
   },
   faq: {
-    eyebrow: "Galderak",
     title: "Informatikak lehenik galdetzen duena.",
     lead: "Beste zerbait? Galdetu demoan, zure instalazioa aurrean duzula.",
     items: [
       { q: "Confirek lokaleko SAP Business Onerekin funtzionatzen al du?", a: "Bai, horretarako egina dago. Zure SAP zerbitzariko agente txiki batek Confire Service Layerrekin konektatzen du, zure suhesian ezer ireki gabe." },
       { q: "Beas behar al dut?", a: "Ez. Beasekin, Confirek zure ibilbideen kostua ere kalkulatzen du. Hura gabe, kostuak materialen zerrendatik eta zure SAPeko prezio-zerrendetatik datoz." },
-      { q: "Zein AA erabiltzen du, eta zer ikusten du?", a: "Zirriborroa: Claude, Anthropicena. Zuk jaregindako eskaera eta betetzen ari den produktua ikusten ditu, SAPeko beste ezer ez." },
+      { q: "Zein AA erabiltzen du, eta zer ikusten du?", a: "Claude, Anthropicena. Zuk jaregindako eskaera eta betetzen ari den produktua ikusten ditu, SAPeko beste ezer ez." },
       { q: "Zer gertatzen da SAP lineaz kanpo badago?", a: "Konfiguratzen eta balioztatzen jarraitzen duzu, Confirek gordetzen duen zure aukera eta prezioen kopiarekin. SAPen erregistratzeak itzuli arte itxaroten du." },
       { q: "Nire bezeroek erabil dezakete?", a: "Bai, euren atariaren bidez, gonbidapenez. Euren dokumentuak bakarrik ikusten dituzte." },
-      { q: "Zenbat behar da martxan jartzeko?", a: "Zirriborroa: agentea minututan instalatzen da. Zure lehen produktua modelatzeko da, hain zuzen, demoa." },
+      { q: "Zenbat behar da martxan jartzeko?", a: "Agentea minututan instalatzen da. Zure lehen produktua modelatzeko da, hain zuzen, demoa." },
     ],
   },
   demo: {
-    eyebrow: "Eskatu demo bat",
     title: "Ikusi zure produktu batekin.",
+    founder: { role: "Sortzailea · Euskal Herria", lead: "Confire sortu duenarekin hitz egingo duzu.", text: "SAP Business One eta Beasen lau ezarpen oso zuzendu ditut Espainiako eta Alemaniako fabrikatzaileetan, eta Beas Manufacturingeko ziurtagiri aurreratua dut." },
     next: [
       { title: "Lanegun batean erantzuten dugu", text: "Zuri ondo datorkizun ordua finkatzeko." },
       { title: "30 minutuko deia", text: "Ekarri bezero baten benetako eskaera bat." },
@@ -198,6 +192,7 @@ export const eu: Dict = {
     privacy: "Erantzuteko bakarrik erabiliko dugu.",
     privacyLink: "Pribatutasuna",
     submit: "Eskatu demo bat",
+    sending: "Bidaltzen…",
   },
   footer: {
     about: "AA bidezko eskaintzak SAP Business One duten fabrikatzaileentzat.",

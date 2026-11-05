@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import type { RouterClient } from "@orpc/server";
 import { getI18nBundleData } from "@ui5/webcomponents-base/dist/asset-registries/i18n.js";
 import getLocale from "@ui5/webcomponents-base/dist/locale/getLocale.js";
@@ -37,14 +37,7 @@ export function localizeConstraints(c: EntityConstraints, text: (key: string) =>
  *  entity_meta in Postgres and only re-reads $metadata on an explicit refresh. */
 export function useFieldConstraints(entity: string | undefined) {
   const { orpc } = useUiSource();
-  // UI5's hook, not useUiI18n: i18n.ts drags in a .properties parser that needs `window` on import.
-  useI18nBundle("@confire/ui"); // re-renders on a language switch, which re-keys `select`
-  const language = getLocale().getLanguage();
-  // The bundle's data, not getText: getText warns on every miss, and most fields have no catalog entry.
-  const select = useCallback((c: EntityConstraints) => {
-    const texts = getI18nBundleData("@confire/ui");
-    return localizeConstraints(c, (key) => texts?.[key]);
-  }, [language]);
+  const select = useLocalize();
   return useQuery({
     ...orpc.entities.metadata.queryOptions({ input: { entity: entity ?? "" } }),
     enabled: !!entity,
@@ -52,6 +45,36 @@ export function useFieldConstraints(entity: string | undefined) {
     staleTime: 24 * 60 * 60_000,
     select,
   });
+}
+
+/** The same, for several entities at once (a report reads more than one); one entry per entity,
+ *  undefined until it lands or when it fails. */
+export function useFieldConstraintsOf(entities: string[]): (EntityConstraints | undefined)[] {
+  const { orpc } = useUiSource();
+  const select = useLocalize();
+  return useQueries({
+    queries: entities.map((entity) => ({
+      ...orpc.entities.metadata.queryOptions({ input: { entity } }),
+      retry: false,
+      staleTime: 24 * 60 * 60_000,
+      select,
+    })),
+    combine: dataOf,
+  });
+}
+
+// Module-level, so useQueries keeps the combined array's identity while no result changed.
+const dataOf = <T,>(rs: { data?: T }[]) => rs.map((r) => r.data);
+
+function useLocalize() {
+  // UI5's hook, not useUiI18n: i18n.ts drags in a .properties parser that needs `window` on import.
+  useI18nBundle("@confire/ui"); // re-renders on a language switch, which re-keys `select`
+  const language = getLocale().getLanguage();
+  // The bundle's data, not getText: getText warns on every miss, and most fields have no catalog entry.
+  return useCallback((c: EntityConstraints) => {
+    const texts = getI18nBundleData("@confire/ui");
+    return localizeConstraints(c, (key) => texts?.[key]);
+  }, [language]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 // --- Jo: exact key first, then case-insensitive -------------------------------------------------

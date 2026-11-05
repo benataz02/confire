@@ -17,3 +17,7 @@ const t = dict[lang].thanks;
     </div>
   </section>
 </Base>
+<script>
+  // The request arrived: the demo form no longer needs to bring it back (Demo.astro).
+  try { sessionStorage.removeItem("confire:demo") } catch {}
+</script>

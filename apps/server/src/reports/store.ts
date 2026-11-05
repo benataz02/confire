@@ -1,31 +1,21 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, assistantReport, assistantThread, type ReportDef } from "@confire/db";
 import type { ReportResult } from "./types.ts";
 
 // A user's reports and their chats (reports spec §4): personal — every read and write is on
-// (tenant, user). A report has one chat, made with it; deleting the report deletes the chat.
+// (tenant, user). A report has one chat, the one that built it; deleting the report deletes the chat.
 
-/** The user's report nothing was drafted on yet, its chat still empty and not answering — opening
- *  New report over and over leaves no trail of empty reports. Else a new one, with its chat. */
-export async function blankReport(tenantId: string, userId: string): Promise<{ id: string; threadId: string }> {
-  const [found] = await db.select({ id: assistantReport.id, threadId: assistantThread.id })
-    .from(assistantReport)
-    .innerJoin(assistantThread, eq(assistantThread.reportId, assistantReport.id))
-    .where(and(
-      eq(assistantReport.tenantId, tenantId), eq(assistantReport.userId, userId), isNull(assistantReport.definition),
-      sql`jsonb_array_length(${assistantThread.messages}) = 0`,
-      or(isNull(assistantThread.busyUntil), lt(assistantThread.busyUntil, sql`now()`)),
-    ))
-    .orderBy(desc(assistantReport.updatedAt)).limit(1);
-  if (found) {
-    await db.update(assistantReport).set({ updatedAt: new Date() }).where(eq(assistantReport.id, found.id));
-    return found;
-  }
+/** A general chat's first report_set (reports spec §4): the chat becomes a new report's. Under the
+ *  run's lease; `report_id is null` keeps a second adoption from relinking a chat that has one. */
+export async function adoptReport(tenantId: string, userId: string, threadId: string): Promise<string> {
   return db.transaction(async (tx) => {
     const [r] = await tx.insert(assistantReport).values({ tenantId, userId }).returning({ id: assistantReport.id });
-    const [t] = await tx.insert(assistantThread).values({ tenantId, userId, reportId: r!.id }).returning({ id: assistantThread.id });
-    return { id: r!.id, threadId: t!.id };
+    const linked = await tx.update(assistantThread).set({ reportId: r!.id })
+      .where(and(eq(assistantThread.id, threadId), eq(assistantThread.tenantId, tenantId), eq(assistantThread.userId, userId), isNull(assistantThread.reportId), isNull(assistantThread.projectId)))
+      .returning({ id: assistantThread.id });
+    if (!linked.length) throw new ORPCError("CONFLICT");
+    return r!.id;
   });
 }
 

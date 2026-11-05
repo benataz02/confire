@@ -1,7 +1,7 @@
 /* The landing page's sections, ported from the approved mockup (spec §6). */
 
 /* ---------- Hero ---------- */
-.hero { padding: clamp(3.5rem, 2rem + 6vw, 7rem) 0 clamp(3rem, 2rem + 4vw, 6rem); background: var(--sapShellColor); isolation: isolate; overflow: clip }
+.hero { padding: clamp(2.5rem, 1.5rem + 3vw, 4.5rem) 0 clamp(3rem, 2rem + 4vw, 6rem); background: var(--sapShellColor); isolation: isolate; overflow: clip }
 .hero::before { content: ""; position: absolute; inset: 0; z-index: -2; background-image: radial-gradient(var(--dot) 1px, transparent 1.4px); background-size: 22px 22px;
   mask-image: radial-gradient(ellipse 75% 60% at 50% 35%, black 25%, transparent 78%); -webkit-mask-image: radial-gradient(ellipse 75% 60% at 50% 35%, black 25%, transparent 78%) }
 .glow { position: absolute; z-index: -1; border-radius: 50%; filter: blur(10px); pointer-events: none }
@@ -9,22 +9,22 @@
 .glow.a { width: 40rem; height: 28rem; left: 50%; top: 52%; translate: -8% -10%; background: radial-gradient(closest-side, var(--glow-ai), transparent) }
 .hero-copy { text-align: center; display: grid; justify-items: center }
 .pill { display: inline-flex; align-items: center; gap: .5rem; padding: .3125rem .875rem .3125rem .375rem; border-radius: 2rem; text-decoration: none; font-size: var(--sapFontSize);
-  color: var(--sapTextColor); background: var(--glass); border: 1px solid var(--hairline); box-shadow: var(--sapContent_Shadow0); margin-bottom: 2rem; transition: border-color .2s }
+  color: var(--sapTextColor); background: var(--glass); border: 1px solid var(--hairline); box-shadow: var(--sapContent_Shadow0); margin-bottom: 1.5rem; transition: border-color .2s }
 .pill:hover { border-color: var(--sapAssistant_BorderColor) }
 .pill .new { background: var(--sapAssistant_BackgroundGradient); color: var(--sapAssistant_TextColor); border-radius: 1rem; padding: .125rem .5rem; font-weight: 700; font-size: var(--sapFontSmallSize); display: inline-flex; gap: .25rem; align-items: center }
 .pill .ico { width: .75rem; height: .75rem }
 /* em, not the mockup's 15ch: ch is the current font's zero, which changes when 72 swaps in (CLS) */
-.hero h1 { max-width: 8.9em; margin-bottom: 1.5rem }
-.hero .lead { max-width: 40rem; margin-bottom: 2.25rem }
+.hero h1 { max-width: 11em; margin-bottom: 1.25rem }
+.hero .lead { max-width: 40rem; margin-bottom: 2rem }
 .ctas { display: flex; flex-wrap: wrap; gap: .75rem; justify-content: center }
-.works { margin-top: 2.5rem; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .5rem 1.75rem; color: var(--sapContent_LabelColor); font-size: var(--sapFontSize); list-style: none; padding: 0 }
+.works { margin-top: 2rem; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .5rem 1.75rem; color: var(--sapContent_LabelColor); font-size: var(--sapFontSize); list-style: none; padding: 0 }
 .works b { color: var(--sapTitleColor); font-weight: 700; display: inline-flex; align-items: center; gap: .5rem }
 .works b::before { content: ""; width: .375rem; height: .375rem; border-radius: 50%; background: var(--sapPositiveElementColor) }
 
 /* The stage: request -> configuration -> SAP quotation, told in one loop */
-.stage { margin-top: clamp(3rem, 2rem + 4vw, 5rem); display: grid; gap: 0; align-items: center; grid-template-columns: minmax(0, 1fr); justify-items: stretch; max-width: 32rem; margin-inline: auto;
+.stage { margin-top: clamp(2.5rem, 1.5rem + 3vw, 3.5rem); display: grid; gap: 0; align-items: center; grid-template-columns: minmax(0, 1fr); justify-items: stretch; max-width: 32rem; margin-inline: auto;
   padding: clamp(.75rem, .5rem + 1vw, 1.25rem); border-radius: 1.75rem; background: var(--glass); border: 1px solid var(--hairline);
-  box-shadow: 0 2rem 4rem -2rem color-mix(in oklab, var(--sapTitleColor) 25%, transparent); backdrop-filter: blur(6px) }
+  box-shadow: 0 2rem 4rem -2rem color-mix(in oklab, var(--sapContent_ShadowColor) 25%, transparent); backdrop-filter: blur(6px) }
 @media (max-width: 599px) { .stage { margin-inline: var(--pad) } }
 @media (min-width: 1024px) { .stage { max-width: var(--max); grid-template-columns: minmax(0, 1fr) 4rem minmax(0, 1.6fr) 4rem minmax(0, 1fr); margin-inline: var(--pad) } }
 @media (min-width: 1300px) { .stage { margin-inline: auto; max-width: calc(var(--max) - 2 * var(--pad)) } }
@@ -41,7 +41,7 @@
 .attach { margin-top: .875rem; display: inline-flex; gap: .5rem; align-items: center; padding: .375rem .625rem; border-radius: .5rem; border: 1px solid var(--hairline); font-size: var(--sapFontSmallSize) }
 .attach .ico { fill: var(--sapNegativeElementColor) }
 
-.conn { position: relative; justify-self: center; width: 2px; height: 3.25rem; background: repeating-linear-gradient(180deg, var(--sapContent_ForegroundBorderColor) 0 4px, transparent 4px 8px); opacity: .9 }
+.conn { position: relative; justify-self: center; width: 2px; height: 3.25rem; background: repeating-linear-gradient(180deg, var(--sapContent_ForegroundBorderColor) 0 4px, transparent 4px 8px) }
 .conn .lbl { position: absolute; left: 1rem; top: 50%; translate: 0 -50%; white-space: nowrap; font-size: var(--sapFontSmallSize); font-weight: 700; color: var(--sapContent_LabelColor) }
 .spark { position: absolute; left: 50%; top: 0; width: 1.5rem; height: 1.5rem; margin: -.75rem 0 0 -.75rem; border-radius: 50%; display: grid; place-items: center;
   background: var(--sapAssistant_BackgroundGradient); color: var(--sapAssistant_TextColor); box-shadow: 0 0 0 4px var(--ai-wash), 0 0 1.25rem var(--glow-ai); opacity: 0 }
@@ -141,7 +141,7 @@
   .t-a { grid-column: span 4 } .t-b { grid-column: span 2 } .t-c { grid-column: span 2 } .t-d { grid-column: span 4 } .t-e, .t-f { grid-column: span 3 } }
 .tile { background: var(--sapTile_Background); border-radius: 1.5rem; border: 1px solid var(--hairline); padding: clamp(1.25rem, 1rem + 1vw, 1.75rem); display: grid; gap: 1.5rem; align-content: space-between;
   position: relative; overflow: hidden; transition: transform .35s var(--ease), box-shadow .35s var(--ease) }
-.tile:hover { transform: translateY(-3px); box-shadow: 0 1.5rem 3rem -1.75rem color-mix(in oklab, var(--sapTitleColor) 35%, transparent) }
+.tile:hover { transform: translateY(-3px); box-shadow: 0 1.5rem 3rem -1.75rem color-mix(in oklab, var(--sapContent_ShadowColor) 35%, transparent) }
 .tile h3 { font-size: 1.25rem; margin-bottom: .375rem }
 .tile p { color: var(--sapTile_TextColor); font-size: var(--sapFontSize); line-height: 1.6; max-width: 34rem }
 .tile .badge { margin-bottom: 1rem }
@@ -157,7 +157,7 @@
 .qchip { border: 1px solid var(--sapAssistant_BorderColor); color: var(--ai-ink); border-radius: 1rem; padding: .1875rem .75rem; font-weight: 700; font-size: var(--sapFontSmallSize); background: var(--sapGroup_ContentBackground) }
 .dis { color: var(--sapContent_DisabledTextColor); text-decoration: line-through; text-decoration-color: color-mix(in oklab, var(--sapContent_LabelColor) 50%, transparent) }
 .radio.off { opacity: .4 }
-.why { display: block; font-size: var(--sapFontSmallSize); color: var(--sapCriticalElementColor); text-decoration: none; margin-top: .125rem }
+.why { display: block; font-size: var(--sapFontSmallSize); color: var(--sapCriticalTextColor); text-decoration: none; margin-top: .125rem }
 .bars { display: grid; gap: .625rem }
 .bar-row { display: grid; grid-template-columns: 2.75rem 1fr auto; gap: .625rem; align-items: center; font-size: var(--sapFontSmallSize) }
 .bar { display: flex; height: .75rem; border-radius: 1rem; overflow: hidden; gap: 2px }
@@ -184,7 +184,8 @@
 .sys { display: flex; align-items: center; gap: .625rem }
 
 /* ---------- Security (an Evening band inside Morning) ---------- */
-.evening.band { background: var(--sapBackgroundColor); color: var(--sapTextColor); overflow: clip; isolation: isolate }
+@media (prefers-color-scheme: dark) { .evening.band { --band: color-mix(in oklab, var(--sapBackgroundColor) 90%, var(--sapBrandColor)); border-block: 1px solid var(--hairline) } }
+.evening.band { --band: var(--sapBackgroundColor); background: var(--band); color: var(--sapTextColor); overflow: clip; isolation: isolate }
 .band::before { content: ""; position: absolute; inset: 0; z-index: -1; background-image: radial-gradient(var(--dot) 1px, transparent 1.4px); background-size: 22px 22px;
   mask-image: radial-gradient(ellipse 60% 70% at 75% 50%, black 10%, transparent 70%); -webkit-mask-image: radial-gradient(ellipse 60% 70% at 75% 50%, black 10%, transparent 70%) }
 .band .glow.b { left: 78%; top: 50%; translate: -50% -50%; width: 36rem; height: 36rem }
@@ -202,13 +203,13 @@
 .node .ic .ico { width: 1.125rem; height: 1.125rem; fill: var(--sapContent_IconColor) }
 .node b { display: block; color: var(--sapTitleColor) }
 .node > div { flex: 1; min-width: 8rem }
-.tunnel { position: relative; width: 2px; height: 5.5rem; background: repeating-linear-gradient(0deg, var(--sapHighlightColor) 0 6px, transparent 6px 12px); opacity: .9 }
+.tunnel { position: relative; width: 2px; height: 5.5rem; background: repeating-linear-gradient(0deg, var(--sapHighlightColor) 0 6px, transparent 6px 12px) }
 @media (prefers-reduced-motion: no-preference) { .tunnel { animation: flow 1s linear infinite } }
 @keyframes flow { to { background-position: 0 -12px } }
 .tunnel .lbl { position: absolute; left: 1.125rem; top: 50%; translate: 0 -50%; white-space: nowrap; font-size: var(--sapFontSmallSize); color: var(--sapContent_LabelColor); display: flex; align-items: center; gap: .375rem }
 .tunnel .lbl .ico { width: .75rem; height: .75rem; fill: var(--sapHighlightColor) }
 .lan { width: 100%; border: 1.5px dashed color-mix(in oklab, var(--sapContent_LabelColor) 45%, transparent); border-radius: 1.5rem; padding: 2.25rem 1rem 1rem; position: relative; display: grid; gap: .75rem }
-.lan > .tag { position: absolute; top: -.75rem; left: 1.25rem; background: var(--sapBackgroundColor); padding: 0 .5rem; font-size: var(--sapFontSmallSize); font-weight: 700; color: var(--sapContent_LabelColor); letter-spacing: .06em; text-transform: uppercase }
+.lan > .tag { position: absolute; top: -.75rem; left: 1.25rem; background: var(--band); padding: 0 .5rem; font-size: var(--sapFontSmallSize); font-weight: 700; color: var(--sapContent_LabelColor); letter-spacing: .06em; text-transform: uppercase }
 .lan .wire { justify-self: center; width: 2px; height: 1rem; background: var(--hairline); margin: -.75rem 0 }
 
 /* ---------- FAQ ---------- */
@@ -235,16 +236,20 @@ details p { padding: 0 1.25rem 1.25rem; color: var(--sapContent_LabelColor); max
 .cta-wrap .glow.b { left: 20%; top: 40%; translate: -50% -50% } .cta-wrap .glow.a { left: 85%; top: 70%; translate: -50% -50% }
 .cta { display: grid; gap: 2.5rem; border-radius: 2rem; padding: clamp(1.5rem, 1rem + 3vw, 3.5rem);
   background: linear-gradient(var(--sapGroup_ContentBackground), var(--sapGroup_ContentBackground)) padding-box, linear-gradient(135deg, var(--sapBrandColor), var(--hairline) 40%, var(--hairline) 60%, var(--sapAssistant_Background)) border-box;
-  border: 1.5px solid transparent; box-shadow: 0 3rem 6rem -3rem color-mix(in oklab, var(--sapTitleColor) 30%, transparent) }
+  border: 1.5px solid transparent; box-shadow: 0 3rem 6rem -3rem color-mix(in oklab, var(--sapContent_ShadowColor) 30%, transparent) }
 @media (min-width: 1000px) { .cta { grid-template-columns: 1fr 1.15fr; gap: 4rem } }
 .next { list-style: none; padding: 0; margin: 2rem 0 0; display: grid; gap: 1rem; counter-reset: n }
 .next li { display: grid; grid-template-columns: 1.75rem 1fr; gap: .875rem; font-size: var(--sapFontSize); color: var(--sapContent_LabelColor); counter-increment: n }
 .next li::before { content: counter(n); width: 1.75rem; height: 1.75rem; border-radius: 50%; display: grid; place-items: center; background: var(--brand-wash); color: var(--sapHighlightColor); font-weight: 700; font-size: var(--sapFontSmallSize) }
 .next b { color: var(--sapTitleColor); display: block }
+.founder { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--hairline); display: grid; grid-template-columns: auto 1fr; gap: 0 .875rem; align-items: center; max-width: 30rem }
+.founder .avatar { width: 3rem; height: 3rem; font-size: 1rem; background: var(--sapAvatar_6_Background); color: var(--sapAvatar_6_TextColor) }
+.founder b { display: block; color: var(--sapTitleColor) }
+.founder p { grid-column: 1 / -1; margin-top: .875rem; font-size: var(--sapFontSize); color: var(--sapContent_LabelColor) }
+.founder p b { display: inline }
 
 /* small pieces the mockup set inline */
 .cfg-name { display: block; font: 700 1.125rem var(--sapFontHeaderFamily); color: var(--sapTitleColor) }
 .margin { padding: .375rem 0 .125rem }
 .card-lead { margin-top: .25rem }
-.footnote { text-align: center; margin-top: 1.25rem }
 .band-lead { margin-top: 1rem }

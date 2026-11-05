@@ -122,8 +122,9 @@ property holding `var()` resolves where it is declared:
   Fiori's 3rem H1 on purpose: marketing needs a display size. Section titles are 72 Bold,
   `clamp(1.75rem, 1rem + 2.2vw, 2.75rem)`, tracking −0.025em. **Body text is 1rem**
   (`--sapFontLargeSize`), because Fiori's 0.875rem is for apps, not reading. UI chrome (buttons,
-  labels, tables) keeps `--sapFontSize`. Above each section title sits an uppercase **eyebrow** (0.75rem,
-  700, letter-spacing 0.14em, `--sapHighlightColor`). Headings use `text-wrap: balance`.
+  labels, tables) keeps `--sapFontSize`. No eyebrow above section titles (dropped 2026-11-04 after a
+  design critique: the kicker label is the template's tell, and each heading carries its own weight).
+  Headings use `text-wrap: balance`.
 - **AI is purple, and only AI is purple.** The `--sapAssistant_*` gradient and `--ai-ink` appear
   only where the AI acts: ✦ marks (the `ai` icon, never the ✦ character, which 72 lacks), the "In
   minutes." gradient text, AI chips and tiles. This is the same rule as the app.

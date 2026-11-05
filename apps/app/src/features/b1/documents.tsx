@@ -89,8 +89,7 @@ export function CopyTo({ entity, flows, rows, disabled }: {
           onItemClick={(e) => void navigate({
             to: "/$slug/b1/$entity",
             params: { entity: (e.detail.item as HTMLElement).dataset.target! },
-            // The route keeps its search free-form (a list's filters live there), hence the cast.
-            search: { from: entity, docs: rows.map((r) => r.DocEntry).join(",") } as never,
+            search: { from: entity, docs: rows.map((r) => r.DocEntry).join(",") },
             hash: "copy",
           })}>
           {flows.map((f) => (

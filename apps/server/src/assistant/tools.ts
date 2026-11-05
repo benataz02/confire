@@ -161,8 +161,10 @@ export const readSap = (ctx: CtxOf): AnyServerTool =>
     },
   });
 
-/** The panel's two steps, again on the thread's last drop. In every tool set: a thread's history
- *  holds their calls, and a request naming a tool it does not define is refused. */
+/** The two steps over the thread's last drop: propose a configuration for it (read_request, the card
+ *  the configure skill starts from) and read its values into one (extract_values, also the panel's
+ *  own step on a configuration's page). In every tool set: a thread's history holds their calls, and
+ *  a request naming a tool it does not define is refused. */
 function rerunTools(ctx: ToolCtx): Record<string, AnyServerTool> {
   const drop = () => {
     const d = lastDrop(ctx.thread.messages);
@@ -172,7 +174,7 @@ function rerunTools(ctx: ToolCtx): Record<string, AnyServerTool> {
   return {
     read_request: toolDefinition({
       name: "read_request",
-      description: "Read the client's last dropped files and text again, and propose the model, the customer and a name. The panel already does this when files are dropped; call it only when the user asks to read them again.",
+      description: "Read the client's files and text last dropped in this chat, and propose the model, the customer and a name for a new configuration in a card the user confirms (its Create starts the configuration). Nothing is created.",
       inputSchema: z.object({}),
     }).server(async () => {
       const d = drop();
@@ -199,18 +201,24 @@ export const B1_WRITES: ReadonlySet<string> = new Set(["b1_write", "b1_copy"]);
 /** The tool's name, which the route's loop strategy stops on. */
 export const ASK_USER = "ask_user";
 
+const Question = z.object({
+  question: z.string().describe("One short question, in the user's language"),
+  options: z.array(z.object({
+    label: z.string().describe("The answer as the user would say it, e.g. 'ACME S.L. (C0001)'"),
+    description: z.string().optional().describe("Why it may be the one: where it was read, a rule, a past quote"),
+  })).min(2).max(6),
+  multiple: z.boolean().optional().describe("The user may pick several options"),
+});
+
 /** A choice for the user, drawn as buttons (the panel's ChoiceCard). The run ends after it: the
  *  pick comes back as the user's next message, so a value written from it has the user's words as
  *  its source. */
 const askUser: AnyServerTool = toolDefinition({
   name: ASK_USER,
-  description: "Ask the user to choose between known options: which customer, which option of a field, which of two readings, which model. The panel shows the options as buttons and the user may also type an answer. Your turn ends after this call; the answer comes as the user's next message. One question at a time.",
-  inputSchema: z.object({
-    question: z.string().describe("One short question, in the user's language"),
-    options: z.array(z.object({
-      label: z.string().describe("The answer as the user would say it, e.g. 'ACME S.L. (C0001)'"),
-      description: z.string().optional().describe("Why it may be the one: where it was read, a rule, a past quote"),
-    })).min(2).max(6),
+  description: "Ask the user to choose between known options: which customer, which option of a field, which of two readings, which model. The panel shows the options as buttons and the user may also type an answer. Your turn ends after this call; the answer comes as the user's next message. One question at a time — except a skill's brief, which may ask up to four at once with `more`.",
+  inputSchema: Question.extend({
+    more: z.array(Question).max(3).optional()
+      .describe("Only where a skill says so (a report's brief): further questions in the same card, all answered with one Send"),
   }),
 }).server(async () => ({ asked: true, note: "The user answers in their next message." })) as AnyServerTool;
 

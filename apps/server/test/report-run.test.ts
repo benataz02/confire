@@ -18,6 +18,7 @@ const DOC = (name: string) => schemaOf(name, ["DocEntry"], [
 ]);
 const SCHEMAS: Record<string, B1EntitySchema> = {
   Quotations: DOC("Quotations"), Orders: DOC("Orders"),
+  Invoices: { ...DOC("Invoices"), fields: [...DOC("Invoices").fields, { ...f("DocumentLines", "collection"), fields: [f("ItemCode", "string"), f("LineTotal", "number")] }] },
   SalesPersons: schemaOf("SalesPersons", ["SalesEmployeeCode"], [f("SalesEmployeeCode", "number"), f("SalesEmployeeName", "string")]),
   EmployeesInfo: schemaOf("EmployeesInfo", ["EmployeeID"], [f("EmployeeID", "number"), f("LastName", "string")]),
 };
@@ -69,7 +70,7 @@ const quote = (i: number, extra: Record<string, unknown> = {}) => ({
   DocEntry: i, DocNum: 1000 + i, DocDate: "2026-10-01", DocDueDate: "2026-11-30", CardCode: "C1", CardName: "ACME",
   DocTotal: 100, VatSum: 21, SalesPersonCode: 1, DocumentStatus: "bost_Open", ...extra,
 });
-const ONE = (widgets: unknown[], datasets: unknown = { d: { from: [{ source: "b1", entity: "Quotations" }], select: ["DocDate", "DocTotal"], derive: [{ name: "month", field: "DocDate", bucket: "month" }] } }): ReportDef =>
+const ONE = (widgets: unknown[], datasets: unknown = { d: { from: [{ source: "b1", entity: "Quotations" }], derive: [{ name: "month", field: "DocDate", bucket: "month" }] } }): ReportDef =>
   ReportDefZ.parse({ title: "t", assumptions: [], datasets, widgets });
 
 test("every page is read: 600 open quotations through the fallback are all counted", async () => {
@@ -92,6 +93,15 @@ test("pushdown: SAP's totals are used as they come, lookups batched by 50", asyn
   expect(calls.some((p) => p.startsWith("Quotations?$apply="))).toBe(true);
 });
 
+test("lines are read as rows, never asked as $apply: B1 refuses every line measure over the crossjoin", async () => {
+  const { src, calls } = fakeSap({});
+  const r = await runWith(src, ONE([{ kind: "kpi", title: "s", value: { dataset: "d", agg: "sum", field: "Lines.LineTotal", label: "s" } }],
+    { d: { from: [{ source: "b1", entity: "Invoices" }], lines: true } }), "member", today);
+  expect(calls.some((p) => p.includes("$apply"))).toBe(false);
+  expect(calls.some((p) => p.startsWith("$crossjoin(Invoices,Invoices/DocumentLines)?$expand="))).toBe(true);
+  expect(r.datasets.d!.fellBack).toBe(true);
+});
+
 test("more than 40 pages marks the dataset partial and warns", async () => {
   const { src } = fakeSap({ Quotations: Array.from({ length: 20_500 }, (_, i) => quote(i + 1)) }, { refuseApply: true });
   const r = await runWith(src, ONE([{ kind: "kpi", title: "n", value: { dataset: "d", agg: "count", label: "n" } }]), "member", today);
@@ -104,7 +114,7 @@ test("validation: every problem in one refusal", async () => {
   const { src } = fakeSap({});
   const bad = {
     ...PIPELINE_INPUT,
-    datasets: { docs: { ...PIPELINE_INPUT.datasets.docs, select: ["DocTotl"] } },
+    datasets: { docs: { ...PIPELINE_INPUT.datasets.docs, filter: [{ field: "DocTotl", op: "gt", value: 0 }] } },
     widgets: [...PIPELINE_INPUT.widgets, { kind: "chart", title: "x", chart: "donut", dimension: "Nope", measures: [{ dataset: "docs", agg: "count", label: "n" }] }],
   };
   const e = await runWith(src, ReportDefZ.parse(bad), "member", today).catch((x: unknown) => x);
@@ -156,4 +166,43 @@ test("a filter SAP's grammar cannot take is a refusal the model can fix, before 
   expect(e.problems.join("\n")).toContain("DocumentStatus");
   expect(e.problems.join("\n")).toContain("abc");
   expect(calls).toEqual([]);
+});
+
+test("the filter bar: defaults, the page's values, a measure's own condition standing, its controls", async () => {
+  const docs = [quote(1), quote(2), quote(3, { CardCode: "C2" })];
+  const { src, calls } = fakeSap({ Quotations: docs }, { refuseApply: true });
+  const def = ReportDefZ.parse({
+    title: "t",
+    filters: [
+      { field: "CardCode", label: "Customer", default: ["C1"] },
+      { field: "DocDate", label: "Date", default: { from: "@startOfYear", to: "@today" } },
+    ],
+    datasets: { d: { from: [{ source: "b1", entity: "Quotations" }] } },
+    widgets: [{ kind: "kpi", title: "n", value: { dataset: "d", agg: "count", label: "n" },
+      compare: { dataset: "d", agg: "count", label: "c2", filter: [{ field: "CardCode", op: "eq", value: "C2" }] } }],
+  });
+  // The compare's own CardCode condition stands under the bar's.
+  const byDefault = await runWith(src, def, "member", today);
+  expect((byDefault.widgets[0] as KpiResult).value).toBe(2);
+  expect((byDefault.widgets[0] as KpiResult).compare).toBe(1);
+  // The definition's filters first, then every other field of the data for Adapt Filters.
+  expect(byDefault.filters!.slice(0, 3)).toEqual([
+    { field: "CardCode", label: "Customer", type: "string", value: ["C1"], declared: true, default: ["C1"] },
+    { field: "DocDate", label: "Date", type: "date", value: { from: "2026-01-01", to: "2026-11-03" }, declared: true, default: { from: "2026-01-01", to: "2026-11-03" } },
+    { field: "CardName", label: "CardName", type: "string", value: null, declared: false },
+  ]);
+  expect(byDefault.filters!.map((x) => x.field)).toContain("DocTotal");
+  expect(calls.some((p) => decodeURIComponent(p).includes("(DocDate ge '2026-01-01')) and (DocDate lt '2026-11-04')"))).toBe(true);
+  expect(((await runWith(src, def, "member", today, { CardCode: ["C2"] })).widgets[0] as KpiResult).value).toBe(1);
+  // A field added through Adapt Filters filters too; one that is no field of the data is ignored.
+  expect(((await runWith(src, def, "member", today, { CardCode: [], DocNum: 1003, Nope: "x" })).widgets[0] as KpiResult).value).toBe(1);
+  // Cleared in the bar: no condition at all.
+  expect(((await runWith(src, def, "member", today, {})).widgets[0] as KpiResult).value).toBe(3);
+
+  const bad = { ...def, filters: [{ field: "CardCod", label: "Customer" }] };
+  const e = (await runWith(src, bad, "member", today).catch((x: unknown) => x)) as ReportInvalid;
+  expect(e.problems.join("\n")).toContain("CardCod is not a field of any dataset");
+  const twice = ReportDefZ.parse({ ...def, datasets: { d: { from: [{ source: "b1", entity: "Quotations", filter: [{ field: "CardCode", op: "eq", value: "C9" }] }] } } });
+  const e2 = (await runWith(src, twice, "member", today).catch((x: unknown) => x)) as ReportInvalid;
+  expect(e2.problems.join("\n")).toContain("CardCode is the filter bar's (Customer)");
 });

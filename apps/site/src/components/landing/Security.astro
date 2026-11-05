@@ -11,7 +11,7 @@ const icons = ["locked", "shield", "connected"] as const;
   <span class="glow b" aria-hidden="true"></span>
   <div class="wrap sec-split">
     <div class="rv">
-      <span class="eyebrow">{t.eyebrow}</span>
+      
       <h2>{t.title}</h2>
       <p class="lead band-lead">{t.lead}</p>
       <ul class="points">{t.points.map((p, i) => <li><span class="ic"><Icon name={icons[i]!} /></span><div><b>{p.title}</b><span>{p.text}</span></div></li>)}</ul>

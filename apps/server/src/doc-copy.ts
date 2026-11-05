@@ -135,3 +135,84 @@ export function buildCopy(
 
 /** Fields the copy needs off the source; keeps the read narrow. */
 export const COPY_SELECT = ["DocEntry", "DocNum", "CardCode", "CardName", "DocDate", "DocDueDate", "DocumentLines"];
+
+// --- configured parts ------------------------------------------------------------------------------
+// A part with no SAP item is quoted on the model's generic item with its code in ITEM_UDF
+// (config-quote.ts). An order needs the real item, and B1 will not put another item on a line linked
+// to its base, so a Quotations→Orders copy first makes each one real: create the item as a duplicate
+// of the generic one, put it on the quotation's line, then copy the quotation as it now is.
+
+/** The line UDF carrying a configured part's code (the items grid's default map, config-engine). */
+export const ITEM_UDF = "U_CF_ItemCode";
+
+/** A source line quoted on a generic item for a part; `item` is the item it goes on. */
+export type PartLine = { docEntry: number; lineNum: number; code: string; generic: string; name: string };
+
+const linesOf = (s: SourceDocument) => (Array.isArray(s.DocumentLines) ? (s.DocumentLines as Record<string, unknown>[]) : []);
+
+/** The open lines of the sources still on a generic item — ITEM_UDF holds a code that is not the
+ *  line's ItemCode (case-blind, as SQL Server matches) — of the kept lines only, when `kept` is set. */
+export function partLines(sources: SourceDocument[], kept?: CopyLine[]): PartLine[] {
+  const keep = kept && new Set(kept.map((l) => `${l.baseEntry}:${l.baseLine}`));
+  return sources.flatMap((s) => linesOf(s).flatMap((l, i) => {
+    const docEntry = Number(s.DocEntry);
+    const lineNum = Number(l.LineNum ?? i);
+    const code = typeof l[ITEM_UDF] === "string" ? (l[ITEM_UDF] as string).trim() : "";
+    const generic = typeof l.ItemCode === "string" ? l.ItemCode : "";
+    if (!code || code.toUpperCase() === generic.toUpperCase() || l.LineStatus === "bost_Close") return [];
+    if (keep && !keep.has(`${docEntry}:${lineNum}`)) return [];
+    const name = typeof l.ItemDescription === "string" && l.ItemDescription ? l.ItemDescription : code;
+    return [{ docEntry, lineNum, code, generic, name }];
+  }));
+}
+
+/** The sources as they will be once each part line is on its item. */
+export function onItems(sources: SourceDocument[], parts: (PartLine & { item: string })[]): SourceDocument[] {
+  const at = new Map(parts.map((p) => [`${p.docEntry}:${p.lineNum}`, p.item]));
+  return sources.map((s) => Array.isArray(s.DocumentLines) ? {
+    ...s,
+    DocumentLines: linesOf(s).map((l, i) => {
+      const item = at.get(`${Number(s.DocEntry)}:${Number(l.LineNum ?? i)}`);
+      return item ? { ...l, ItemCode: item } : l;
+    }),
+  } : s);
+}
+
+/** What B1 keeps for itself on an item: stock, cost, dates, the numbering series — and barcodes,
+ *  which are one item's each. Everything else is the duplicate's, as SAP's own Duplicate keeps it. */
+const ITEM_OWN = new Set([
+  "ItemCode", "ItemName", "BarCode", "ItemBarCodeCollection", "Series", "QuantityOnStock",
+  "QuantityOrderedFromVendors", "QuantityOrderedByCustomers", "MovingAveragePrice", "AvgStdPrice",
+  "CreateDate", "CreateTime", "UpdateDate", "UpdateTime", "DataVersion",
+]);
+const WAREHOUSE_OWN = new Set(["InStock", "Committed", "Ordered", "CountedQuantity", "WasCounted", "Counted", "StandardAveragePrice", "UserSignature"]);
+
+const present = (o: Record<string, unknown>, drop: Set<string>) =>
+  Object.fromEntries(Object.entries(o).filter(([k, v]) => v !== null && v !== undefined && !k.startsWith("@") && !drop.has(k)));
+
+/** A new item as a duplicate of `generic` (the item read whole): only the code and the name differ.
+ *  ponytail: unverified (spec §16) — the field list was read off a live Items GET, not yet posted
+ *  back; a field B1 refuses on create comes back as its own error and joins ITEM_OWN. Also that B1
+ *  keeps the sent ItemCode when the default item series is not Manual. */
+export function duplicateItem(generic: Record<string, unknown>, code: string, name: string): Record<string, unknown> {
+  const item = present(generic, ITEM_OWN);
+  if (Array.isArray(item.ItemWarehouseInfoCollection))
+    item.ItemWarehouseInfoCollection = (item.ItemWarehouseInfoCollection as Record<string, unknown>[]).map((w) => present(w, WAREHOUSE_OWN));
+  return { ItemCode: code, ItemName: name, ...item };
+}
+
+/** A line's own figures, sent back with its new item: B1 re-prices and renames a line whose item
+ *  changes, and the quotation must still say what the customer was quoted. Price follows from
+ *  UnitPrice and DiscountPercent. ponytail: unverified (spec §16) — that this list is all a live B1
+ *  resets on an item change. */
+const KEEP_ON_SWAP = [
+  "Quantity", "UnitPrice", "DiscountPercent", "Currency", "ItemDescription", "WarehouseCode", "TaxCode", "VatGroup",
+  "ProjectCode", "CostingCode", "CostingCode2", "CostingCode3", "CostingCode4", "CostingCode5",
+];
+
+/** A quotation line put on `item`, for a PATCH that merges lines by LineNum. */
+export function swapLine(line: Record<string, unknown>, item: string): Record<string, unknown> {
+  const out: Record<string, unknown> = { LineNum: line.LineNum, ItemCode: item };
+  for (const k of KEEP_ON_SWAP) if (line[k] !== null && line[k] !== undefined) out[k] = line[k];
+  return out;
+}

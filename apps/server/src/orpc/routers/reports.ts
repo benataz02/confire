@@ -2,23 +2,23 @@ import { ORPCError } from "@orpc/server";
 import { openapi } from "@orpc/openapi";
 import * as Sentry from "@sentry/bun";
 import { z } from "zod";
-import { ReportDefZ, type ReportDef } from "@confire/db";
+import { FilterValueZ, ReportDefZ, type FilterValue, type ReportDef } from "@confire/db";
 import { userProcedure } from "../base.ts";
 import { tenantCompany, viaB1 } from "../../b1.ts";
 import { ownThread, withThread } from "../../assistant/threads.ts";
 import { summarize } from "../../reports/aggregate.ts";
 import { ReportInvalid, runReport } from "../../reports/run.ts";
-import { deleteReport, getReport, savedReports, setReport, storeResult, storeRun, blankReport, type StoredReport } from "../../reports/store.ts";
+import { adoptReport, deleteReport, getReport, savedReports, setReport, storeResult, storeRun, type StoredReport } from "../../reports/store.ts";
 import type { KpiResult, ReportResult } from "../../reports/types.ts";
 import { t } from "../../i18n/index.ts";
 
 // Reports (reports spec §7): the page's procedures, and `set` — the chat's `report_set` tool, which
 // only a chat run can call (its `assistantThreadId` is the call's context, never a request's), so a
-// definition is only ever written by the assistant. Every figure comes from runReport.
+// definition is only ever written by the assistant. A report is made by its chat's first `set`. Every figure comes from runReport.
 
 /** A run, its refusal a BAD_REQUEST naming every problem; SAP's errors as every SAP call maps them. */
-async function run(ctx: { tenantId: string; role: string }, def: ReportDef): Promise<ReportResult> {
-  return viaB1(() => runReport(ctx, def).catch((e: unknown) => {
+async function run(ctx: { tenantId: string; role: string }, def: ReportDef, values?: Record<string, FilterValue>): Promise<ReportResult> {
+  return viaB1(() => runReport(ctx, def, values).catch((e: unknown) => {
     if (e instanceof ReportInvalid) throw new ORPCError("BAD_REQUEST", { message: e.message });
     throw e;
   }));
@@ -54,31 +54,32 @@ export const reportsRouter = {
   set: userProcedure
     .meta(openapi({
       summary: "Build or change this report",
-      description: "Build or change the report of this chat: send the whole definition each time (the report guide says how). Confire checks it, reads SAP and Confire, and computes every figure; the page beside the chat shows the report. The answer is a summary — each KPI's value, each chart's first categories, each table's row count, partial reads and warnings — never the rows: describe the report from it. A refusal lists every problem with the closest real names: fix them all and call again.",
+      description: "Build or change the report of this chat: send the whole definition each time (the report skill says how). The first call makes this chat the new report's chat. Confire checks it, reads SAP and Confire, and computes every figure; the page beside the chat shows the report. The answer is a summary — each KPI's value, each chart's first categories, each table's row count, partial reads and warnings — never the rows: describe the report from it. A refusal lists every problem with the closest real names: fix them all and call again.",
     }))
     .input(z.object({ definition: ReportDefZ }))
     .handler(async ({ input, context }) => {
       if (!context.assistantThreadId) throw new ORPCError("FORBIDDEN", { message: t("REPORT_CHAT_ONLY") });
       const thread = await ownThread(context.tenantId, context.userId, context.assistantThreadId);
-      if (!thread.reportId) throw new ORPCError("FORBIDDEN", { message: t("REPORT_CHAT_ONLY") });
+      if (thread.projectId) throw new ORPCError("FORBIDDEN", { message: t("REPORT_NOT_IN_CONFIG") });
+      // Run first: a refused definition leaves a general chat general (no empty report behind it).
       const result = await run(context, input.definition);
-      await storeRun(thread.reportId, result, input.definition);
+      const reportId = thread.reportId ?? await adoptReport(context.tenantId, context.userId, thread.id);
+      await storeRun(reportId, result, input.definition);
       return summarize(result);
     }),
-
-  create: userProcedure.handler(({ context }) => blankReport(context.tenantId, context.userId)),
 
   get: userProcedure.input(Id).handler(async ({ input, context }) => {
     const r = await getReport(context.tenantId, context.userId, input.id);
     return { id: r.id, title: r.title, saved: r.saved, definition: r.definition, lastResult: r.lastResult, lastRunAt: r.lastRunAt, threadId: r.threadId };
   }),
 
-  /** Live: the page's open and its Refresh. */
-  run: userProcedure.input(Id).handler(async ({ input, context }): Promise<ReportResult> => {
+  /** Live: the page's open, its Refresh and its filter bar's Go (`filters`, by field — any header
+   *  field of the report's data; none = the defaults). Only a run on the defaults is stored: the tile shows the report as defined. */
+  run: userProcedure.input(Id.extend({ filters: z.record(z.string(), FilterValueZ).optional() })).handler(async ({ input, context }): Promise<ReportResult> => {
     const r = await getReport(context.tenantId, context.userId, input.id);
     if (!r.definition) throw new ORPCError("BAD_REQUEST", { message: t("REPORT_NOT_DRAFTED") });
-    const result = await run(context, r.definition);
-    await storeResult(r.id, result, r.definition);
+    const result = await run(context, r.definition, input.filters);
+    if (!input.filters) await storeResult(r.id, result, r.definition);
     return result;
   }),
 

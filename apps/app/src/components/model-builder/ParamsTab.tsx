@@ -402,14 +402,12 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
   return (
     // Form's shell (.ui5-form-root) is the rounded card: 0.75rem and the group background. Table
     // exposes no CSS part for its frame, so the title bar and the rows share this card and overflow
-    // clips them to the curve. flex:1 + minHeight:0 is fitContent's contract (see the params
-    // section): the card fills the page's height and the Table the rest of it. A Scroll-mode Table
-    // scrolls its own rows (`#table` is `height: 100%`) once its height is definite, which is what
-    // keeps the toolbar and the sticky header in place; a 0 basis is that definite height, an
-    // `auto` one is sized to the rows. The section already pads the top and the start.
+    // clips them to the curve. The card grows with its rows and the ObjectPage scrolls it, header
+    // row included: a sticky one would stick under the page's own sticky title and tab bar, whose
+    // height UI5 computes in JS and does not expose. The section already pads the top and the start.
     // The dialogs sit inside: they are top-layer popups, which the clip does not reach.
     <div style={{
-      display: "flex", flexDirection: "column", flex: "1 1 0", minInlineSize: 0, minHeight: 0,
+      minInlineSize: 0,
       margin: "0 1rem 1rem 0",
       backgroundColor: "var(--sapGroup_ContentBackground)",
       borderRadius: "0.75rem", overflow: "hidden",
@@ -469,7 +467,6 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
       <Table
         accessibleName={t("MODEL_FORM_STRUCTURE")}
         className="confire-params-struct"
-        style={{ flex: "1 1 0", minHeight: 0 }}
         noData={
           <IllustratedMessage name="AddColumn" design="Dot" titleText={t("MODEL_NO_STRUCTURE")}
             subtitleText={t("MODEL_NO_STRUCTURE_SUB")} />
@@ -510,7 +507,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
           }
         }}
         headerRow={
-          <TableHeaderRow sticky>
+          <TableHeaderRow>
             <TableHeaderCell width="45%"><span>{t("MODEL_STRUCTURE")}</span></TableHeaderCell>
             <TableHeaderCell width="8rem"><span>{t("MODEL_MANDATORY")}</span></TableHeaderCell>
             <TableHeaderCell width="8rem"><span>{t("MODEL_COL_EXCLUDE")}</span></TableHeaderCell>

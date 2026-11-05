@@ -30,14 +30,14 @@ const literal = (f: B1Field, value: string | number | boolean): string => {
       // A BoYesNoEnum column rejects `eq true` — it wants the quoted member (`Cancelled eq 'tNO'`).
       return isYesNo(f) ? `'${encodeBool(f, on)}'` : String(on);
     }
-    // OData v4 date/time literals are unquoted. A quoted DocDate (`DocDate ge '2026-01-01'`)
-    // is the form verified against live b1s/v2; this compiler leaves them bare.
-    // ponytail: if one of the two 400s in the field, make both match whichever wins.
-    // Bare, so held to the literal's own shape: anything else would be more OData — a portal
-    // client's `2000-01-01) or (DocEntry gt 0` would have outlived the CardCode fence after it.
+    // Quoted, though OData v4 dates are bare: B1's `$filter` takes both, but `$apply`'s filter()
+    // refuses the bare one — `Orders?$apply=filter(DocDueDate lt 2026-11-03)/aggregate($count as n)`
+    // → 400 code 201 "Not supported query option", the quoted form the same count as `$filter`
+    // (verified on a live b1s/v2, 2026-11-03). Still held to the literal's own shape: anything else
+    // would be more OData — `2000-01-01) or (DocEntry gt 0` would have outlived a fence after it.
     case "date":
       if (!DATE.test(String(value))) throw new Error(t("FILTER_NEEDS_DATE", f.name, String(value)));
-      return String(value);
+      return `'${value}'`;
     case "time":
       if (!TIME.test(String(value))) throw new Error(t("FILTER_NEEDS_DATE", f.name, String(value)));
       return String(value);
@@ -145,15 +145,12 @@ const applyText = (filter: string | undefined, groupBy: string[], measures: stri
   return filter ? `filter(${filter})/${body}` : body;
 };
 
-/** One measure: `$count as n` for a count, else `<field> with <agg> as <as>` (`wrap` puts a
- *  crossjoin's entity around it: `Orders/DocumentLines(LineTotal with sum as a0)`). */
-function measureText(m: AggSpec["measures"][number], field: (name: string) => { name: string; wrap?: string }): string {
+/** One measure: `$count as n` for a count, else `<field> with <agg> as <as>`. */
+function measureText(m: AggSpec["measures"][number], field: (name: string) => string): string {
   const as = assertName(m.as, "alias");
   if (m.agg === "count") return `$count as ${as}`;
   if (!m.field) throw new Error(`${m.agg} needs a field`);
-  const f = field(m.field);
-  const text = `${f.name} with ${AGG_WORD[m.agg]} as ${as}`;
-  return f.wrap ? `${f.wrap}(${text})` : text;
+  return `${field(m.field)} with ${AGG_WORD[m.agg]} as ${as}`;
 }
 
 /** b1.read's `aggregate` and a report's pushed-down totals over one entity set. `extraFilter` is a
@@ -168,18 +165,15 @@ export function compileAggregate(
   };
   let f = compileFilter(byName, filter, schema.name);
   if (opts.extraFilter) f = andFilter(f, opts.extraFilter);
-  const apply = applyText(f, agg.groupBy.map(known), agg.measures.map((m) => measureText(m, (n) => ({ name: known(n) }))));
+  const apply = applyText(f, agg.groupBy.map(known), agg.measures.map((m) => measureText(m, known)));
   return { apply, maxPageSize: opts.pageSize };
 }
 
 const LINES = "DocumentLines";
 
-/** A document set with its lines: `$crossjoin(<set>,<set>/DocumentLines)` grouped and totalled, with
- *  the DocEntry equality as the join (doc-chain.ts). A dataset names line fields `Lines.<field>`.
- *  unverified (reports spec §3.3): `$apply` over a crossjoin, in the documented `Entity(prop with …)`
- *  form; the runner falls back to reading rows when B1 refuses it. */
 /** A document set and its lines as one dataset: names `X` (the header's) and `Lines.X`, their
- *  crossjoin paths, and the filter with the DocEntry equality that is the join. */
+ *  crossjoin paths, and the filter with the DocEntry equality that is the join (doc-chain.ts).
+ *  Rows only, never totals: B1's `$apply` over this crossjoin names no line field (reports/run.ts). */
 function linesOf(header: B1EntitySchema, set: string, filter: FilterCond[]) {
   const lines = header.fields.find((f) => f.name === LINES && f.kind === "collection")?.fields ?? [];
   const byName = new Map<string, B1Field>([
@@ -190,21 +184,12 @@ function linesOf(header: B1EntitySchema, set: string, filter: FilterCond[]) {
     const f = byName.get(name);
     if (!f) throw new Error(t("FILTER_FIELD_NOT_ON", name, set));
     return name.startsWith("Lines.")
-      ? { entity: `${set}/${LINES}`, name: f.name, path: `${set}/${LINES}/${f.name}`, line: true }
-      : { entity: set, name: f.name, path: `${set}/${f.name}`, line: false };
+      ? { name: f.name, path: `${set}/${LINES}/${f.name}`, line: true }
+      : { name: f.name, path: `${set}/${f.name}`, line: false };
   };
   const join = `${set}/DocEntry eq ${set}/${LINES}/DocEntry`;
   const own = compileFilter(byName, filter, set, (n) => at(n).path);
   return { at, filter: own ? `${join} and (${own})` : join, entities: [set, `${set}/${LINES}`] };
-}
-
-export function compileLinesAggregate(
-  header: B1EntitySchema, set: string, filter: FilterCond[], agg: AggSpec, opts: { pageSize: number },
-): CrossJoinSpec {
-  const l = linesOf(header, set, filter);
-  const apply = applyText(l.filter, agg.groupBy.map((n) => l.at(n).path),
-    agg.measures.map((m) => measureText(m, (n) => { const a = l.at(n); return { name: a.name, wrap: a.entity }; })));
-  return { entities: l.entities, expand: [], apply, maxPageSize: opts.pageSize };
 }
 
 /** The rows of a document set with its lines (the report runner's fallback and tables): the named

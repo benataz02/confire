@@ -1,16 +1,16 @@
 import { ORPCError } from "@orpc/server";
-import { B1Error, countOf, followPages, readPages, type B1EntitySchema, type B1Transport } from "@confire/b1";
-import type { Dataset, FilterCond, ReportDef } from "@confire/db";
+import { B1Error, countOf, followPages, readPages, type B1EntitySchema, type B1Field, type B1Transport } from "@confire/b1";
+import type { Dataset, FilterCond, FilterValue, ReportDef } from "@confire/db";
 import { tenantConnector, tenantCurrency } from "../b1.ts";
 import { entityList, entitySchema } from "../entity-meta.ts";
-import { compileAggregate, compileLinesAggregate, compileLinesRows, compileList, flattenJoined } from "../entity-list.ts";
+import { compileAggregate, compileLinesRows, compileList, flattenJoined, scalarFields } from "../entity-list.ts";
 import { compileListSql } from "../list-sql.ts";
 import { CONFIRE_FIELDS, type ConfireEntity } from "./confire.ts";
 import { evaluate, toParts, withDerived, type PartRow, type TableData } from "./aggregate.ts";
 import { readConfire } from "./confire.ts";
-import { resolveFilter } from "./dates.ts";
-import { planReads, rootField, sourceLabel, SOURCE, type Read } from "./plan.ts";
-import type { DatasetStat, ReportResult } from "./types.ts";
+import { resolveDate, resolveFilter } from "./dates.ts";
+import { barConds, planReads, rootField, scoped, sourceLabel, SOURCE, type Bar, type Read } from "./plan.ts";
+import type { BarFilter, DatasetStat, ReportResult } from "./types.ts";
 import { checkReport } from "./validate.ts";
 
 // Running a report (reports spec §3.3): validate the whole definition, ask SAP for the totals
@@ -50,7 +50,54 @@ export class ReportInvalid extends Error {
 const fieldsOf = (r: Read): string[] => [...new Set([...r.agg.groupBy, ...r.agg.measures.flatMap((m) => (m.field ? [m.field] : []))])];
 const stripOrder = (row: PartRow) => Object.fromEntries(Object.entries(row).filter(([k]) => !k.endsWith("#order")));
 
-export async function runWith(src: Sources, def: ReportDef, role: string, today: Date): Promise<ReportResult> {
+type FieldInfo = Pick<B1Field, "kind" | "options" | "lookup" | "label">;
+
+/** The filter bar against the schemas, as a list's: every header field of the report's data (each
+ *  dataset's, those all its sources share), the definition's filters first and shown, the rest
+ *  offered by Adapt Filters. Per field: its control (type, options, value help), the value it applies
+ *  (`values`, else a declared filter's default) and, per dataset that has it, its conditions. A key
+ *  `values` names that is no field of the data is ignored. A field a dataset's own filter already
+ *  conditions narrows further under the bar: only the definition's filters replace (validate.ts). */
+function filterBar(def: ReportDef, schemas: Map<string, B1EntitySchema | null>, values: Record<string, FilterValue> | undefined, today: Date) {
+  const fieldsOf = (s: Dataset["from"][number]): Map<string, FieldInfo> => {
+    if (s.source === "confire") {
+      const f = CONFIRE_FIELDS[s.entity as ConfireEntity] as Record<string, { kind: FieldInfo["kind"] }> | undefined;
+      return new Map(Object.entries(f ?? {}).map(([n, x]) => [n, { kind: x.kind }]));
+    }
+    const sc = schemas.get(s.entity);
+    return new Map((sc ? scalarFields(sc) : []).map((f) => [f.name, f]));
+  };
+  const perDataset = Object.entries(def.datasets).map(([id, ds]) => {
+    const maps = ds.from.map(fieldsOf);
+    return [id, new Map([...maps[0]!].filter(([n]) => maps.every((m) => m.has(n))))] as const;
+  });
+  const all = new Map<string, FieldInfo>();
+  for (const [, m] of perDataset) for (const [n, f] of m) if (!all.has(n)) all.set(n, f);
+  const declared = new Map(def.filters.map((f) => [f.field, f]));
+  const keys = [...declared.keys(), ...[...all.keys()].filter((k) => !declared.has(k)).sort()];
+
+  // A date token resolved, as the bar shows it.
+  const shown = (v: FilterValue): FilterValue => v && typeof v === "object" && !Array.isArray(v)
+    ? { from: v.from && resolveDate(v.from, today), to: v.to && resolveDate(v.to, today) } : v;
+  const bar: Bar = {};
+  const filters = keys.flatMap((k): BarFilter[] => {
+    const field = all.get(k);
+    if (!field) return [];
+    const d = declared.get(k);
+    const value = values ? values[k] ?? null : d?.default ?? null;
+    const coded = field.kind === "enum" || !!field.lookup;
+    for (const [id, m] of perDataset) if (m.has(k)) (bar[id] ??= []).push(...barConds(k, value ?? undefined, coded, today));
+    return [{
+      field: k, label: d?.label ?? field.label ?? k, type: field.kind, value: shown(value), declared: !!d,
+      ...(d?.default !== undefined ? { default: shown(d.default) } : {}),
+      ...(field.options ? { options: field.options } : {}), ...(field.lookup ? { lookup: field.lookup } : {}),
+    }];
+  });
+  return { bar, filters };
+}
+
+/** `values`: the filter bar's, by field; none = each filter's default (a tile, the chat's set). */
+export async function runWith(src: Sources, def: ReportDef, role: string, today: Date, values?: Record<string, FilterValue>): Promise<ReportResult> {
   const entities = new Set<string>();
   for (const ds of Object.values(def.datasets)) {
     for (const s of ds.from) if (s.source === "b1") entities.add(s.entity);
@@ -62,8 +109,9 @@ export async function runWith(src: Sources, def: ReportDef, role: string, today:
   for (const e of entities) schemas.set(e, await src.schema(e));
   const problems = checkReport(def, schemas, role);
   if (problems.length) throw new ReportInvalid(problems);
-  const plan = planReads(def, today);
-  const grammar = dryCompile(def, plan.reads, schemas, today);
+  const { bar, filters } = filterBar(def, schemas, values, today);
+  const plan = planReads(def, today, bar);
+  const grammar = dryCompile(def, plan.reads, schemas, today, bar);
   if (grammar.length) throw new ReportInvalid(grammar);
 
   const stats: Record<string, DatasetStat> = Object.fromEntries(Object.keys(def.datasets).map((k) => [k, { rows: 0, partial: null, fellBack: false }]));
@@ -97,20 +145,26 @@ export async function runWith(src: Sources, def: ReportDef, role: string, today:
       note(r.dataset, rows.length, total > rows.length ? { read: rows.length, total } : null);
       return toParts(rows, r.agg);
     }
-    const schema = schemas.get(s.entity)!;
-    try {
-      const first = ds.lines
-        ? await b1!.crossJoin(compileLinesAggregate(schema, s.entity, r.filter, r.agg, { pageSize: PAGE }))
-        : await b1!.readEntitySet(s.entity, compileAggregate(schema, r.filter, r.agg, { pageSize: PAGE }));
-      const { rows, truncated } = await followPages(b1!, first, { pageSize: PAGE, maxPages: MAX_PAGES });
-      note(r.dataset, rows.length, truncated ? { read: rows.length, total: null } : null);
-      return ds.lines ? rows.map((x) => flattenJoined(x, s.entity)) : rows;
-    } catch (e) {
-      // Only B1 refusing the `$apply` itself falls back; an agent that is down is the run's error.
-      if (!(e instanceof B1Error) || e.status !== 400) throw e;
+    // A dataset with lines is never asked for totals: B1's `$apply` over `$crossjoin(X,X/DocumentLines)`
+    // names no line field, in groupby or aggregate, nor `$count` — every form 400s with code 201 "Not
+    // supported query option" on a live b1s/v2 (2026-11-03), encoded or not: `aggregate(X/DocumentLines(
+    // LineTotal with sum as s))`, `aggregate(X/DocumentLines/LineTotal with sum as s)`, `aggregate(X(
+    // DocumentLines(…)))` ("'with' is expected while '(' is found"), `groupby((X/DocumentLines/ItemCode))`
+    // ("invalid property 'X' of entity type 'Document'"). Only its filter() reaches the lines.
+    if (!ds.lines) {
+      try {
+        const first = await b1!.readEntitySet(s.entity, compileAggregate(schemas.get(s.entity)!, r.filter, r.agg, { pageSize: PAGE }));
+        const { rows, truncated } = await followPages(b1!, first, { pageSize: PAGE, maxPages: MAX_PAGES });
+        note(r.dataset, rows.length, truncated ? { read: rows.length, total: null } : null);
+        return rows;
+      } catch (e) {
+        // Only B1 refusing the `$apply` itself falls back; an agent that is down is the run's error.
+        if (!(e instanceof B1Error) || e.status !== 400) throw e;
+      }
     }
-    // ponytail: the slow path — every row read and totalled here, capped. Kept for the B1 versions and
-    // sets `$apply` does not cover (unverified on a live B1, reports spec §3.3).
+    // ponytail: the slow path — every row read and totalled here, capped at 20,000. A lines dataset's
+    // only path (above), and kept for the B1 versions and sets that refuse `$apply`. SQLQueries or a
+    // Semantic Layer view would let SAP total lines, at the price of a write or HANA.
     stats[r.dataset]!.fellBack = true;
     fellBack.add(s.entity);
     const { rows, truncated, total } = await readRows(s.entity, ds.lines, r.filter, fieldsOf(r), [], MAX_PAGES);
@@ -133,7 +187,7 @@ export async function runWith(src: Sources, def: ReportDef, role: string, today:
     let total: number | null = 0;
     let partial = false;
     for (const [i, s] of ds.from.entries()) {
-      const filter = resolveFilter([...ds.filter, ...s.filter], today);
+      const filter = resolveFilter(scoped([...ds.filter, ...s.filter], [], bar[w.dataset] ?? []), today);
       const got = s.source === "confire"
         ? await src.confire(s.entity, filter, raw, TABLE_ROWS, orderby).then((x) => ({ rows: x.rows, truncated: x.total > x.rows.length, total: x.total as number | null }))
         : await readRows(s.entity, ds.lines, filter, raw, orderby, TABLE_PAGES);
@@ -171,7 +225,7 @@ export async function runWith(src: Sources, def: ReportDef, role: string, today:
     ...[...fellBack].map((e) => `${e}: SAP did not total it itself, so its rows were read and totalled here (slower, at most ${MAX_PAGES * PAGE} rows).`),
   ];
   return {
-    readAt: today.toISOString(), company: src.company, currency: src.currency,
+    readAt: today.toISOString(), company: src.company, currency: src.currency, filters,
     datasets: stats, widgets: evaluate(def, plan, data, tables, today), warnings,
   };
 }
@@ -179,7 +233,7 @@ export async function runWith(src: Sources, def: ReportDef, role: string, today:
 /** Every query the run will send, compiled before the first is: a value SAP's grammar cannot take (an
  *  array on `eq`, text on a number field, a date that is not one) is a problem the model fixes in one
  *  turn, not "the tool failed" halfway through. */
-function dryCompile(def: ReportDef, reads: Read[], schemas: Map<string, B1EntitySchema | null>, today: Date): string[] {
+function dryCompile(def: ReportDef, reads: Read[], schemas: Map<string, B1EntitySchema | null>, today: Date, bar: Bar): string[] {
   const out: string[] = [];
   const attempt = (where: string, fn: () => unknown) => {
     try { fn(); } catch (e) { out.push(`${where}: ${e instanceof Error ? e.message : String(e)}`); }
@@ -196,7 +250,6 @@ function dryCompile(def: ReportDef, reads: Read[], schemas: Map<string, B1Entity
     const schema = schemas.get(s.entity)!;
     if (ds.lines) {
       for (const c of filter) attempt(where, () => compileLinesRows(schema, s.entity, [c], [], { pageSize: PAGE }));
-      if (agg) attempt(where, () => compileLinesAggregate(schema, s.entity, [], agg, { pageSize: PAGE }));
       attempt(where, () => compileLinesRows(schema, s.entity, [], fields, { pageSize: PAGE }));
     } else {
       for (const c of filter) attempt(where, () => compileList(schema, { select: [], filter: [c], orderby: [] }, { pageSize: PAGE }));
@@ -207,7 +260,7 @@ function dryCompile(def: ReportDef, reads: Read[], schemas: Map<string, B1Entity
   for (const w of def.widgets) {
     if (w.kind !== "table") continue;
     const ds = def.datasets[w.dataset]!;
-    ds.from.forEach((s, i) => compileFor(w.dataset, i, resolveFilter([...ds.filter, ...s.filter], today), []));
+    ds.from.forEach((s, i) => compileFor(w.dataset, i, resolveFilter(scoped([...ds.filter, ...s.filter], [], bar[w.dataset] ?? []), today), []));
   }
   return [...new Set(out)];
 }
@@ -237,7 +290,7 @@ function sortRows(rows: Rows, by: { field: string; dir: "asc" | "desc" }[]): voi
 }
 
 /** A run for the tenant: its agent (none paired = Confire-only), the cached schemas, Confire's rows. */
-export async function runReport(ctx: { tenantId: string; role: string }, def: ReportDef, today = new Date()): Promise<ReportResult> {
+export async function runReport(ctx: { tenantId: string; role: string }, def: ReportDef, values?: Record<string, FilterValue>, today = new Date()): Promise<ReportResult> {
   const conn = await tenantConnector(ctx.tenantId).catch((e: unknown) => {
     if (e instanceof ORPCError && e.code === "SERVICE_UNAVAILABLE") return null;
     throw e;
@@ -253,5 +306,5 @@ export async function runReport(ctx: { tenantId: string; role: string }, def: Re
     },
     confire: (entity, filter, select, cap, orderby) => readConfire(ctx.tenantId, entity, filter, select, cap, orderby),
   };
-  return runWith(src, def, ctx.role, today);
+  return runWith(src, def, ctx.role, today, values);
 }

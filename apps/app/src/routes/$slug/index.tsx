@@ -81,9 +81,11 @@ function Home() {
     {
       title: t("HOME_REPORTS"),
       tiles: [
-        { title: t("HOME_NEW_REPORT"), subtitle: t("HOME_NEW_REPORT_SUB"), icon: "add-document", to: "/reports/new" },
+        // The AI page: a chat that asks for a report becomes the report's.
+        { title: t("HOME_NEW_REPORT"), subtitle: t("HOME_NEW_REPORT_SUB"), icon: "add-document", to: "/assistant" },
+        // The 11rem square holds the title and the figure. The report's subtitle stays on its page.
         ...(reports ?? []).map((r): TileProps => ({
-          title: r.title || t("REPORT_UNTITLED"), subtitle: r.subtitle ?? undefined, icon: "business-objects-experience",
+          title: r.title || t("REPORT_UNTITLED"), icon: "business-objects-experience",
           value: r.value === null ? undefined : formatValue(r.value, r.format, r.currency, formatLocale()),
           to: `/reports/${r.id}`,
         })),

@@ -21,7 +21,7 @@ export function RouteError({ error, reset }: ErrorComponentProps) {
       design="Scene"
       titleText={i18n.getText("UI_SOMETHING_WRONG")}
       // ponytail: raw message. Map to friendlier copy per oRPC error code once we have codes users care about.
-      subtitleText={error.message}
+      subtitleText={error instanceof Error ? error.message : String(error)}
     >
       <Button design="Emphasized" onClick={() => reset()}>{i18n.getText("UI_TRY_AGAIN")}</Button>
       {/* IllustratedMessage's default slot is IButton[] with no inter-button gap in UI5 2.26. */}

@@ -5,7 +5,7 @@ import { fakeText } from "@tanstack/ai/testing";
 import { db, aiUsage, assistantSettings } from "@confire/db";
 import { useTestAdapter } from "../src/assistant/model.ts";
 import {
-  assertAssistant, costOf, meter, MONTHLY_LIMIT_USD, rateLimit, tokensOf,
+  assertAssistant, costOf, meter, MONTHLY_LIMIT_USD, rateLimit, tokensOf, usageReport,
 } from "../src/assistant/usage.ts";
 import { makeTenant } from "./harness.ts";
 
@@ -70,6 +70,25 @@ describe.skipIf(!process.env.DATABASE_URL)("budget", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ userId: "u1", kind: "chat", threadId: null });
     expect(Number(rows[0]!.cost)).toBeGreaterThan(0);
+  });
+
+  test("usageReport: this month's totals, kinds and users; every day and six months, gaps included", async () => {
+    const { tenantId } = await makeTenant();
+    const row = { tenantId, model: "claude-sonnet-5-5", inputTokens: 10, outputTokens: 5, cacheReadTokens: 100, cacheWriteTokens: 0 };
+    const lastMonth = new Date(); lastMonth.setUTCDate(1); lastMonth.setUTCMonth(lastMonth.getUTCMonth() - 1);
+    await db.insert(aiUsage).values([
+      { ...row, userId: "a", kind: "chat", cost: "1.5", projectId: crypto.randomUUID() },
+      { ...row, userId: "a", kind: "intake", cost: "0.5" },
+      { ...row, userId: "b", kind: "chat", cost: "3" },
+      { ...row, userId: "a", kind: "chat", cost: "100", at: lastMonth },
+    ]);
+    const r = await usageReport(tenantId);
+    expect(r.totals).toMatchObject({ cost: 5, calls: 3, assisted: 1, input: 30, cacheRead: 300 });
+    expect(r.kinds.sort((x, y) => x.kind.localeCompare(y.kind)).map((k) => [k.kind, k.cost])).toEqual([["chat", 4.5], ["intake", 0.5]]);
+    expect(r.users.map((u) => [u.userId, u.cost, u.calls])).toEqual([["b", 3, 1], ["a", 2, 2]]);
+    expect(r.days).toHaveLength(new Date().getUTCDate());
+    expect(r.days.at(-1)).toMatchObject({ cost: 5, calls: 3 });
+    expect(r.months.map((m) => m.cost)).toEqual([0, 0, 0, 0, 100, 5]);
   });
 });
 

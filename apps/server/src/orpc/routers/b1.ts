@@ -109,6 +109,14 @@ function proposalOf(p: Prepared): Proposal {
   }
   if (p.op === "copy") {
     const src = p.input;
+    // What posting it makes first (planCopy): shown, since each is a SAP write of its own.
+    if (p.make.length)
+      changes[t("B1_NEW_ITEMS")] = { before: null, after: p.make.map((m) => ({ ItemCode: m.code, ItemName: m.name, [t("B1_ITEM_COPY_OF")]: m.from })) };
+    if (p.parts.length)
+      changes[t("B1_QUOTE_LINES")] = {
+        before: p.parts.map((l) => ({ DocEntry: l.docEntry, LineNum: l.lineNum, ItemCode: l.generic })),
+        after: p.parts.map((l) => ({ DocEntry: l.docEntry, LineNum: l.lineNum, ItemCode: l.item })),
+      };
     return {
       op: "copy", entity: p.entity, payload: src as unknown as Record<string, unknown>, changes,
       title: t("B1_TITLE_COPY", src.sourceEntity, src.docEntries.join(", "), p.entity),
@@ -262,7 +270,7 @@ export const b1Router = {
   copy: userProcedure
     .meta(openapi({
       summary: "Copy SAP documents along their flow",
-      description: `Make the next document from one or more of a business partner's documents, linked so SAP closes the source lines: Quotations→Orders, Orders→DeliveryNotes, Orders→Invoices, DeliveryNotes→Invoices. \`docEntries\` are the sources' DocEntry. \`header\` may set DocDate, DocDueDate, NumAtCard, Comments; \`lines\` (by the source's DocEntry and LineNum) keeps only those lines with their quantities — a partial delivery or invoice. A copy to Invoices is always a proposal. ${WRITE_NOTE}`,
+      description: `Make the next document from one or more of a business partner's documents, linked so SAP closes the source lines: Quotations→Orders, Orders→DeliveryNotes, Orders→Invoices, DeliveryNotes→Invoices. \`docEntries\` are the sources' DocEntry. \`header\` may set DocDate, DocDueDate, NumAtCard, Comments; \`lines\` (by the source's DocEntry and LineNum) keeps only those lines with their quantities — a partial delivery or invoice. Quotations→Orders first makes an item of each configured part still quoted on its model's generic item (a copy of that item, with the part's code) and puts it on the quotation's line; the proposal lists them. A copy to Invoices is always a proposal. ${WRITE_NOTE}`,
     }))
     .input(CopyInputZ)
     .handler(async ({ input, context }) => {

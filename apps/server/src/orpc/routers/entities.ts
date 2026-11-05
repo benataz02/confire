@@ -9,7 +9,7 @@ import { entitySchema, toConstraints } from "../../entity-meta.ts";
 import { compileList } from "../../entity-list.ts";
 import { assertReadable, profileOf, PRINTABLE } from "../../entity-profiles.ts";
 import { buildCopy, draftConstraints, flowsFrom } from "../../doc-copy.ts";
-import { copySources, CopyInputZ, CopyZ, EntityZ, KeyZ, postWrite, prepareWrite } from "../../entity-write.ts";
+import { CopyInputZ, CopyZ, EntityZ, KeyZ, planCopy, postWrite, prepareWrite } from "../../entity-write.ts";
 import { printDocument } from "../../print.ts";
 import { bad, readOne, readRows } from "../../entity-read.ts";
 import { DEFAULT_PAGE } from "../../lookups.ts";
@@ -143,12 +143,13 @@ export const entitiesRouter = {
 
   /** The copy's draft page: the target document `copy` would post, unposted, and the form it is
    *  drawn with — the target's fields, editable only where `copy` takes a change (CopyHeaderZ, a
-   *  line's quantity). DeliveryNotes and Invoices stay read-only targets: this is their only form. */
+   *  line's quantity). DeliveryNotes and Invoices stay read-only targets: this is their only form.
+   *  `newItems`: the configured parts posting it makes items of first (planCopy). */
   copyDraft: userProcedure
     .input(CopyZ)
     .handler(async ({ input, context }) => {
       const b1 = await b1Of(context.tenantId);
-      const { flow, sources } = await copySources(b1, input);
+      const { flow, sources, make } = await planCopy(b1, input);
       const schema = await viaB1(() => entitySchema(context.tenantId, b1, flow.target)).catch(bad);
       let draft;
       try {
@@ -158,6 +159,7 @@ export const entitiesRouter = {
       }
       return {
         draft,
+        newItems: make.map((m) => m.code),
         constraints: { ...draftConstraints(toConstraints(schema, undefined)), printable: false, flows: [] as { target: string; label: string }[] },
       };
     }),

@@ -54,7 +54,6 @@ export const en = {
     },
   },
   why: {
-    eyebrow: "Why Confire",
     title: "Quoting a configured product shouldn't take a week.",
     today: "Today",
     todayLead: "Email, a spreadsheet, and the one person who knows the rules.",
@@ -64,7 +63,7 @@ export const en = {
       { title: "Typed into SAP by hand", text: "Line by line, price by price." },
     ],
     todayTime: "2–5 days",
-    todayTimeNote: "per quotation*",
+    todayTimeNote: "per quotation",
     with: "With Confire",
     withLead: "One screen between the request and SAP.",
     withSteps: [
@@ -74,11 +73,8 @@ export const en = {
     ],
     withTime: "Minutes",
     withTimeNote: "from inbox to SAP",
-    // DRAFT: replace with a real customer's figure before launch (spec §15).
-    footnote: "* Placeholder. Replace with a real customer's figure.",
   },
   how: {
-    eyebrow: "How it works",
     title: "Set up once. Quote every day.",
     lead: "The first two steps happen once. The third is your sales team's new routine.",
     steps: [
@@ -88,7 +84,6 @@ export const en = {
     ],
   },
   product: {
-    eyebrow: "Product",
     title: "Everything between the request and the quotation.",
     lead: "For manufacturers whose products are configured to order, not picked from a catalogue.",
     ai: {
@@ -152,7 +147,6 @@ export const en = {
     },
   },
   security: {
-    eyebrow: "Security",
     title: "Your SAP stays on your server.",
     lead: "Confire never holds your SAP login and never gets a door into your network.",
     points: [
@@ -169,21 +163,20 @@ export const en = {
     online: "Online",
   },
   faq: {
-    eyebrow: "FAQ",
     title: "Questions IT asks first.",
     lead: "Something else? Ask it in the demo, with your own setup in front of us.",
     items: [
       { q: "Does Confire work with on-premise SAP Business One?", a: "Yes, that's what it's built for. A small agent on your SAP server connects Confire to the Service Layer, with nothing to open in your firewall." },
       { q: "Do I need Beas?", a: "No. With Beas, Confire also costs your routings. Without it, costs come from the BOM and your SAP price lists." },
-      { q: "Which AI does it use, and what does it see?", a: "Draft: Claude, by Anthropic. It sees the request you drop and the product it's filling, nothing else in SAP." },
+      { q: "Which AI does it use, and what does it see?", a: "Claude, by Anthropic. It sees the request you drop and the product it's filling, nothing else in SAP." },
       { q: "What happens if SAP is offline?", a: "You keep configuring and pricing from Confire's copy of your options and prices. Posting to SAP waits until it's back." },
       { q: "Can my customers use it?", a: "Yes, through their own portal, by invitation. They see only their own documents." },
-      { q: "How long does setup take?", a: "Draft: the agent installs in minutes. Modelling your first product is what the demo is for." },
+      { q: "How long does setup take?", a: "The agent installs in minutes. Modelling your first product is what the demo is for." },
     ],
   },
   demo: {
-    eyebrow: "Book a demo",
     title: "See it on one of your own products.",
+    founder: { role: "Founder · Basque Country", lead: "You'll talk to the person who built Confire.", text: "I've led four end-to-end SAP Business One and Beas implementations for manufacturers in Spain and Germany, and I'm Advanced Certified in Beas Manufacturing." },
     next: [
       { title: "We reply within one working day", text: "To set a time that suits you." },
       { title: "A 30-minute call", text: "Bring a real customer request." },
@@ -200,6 +193,7 @@ export const en = {
     privacy: "We'll only use this to reply.",
     privacyLink: "Privacy",
     submit: "Request a demo",
+    sending: "Sending…",
   },
   footer: {
     about: "AI quoting for manufacturers on SAP Business One.",

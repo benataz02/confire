@@ -19,11 +19,12 @@ import { TENANT_HEADER } from "../tenant.ts";
 import { chatHasClientContent, readsClientContent } from "./auto.ts";
 import { modelBlock } from "./extract.ts";
 import { ASSISTANT_MODEL, CHAT_EFFORT, modelOptions, textAdapter } from "./model.ts";
-import { CONFIGURE_CHAT, contextText, GENERAL, LANGUAGES, pageFor, REPORT, REPORT_GUIDE, SYSTEM } from "./pages.ts";
+import { CONFIGURE_CHAT, contextText, GENERAL, LANGUAGES, pageFor, REPORT, SYSTEM } from "./pages.ts";
+import { LOAD_SKILL, SKILLS, SKILLS_FINGERPRINT } from "./skills.ts";
 import {
   appendMessages, dehydrate, hydrate, ownThread, releaseLease, renewLease, replayable, takeLease, type MessageMeta,
 } from "./threads.ts";
-import { unlabeled } from "./files.ts";
+import { fileParts, FileRefZ, unlabeled, type FileRef } from "./files.ts";
 import { ASK_USER, B1_WRITES, chatTools, type Taint } from "./tools.ts";
 import { assertAssistant, budget, meter, rateLimit, REFUSAL_STATUS, type Meter } from "./usage.ts";
 import { localizeError, t } from "../i18n/index.ts";
@@ -47,7 +48,7 @@ const CACHE = { cache_control: { type: "ephemeral" as const } };
  * then adds none (`promptCache` is a no-op once a request has a marker), so without it the history
  * was never cached. Context editing clears old tool results server-side once a long chat passes 80k
  * input tokens — at least 20k at a time, so the cache it invalidates is worth it — keeping the last 8
- * and never what was read off the client's files or asked.
+ * and never what was read off the client's files, asked, or a loaded skill.
  */
 export const CHAT_OPTIONS = {
   cache_control: { type: "ephemeral" },
@@ -57,7 +58,7 @@ export const CHAT_OPTIONS = {
       trigger: { type: "input_tokens", value: 80_000 },
       keep: { type: "tool_uses", value: 8 },
       clear_at_least: { type: "input_tokens", value: 20_000 },
-      exclude_tools: ["read_request", "extract_values", ASK_USER],
+      exclude_tools: ["read_request", "extract_values", ASK_USER, LOAD_SKILL],
     }],
   },
 } as const;
@@ -66,6 +67,8 @@ const PropsZ = z.object({
   route: z.object({ routeId: z.string(), params: z.record(z.string(), z.string()) }),
   dirty: z.boolean(),
   language: z.enum(Object.keys(LANGUAGES) as [keyof typeof LANGUAGES, ...(keyof typeof LANGUAGES)[]]),
+  /** Files dropped with this turn, uploaded first (files.ts): the chat decides what they are for. */
+  refs: z.array(FileRefZ).max(10).optional(),
 });
 
 /** A SAP write of the last turn answered a proposal: it waits for the user's click (b1-tools §5.6). */
@@ -83,12 +86,16 @@ export function proposed(messages: ModelMessage[]): boolean {
   });
 }
 
-/** Up to 12 model turns, and none after the model asked the user or proposed a SAP write: the engine
- *  consults this only once a turn's tools have run, so the stored history ends on that result and the
- *  answer (the pick, "Posted Order 1234") is the user's next message. */
+/** The tools whose card waits for the user: the choice card, and read_request's proposal (its Create
+ *  starts the configuration — the model going on would start a second one). */
+const WAITS = new Set([ASK_USER, "read_request"]);
+
+/** Up to 12 model turns, and none after the model asked the user, proposed a configuration or a SAP
+ *  write: the engine consults this only once a turn's tools have run, so the stored history ends on
+ *  that result and the answer (the pick, "Posted Order 1234") is the user's next message. */
 export const untilAsked: AgentLoopStrategy = (s) => {
   const last = s.messages.findLast((m) => m.role === "assistant");
-  return maxIterations(12)(s) && !last?.toolCalls?.some((c) => c.function.name === ASK_USER) && !proposed(s.messages);
+  return maxIterations(12)(s) && !last?.toolCalls?.some((c) => WAITS.has(c.function.name)) && !proposed(s.messages);
 };
 
 /**
@@ -129,14 +136,15 @@ const schemaOf = (s: unknown): unknown => {
   }
 };
 
-/** What a thinking block is signed against, as one hash: the system prompts, the tools on the wire,
+/** What a thinking block is signed against, as one hash: the system prompts, the tools on the wire
+ *  (the skills middleware's `load_skill` by its fingerprint),
  *  the model and its thinking settings, the provider options and the adapter. A deploy that changes
  *  any of them changes the hash, and the thinking of earlier runs is then not sent back (threads.ts
  *  `replayable`). Bump THINKING_EPOCH to drop every stored block once. */
 const THINKING_EPOCH = 1;
 export function prefixHash(system: { content: string }[], tools: AnyServerTool[]): string {
   return createHash("sha256").update(JSON.stringify({
-    epoch: THINKING_EPOCH, adapter: ADAPTER_VERSION, model: ASSISTANT_MODEL, effort: CHAT_EFFORT,
+    epoch: THINKING_EPOCH, adapter: ADAPTER_VERSION, model: ASSISTANT_MODEL, effort: CHAT_EFFORT, skills: SKILLS_FINGERPRINT,
     options: { ...modelOptions(), ...CHAT_OPTIONS },
     system: system.map((p) => p.content),
     tools: tools.map((x) => [x.name, x.description, schemaOf(x.inputSchema)]),
@@ -197,7 +205,7 @@ export function assistantRoutes(): Hono {
       // Client-sent tools and history are ignored: the last message's text is all that is taken.
       const last = params.messages.at(-1);
       text = last && last.role === "user" ? textOf(last).trim() : "";
-      if (!text) throw new ORPCError("BAD_REQUEST", { message: t("CHAT_EMPTY") });
+      if (!text && !props.refs?.length) throw new ORPCError("BAD_REQUEST", { message: t("CHAT_EMPTY") });
       if (text.length > MAX_TEXT) throw new ORPCError("BAD_REQUEST", { message: t("CHAT_TOO_LONG", MAX_TEXT) });
       ids = { threadId: thread.id, runId: params.runId };
       lease = await takeLease(thread.id);
@@ -214,13 +222,19 @@ export function assistantRoutes(): Hono {
       : thread.projectId ? (hinted.kind === "configure" ? hinted : CONFIGURE_CHAT)
       : hinted.kind === "configure" || hinted.kind === "report" ? GENERAL : hinted;
     let hydrated: ModelMessage[];
+    let files: ContentPart[] = [];
     let block: string | null = null;
     let name: string | undefined;
     const taint: Taint = { client: false };
     try {
-      hydrated = await hydrate(tenantId, thread.messages, { threadId: thread.id, ...(thread.projectId ? { projectId: thread.projectId } : {}) });
+      const fence = { threadId: thread.id, ...(thread.projectId ? { projectId: thread.projectId } : {}) };
+      hydrated = await hydrate(tenantId, thread.messages, fence);
+      // A ref outside this chat's fence (another thread's drop, another configuration's file) is
+      // refused rather than skipped: the user would otherwise be answered about files never read.
+      const refs = (props.refs ?? []) as FileRef[];
+      files = refs.length ? await fileParts(tenantId, refs, fence) : [];
+      if (files.length !== refs.length * 2) throw new ORPCError("BAD_REQUEST", { message: t("ASSISTANT_FILE_GONE") });
       taint.client = await chatHasClientContent(tenantId, userId, thread.id);
-      if (thread.reportId) block = REPORT_GUIDE;
       if (thread.projectId) {
         const where = and(eq(configProject.id, thread.projectId), eq(configProject.tenantId, tenantId), internalVisible)!;
         const { live, view } = await configView(tenantId, where).catch(() => ({ live: null, view: null }));
@@ -237,7 +251,10 @@ export function assistantRoutes(): Hono {
       content: contextText(page.section({ projectId: thread.projectId ?? undefined, name, dirty: props.dirty }), props.language),
       metadata: { pageContext: true },
     };
-    const user: ModelMessage = { role: "user", content: [contextPart, { type: "text", content: text }] };
+    const user: ModelMessage = { role: "user", content: [contextPart, ...files, ...(text ? [{ type: "text" as const, content: text }] : [])] };
+    // The run's tools read the drop off the thread (read_request, a configuration started from it).
+    if (files.length) thread.messages = [...thread.messages, dehydrate(user)];
+    const title = (text || (props.refs ?? []).map((r) => r.name).join(", ")).slice(0, 80);
 
     const m: Meter = { tenantId, userId, threadId: thread.id, projectId: thread.projectId, kind: "chat" };
     const tools = chatTools({ headers, tenantId, userId, thread, meter: m, taint });
@@ -262,7 +279,7 @@ export function assistantRoutes(): Hono {
         if (upTo <= stored) return;
         const add = msgs.slice(stored, upTo).filter((x) => !empty(x)).map((x) => dehydrate(mark(x, resetThinking)));
         stored = upTo;
-        if (add.length) await appendMessages(thread.id, add, text.slice(0, 80));
+        if (add.length) await appendMessages(thread.id, add, title);
       }).catch((e) => { Sentry.captureException(e); });
       return chain;
     };
@@ -326,7 +343,7 @@ export function assistantRoutes(): Hono {
       // Thinking summarized, so the panel can show it (and Sonnet 5.5's notes between tool calls).
       reasoning: { level: CHAT_EFFORT, summary: true },
       promptCache: "short",
-      middleware: [meter(m), budget(tenantId), guard, refusals, saver],
+      middleware: [SKILLS, meter(m), budget(tenantId), guard, refusals, saver],
       abortController,
     });
     return toServerSentEventsResponse(stream, { abortController });

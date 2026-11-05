@@ -48,3 +48,10 @@ test("highlight markers match across languages", () => {
     expect(marks(dict[lang].hero.stage.body)).toBe(marks(dict.en.hero.stage.body));
   }
 });
+
+// Draft markers once shipped live, and in the FAQPage JSON-LD that assistants quote (critique 2026-11-04).
+test("no draft or placeholder copy in any language", () => {
+  for (const [lang, d] of Object.entries(dict))
+    for (const [path, v] of leaves(d))
+      expect([lang, path, /\b(draft|placeholder|borrador|provisional|zirriborro|behin-behineko)/i.test(String(v))]).toEqual([lang, path, false]);
+});

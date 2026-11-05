@@ -4,9 +4,11 @@ import { Hono } from "hono";
 import * as Sentry from "@sentry/bun";
 import { z } from "zod";
 import { and, eq, gt, like } from "drizzle-orm";
-import { db, organization, sapConnection, verification } from "@confire/db";
+import { db, entityMeta, organization, sapConnection, verification } from "@confire/db";
 import { agentPost } from "@confire/b1";
-import { adoptCompany, agentTarget, tenantConnector } from "./b1.ts";
+import { adoptCompany, agentTarget, tenantConnector, type Connector } from "./b1.ts";
+import { DEDUP_UDF } from "./config-quote.ts";
+import { ITEM_UDF } from "./doc-copy.ts";
 import { agentHost, cloudflareConfig, provisionAgent } from "./cloudflare.ts";
 import { encryptSecret } from "./crypto.ts";
 import { readCapped } from "./files.ts";
@@ -125,11 +127,55 @@ type Health = {
   services: { b1: boolean; beas: boolean; print: string[] };
 };
 
+/** Confire's UDFs in a SAP company: the dedup key on quotations (createQuote) and on business
+ *  partners (portal onboarding), and a configured part's code on document lines (buildQuoteLines,
+ *  planCopy). B1 adds a marketing document's UDF to every document of its kind — OQUT's to ORDR,
+ *  OINV…, QUT1's to RDR1, INV1… — so one row per kind is the whole install. */
+export const CONFIRE_UDFS = [
+  { TableName: "OQUT", Name: DEDUP_UDF.slice(2), Type: "db_Alpha", Size: 64, Description: "Confire key" },
+  { TableName: "OCRD", Name: DEDUP_UDF.slice(2), Type: "db_Alpha", Size: 64, Description: "Confire key" },
+  // B1's ItemCode is 50 characters.
+  { TableName: "QUT1", Name: ITEM_UDF.slice(2), Type: "db_Alpha", Size: 50, Description: "Confire item code" },
+];
+
+const udfsMade = new Map<string, Promise<void>>();
+
+/** Make whatever of CONFIRE_UDFS the agent's company lacks — once per company per process, so the
+ *  status page's polling costs SAP nothing after the first. A failure is logged and tried again on
+ *  the next status read; until then the quote and onboarding pre-checks say which UDF is missing.
+ *  ponytail: unverified (spec §16) — B1 may refuse a UDF on a table other sessions hold open; the
+ *  retry on the next read is the whole answer for now. */
+export function ensureUdfs(tenantId: string, conn: Connector): Promise<void> {
+  const key = `${tenantId}|${conn.companyDb}`;
+  const known = udfsMade.get(key);
+  if (known) return known;
+  const made = (async () => {
+    let created = false;
+    for (const u of CONFIRE_UDFS) {
+      const { data } = await conn.b1.readEntitySet("UserFieldsMD", {
+        filter: `TableName eq '${u.TableName}' and Name eq '${u.Name}'`, select: ["FieldID"], top: 1,
+      });
+      if ((data as { value?: unknown[] }).value?.length) continue;
+      await conn.b1.createEntity("UserFieldsMD", u, { prefer: "no-content" });
+      created = true;
+    }
+    // A stored schema never expires on its own: without this the new fields stay unknown to it.
+    if (created) await db.delete(entityMeta).where(eq(entityMeta.tenantId, tenantId));
+  })();
+  udfsMade.set(key, made);
+  made.catch((e) => {
+    udfsMade.delete(key);
+    console.error(`[udfs] ${tenantId} ${conn.companyDb}:`, e);
+    Sentry.captureException(e);
+  });
+  return made;
+}
+
 /**
  * Is the agent there, and does SAP answer through it? `/health` first (version, company, what is
  * configured), then the CompanyService_GetAdminInfo read `tenantCurrency` makes, so green means B1
- * itself answered — and the local currency is filled while at it. The onboarding page polls this
- * instead of trusting that a row exists.
+ * itself answered — and the local currency is filled while at it, and Confire's UDFs made
+ * (ensureUdfs). The onboarding page polls this instead of trusting that a row exists.
  */
 export async function agentStatus(tenantId: string) {
   const [row] = await db.select({ lastOkAt: sapConnection.lastOkAt, companyDb: sapConnection.companyDb })
@@ -148,7 +194,10 @@ export async function agentStatus(tenantId: string) {
   try {
     health = (await agentPost(await agentTarget(tenantId), "/health")) as Health;
     if (health.companyDb) await adoptCompany(tenantId, health.companyDb);
-    const { data } = await (await tenantConnector(tenantId)).b1.readEntitySet("CompanyService_GetAdminInfo");
+    const conn = await tenantConnector(tenantId);
+    const { data } = await conn.b1.readEntitySet("CompanyService_GetAdminInfo");
+    // Off the status's path: a UDF alters every table of its kind, which can take SAP a while.
+    void ensureUdfs(tenantId, conn);
     const cur = (data as { LocalCurrency?: unknown } | null)?.LocalCurrency;
     const lastOkAt = new Date();
     await db.update(sapConnection)

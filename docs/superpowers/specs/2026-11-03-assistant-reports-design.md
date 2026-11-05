@@ -76,7 +76,6 @@ Dataset = {
   /** document lines: the document $crossjoin'ed with its DocumentLines (doc-chain.ts' pattern);
    *  line fields are `Lines.ItemCode`, `Lines.LineTotal`… */
   lines?: boolean;
-  select: string[];                                          // header (and `Lines.*`) fields to read
   filter?: FilterCond[];                                     // ANDed onto every source
   /** related entities, one named value each: `{ name: "country", field: "CardCode",
    *  entity: "BusinessPartners", key: "CardCode", value: "Country" }`; `field` may name an earlier
@@ -119,7 +118,7 @@ every problem (as `config-patch.ts` does), so the model corrects itself in one t
   schema — the strict-name check `b1.read` already has (`checkQueryNames`), which answers the closest
   real names; Confire fields are the Confire source's (§3.5);
 - a widget's dimension and series hold at most one date bucket between them;
-- every widget names a dataset that exists and fields the dataset has (selected, `Lines.*`, looked
+- every widget names a dataset that exists and fields the dataset has (its sources', `Lines.*`, looked
   up, derived, or `_source`);
 - a chart's measures from different datasets each have its dimension;
 - chart kinds get what they need (a donut one measure, a bullet a target or a compare, a scatter two
@@ -141,17 +140,21 @@ are read only where rows are shown.
   after.
 - **Every page, still.** Grouped answers page like rows: the runner follows B1's sealed
   `@odata.nextLink` (`readRows`' cursor, `readNext`) until there is none, page size 500.
-- **Live check (2026-11-03, pending):** `$apply` on an entity set and over a crossjoin has not yet run
-  against a live B1. The runner's fallback makes a refusal visible (a "SAP did not total …" message on
-  the page) rather than wrong; record here what a paired B1 answers, and any verified error text.
+- **Live check (2026-11-03, done on a paired b1s/v2):** `$apply` on an entity set works, encoded
+  like `$filter` — filter, groupby, sum, `$count`. Two refusals, both 400 code 201 "Not supported
+  query option": a bare date inside `filter()` (`DocDueDate lt 2026-11-03`; `$filter` takes it, so
+  dates are now quoted everywhere, same counts), and any line field in `$apply` over the lines
+  crossjoin (below). `$apply` over a crossjoin of two top-level sets works.
 - **Rows only for the table**, at most the 2,000 it shows, in the table's sort; `partial: { read,
   total }` (`$count`) when there are more. A table is the one place the first page's count matters.
-- **Lines.** Header + lines totals are `$apply` over `$crossjoin(<Set>,<Set>/DocumentLines)` with the
-  DocEntry equality as the join (doc-chain.ts' spec shape). **Unverified on a live B1 — verify first.**
-  If B1 refuses `$apply` on a crossjoin (or on any set), the runner falls back to reading rows and
-  aggregating them itself, capped at **20,000 rows** per dataset with `partial` on the page, and the
-  result says which datasets fell back. `// ponytail:` the fallback is the slow path, kept for the
-  B1 versions and sets `$apply` does not cover.
+- **Lines.** A lines dataset is `$crossjoin(<Set>,<Set>/DocumentLines)` with the DocEntry equality
+  as the join (doc-chain.ts' spec shape), and it is **always read as rows**: B1's `$apply` over that
+  crossjoin names no line field — `aggregate(<Set>/DocumentLines(LineTotal with sum as s))`, the
+  `<Set>/DocumentLines/LineTotal` path form, `groupby((<Set>/DocumentLines/ItemCode))` ("invalid
+  property '<Set>' of entity type 'Document'") and `$count` all 201; only its `filter()` reaches the
+  lines. Rows are read and totalled here, as when B1 refuses `$apply` on a set: capped at **20,000
+  rows** per dataset with `partial` on the page, and the result says which datasets did.
+  `// ponytail:` the slow path; SQLQueries or a Semantic Layer view would let SAP total lines.
 - **Lookups.** A measure grouped by a related entity's field (item group, customer country) is
   pushed down grouped by the key (`ItemCode`, `CardCode`); the runner then reads the distinct keys'
   attributes and re-aggregates by them. The distinct values of the joined field are read from the related entity in batches of
@@ -215,7 +218,7 @@ Client requests are configurations with channel `portal`.
 `report_set({ definition })` — validate (§3.2), run (§3.3), store the definition and its result on
 the thread's report (`thread.reportId`; `reports.create` made both before the first send, so a thread
 without a report refuses the tool: "only on a report's page"), and answer the model a **compact summary**, not the rows: per widget a few figures (a KPI's value, a
-chart's top categories and totals), row counts, `partial`, warnings. That is enough for the model to
+chart's category count and top categories, a table's row count), each dataset's `partial` and `fellBack`, warnings — not the rows SAP returned, which add up every grouped read and read as a document count. That is enough for the model to
 describe the draft and sanity-check it ("0 rows — the status filter is wrong") without its context
 filling with data. Whole definition per call (`// ponytail:` a patch once definitions grow large).
 
@@ -286,12 +289,15 @@ still hold whatever a model does; this is a hint, as every page note is.
    narrows** (~360 px) and the report grows in on the left — one `document.startViewTransition`
    with a `viewTransitionName` on the chat column, as `ChatView` already does for its box
    (reduced motion: no animation). The chat column is one element through all three states, so a
-   stream in progress is never interrupted. A saved report opens directly in this state with its chat.
+   stream in progress is never interrupted. A report that already has a definition opens to be **read**,
+   its chat closed: *Edit* docks the chat (Fiori's display → edit, the same slide) and *Done* hides it
+   again, kept mounted so a running answer goes on. A chat search hit (`/reports/$id#chat`) and a click
+   on an assumption chip open it docked.
 
 The report side (`ReportView`, `apps/app/src/reports/`), all UI5, every colour a theme variable:
 - **Header**: title, subtitle, "live from SAP · read 11:42 (612 quotations, 148 orders)", the
   `PageMessages` button (partial reads, warnings, a failed run), *Refresh*, *Save to home* (then
-  *Saved*, with rename and delete in a menu).
+  *Saved*, a toggle), *Edit*/*Done*, rename and delete in the toolbar's overflow.
 - **Assumption chips** (`Token`s or `Tag`s): clicking one puts "Change <label>: " in the chat box.
 - **KPI row**: `Card` + `AnalyticalCardHeader` with `NumericSideIndicator`s (compare, deviation,
   target), as the assistant's cards already do.
@@ -353,3 +359,47 @@ first drafts look like the mockup.
 - The chat is the only editor; chips pre-fill it.
 - One thread per report; a report deleted deletes its chat.
 - Whole definition per `report_set`, no patches.
+
+## 11. One assistant, no report page of its own (2026-11-04)
+
+Superseding §4, §5.2 and §6.1–6.2 where they differ:
+
+- **No *New report* page.** A report is made by its chat: a general chat's first successful
+  `report_set` creates the `assistant_report` and links the thread (`adoptReport`, under the run's
+  lease, `report_id is null` guarded). A refused definition leaves the chat general. `reports.create`,
+  `blankReport` and `/reports/new` are gone; the home's *New report* tile opens the AI page.
+- **The guide is a skill.** `REPORT_GUIDE` is the `report` skill (`assistant/skills.ts`), loaded with
+  `load_skill` by intent, not a second system block; the report chat's page note says to load it if it
+  is not in the chat yet.
+- **One page.** The AI page (`AssistantPage.tsx`) docks the report beside the chat once the chat has
+  one (the §6.2 storyboard, unchanged). `/reports/$id` is the same component opened to be read.
+- **Rebuilding a report from a file.** A report's chat takes files: spreadsheets are read as text
+  (`assistant/sheet.ts`: the first 200 rows a sheet as CSV, the formulas, an xlsx's pivot tables by
+  their definition), PDFs and images as before. The skill maps the file's figures to SAP fields,
+  never copies its numbers, puts every guessed mapping in `assumptions` and checks one or two totals
+  against SAP.
+
+## 12. The filter bar and the brief (2026-11-04)
+
+- **`ReportDef.filters`** (max 8): `{ field, label, default? }`, the report's filter bar: the list's
+  `FilterHeader` in a card between the chips and the KPIs (`ReportFilters`, `ReportView.tsx`). The
+  definition's filters are shown; every other header field of the report's data (each dataset's,
+  those all its sources share) waits in Adapt Filters, and narrows the datasets that have it — under a
+  dataset's own condition on it too, since only the definition's filters replace. Go runs on the
+  values, Clear on the definition's defaults; which fields are shown is the page's, not stored. A filter's field is a header field of the datasets (not a lookup,
+  derive or `Lines.*`); it applies to every dataset whose every source has it. `checkReport` refuses an
+  unknown field, a duplicate, and a dataset or source condition on a bar field — one place says a
+  field's condition, so a value cleared in the bar filters nothing. A measure's own condition on a bar
+  field stands, the bar's not added over it: a KPI's compare keeps its fixed period.
+- **The server converts.** `reports.run` takes `filters` (by field, any header field of the data; none = each filter's default).
+  `barConds` (`plan.ts`, pure) applies a list's rules (`views.ts`' `toQuery`): a range `ge`/`lt` the next
+  day, date tokens resolved; a list `in`; text `contains` unless the field is coded (enum, value help);
+  else `eq`. `ReportResult.filters` says, per filter, its control (type, enum options, the value help's
+  entity set from B1's metadata) and the value the run applied, dates resolved — the bar draws what the
+  figures were filtered by. Only a run on the defaults is stored: a tile shows the report as defined.
+- **The brief.** Before a first draft the `report` skill asks one `ask_user` of up to four questions —
+  the bar's filters, how to see the figures, and at most two that change the report most (period or
+  comparison, net or gross, which documents) — then builds the whole over-delivered draft from the
+  answers. Not when rebuilding from a file, refining, or when the user already said. `ask_user` takes
+  `more` (≤ 3 further questions) and `multiple`; `ChoiceCard` draws them as one card with one Send, the
+  answer a line per question.

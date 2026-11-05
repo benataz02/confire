@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "intent": {
-    "skills": ["@tanstack/router-core"]
+    "skills": ["@tanstack/router-core", "@tanstack/react-router"]
   },
   "devDependencies": {
     "@confire/b1": "workspace:*",

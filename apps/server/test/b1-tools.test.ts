@@ -4,6 +4,7 @@ import { db, assistantFile, assistantSettings, assistantThread, configModel, con
 import type { ModelMessage } from "@tanstack/ai";
 import { router } from "../src/orpc/router.ts";
 import { tenantConnector } from "../src/b1.ts";
+import type { Proposal } from "../src/orpc/routers/b1.ts";
 import { entitySchema } from "../src/entity-meta.ts";
 import { closestNames, postWrite, prepareWrite } from "../src/entity-write.ts";
 import { CHAT_TOOLS } from "../src/assistant/pages.ts";
@@ -256,6 +257,60 @@ describe.skipIf(!process.env.DATABASE_URL)("b1 tools", () => {
     const posted = await call(router.b1.post, { proposal: (inv as { proposal: never }).proposal }, w.staff);
     expect(posted.written.entity).toBe("Invoices");
     expect(agent.store.Invoices![0]!.DocumentLines).toEqual([expect.objectContaining({ BaseType: 17, BaseEntry: 5, BaseLine: 0 })]);
+  });
+
+  test("a quotation's configured part becomes an item, then its quotation line, then the order", async () => {
+    const w = await world();
+    const generic = {
+      ItemCode: "GEN", ItemName: "Generic", ItemsGroupCode: 108, Series: 3, QuantityOnStock: 4, "@odata.etag": 'W/"g"',
+      ItemWarehouseInfoCollection: [{ WarehouseCode: "01", InStock: 4, MinimalStock: 1 }], U_Cliente: "X",
+    };
+    const quote = () => ({
+      DocEntry: 7, DocNum: 907, CardCode: "C1", CardName: "ACME", DocumentStatus: "bost_Open", "@odata.etag": 'W/"7"',
+      DocumentLines: [
+        { LineNum: 0, ItemCode: "GEN", ItemDescription: "Bracket 40", Quantity: 3, UnitPrice: 12, LineStatus: "bost_Open", U_CF_ItemCode: "PART-A" },
+        { LineNum: 1, ItemCode: "A", Quantity: 1, UnitPrice: 5, LineStatus: "bost_Open" },
+      ],
+    });
+    agent.store.Quotations = [quote()];
+    agent.store.Items = [generic];
+    const input = { sourceEntity: "Quotations", targetEntity: "Orders", docEntries: [7] };
+
+    // The draft page: the order on the real item, and a word on what posting makes first.
+    const start = agent.calls.length;
+    const draft = await call(router.entities.copyDraft, input, w.staff);
+    expect(draft.newItems).toEqual(["PART-A"]);
+    expect((draft.draft.DocumentLines as Record<string, unknown>[]).map((l) => l.ItemCode)).toEqual(["PART-A", "A"]);
+    expect(agent.calls.slice(start).some((c) => c.route === "/create" || c.route === "/update")).toBe(false);
+
+    const from = agent.calls.length;
+    await call(router.entities.copy, input, w.staff);
+    const writes = agent.calls.slice(from).filter((c) => c.route === "/create" || c.route === "/update");
+    expect(writes.map((c) => `${c.route} ${c.body.entitySet}`)).toEqual(["/create Items", "/update Quotations", "/create Orders"]);
+    expect(writes[0]!.body.data).toEqual({
+      ItemCode: "PART-A", ItemName: "Bracket 40", ItemsGroupCode: 108, U_Cliente: "X", ItemWarehouseInfoCollection: [{ WarehouseCode: "01", MinimalStock: 1 }],
+    });
+    expect(writes[1]!.body).toMatchObject({
+      key: 7, etag: 'W/"7"', replaceCollections: false,
+      data: { DocumentLines: [{ LineNum: 0, ItemCode: "PART-A", Quantity: 3, UnitPrice: 12, ItemDescription: "Bracket 40" }] },
+    });
+    expect(agent.store.Quotations![0]!.DocumentLines).toEqual([
+      expect.objectContaining({ LineNum: 0, ItemCode: "PART-A", U_CF_ItemCode: "PART-A" }), expect.objectContaining({ LineNum: 1, ItemCode: "A" }),
+    ]);
+    expect((writes[2]!.body.data as { DocumentLines: unknown[] }).DocumentLines[0]).toMatchObject({ BaseType: 23, BaseEntry: 7, BaseLine: 0, ItemCode: "PART-A" });
+
+    // The chat, after a copy that made the item and failed: the item is used, the line still moved —
+    // and the proposal says so before anything is written.
+    agent.store.Quotations = [quote()];
+    const { proposal } = (await call(router.b1.copy, input, w.staff)) as { proposal: Proposal };
+    expect(proposal.changes?.["New items"]).toBeUndefined();
+    expect(proposal.changes?.["Quotation lines"]).toEqual({
+      before: [{ DocEntry: 7, LineNum: 0, ItemCode: "GEN" }], after: [{ DocEntry: 7, LineNum: 0, ItemCode: "PART-A" }],
+    });
+    const again = agent.calls.length;
+    await call(router.b1.post, { proposal }, w.staff);
+    expect(agent.calls.slice(again).filter((c) => c.route === "/create" || c.route === "/update").map((c) => `${c.route} ${c.body.entitySet}`))
+      .toEqual(["/update Quotations", "/create Orders"]);
   });
 
   test("auto still proposes once the chat read what a client wrote: this run, an earlier one, or a client's request", async () => {

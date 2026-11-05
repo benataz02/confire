@@ -1,4 +1,8 @@
 import type { PageMessage } from "@confire/ui/PageMessages.tsx";
+import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
+import { cleanValues } from "@confire/ui/views.ts";
+import type { Constraints, EntityConstraints } from "@confire/ui/metadata.ts";
+import type { CflDialogConfig, FilterField, FilterValue } from "@confire/ui/types.ts";
 import type { client } from "../orpc.ts";
 
 // A report's results as UI5 chart props (reports spec §6.2). Pure — the page picks the component by
@@ -10,6 +14,7 @@ export type WidgetResult = Result["widgets"][number];
 export type ChartResult = Extract<WidgetResult, { kind: "chart" }>;
 export type KpiResult = Extract<WidgetResult, { kind: "kpi" }>;
 export type TableResult = Extract<WidgetResult, { kind: "table" }>;
+export type BarFilter = NonNullable<Result["filters"]>[number];
 export type ChartKind = ChartResult["chart"];
 export type Format = ChartResult["measures"][number]["format"];
 
@@ -49,6 +54,19 @@ export function chartProps(r: ChartResult, fmt: (v: number, f: Format) => string
   };
 }
 
+/** A grid's sort, done in the browser over rows that are all loaded (the Grid only asks for it). */
+export function sortRows<T extends Record<string, unknown>>(rows: T[], by: { field: string; direction: "asc" | "desc" }[]): T[] {
+  if (!by.length) return rows;
+  return [...rows].sort((a, b) => {
+    for (const s of by) {
+      const x = a[s.field], y = b[s.field];
+      const c = typeof x === "number" && typeof y === "number" ? x - y : String(x ?? "").localeCompare(String(y ?? ""), undefined, { numeric: true });
+      if (c) return s.direction === "desc" ? -c : c;
+    }
+    return 0;
+  });
+}
+
 /** The table's rows behind one clicked category. */
 export const filterRows = <T extends Record<string, unknown>>(rows: T[], dimension: string, value: unknown): T[] =>
   rows.filter((r) => String(r[dimension] ?? "—") === String(value));
@@ -83,4 +101,45 @@ export function reportMessages(result: Result | null, failed: string | null, gro
       out.push({ id: `t:${i}`, type: "Critical", text: t("REPORT_TABLE_PARTIAL", w.title), detail: t("REPORT_TABLE_PARTIAL_DETAIL", String(w.rows.length), w.total === null ? "…" : String(w.total)), group });
   });
   return out;
+}
+
+/** The value helps a bar filter gets, by the entity set its field points to (B1's metadata). Any
+ *  other coded field is typed: ponytail — add a set here once a report wants its value help. */
+const VALUE_HELP: Record<string, () => CflDialogConfig> = {
+  BusinessPartners: () => cfl.businessPartners(), Items: () => cfl.items(), SalesPersons: () => cfl.salesPersons(),
+  Warehouses: () => cfl.warehouses(), PriceLists: () => cfl.priceLists(), Currencies: () => cfl.currencies(),
+};
+
+/** The report's fields as a list's metadata, so its grid, bar and axes read like a List Report's
+ *  (labels in the reader's language, enum names): every SAP set it reads merged, the first to name a
+ *  field winning (a dataset's sources share their fields), and a document's lines as the dataset
+ *  names them, `Lines.ItemCode`. */
+export function reportConstraints(list: (EntityConstraints | undefined)[]): Constraints {
+  const out: Constraints = {};
+  for (const c of list) {
+    for (const [name, f] of Object.entries(c?.fields ?? {})) {
+      if (name === "DocumentLines") for (const [ln, lf] of Object.entries(f.Fields ?? {})) out[`Lines.${ln}`] ??= lf;
+      else out[name] ??= f;
+    }
+  }
+  return out;
+}
+
+/** The report's filter bar as a list's filters (FilterHeader's pool: the definition's shown, with
+ *  their defaults for Clear; every other field in Adapt Filters), and the values its run applied.
+ *  A declared filter keeps the definition's label; the rest, and every enum's options, are the
+ *  metadata's — an option's value is B1's member name, what the Service Layer filters on. */
+export function filterBar(filters: BarFilter[], meta: Constraints = {}): { pool: FilterField[]; values: Record<string, FilterValue> } {
+  const pool = filters.map((f): FilterField => {
+    const help = f.lookup ? VALUE_HELP[f.lookup.entitySet] : undefined;
+    const m = meta[f.field];
+    const options = m?.Options ?? f.options;
+    return {
+      key: f.field, label: f.declared ? f.label : m?.Label ?? f.label, type: f.type, visible: f.declared,
+      ...(f.default !== undefined ? { defaultValue: f.default } : {}),
+      ...(options ? { options } : {}),
+      ...(help ? { cfl: { dialogConfig: help() } } : {}),
+    };
+  });
+  return { pool, values: cleanValues(Object.fromEntries(filters.map((f) => [f.field, f.value]))) };
 }

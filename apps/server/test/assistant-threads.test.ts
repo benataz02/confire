@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { ModelMessage } from "@tanstack/ai";
 import { and, eq } from "drizzle-orm";
 import { db, assistantFile, configModel, configProjectEvent, projectFile } from "@confire/db";
-import { assistantFileRoutes, copyToProject, filePart, unlabeled, type FileRef } from "../src/assistant/files.ts";
+import { utils, write } from "xlsx";
+import { assistantFileRoutes, copyToProject, filePart, fileParts, unlabeled, type FileRef } from "../src/assistant/files.ts";
 import {
   appendMessages, clearThread, dehydrate, hydrate, lastDrop, newThread, ownThread, threadFor, withThread,
 } from "../src/assistant/threads.ts";
@@ -14,6 +15,11 @@ import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness
 
 const codeOf = (p: Promise<unknown>) => p.then(() => "OK", (e: { code?: string }) => e.code);
 const PDF = Buffer.from("%PDF-1.7 drawing");
+const XLSX = (() => {
+  const wb = utils.book_new();
+  utils.book_append_sheet(wb, utils.aoa_to_sheet([["Customer", "Net"], ["ACME", 100]]), "Sales");
+  return Buffer.from(write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer);
+})();
 
 async function world() {
   const { tenantId, slug } = await makeTenant();
@@ -172,18 +178,38 @@ describe.skipIf(!process.env.DATABASE_URL)("assistant files", () => {
       method: "POST", body: new Uint8Array(body), headers: { cookie },
     });
 
-  test("only PDF, PNG and JPEG, by their bytes", async () => {
+  test("PDF, PNG, JPEG and spreadsheets, by their bytes", async () => {
     const w = await world();
     const t = await newThread(w.tenantId, w.a.userId);
     const docx = await upload(w.slug, t.id, w.a.cookie, "rfq.pdf", Buffer.from("PK\x03\x04 word document"));
     expect(docx.status).toBe(415);
-    expect(((await docx.json()) as { message: string }).message).toContain("PDF, PNG and JPEG");
+    expect(((await docx.json()) as { message: string }).message).toContain("PDF, PNG, JPEG");
     expect(await db.select().from(assistantFile).where(eq(assistantFile.threadId, t.id))).toHaveLength(0);
     const pdf = await upload(w.slug, t.id, w.a.cookie, "x.bin", PDF);
     expect(pdf.status).toBe(201);
     expect(((await pdf.json()) as { ref: FileRef }).ref).toMatchObject({ kind: "assistant", name: "x.bin", mime: "application/pdf" });
+    const sheet = await upload(w.slug, t.id, w.a.cookie, "Q1.xlsx", XLSX);
+    expect(sheet.status).toBe(201);
+    expect(((await sheet.json()) as { ref: FileRef }).ref.mime).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     // someone else's thread is not a place to upload to
     expect((await upload(w.slug, t.id, w.b.cookie, "y.pdf", PDF)).status).toBe(404);
+  });
+
+  test("a spreadsheet is read as text, stored as a reference, and read again on hydrate", async () => {
+    const w = await world();
+    const t = await newThread(w.tenantId, w.a.userId);
+    const { ref } = (await (await upload(w.slug, t.id, w.a.cookie, "Q1.xlsx", XLSX)).json()) as { ref: FileRef };
+    const parts = await fileParts(w.tenantId, [ref], { threadId: t.id });
+    expect(parts[1]).toMatchObject({ type: "text", metadata: { file: { id: ref.id } } });
+    expect((parts[1] as { content: string }).content).toContain("ACME,100");
+    const msg: ModelMessage = { role: "user", content: [...parts, { type: "text", content: "rebuild this" }] };
+    const stored = dehydrate(msg);
+    expect(JSON.stringify(stored)).not.toContain("ACME");
+    expect(lastDrop([stored])).toEqual({ refs: [ref], text: "rebuild this" });
+    const [back] = await hydrate(w.tenantId, [stored], { threadId: t.id });
+    expect(JSON.stringify(back)).toContain("ACME,100");
+    // on the wire a text part carries no Confire metadata
+    expect(unlabeled(back!.content as never)[1]).toEqual({ type: "text", content: (parts[1] as { content: string }).content });
   });
 
   test("copy to project writes file events", async () => {

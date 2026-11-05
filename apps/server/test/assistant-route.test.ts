@@ -30,14 +30,14 @@ async function world(on = true) {
   const fake = fakeText();
   useTestAdapter(fake);
   const thread = await newThread(tenantId, u.userId);
-  const post = (o: { text?: string; threadId?: string; cookie?: string | null; slug?: string; route?: object; messages?: object[] } = {}) =>
+  const post = (o: { text?: string; threadId?: string; cookie?: string | null; slug?: string; route?: object; messages?: object[]; refs?: object[] } = {}) =>
     assistantRoutes().request("/api/assistant", {
       method: "POST",
       headers: { "content-type": "application/json", [TENANT_HEADER]: o.slug ?? slug, ...(o.cookie === null ? {} : { cookie: o.cookie ?? u.cookie }) },
       body: JSON.stringify({
         threadId: o.threadId ?? thread.id, runId: crypto.randomUUID(), state: {}, tools: [], context: [],
         messages: o.messages ?? [{ id: "u1", role: "user", content: o.text ?? "Hello?" }],
-        forwardedProps: { route: o.route ?? HOME, dirty: false, language: "en" },
+        forwardedProps: { route: o.route ?? HOME, dirty: false, language: "en", ...(o.refs ? { refs: o.refs } : {}) },
       }),
     });
   const stored = async (id = thread.id) => (await db.select().from(assistantThread).where(eq(assistantThread.id, id)))[0]!;
@@ -160,13 +160,15 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/assistant", () => {
     await (await w.post({ text: "a" })).text();
     w.fake.setResponses([look]);
     await (await w.post({ text: "b", route: { routeId: "/$slug/models/$id", params: { id: "x" } } })).text();
-    expect(seen[0]!.tools).toEqual([...CHAT_TOOLS]);
+    // the skills middleware adds load_skill after the fixed set (skills.ts)
+    expect(seen[0]!.tools).toEqual([...CHAT_TOOLS, "load_skill"]);
     expect(seen[1]!.tools).toEqual(seen[0]!.tools);
     expect(seen[1]!.system).toBe(seen[0]!.system);
     expect(seen[1]!.last).toContain("model builder");
     expect(seen[0]!.system).not.toContain("model builder");
     // the history is cached (top-level marker) and old tool results are cleared past 80k tokens
     expect(seen[0]!.options).toMatchObject(CHAT_OPTIONS);
+    expect(CHAT_OPTIONS.context_management.edits[0].exclude_tools).toContain("load_skill"); // a skill is never cleared
     expect(JSON.stringify(seen[0]!.last)).not.toContain("pageContext"); // Confire's metadata never reaches the wire
   });
 
@@ -189,7 +191,7 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/assistant", () => {
     w.fake.setResponses([({ request }) => { system = JSON.stringify(request.systemPrompts); tools = (request.tools ?? []).map((x) => x.name); return { text: "ok" }; }]);
     await (await w.post({ text: "What is missing?" })).text();
     expect(system).toContain("# Model: Cable");
-    expect(tools).toEqual([...CHAT_TOOLS]);
+    expect(tools).toEqual([...CHAT_TOOLS, "load_skill"]);
   });
 
   test("an error mid-run keeps the user's message", async () => {
@@ -299,40 +301,66 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/assistant", () => {
     datasets: { c: { from: [{ source: "confire", entity: "Configurations" }] } },
     widgets: [{ kind: "kpi", title: "All", value: { dataset: "c", agg: "count", label: "n" } }],
   };
-  const reportOf = (w: Awaited<ReturnType<typeof world>>) =>
-    call(router.reports.create, {}, { context: { headers: tenantHeaders(w.slug, w.u.cookie) } });
-
-  test("a report's chat gets the report guide as its second system block and report_set in its tools", async () => {
+  test("a general chat asking for a report loads the report skill; its first report_set makes it the report's", async () => {
     const w = await world();
-    const r = await reportOf(w);
-    let system = ""; let tools: string[] = [];
-    w.fake.setResponses([({ request }) => { system = JSON.stringify(request.systemPrompts); tools = (request.tools ?? []).map((x) => x.name); return { text: "ok" }; }]);
-    await (await w.post({ threadId: r.threadId, text: "sales pipeline by month", route: { routeId: "/$slug/reports/$id", params: { id: r.id } } })).text();
-    expect(system).toContain("over-deliver");
-    expect(tools).toContain("report_set");
-    const t = await w.stored(r.threadId);
-    expect(JSON.stringify(note(t.messages[0]!))).toContain("report");
-  });
-
-  test("report_set stores the report and answers a summary without rows", async () => {
-    const w = await world();
-    const r = await reportOf(w);
-    w.fake.setResponses([{ toolCalls: [{ name: "report_set", input: { definition: CONFIRE_REPORT } }] }, { text: "Here is a first draft." }]);
-    await (await w.post({ threadId: r.threadId, text: "how many configurations?" })).text();
-    const t = await w.stored(r.threadId);
-    const result = t.messages.find((m) => m.role === "tool")!;
+    let system = ""; let skill = "";
+    w.fake.setResponses([
+      ({ request }) => { system = JSON.stringify(request.systemPrompts); return { toolCalls: [{ name: "load_skill", input: { name: "report" } }] }; },
+      ({ request }) => { skill = JSON.stringify(request.messages.at(-1)); return { toolCalls: [{ name: "report_set", input: { definition: CONFIRE_REPORT } }] }; },
+      { text: "Here is a first draft." },
+    ]);
+    await (await w.post({ text: "how many configurations?" })).text();
+    expect(skill).toContain("over-deliver"); // the skill arrives as a tool result, in the history
+    expect(system).not.toContain("over-deliver"); // never in the prompt prefix
+    const t = await w.stored();
+    expect(t.reportId).not.toBeNull();
+    const result = t.messages.filter((m) => m.role === "tool").at(-1)!;
     expect(String(result.content)).toContain("\"kpi\":\"All\"");
     expect(String(result.content)).not.toContain("\"rows\":[");
-    const got = await call(router.reports.get, { id: r.id }, { context: { headers: tenantHeaders(w.slug, w.u.cookie) } });
+    const got = await call(router.reports.get, { id: t.reportId! }, { context: { headers: tenantHeaders(w.slug, w.u.cookie) } });
     expect(got.definition?.title).toBe("Configurations");
     expect(got.lastResult).not.toBeNull();
+    // the next turn's note says it is a report's chat, and to load its skill if it is not there yet
+    let last = "";
+    w.fake.setResponses([({ request }) => { last = JSON.stringify(request.messages.at(-1)); return { text: "ok" }; }]);
+    await (await w.post({ text: "only Spain" })).text();
+    expect(last).toContain("report skill");
   });
 
-  test("report_set on a general chat is refused", async () => {
+  test("report_set in a configuration's chat is refused", async () => {
     const w = await world();
-    w.fake.setResponses([{ toolCalls: [{ name: "report_set", input: { definition: CONFIRE_REPORT } }] }, { text: "ok" }]);
-    await (await w.post({ text: "a report please" })).text();
-    const result = (await w.stored()).messages.find((m) => m.role === "tool")!;
-    expect(String(result.content)).toContain("report's chat");
+    const [m] = await db.insert(configModel).values({ tenantId: w.tenantId, name: "Cable", definition: TEST_MODEL }).returning({ id: configModel.id });
+    w.fake.setResponses([
+      { toolCalls: [{ name: "configs_create", input: { modelId: m!.id, name: "ACME cable" } }] },
+      { toolCalls: [{ name: "report_set", input: { definition: CONFIRE_REPORT } }] },
+      { text: "ok" },
+    ]);
+    await (await w.post({ text: "a cable, and a report please" })).text();
+    const t = await w.stored();
+    expect(t.projectId).not.toBeNull();
+    expect(t.reportId).toBeNull();
+    expect(String(t.messages.filter((m) => m.role === "tool").at(-1)!.content)).toContain("configuration");
+  });
+
+  test("files ride the turn: the chat reads them, the stored turn keeps references; another chat's are refused", async () => {
+    const w = await world();
+    const { assistantFileRoutes } = await import("../src/assistant/files.ts");
+    const upload = async (threadId: string) => ((await (await assistantFileRoutes().request(`/files/${w.slug}/assistant/${threadId}?name=old-report.csv`, {
+      method: "POST", body: new Uint8Array(Buffer.from("Customer,Net\nACME,100\n")), headers: { cookie: w.u.cookie },
+    })).json()) as { ref: object }).ref;
+    const ref = await upload(w.thread.id);
+    let sent = "";
+    w.fake.setResponses([({ request }) => { sent = JSON.stringify(request.messages.at(-1)); return { text: "A sales list." }; }]);
+    const res = await w.post({ text: "", refs: [ref] });
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(sent).toContain("ACME,100");
+    const t = await w.stored();
+    expect(t.title).toBe("old-report.csv"); // no words: the files name the chat
+    expect(JSON.stringify(t.messages[0])).not.toContain("ACME");
+    // a ref of another of the user's chats is no file of this one
+    const other = await newThread(w.tenantId, w.u.userId);
+    const foreign = await upload(other.id);
+    expect((await w.post({ text: "and this", refs: [foreign] })).status).toBe(400);
   });
 });

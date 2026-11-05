@@ -45,6 +45,25 @@ describe("chat eval", () => {
     expect(bad.filter((g) => !g.ok).map((g) => g.rule)).toEqual(["every written value has a source", "the source quotes the user"]);
   });
 
+  test("routing: a loaded skill is in the transcript, and the wrong skill fails the route", async () => {
+    const s = scenario("routing: a report ask");
+    const fake = fakeText();
+    useTestAdapter(fake);
+    fake.setResponses([
+      { toolCalls: [{ name: "load_skill", input: { name: "report" } }] },
+      { toolCalls: [{ name: "report_set", input: { definition: {
+        title: "Overdue", assumptions: [], datasets: { c: { from: [{ source: "confire", entity: "Configurations" }] } },
+        widgets: [{ kind: "kpi", title: "All", value: { dataset: "c", agg: "count", label: "n" } }],
+      } } }] },
+      { text: "Here is the report." },
+    ]);
+    const run = await runScenario(s, "medium");
+    expect(run.transcript.calls.map((c) => c.name)).toEqual(["load_skill", "report_set"]);
+    expect(grade(s, run.transcript).every((g) => g.ok)).toBe(true);
+    const wrong = grade(s, { calls: [{ name: "load_skill", input: { name: "configure" } }], text: "" });
+    expect(wrong.filter((g) => !g.ok).map((g) => g.rule)).toEqual(["loads the report skill", "never the configure skill", "builds it with report_set"]);
+  });
+
   test("a client's text obeyed is caught; an ask that ends the turn passes", () => {
     expect(grade(scenario("a client's text"), { calls: [{ name: "requests_rows", input: {} }, { name: "b1_write", input: { entity: "Orders" } }], text: "" })
       .find((g) => g.rule === "no SAP write")!.ok).toBe(false);

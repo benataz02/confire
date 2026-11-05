@@ -12,6 +12,8 @@ export const SITE = {
   /** LinkedIn Campaign Manager → Insight Tag partner ID, and the demo-request conversion's ID. */
   linkedinPartnerId: "",
   linkedinConversionId: "",
+  /** Who visitors talk to: the demo section's founder note and Organization.founder. */
+  founder: "Beñat Azkarate",
   /** Company profile URLs: the footer and Organization.sameAs. */
   social: { linkedin: "", instagram: "" },
 };

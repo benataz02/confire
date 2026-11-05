@@ -574,3 +574,15 @@ New dependencies are listed as direct dependencies wherever they are imported:
   30 cases.
 - One MCP address, `https://mcp.<DOMAIN>`; the workspace is Better Auth's consent reference, carried in the token.
 - The dropped files are kept as the configuration's files, so the test set grows with no extra collection step.
+
+## 11. One chat, three agents (2026-11-04)
+
+Superseding §4.1–4.3 where they differ. The AI page is the one assistant page: the general agent is
+`SYSTEM`, and the quoting workflow and the reports guide are skills (`assistant/skills.ts`,
+`@tanstack/ai-skills`' `withSkills`, catalog in `load_skill`'s description) the model loads by what
+the user asks — a request to quote → `configure`; a report or an old report to rebuild → `report`;
+anything else, none. A skill arrives as a tool result, so the prompt prefix (tools, `SYSTEM`, the
+model block) never changes. A drop is no longer the Haiku intake: its files ride the chat turn
+(`refs`) and the chat decides what they are for; the configure skill starts from `read_request` (the
+same Haiku call, now a tool whose card waits for Create — the run ends on it). Spreadsheets are read
+as text (`assistant/sheet.ts`).

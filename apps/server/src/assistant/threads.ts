@@ -4,6 +4,7 @@ import { and, desc, eq, ilike, isNull, or, lt, sql } from "drizzle-orm";
 import { db, assistantFile, assistantReport, assistantThread, configProject } from "@confire/db";
 import { internalVisible } from "../project-lifecycle.ts";
 import { fileBytes, type Fence, type FileMeta, type FileRef } from "./files.ts";
+import { cachedSheetText } from "./sheet.ts";
 import { t as text } from "../i18n/index.ts";
 
 // The assistant's threads (assistant spec §4.7): server-owned history, loaded by id and never taken
@@ -52,7 +53,6 @@ export async function newThread(tenantId: string, userId: string): Promise<Threa
 export async function blankThread(tenantId: string, userId: string): Promise<Thread> {
   const [t] = await db.update(assistantThread).set({ updatedAt: new Date() }).where(and(
     eq(assistantThread.tenantId, tenantId), eq(assistantThread.userId, userId), isNull(assistantThread.projectId),
-    // A report's blank chat is its New report page's, never the AI page's.
     isNull(assistantThread.reportId),
     sql`jsonb_array_length(${assistantThread.messages}) = 0`,
     or(isNull(assistantThread.busyUntil), lt(assistantThread.busyUntil, sql`now()`)),
@@ -178,8 +178,9 @@ export async function linkProject(threadId: string, projectId: string): Promise<
   await db.update(assistantThread).set({ projectId, updatedAt: new Date() }).where(eq(assistantThread.id, threadId));
 }
 
+/** The file a part carries: a PDF or an image, or a spreadsheet read as text (sheet.ts). */
 const fileOf = (p: ContentPart): FileRef | null =>
-  (p.type === "document" || p.type === "image") ? ((p.metadata as FileMeta | undefined)?.file ?? null) : null;
+  (p.type === "document" || p.type === "image" || p.type === "text") ? ((p.metadata as FileMeta | undefined)?.file ?? null) : null;
 
 /** A user turn's page context (route.ts `contextPart`): what the user is looking at, for the model
  *  only. It rides in the stored turn, so the prompt prefix stays the same from turn to turn; the
@@ -227,8 +228,9 @@ export function dehydrate(m: ModelMessage): ModelMessage {
   if (!Array.isArray(m.content)) return m;
   return {
     ...m,
-    content: m.content.map((p) => (fileOf(p) && (p.type === "document" || p.type === "image") && p.source.type === "data"
-      ? { ...p, source: { ...p.source, value: "" } } : p)) as ContentPart[],
+    content: m.content.map((p) => !fileOf(p) ? p
+      : p.type === "text" ? { ...p, content: "" }
+      : (p.type === "document" || p.type === "image") && p.source.type === "data" ? { ...p, source: { ...p.source, value: "" } } : p) as ContentPart[],
   };
 }
 
@@ -242,7 +244,9 @@ export async function hydrate(tenantId: string, ms: ModelMessage[], fence: Fence
     content: m.content.map((p) => {
       const ref = fileOf(p);
       const data = ref && bytes.get(ref.id);
-      return data && (p.type === "document" || p.type === "image") && p.source.type === "data"
+      if (!data) return p;
+      if (p.type === "text") return { ...p, content: cachedSheetText(ref.id, ref.name, data) ?? "" };
+      return (p.type === "document" || p.type === "image") && p.source.type === "data"
         ? { ...p, source: { ...p.source, value: data.toString("base64") } } : p;
     }) as ContentPart[],
   });
@@ -256,7 +260,7 @@ export function lastDrop(ms: ModelMessage[]): { refs: FileRef[]; text: string } 
     const refs = m.content.map(fileOf).filter((r): r is FileRef => !!r);
     if (!refs.length) continue;
     const text = m.content
-      .filter((p) => p.type === "text" && !(p.metadata as { fileLabel?: boolean } | undefined)?.fileLabel && !isContext(p))
+      .filter((p) => p.type === "text" && !(p.metadata as { fileLabel?: boolean } | undefined)?.fileLabel && !isContext(p) && !fileOf(p))
       .map((p) => (p.type === "text" ? p.content : "")).join("\n");
     return { refs, text };
   }

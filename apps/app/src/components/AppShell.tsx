@@ -113,6 +113,7 @@ function Shell() {
     ...(isAdmin ? [
       { text: t("NAV_MODELS"), icon: "tree", to: "/models" },
       { text: t("NAV_MASTERDATA"), icon: "table-view", to: "/masterdata" },
+      { text: t("NAV_AI_USAGE"), description: t("NAV_AI"), icon: "area-chart", to: "/usage" },
     ] : []),
     { text: t("NAV_REQUESTS"), description: t("NAV_PORTAL"), icon: "inbox", to: "/requests" },
     ...(isAdmin ? [{ text: t("NAV_INVITATIONS"), description: t("NAV_PORTAL"), icon: "paper-plane", to: "/portal/invitations" }] : []),
@@ -279,6 +280,14 @@ function Shell() {
                       selected={pathname === "/masterdata" || pathname.startsWith("/masterdata/")}
                     />
                   </>
+                ) : null}
+              </SideNavigationGroup>
+              {/* The assistant for every member; what it costs for admins (assistant spec §4.7). */}
+              <SideNavigationGroup text={i18n.getText("NAV_AI")} expanded>
+                <SideNavigationItem text={i18n.getText("ASSISTANT_PAGE_TITLE")} icon="ai" data-to="/assistant" selected={onAiPage} />
+                {isAdmin ? (
+                  <SideNavigationItem text={i18n.getText("NAV_AI_USAGE")} icon="area-chart" data-to="/usage"
+                    selected={pathname === "/usage"} />
                 ) : null}
               </SideNavigationGroup>
               {/* The customer portal (spec §10): Requests for every member, the rest for admins. */}

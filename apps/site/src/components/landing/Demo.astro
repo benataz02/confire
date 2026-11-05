@@ -2,6 +2,7 @@
 import Icon from "../Icon.astro";
 import { dict, type Lang } from "../../i18n/index.ts";
 import { localePath } from "../../lib/urls.ts";
+import { SITE } from "../../site.config.ts";
 
 // A plain form POST, so it works with JavaScript off (spec §9). Caddy sends it to the portal process.
 interface Props { lang: Lang }
@@ -13,9 +14,15 @@ const t = dict[lang].demo;
     <span class="glow b" aria-hidden="true"></span><span class="glow a" aria-hidden="true"></span>
     <div class="cta rv">
       <div>
-        <span class="eyebrow">{t.eyebrow}</span>
+        
         <h2>{t.title}</h2>
         <ol class="next">{t.next.map((n) => <li><div><b>{n.title}</b>{n.text}</div></li>)}</ol>
+        {/* Who is behind it, at the moment of asking (critique 2026-11-04: the page named nobody). */}
+        <div class="founder">
+          <span class="avatar" aria-hidden="true">{SITE.founder.split(" ").map((w) => w[0]).join("")}</span>
+          <div><b>{SITE.founder}</b><span class="small muted">{t.founder.role}</span></div>
+          <p><b>{t.founder.lead}</b> {t.founder.text}</p>
+        </div>
       </div>
       <form method="post" action="/api/demo-request">
         <input type="hidden" name="lang" value={lang}>
@@ -25,8 +32,32 @@ const t = dict[lang].demo;
         <div class="f"><label for="s">{t.setup}</label><select id="s" name="setup">{t.setups.map((o) => <option>{o}</option>)}</select></div>
         <div class="f full"><label for="msg">{t.message}</label><textarea id="msg" name="message" maxlength="5000" placeholder={t.placeholder}></textarea></div>
         <input class="trap" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
-        <div class="submit-row"><span class="tiny muted">{t.privacy} <a href={localePath(lang, "/privacy/")}>{t.privacyLink}</a></span><button class="btn em lg" type="submit">{t.submit}<Icon name="arrow-right" class="arrow" /></button></div>
+        <div class="submit-row"><span class="tiny muted">{t.privacy} <a href={localePath(lang, "/privacy/")}>{t.privacyLink}</a></span><button class="btn em lg" type="submit" data-sending={t.sending}><span>{t.submit}</span><Icon name="arrow-right" class="arrow" /></button></div>
       </form>
     </div>
   </div>
 </section>
+
+<script>
+  // Losing a demo request is the spec's anti-goal (§4): until /thanks/ confirms it arrived, this tab
+  // keeps what was typed, so /demo-error/'s "Back to the form" finds it filled in again. The submit
+  // waits on the mail (demo-request.ts), so the button says so and refuses a second click.
+  const KEY = "confire:demo";
+  const form = document.querySelector<HTMLFormElement>("#demo form")!;
+  const button = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
+  const label = button.querySelector("span")!, idle = label.textContent;
+  try {
+    for (const [k, v] of Object.entries(JSON.parse(sessionStorage.getItem(KEY) ?? "{}") as Record<string, string>)) {
+      const el = form.elements.namedItem(k);
+      if (el && "value" in el) el.value = v;
+    }
+  } catch {}
+  form.addEventListener("submit", () => {
+    const fields = [...new FormData(form)].filter(([k]) => k !== "lang" && k !== "website");
+    try { sessionStorage.setItem(KEY, JSON.stringify(Object.fromEntries(fields))) } catch {}
+    button.disabled = true;
+    label.textContent = button.dataset.sending!;
+  });
+  // Back from the next page restores this one from the bfcache, button and all.
+  addEventListener("pageshow", () => { button.disabled = false; label.textContent = idle });
+</script>

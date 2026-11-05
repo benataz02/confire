@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, organization, sapConnection, verification } from "@confire/db";
-import { agentRoutes, isNewer, normalizeCode, redeemPairing } from "../src/agent-pairing.ts";
+import { agentRoutes, CONFIRE_UDFS, ensureUdfs, isNewer, normalizeCode, redeemPairing } from "../src/agent-pairing.ts";
+import { tenantConnector } from "../src/b1.ts";
 import { auth } from "../src/auth.ts";
 import { decryptSecret } from "../src/crypto.ts";
 import { upsertSapConnection } from "../src/seed-agent.ts";
@@ -150,6 +151,15 @@ describe.skipIf(!process.env.DATABASE_URL)("sap.agentStatus", () => {
       services: { b1: true, beas: false, print: ["Quotations"] }, updateAvailable: false, error: null, pairingPending: false,
     });
     expect(green.lastOkAt).toBeInstanceOf(Date);
+
+    // Connected, it makes Confire's UDFs in the company — once: the next status read asks SAP nothing.
+    await ensureUdfs(tenantId, await tenantConnector(tenantId)); // the status read's own, still in flight
+    expect(agent.store.UserFieldsMD!.map((u) => `${u.TableName}.${u.Name}`)).toEqual(["OQUT.CF_Key", "OCRD.CF_Key", "QUT1.CF_ItemCode"]);
+    expect(agent.store.UserFieldsMD![0]).toMatchObject(CONFIRE_UDFS[0]!);
+    const udfCalls = () => agent.calls.filter((c) => c.body.entitySet === "UserFieldsMD").length;
+    const asked = udfCalls();
+    await status();
+    expect(udfCalls()).toBe(asked);
 
     await upsertSapConnection(tenantId, { agentUrl: "http://127.0.0.1:9", secret: "x", companyDb: "SBODEMO" });
     const red = await status();

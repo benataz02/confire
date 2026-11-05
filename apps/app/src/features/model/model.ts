@@ -76,9 +76,8 @@ export const modelSections = (t: Translate): Section[] => [
       },
     ],
   },
-  // The structure tree (a template). fitContent: the section fills what the title and tab bar leave,
-  // so the tree's toolbar and column header stay put while its rows scroll.
-  { id: MODEL_SECTIONS.params, label: t("MODEL_SECTION_PARAMS"), fitContent: true },
+  // The structure tree (a template).
+  { id: MODEL_SECTIONS.params, label: t("MODEL_SECTION_PARAMS") },
   {
     id: MODEL_SECTIONS.rules, label: t("MODEL_SECTION_RULES"),
     subsections: [

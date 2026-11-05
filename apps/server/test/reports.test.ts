@@ -43,25 +43,43 @@ describe.skipIf(!process.env.DATABASE_URL)("reports", () => {
     await connectTenant(tenantId, agent);
     const headers = tenantHeaders(slug, u.cookie);
     const staff = { context: { headers } };
-    const r = await call(router.reports.create, {}, staff);
-    const chat = { context: { headers, assistantThreadId: r.threadId } };
+    // A report is its chat's first report_set: a general chat becomes the report's.
+    const general = await blankThread(tenantId, u.userId);
+    const chat = { context: { headers, assistantThreadId: general.id } };
+    await call(router.reports.set, { definition: DEF }, chat);
+    const r = { id: (await ownThread(tenantId, u.userId, general.id)).reportId!, threadId: general.id };
     return { tenantId, slug, u, headers, staff, chat, r };
   }
   const code = (p: Promise<unknown>) => p.then(() => "ok", (e: { code?: string }) => e.code ?? String(e));
 
-  test("create reuses the blank report; its chat is never the user's general chat", async () => {
+  test("a general chat's first set makes it a report's; later sets change that report", async () => {
     const w = await world();
-    expect((await call(router.reports.create, {}, w.staff)).id).toBe(w.r.id);
+    expect(w.r.id).toBeTruthy();
+    await call(router.reports.set, { definition: { ...DEF, title: "Again" } }, w.chat);
+    expect((await ownThread(w.tenantId, w.u.userId, w.r.threadId)).reportId).toBe(w.r.id);
+    expect(await db.select().from(assistantReport).where(eq(assistantReport.userId, w.u.userId))).toHaveLength(1);
+    // the report's chat is no longer a blank or a general chat
     expect((await blankThread(w.tenantId, w.u.userId)).id).not.toBe(w.r.threadId);
     expect((await threadFor(w.tenantId, w.u.userId, null)).id).not.toBe(w.r.threadId);
-    expect((await ownThread(w.tenantId, w.u.userId, w.r.threadId)).reportId).toBe(w.r.id);
+    // a refused definition leaves a general chat general: no empty report behind it
+    const other = await blankThread(w.tenantId, w.u.userId);
+    const bad = { ...DEF, widgets: [{ kind: "kpi", title: "x", value: { dataset: "q", agg: "sum", field: "DocTotl", label: "v" } }] };
+    expect(await code(call(router.reports.set, { definition: bad }, { context: { headers: w.headers, assistantThreadId: other.id } }))).toBe("BAD_REQUEST");
+    expect((await ownThread(w.tenantId, w.u.userId, other.id)).reportId).toBeNull();
+  });
+
+  test("a configuration's chat builds no report", async () => {
+    const w = await world();
+    const [m] = await db.insert(configModel).values({ tenantId: w.tenantId, name: "Cable", definition: TEST_MODEL }).returning({ id: configModel.id });
+    const general = await blankThread(w.tenantId, w.u.userId);
+    await call(router.assistant.start, { threadId: general.id, modelId: m!.id, name: "x", customer: null }, w.staff);
+    expect(await code(call(router.reports.set, { definition: DEF }, { context: { headers: w.headers, assistantThreadId: general.id } }))).toBe("FORBIDDEN");
+    expect((await ownThread(w.tenantId, w.u.userId, general.id)).reportId).toBeNull();
   });
 
   test("set is the chat's only: it stores the definition and its run and answers a summary", async () => {
     const w = await world();
     expect(await code(call(router.reports.set, { definition: DEF }, w.staff))).toBe("FORBIDDEN");
-    const general = await blankThread(w.tenantId, w.u.userId);
-    expect(await code(call(router.reports.set, { definition: DEF }, { context: { headers: w.headers, assistantThreadId: general.id } }))).toBe("FORBIDDEN");
     const out = await call(router.reports.set, { definition: DEF }, w.chat);
     expect(out.widgets).toEqual([{ kpi: "Value", value: 1234, compare: null }]);
     expect(JSON.stringify(out)).not.toContain("\"rows\":[");
@@ -69,8 +87,6 @@ describe.skipIf(!process.env.DATABASE_URL)("reports", () => {
     expect(got.title).toBe("Open quotations");
     expect(got.definition?.title).toBe("Open quotations");
     expect((got.lastResult as ReportResult).widgets).toHaveLength(1);
-    // A new blank report is another one now: this one has a definition.
-    expect((await call(router.reports.create, {}, w.staff)).id).not.toBe(w.r.id);
   });
 
   test("an invalid definition is BAD_REQUEST naming the problem", async () => {
@@ -83,7 +99,6 @@ describe.skipIf(!process.env.DATABASE_URL)("reports", () => {
 
   test("run reads live and stores it; another user's report is NOT_FOUND", async () => {
     const w = await world();
-    expect(await code(call(router.reports.run, { id: w.r.id }, w.staff))).toBe("BAD_REQUEST"); // nothing drafted yet
     await call(router.reports.set, { definition: DEF }, w.chat);
     agent.store["Quotations#apply"] = [{ sum_DocTotal: 99 }];
     const live = await call(router.reports.run, { id: w.r.id }, w.staff);

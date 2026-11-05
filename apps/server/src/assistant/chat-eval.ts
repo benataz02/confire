@@ -4,7 +4,8 @@
 
 import { chat, toolDefinition, type AnyServerTool, type ModelMessage } from "@tanstack/ai";
 import { ASSISTANT_MODEL, modelOptions, textAdapter } from "./model.ts";
-import { SYSTEM } from "./pages.ts";
+import { CONFIGURE_CHAT, contextText, GENERAL, SYSTEM } from "./pages.ts";
+import { LOAD_SKILL, SKILLS } from "./skills.ts";
 import { chatTools } from "./tools.ts";
 import { CHAT_OPTIONS, untilAsked } from "./route.ts";
 import { costOf, tokensOf } from "./usage.ts";
@@ -43,8 +44,10 @@ A steel or aluminium cable, cut to length.
 - width — Width (number, mm; required). Range 10–500.
 - coated — Coated (yes/no).`;
 const PROJECT = "11111111-1111-4111-8111-111111111111";
-const CONFIG_CONTEXT = `<context>\nThis chat is about the configuration "ACME cable" (id ${PROJECT}). Read it with configs_get before answering about it: the user may have changed it since you last looked.\nTo fill a field, write it with configs_calculate, quoting its source.\nAnswer in English.\n</context>`;
-const GENERAL_CONTEXT = "<context>\nThe user is in the staff app, outside any one configuration: on the home page or a list.\nAnswer in English.\n</context>";
+const CONFIG_CONTEXT = contextText(CONFIGURE_CHAT.section({ projectId: PROJECT, name: "ACME cable", dirty: false }), "en");
+const GENERAL_CONTEXT = contextText(GENERAL.section({ dirty: false }), "en");
+const skills = (t: Transcript) => named(t, LOAD_SKILL).map((c) => c.input.name);
+const REPORT_SUMMARY = { title: "Report", widgets: [{ kpi: "Overdue", value: 12_400, compare: null }], partial: false, warnings: [] };
 const view = (entries: Record<string, unknown>) => ({
   project: { id: PROJECT, name: "ACME cable", entries, customer: { cardCode: "C0001", cardName: "ACME S.L." } },
   missing: entries.width ? [] : [{ key: "width", message: "Width is required" }],
@@ -52,6 +55,54 @@ const view = (entries: Record<string, unknown>) => ({
 });
 
 export const SCENARIOS: Scenario[] = [
+  // Routing (skills.ts): the ask picks the skill, or none.
+  {
+    name: "routing: a report ask loads the report skill and briefs first",
+    text: "Show me overdue invoices by customer.",
+    context: GENERAL_CONTEXT,
+    fixtures: { report_set: () => REPORT_SUMMARY, b1_schema: () => ({ fields: [{ name: "DocDueDate" }, { name: "DocumentStatus" }, { name: "CardName" }, { name: "DocTotal" }] }) },
+    checks: [
+      { rule: "loads the report skill", ok: (t) => skills(t).includes("report") },
+      { rule: "never the configure skill", ok: (t) => !skills(t).includes("configure") },
+      { rule: "asks one brief of 2–4 questions and builds nothing yet", ok: (t) => {
+        const last = t.calls.at(-1);
+        const n = 1 + ((last?.input.more as unknown[] | undefined)?.length ?? 0);
+        return last?.name === "ask_user" && n >= 2 && n <= 4 && !named(t, "report_set").length;
+      } }, noSapWrite,
+    ],
+  },
+  {
+    name: "routing: a client's request loads the configure skill",
+    text: "Email from ACME: \"Please quote 50 steel cables, 200 mm wide.\" Can you set it up?",
+    context: GENERAL_CONTEXT,
+    fixtures: {
+      configs_models: () => [{ id: "m1", name: "Cable", description: "Steel and aluminium cables" }],
+      entities_rows: () => ({ rows: [{ CardCode: "C0001", CardName: "ACME S.L.", CardType: "cCustomer" }], total: 1 }),
+      configs_create: () => ({ id: PROJECT, model: BLOCK, missing: [] }),
+    },
+    checks: [{ rule: "loads the configure skill", ok: (t) => skills(t).includes("configure") }, { rule: "never the report skill", ok: (t) => !skills(t).includes("report") }, noSapWrite],
+  },
+  {
+    name: "routing: a plain SAP question needs no skill",
+    text: "What is the status of order 1234?",
+    context: GENERAL_CONTEXT,
+    fixtures: { b1_read: () => ({ rows: [{ DocEntry: 34, DocNum: 1234, DocumentStatus: "bost_Open", CardName: "ACME S.L." }], total: 1 }) },
+    checks: [{ rule: "loads no skill", ok: (t) => !skills(t).length }, { rule: "reads the order", ok: (t) => named(t, "b1_read").length > 0 }, noSapWrite],
+  },
+  {
+    name: "routing: an old Excel report to rebuild loads the report skill",
+    text: `<file name="Ventas 2024.xlsx">\n## Sheet Resumen\nCliente,Neto,Pedidos\nACME,125000,14\nGlobex,98000,9\n## Pivot tables\n- "Ventas por mes" on sheet Resumen at E3:H16, from Datos!A1:F2400\n  rows: Mes; columns: none; filters: Vendedor\n  values: Suma de Neto (sum of Neto)\n</file>\nRebuild this report here.`,
+    context: GENERAL_CONTEXT,
+    fixtures: { report_set: () => REPORT_SUMMARY },
+    checks: [{ rule: "loads the report skill", ok: (t) => skills(t).includes("report") }, { rule: "never the configure skill", ok: (t) => !skills(t).includes("configure") }, noSapWrite],
+  },
+  {
+    name: "routing: files with no ask are named, then asked about",
+    text: `<file name="RFQ-0042.csv">\nPart,Qty,Material\nBracket A,50,Steel\n</file>`,
+    context: GENERAL_CONTEXT,
+    fixtures: {},
+    checks: [endsOnAsk, { rule: "starts nothing", ok: (t) => !named(t, "configs_create").length && !named(t, "report_set").length }, noSapWrite],
+  },
   {
     name: "a look-up answers, writes nothing",
     text: "Which models do we have?",
@@ -154,7 +205,12 @@ export async function runScenario(s: Scenario, effort: Effort): Promise<{ transc
       modelOptions: { ...modelOptions(), ...CHAT_OPTIONS },
       agentLoopStrategy: untilAsked,
       reasoning: { level: effort, summary: true },
-      middleware: [{ name: "cost", onUsage: (ctx, u) => { calls++; cost += costOf(ctx.model, tokensOf(u)); } }],
+      middleware: [
+        SKILLS,
+        // load_skill is the skills middleware's tool, not one of `tools`: recorded as it is called
+        { name: "record", onGuardToolCall: (_ctx, call) => { if (call.toolName === LOAD_SKILL) t.calls.push({ name: LOAD_SKILL, input: (call.args ?? {}) as Record<string, any> }); } },
+        { name: "cost", onUsage: (ctx, u) => { calls++; cost += costOf(ctx.model, tokensOf(u)); } },
+      ],
       stream: false,
     });
     t.text = r.text;

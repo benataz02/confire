@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildCopy, draftConstraints, findFlow } from "../src/doc-copy.ts";
+import { buildCopy, draftConstraints, duplicateItem, findFlow, onItems, partLines, swapLine } from "../src/doc-copy.ts";
 
 // Document copy, one source or several merged into one target. Pure: no database, no agent.
 
@@ -55,4 +55,49 @@ test("draftConstraints opens the allowlist only", () => {
   expect(c.fields.DocumentLines).toMatchObject({ Editable: true, Required: true });
   expect(c.fields.DocumentLines?.Fields?.Quantity?.Editable).toBe(true);
   expect(c.fields.DocumentLines?.Fields?.ItemCode?.Editable).toBeUndefined();
+});
+
+describe("configured parts", () => {
+  const quote = {
+    DocEntry: 7, CardCode: "C1", DocumentLines: [
+      { LineNum: 0, ItemCode: "GEN", ItemDescription: "Bracket 40", Quantity: 3, UnitPrice: 12, LineTotal: 36, U_CF_ItemCode: " PART-A " },
+      { LineNum: 1, ItemCode: "A", Quantity: 1, U_CF_ItemCode: null },
+      { LineNum: 2, ItemCode: "part-b", U_CF_ItemCode: "PART-B" }, // already its item, case-blind
+      { LineNum: 3, ItemCode: "GEN", U_CF_ItemCode: "PART-C", LineStatus: "bost_Close" },
+      { LineNum: 5, ItemCode: "GEN", U_CF_ItemCode: "PART-D" },
+    ],
+  };
+
+  test("a part is an open line on a generic item with its code in the UDF; the kept lines only", () => {
+    expect(partLines([quote])).toEqual([
+      { docEntry: 7, lineNum: 0, code: "PART-A", generic: "GEN", name: "Bracket 40" },
+      { docEntry: 7, lineNum: 5, code: "PART-D", generic: "GEN", name: "PART-D" },
+    ]);
+    expect(partLines([quote], [{ baseEntry: 7, baseLine: 5, quantity: 1 }]).map((p) => p.code)).toEqual(["PART-D"]);
+  });
+
+  test("the order is built from the lines on their items, still linked to the quotation", () => {
+    const [p] = partLines([quote]);
+    const doc = buildCopy(findFlow("Quotations", "Orders")!, onItems([quote], [{ ...p!, item: "PART-A" }]));
+    expect((doc.DocumentLines as Record<string, unknown>[])[0]).toMatchObject({ BaseType: 23, BaseEntry: 7, BaseLine: 0, ItemCode: "PART-A", U_CF_ItemCode: " PART-A " });
+  });
+
+  test("a duplicate keeps everything but the code, the name and what is B1's own", () => {
+    const generic = {
+      "@odata.etag": 'W/"1"', ItemCode: "GEN", ItemName: "Generic", ItemsGroupCode: 108, Series: 3, QuantityOnStock: 4,
+      CreateDate: "2018-10-15", BarCode: "123", ItemBarCodeCollection: [], U_Cliente: "X", Picture: null,
+      ItemPrices: [{ PriceList: 1, Price: 1.37 }],
+      ItemWarehouseInfoCollection: [{ WarehouseCode: "01", InStock: 4, Committed: 1, MinimalStock: 2, UserSignature: 1 }],
+    };
+    expect(duplicateItem(generic, "PART-A", "Bracket 40")).toEqual({
+      ItemCode: "PART-A", ItemName: "Bracket 40", ItemsGroupCode: 108, U_Cliente: "X",
+      ItemPrices: [{ PriceList: 1, Price: 1.37 }], ItemWarehouseInfoCollection: [{ WarehouseCode: "01", MinimalStock: 2 }],
+    });
+  });
+
+  test("a swapped line carries its own figures back, nothing computed", () => {
+    expect(swapLine(quote.DocumentLines[0]!, "PART-A")).toEqual({
+      LineNum: 0, ItemCode: "PART-A", Quantity: 3, UnitPrice: 12, ItemDescription: "Bracket 40",
+    });
+  });
 });

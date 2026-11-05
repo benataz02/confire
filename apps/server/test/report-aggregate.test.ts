@@ -65,7 +65,7 @@ test("evaluate: months bucketed and stacked by source, net = DocTotal minus VatS
 
 const ONE = (widgets: unknown[]): ReportDef => ReportDefZ.parse({
   title: "t", assumptions: [], widgets,
-  datasets: { d: { from: [{ source: "b1", entity: "Orders" }], select: ["CardCode", "DocTotal", "DocDate"] } },
+  datasets: { d: { from: [{ source: "b1", entity: "Orders" }] } },
 });
 /** Each read answered from raw rows (the fallback's path), its `eq` filters applied. */
 const run1 = (def: ReportDef, rows: Record<string, unknown>[]) => {

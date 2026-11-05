@@ -99,14 +99,16 @@ body {
 }
 
 /* ObjectPage loading skeleton. Bars are AnalyticalTable's TablePlaceholder cells
-   (placeholderShimmer, sapFontSize, sapElement_BorderCornerRadius) laid out as an OP. */
+   (placeholderShimmer, sapFontSize, sapElement_BorderCornerRadius); the page around them is UI5's. */
 @keyframes confire-op-skel-shimmer {
   0% { background-position-x: 100% }
   100% { background-position-x: 0 }
 }
-.confire-op-skel { padding: 1rem 2rem 2rem }
 .confire-op-skel-bar {
-  display: block;
+  /* inline in a Title/Label/Text: that line box keeps the real row height */
+  display: inline-block;
+  vertical-align: middle;
+  max-width: 100%;
   height: var(--sapFontSize);
   border-radius: var(--sapElement_BorderCornerRadius);
   animation-duration: 2s;
@@ -118,36 +120,24 @@ body {
   background-repeat: no-repeat;
   background-size: 1000px 104px;
 }
-.confire-op-skel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 1rem;
-  padding-block: 0.5rem 1rem;
-  border-bottom: 1px solid var(--sapObjectHeader_BorderColor);
-}
-.confire-op-skel-heading { display: flex; flex-direction: column; gap: 0.5rem }
-.confire-op-skel-actions, .confire-op-skel-tabs { display: flex; align-items: center; gap: 0.5rem }
+.confire-op-skel-bar--button { height: 1.625rem; border-radius: var(--sapButton_BorderCornerRadius) }
+.confire-op-skel-actions { display: flex; align-items: center; gap: 0.5rem }
+/* ui5-breadcrumbs takes 2rem in the title area; the bar sits on its text line */
+.confire-op-skel-crumbs { height: 2rem; padding-top: 0.1875rem; box-sizing: border-box }
+/* ObjectPage's tab bar, which it drops while a placeholder shows: its 3px spacer, 2.75rem strip and
+   shadow, the tabs' text at the page's 2rem inset. */
 .confire-op-skel-tabs {
-  gap: 1.5rem;
-  padding-block: 0.75rem;
-  border-bottom: 1px solid var(--sapObjectHeader_BorderColor);
-  margin-bottom: 1rem;
-}
-.confire-op-skel-section { display: flex; flex-direction: column }
-.confire-op-skel-field {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  height: var(--sapElement_LineHeight);
+  gap: 2rem;
+  height: 2.75rem;
+  padding: 0.1875rem 2rem 0;
+  box-sizing: content-box;
+  background: var(--sapObjectHeader_Background);
+  box-shadow: var(--sapContent_HeaderShadow);
 }
-.confire-op-skel-bar--title { width: 12rem; height: var(--sapFontLargeSize) }
-.confire-op-skel-bar--sub { width: 18rem }
-.confire-op-skel-bar--chip { width: 4.5rem }
-.confire-op-skel-bar--tab { width: 5rem }
-.confire-op-skel-bar--section { width: 10rem; margin-block: 0.5rem }
-.confire-op-skel-bar--label { width: 6rem }
-.confire-op-skel-bar--value { width: 60% }
+.confire-op-skel-section { padding: 0 2rem 2rem }
+.confire-op-skel-section-title { display: flex; align-items: center; height: 2.25rem; margin-block: 0.25rem 1rem }
 @media (prefers-reduced-motion: reduce) {
   .confire-op-skel-bar { animation: none }
 }
