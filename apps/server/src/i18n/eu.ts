@@ -139,6 +139,7 @@ export const eu: Partial<Record<keyof typeof en, string>> = {
   FILTER_FIELD_NOT_ON: "«{0}» iragazki-eremua ez dago hemen: {1}",
   SEARCH_FIELD_NOT_TEXT: "«{0}» bilaketa-eremua ez da zerrenda honetako testu-eremu bat",
   PRINT_NOT_PRINTABLE: "{0}: ezin da inprimatu",
+  PRINT_NOT_CRYSTAL: "{0} inprimatze-formatu lehenetsia ez da Crystal Reports-ena. Ezarri Crystal formatu bat lehenetsi gisa SAP Business One-n (Txosten- eta formatu-kudeatzailea).",
 
   SAP_NOT_PAIRED: "Oraindik ez dago SAP agenterik lan-eremu honekin parekatuta. Administratzaile batek parekatzen du Ezarpenak → SAP agentea atalean.",
   SAP_AGENT_SECRET: "SAP agenteak Confireren sekretua baztertu du: beste lan-eremu edo zerbitzari bat parekatu da ordutik. Parekatu berriro Ezarpenak → SAP agentea atalean.",

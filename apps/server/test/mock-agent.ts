@@ -25,6 +25,10 @@ export type MockAgent = {
   /** entity sets (or crossjoin leads) whose `$apply` B1 refuses with a 400; any other `$apply`
    *  answers the fixture rows in `store["<set>#apply"]` (the mock computes no totals) */
   noApply: Set<string>;
+  /** GetDefaultReport's answers: `"QUT2|C1"` (a customer's own) before `"QUT2"`; unset → `QUT20001` */
+  defaultLayouts: Record<string, string>;
+  /** layout codes GetReportLayout calls PLD forms rather than Crystal */
+  pldLayouts: Set<string>;
   stop: () => void;
 };
 
@@ -93,6 +97,8 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
   const company = { db: "SBODEMO" };
   const missingUdf = new Set<string>();
   const metadata = { xml: "" };
+  const defaultLayouts: Record<string, string> = {};
+  const pldLayouts = new Set<string>();
   let nextDocEntry = 1;
   let nextEtag = 1000; // clear of any etag a fixture hand-writes
 
@@ -129,6 +135,16 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
           return Response.json({ status: 200, data: page(applyFilter(rows, filter), body) });
         }
         case "/create": {
+          // The print layout services, as a live B1 answers them (print spec §6).
+          if (body.entitySet === "ReportLayoutsService_GetDefaultReport") {
+            const { ReportCode, CardCode } = body.data.ReportParams as { ReportCode: string; CardCode?: string };
+            const LayoutCode = defaultLayouts[`${ReportCode}|${CardCode}`] ?? defaultLayouts[ReportCode] ?? `${ReportCode}0001`;
+            return Response.json({ status: 200, data: { ReportCode, LayoutCode, UserID: null, CardCode: CardCode ?? "-1" } });
+          }
+          if (body.entitySet === "ReportLayoutsService_GetReportLayout") {
+            const code = body.data.ReportLayoutParams.LayoutCode as string;
+            return Response.json({ status: 200, data: { LayoutCode: code, Category: pldLayouts.has(code) ? "rlcPLD" : "rlcCrystal" } });
+          }
           // A service action (SeriesService_GetDocumentSeries) answers with its fixture rows.
           if (/Service_/.test(body.entitySet)) return Response.json({ status: 200, data: { value: rows } });
           // A business partner sent without a CardCode is numbered, as B1 does from its series.
@@ -220,7 +236,7 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
 
   return {
     url: `http://localhost:${server.port}`,
-    store, calls, missingUdf, metadata, company, noApply,
+    store, calls, missingUdf, metadata, company, noApply, defaultLayouts, pldLayouts,
     stop: () => void server.stop(true),
   };
 }

@@ -19,12 +19,16 @@ export const sapConnection = pgTable("sap_connection", {
    *  local currency is fixed when its database is created, so — like entity_meta below — there is
    *  no TTL; null only means "not read yet". */
   localCurrency: text("local_currency"),
+  /** The engine `/print` uses (print spec §5.1): the SAP API Gateway, or Direct — Crystal run by
+   *  the agent's confire-print.exe — only once the agent reports it set up (`sap.setPrintEngine`). */
+  printEngine: text("print_engine", { enum: ["gateway", "crystal"] }).notNull().default("gateway"),
   status: text("status", { enum: ["ok", "error"] }).notNull().default("ok"),
   lastOkAt: timestamp("last_ok_at", { withTimezone: true }),
   lastError: text("last_error"),
 });
 
 export type SapConnection = typeof sapConnection.$inferSelect;
+export type PrintEngine = SapConnection["printEngine"];
 
 // Parsed B1 entity schemas, cached per tenant. B1's own $metadata is the source of truth, but a
 // row here is kept until someone presses Refresh — there is no TTL, because metadata changes when

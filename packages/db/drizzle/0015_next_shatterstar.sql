@@ -1,0 +1,1 @@
+ALTER TABLE "sap_connection" ADD COLUMN "print_engine" text DEFAULT 'gateway' NOT NULL;

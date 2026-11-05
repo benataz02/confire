@@ -146,6 +146,7 @@ export const en = {
   FILTER_FIELD_NOT_ON: "Filter field '{0}' is not on {1}",
   SEARCH_FIELD_NOT_TEXT: "Search field '{0}' is not a text field on this list",
   PRINT_NOT_PRINTABLE: "{0} cannot be printed",
+  PRINT_NOT_CRYSTAL: "The default print layout {0} is not a Crystal Reports layout. Make a Crystal layout the default in SAP Business One (Report and Layout Manager).",
 
   // SAP and its agent (b1.ts): SAP's own message is the {0}
   SAP_NOT_PAIRED: "No SAP agent is paired with this workspace yet. An admin pairs one in Settings → SAP agent.",

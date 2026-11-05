@@ -177,7 +177,11 @@ describe("portal documents", () => {
     expect(row).toMatchObject({ DocEntry: 1, DocNum: 101, DocumentLines: [{ ItemCode: "X", LineTotal: 10 }] });
     expect(JSON.stringify(row)).not.toMatch(/CardCode|GrossProfit|GrossBuyPrice/);
     expect(etag).toBeNull();
+    // The fence's read is the print's too: the document is read once.
+    const reads = () => agent.calls.filter((c) => c.route === "/entity" && c.body.entitySet === "Quotations" && c.body.key === 1).length;
+    const before = reads();
     expect((await call(portalRouter.docs.print, { entity: "Quotations", docEntry: 1 }, s.portalA)).fileName).toBe("Quotations-1.pdf");
+    expect(reads()).toBe(before + 1);
   });
 
   test("project walks back to the quotation from every document type", async () => {

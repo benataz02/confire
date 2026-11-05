@@ -104,8 +104,8 @@ export const docsRouter = {
   /** The document's SAP print layout, after the CardCode check (§8). */
   print: portalMemberProcedure.input(DocInputZ).handler(async ({ input, context }) => {
     const { b1 } = await tenantConnector(context.tenantId);
-    await ownDoc(b1, context, input.entity, input.docEntry, ["CardCode"]);
-    return printDocument(context.tenantId, input.entity, input.docEntry);
+    const row = await ownDoc(b1, context, input.entity, input.docEntry, ["CardCode", "DocType"]);
+    return printDocument(context.tenantId, input.entity, input.docEntry, row);
   }),
 
   /** The company's project this document came from, or null: the newest `quoted` event naming one of

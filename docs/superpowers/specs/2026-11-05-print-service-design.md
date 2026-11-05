@@ -146,8 +146,8 @@ printDocument(tenant, entity, docEntry)                       apps/server/src/pr
 - With `CardCode: "C168"` it answers for that customer (no customer default set there, so the
   general one).
 - `GetReportLayout { LayoutCode: "QUT20009" }` → `"Category": "rlcCrystal"`.
-- `ReportTypes`: QUT1 = service quotation, QUT2 = item quotation, QUT3 = summary. The other three
-  prefixes' `1`/`2` are assumed by the same pattern: **verify** with GetDefaultReport.
+- `ReportTypes`: QUT1 = service quotation, QUT2 = item quotation, QUT3 = summary. RDR1, DLN1 and
+  INV1 answer RDR10001, DLN10001 and INV10001: the same pattern holds for all four.
 
 ## 7. Unverified — what the spike answers
 
