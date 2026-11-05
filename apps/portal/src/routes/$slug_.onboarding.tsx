@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, notFound, redirect } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../auth-client.ts";
 import { client, meQuery } from "../orpc.ts";
@@ -13,9 +13,11 @@ import { portalMe } from "../lib/guards.ts";
 // nothing matches, this is the invite-only page: it grants nothing, and never offers workspace setup.
 // An invitation's link (/accept/<id>) is the other way in.
 export const Route = createFileRoute("/$slug_/onboarding")({
-  beforeLoad: async ({ context, params }) => {
-    const me = await portalMe(context.queryClient, params.slug);
+  beforeLoad: async ({ context, params, preload }) => {
+    const me = await portalMe(context.queryClient, params.slug, preload);
     if (me.company) throw redirect({ to: "/$slug", params });
+    // A join is a write: a hover's preload (which follows $slug's redirect here) must never make it.
+    if (preload) throw notFound();
     // A failed join is the same as no match: the page below still says how to get in.
     if (await client.onboarding.join().catch(() => null)) {
       // Reset, not invalidate: an unobserved query is not refetched, and $slug reads the cache.

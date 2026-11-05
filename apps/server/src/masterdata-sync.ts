@@ -2,8 +2,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db, configMasterdata, configMasterdataRow } from "@confire/db";
 import { runnerFor, tenantConnector } from "./b1.ts";
 import {
-  bumpMasterdata, DEFAULT_PAGE, masterdataVersion,
-  type MasterdataQueryRow, type MasterdataRow, type QueryRunner, type RowCache, type RowQuery,
+  DEFAULT_PAGE, type MasterdataQueryRow, type MasterdataRow, type QueryRunner, type RowCache, type RowQuery,
 } from "./lookups.ts";
 
 // The one place a query masterdata's values move from SAP into Postgres, and the one place a
@@ -11,12 +10,6 @@ import {
 //
 // Replaces history-sync.ts, which did exactly this for a single table reachable only from the
 // model builder. Generalising it is what let config_history, its sync, and its private cache go.
-
-/** Rows held in memory while a sync walks. One page — the insert happens per page, so a table
- *  with no ceiling still costs O(page) memory. */
-const CACHE_TTL_MS = 5 * 60_000;
-// Keyed with the masterdata version too, so a bump (an edit, a sync, a company switch) drops it.
-const allRows = new Map<string, { at: number; version: number; rows: Record<string, unknown>[] }>();
 
 /** Pull every page of a query masterdata into config_masterdata_row, wholesale.
  *
@@ -52,8 +45,6 @@ export async function syncMasterdata(
       .update(configMasterdata)
       .set({ syncedAt: new Date(), syncError: null, rowCount: count })
       .where(and(eq(configMasterdata.id, md.id), eq(configMasterdata.tenantId, tenantId)));
-    allRows.delete(`${tenantId}:${md.id}`);
-    bumpMasterdata(tenantId);
     return { count };
   } catch (e) {
     // The failure is recorded, not swallowed: `syncError` is what the editor and the process page
@@ -118,20 +109,7 @@ const textAt = (col: string) => sql<string>`${configMasterdataRow.row} ->> ${col
 /** The cached rows of one query masterdata. This is `RowCache` — the seam every resolve is
  *  written against, and the only thing standing between the configurator and Postgres. */
 export function rowCache(tenantId: string): RowCache {
-  return async (masterdataId, q) => {
-    // No filter and no window: the whole table, which is what similarity scoring wants. Cached in
-    // process because it re-runs on every keystroke and the table can be tens of thousands of rows.
-    if (!q || (q.top === undefined && q.col === undefined && !q.search)) {
-      const key = `${tenantId}:${masterdataId}`;
-      const hit = allRows.get(key);
-      const version = masterdataVersion(tenantId);
-      if (hit && hit.version === version && Date.now() - hit.at < CACHE_TTL_MS) return hit.rows;
-      const rows = await selectRows(tenantId, masterdataId, {});
-      allRows.set(key, { at: Date.now(), version, rows });
-      return rows;
-    }
-    return selectRows(tenantId, masterdataId, q);
-  };
+  return (masterdataId, q) => selectRows(tenantId, masterdataId, q ?? {});
 }
 
 async function selectRows(

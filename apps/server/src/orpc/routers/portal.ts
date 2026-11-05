@@ -232,9 +232,11 @@ export const portalSettingsRouter = {
   leadSeries: adminProcedure.handler(async ({ context }) => {
     const { b1 } = await tenantConnector(context.tenantId);
     const { data } = await viaB1(() =>
-      b1.createEntity("SeriesService_GetDocumentSeries", { DocumentTypeParams: { Document: "2", DocumentSubType: "L" } }));
+      // Leads number from the customer series: "L" answers "No series were found for object 2"
+      // (verified live, 2026-11-05). A manual series is no choice: the lead is posted without a CardCode.
+      b1.createEntity("SeriesService_GetDocumentSeries", { DocumentTypeParams: { Document: "2", DocumentSubType: "C" } }));
     return rowsOf(data)
-      .filter((r) => r.Locked !== "tYES")
+      .filter((r) => r.Locked !== "tYES" && r.IsManual !== "tYES")
       .map((r) => ({ series: Number(r.Series), name: String(r.Name ?? r.Series) }))
       .filter((r) => Number.isInteger(r.series));
   }),

@@ -24,7 +24,7 @@ const bp: B1EntitySchema = {
 const names = (fs: B1Field[]) => fs.map((x) => x.name);
 const countries = new Set(["DE", "AT"]);
 const valid = {
-  ShipToSame: true, CardName: "Neu GmbH", "BillTo.Street": "Hauptstr. 1", "BillTo.City": "Ulm", "BillTo.Country": "DE",
+  ShipToSame: true, CardName: "Neu GmbH", FederalTaxID: "DE123", "BillTo.Street": "Hauptstr. 1", "BillTo.City": "Ulm", "BillTo.Country": "DE",
   "Contact.LastName": "Schmidt",
 };
 
@@ -39,7 +39,7 @@ describe("onboardingSchema", () => {
   test("defaults, extras in setting order, bill-to, ShipToSame, ship-to, contact", () => {
     const s = onboardingSchema(bp, [{ key: "U_Branch", required: true }, { key: "Website", required: false }]);
     expect(names(s.fields)).toEqual([
-      "CardName", "FederalTaxID", "Phone1", "EmailAddress", "U_Branch", "Website",
+      "CardName", "FederalTaxID", "U_Branch", "Website",
       "BillTo.Street", "BillTo.ZipCode", "BillTo.City", "BillTo.Country", "ShipToSame",
       "ShipTo.Street", "ShipTo.ZipCode", "ShipTo.City", "ShipTo.Country",
       "Contact.FirstName", "Contact.LastName", "Contact.Phone1", "Contact.E_Mail",
@@ -48,6 +48,7 @@ describe("onboardingSchema", () => {
     expect(s.required).toContain("U_Branch");
     expect(s.required).not.toContain("Website");
     expect(s.required).toContain("Contact.LastName");
+    expect(s.required).toContain("FederalTaxID");
   });
 
   test("a stored extra the picker no longer offers is dropped on read", () => {
@@ -98,16 +99,17 @@ describe("formProblems", () => {
 describe("leadPayload", () => {
   const s = onboardingSchema(bp, [{ key: "Website", required: false }]);
 
-  test("a lead with the series, both addresses and the contact; the email is the session's", () => {
-    const body = leadPayload(s, { ...valid, Website: "neu.de", "Contact.FirstName": "Anna", "Contact.E_Mail": "forged@x.de" },
+  test("a lead with the series, both addresses and the default contact, whose phone and email are the header's", () => {
+    const body = leadPayload(s, { ...valid, Website: "neu.de", "Contact.FirstName": "Anna", "Contact.Phone1": "+49 1", "Contact.E_Mail": "forged@x.de" },
       { email: "anna@neu.de", series: 77 });
     expect(body).toEqual({
-      CardName: "Neu GmbH", Website: "neu.de", CardType: "cLid", Series: 77,
+      CardName: "NEU GMBH", FederalTaxID: "DE123", Website: "neu.de", Phone1: "+49 1", EmailAddress: "anna@neu.de",
+      ContactPerson: "Anna Schmidt", CardType: "cLid", Series: 77,
       BPAddresses: [
         { Street: "Hauptstr. 1", City: "Ulm", Country: "DE", AddressName: "Bill to", AddressType: "bo_BillTo" },
         { Street: "Hauptstr. 1", City: "Ulm", Country: "DE", AddressName: "Ship to", AddressType: "bo_ShipTo" },
       ],
-      ContactEmployees: [{ FirstName: "Anna", LastName: "Schmidt", Name: "Anna Schmidt", E_Mail: "anna@neu.de" }],
+      ContactEmployees: [{ FirstName: "Anna", LastName: "Schmidt", Phone1: "+49 1", Name: "Anna Schmidt", E_Mail: "anna@neu.de" }],
     });
     expect("CardCode" in body).toBe(false);
   });

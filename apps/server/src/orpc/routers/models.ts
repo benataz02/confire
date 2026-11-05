@@ -150,7 +150,7 @@ export const modelsRouter = {
   }),
 
 
-  // Live preview for the (possibly unsaved) builder draft: same resolver as configs.lookups, keyed
+  // Live preview for the (possibly unsaved) builder draft: the resolver every configuration read uses, keyed
   // by the posted definition instead of a saved model id. Client sends a stripped-down "lookup
   // skeleton" so typing in expression fields doesn't refetch.
   //

@@ -89,6 +89,7 @@ function portalTableData(t: ResolvedTable, refs: LookupRef[]): ResolvedTable {
     columns,
     rows: t.rows.map((r) => idx.map((i) => r[i] ?? null)),
     ...(t.nextSkip === undefined ? {} : { nextSkip: t.nextSkip }),
+    ...(t.partial ? { partial: t.partial } : {}),
     ...(labels ? { labels } : {}),
   };
 }

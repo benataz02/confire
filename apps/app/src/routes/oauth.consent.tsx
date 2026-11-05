@@ -2,7 +2,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { BusyIndicator, MessageStrip } from "@ui5/webcomponents-react";
 import { AuthCard, AuthHead, AuthTile } from "@confire/ui/auth/AuthLayout.tsx";
-import { authUrl, currentSlug, hardRedirect } from "@confire/ui/host.ts";
+import { authUrl, currentSlug, guardRedirect } from "@confire/ui/host.ts";
 import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { useI18n } from "../i18n.ts";
@@ -14,8 +14,8 @@ import { orpc } from "../orpc.ts";
 // /oauth2/consent; oauthProviderClient (auth-client.ts) adds the signed query to that call, and the
 // answer redirects back to the client.
 export const Route = createFileRoute("/oauth/consent")({
-  beforeLoad: async ({ context, location }) => {
-    if (currentSlug()) return hardRedirect(authUrl(`/oauth/consent${location.searchStr}`));
+  beforeLoad: async ({ context, location, preload }) => {
+    if (currentSlug()) return guardRedirect(authUrl(`/oauth/consent${location.searchStr}`), preload);
     const data = await context.queryClient.ensureQueryData(sessionQuery);
     // Signed out (the session ended meanwhile): sign in, which carries the signed query on.
     if (!data?.session) throw redirect({ href: `/login${location.searchStr}` });

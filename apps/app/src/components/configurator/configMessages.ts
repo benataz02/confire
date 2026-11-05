@@ -50,7 +50,6 @@ export function configMessages(a: {
   issues: Notice[];
   form: Pick<FormState, "conflicts" | "fields"> | null;
   calculation: { state: string; message?: string } | null;
-  lookupsError?: Error | null;
   /** a sync the user asked for, that failed */
   syncError?: Error | null;
   /** the last edit: refused (reverted to what is stored) or not delivered (kept, for a retry) */
@@ -97,8 +96,6 @@ export function configMessages(a: {
   if (a.calculation?.state === "failed")
     out.push({ id: "calculation", type: "Negative", text: t("CONFIG_CALC_FAILED"), detail: a.calculation.message, ...configure });
 
-  if (a.lookupsError)
-    out.push({ id: "lookups", type: "Negative", text: t("CONFIG_LOOKUPS_FAILED"), detail: a.lookupsError.message, ...configure });
   if (a.writeError)
     out.push({
       id: "write", type: "Negative", text: t(a.writeError.refused ? "CONFIG_CHANGE_REFUSED" : "CONFIG_CHANGE_UNSENT"),

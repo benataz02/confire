@@ -22,7 +22,7 @@ export function lookupSkeleton(d: ModelDef): ModelDef {
 export function usePreviewLookups(draft: ModelDef) {
   return useQuery({
     ...orpc.models.previewLookups.queryOptions({ input: { definition: lookupSkeleton(draft) } }),
-    staleTime: 5 * 60_000, // matches the server-side configs.lookups cache window
+    staleTime: 5 * 60_000, // rows move only when a sync refills them
     retry: false, // agent-offline should show its message, not spin
     placeholderData: keepPreviousData, // editing a query source keeps loaded fields visible instead of blanking
   });

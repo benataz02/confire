@@ -222,12 +222,14 @@ const askUser: AnyServerTool = toolDefinition({
   }),
 }).server(async () => ({ asked: true, note: "The user answers in their next message." })) as AnyServerTool;
 
-/** The model definition is the model block's, already in the prompt. */
+/** The model definition is the model block's, already in the prompt; the option tables are the
+ *  page's drawing seeds — a tool searches them with configs_queryPage. */
 const slimGet = (out: unknown) => {
-  const o = out as { model?: { definition?: unknown } };
+  const o = out as { model?: { definition?: unknown }; tables?: unknown };
   if (!o?.model) return out;
   const { definition: _d, ...model } = o.model;
-  return { ...o, model };
+  const { tables: _t, ...rest } = o;
+  return { ...rest, model };
 };
 
 /** Every tool by name, for one chat run. */

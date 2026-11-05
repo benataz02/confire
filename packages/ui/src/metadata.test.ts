@@ -90,11 +90,12 @@ test("UDFs not declared become hidden columns and the auto section", () => {
 });
 
 test("localizeConstraints: the catalog beats SAP's label, down into lines", () => {
-  const texts: Record<string, string> = { SAP_FIELD_DocTotal: "Importe", SAP_ENUM_bost_Open: "Abierto" };
+  const texts: Record<string, string> = { SAP_FIELD_DocTotal: "Importe", SAP_FIELD_LastName: "Apellido", SAP_ENUM_bost_Open: "Abierto" };
   const c = localizeConstraints({
     name: "Quotations", label: "Quotations", keys: ["DocEntry"], writable: false, printable: true, flows: [],
     fields: {
       DocTotal: { Type: "number", EdmType: "Edm.Double", Label: "Total" },
+      "Contact.LastName": { Type: "string", EdmType: "Edm.String" },
       U_Prio: { Type: "string", EdmType: "Edm.String", Label: "Priority", Udf: true },
       DocDueDate: { Type: "date", EdmType: "Edm.DateTime" },
       DocumentStatus: { Type: "enum", EdmType: "SAPB1.BoStatus", Options: [{ value: "bost_Open", label: "Open" }, { value: "bost_Close", label: "Close" }] },
@@ -102,6 +103,7 @@ test("localizeConstraints: the catalog beats SAP's label, down into lines", () =
     },
   }, (k) => texts[k]);
   expect(c.fields.DocTotal?.Label).toBe("Importe");
+  expect(c.fields["Contact.LastName"]?.Label).toBe("Apellido");
   expect(c.fields.U_Prio?.Label).toBe("Priority");
   expect(c.fields.DocDueDate?.Label).toBeUndefined();
   expect(c.fields.DocumentStatus?.Options).toEqual([{ value: "bost_Open", label: "Abierto" }, { value: "bost_Close", label: "Close" }]);

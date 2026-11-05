@@ -23,7 +23,6 @@ const EN: Record<string, string> = {
   CONFIG_REQUIRED_OPEN: "Required before the configurator opens.",
   CONFIG_PICK_BP: "Pick a business partner",
   CONFIG_REQUIRED_QUOTE: "Required before the configuration can be quoted.",
-  CONFIG_LOOKUPS_FAILED: "Option lists could not be loaded",
   CONFIG_CHANGE_FAILED: "The last change did not go through",
   CONFIG_SYNC_FAILED_TABLE: "'{0}' could not be refreshed: {1}",
   CONFIG_SYNC_SHOWING: "Showing the {0} rows from the last good sync.",

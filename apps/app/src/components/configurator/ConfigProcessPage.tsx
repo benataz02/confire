@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BusyIndicator, Button, IllustratedMessage, Input, Label, ListItemStandard,
+  IllustratedMessage, Input, Label, ListItemStandard,
   Link, ObjectPage, ObjectPageSection, ObjectPageTitle, Panel, Popover, ResponsivePopover, SelectDialog, Tag, Text, Title,
   ToggleButton, Toolbar,
   ToolbarButton, ToolbarItem,
@@ -290,7 +290,6 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const messages = configMessages({
     t, model: model.definition,
     missing: view.missing, issues: view.issues, form, calculation: view.calculation,
-    lookupsError: proc.lookups.error as Error | null,
     syncError: proc.sync.error as Error | null,
     writeError: queue.error,
     configErrors: [proc.update.error, proc.pickNow.error, proc.duplicate.error, proc.remove.error, accept.error, sendBack.error, decline.error, reassign.error, attach.error] as (Error | null)[],
@@ -326,7 +325,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   ) : null;
 
   // Read-only has no edit to lose, so a locked page shows its configuration regardless.
-  const configurable = (headReady || locked) && !!proc.lookups.data;
+  const configurable = headReady || locked;
   const generalSection = (
     <ObjectPageSection key={GENERAL_SECTION} id={GENERAL_SECTION} titleText={t("CONFIG_GENERAL")}>
       <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -337,14 +336,10 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
             onClick={(e) => setNoticeOpener(e.currentTarget as HTMLElement)}>{t("ASSISTANT_NOTICE")}</Link>
         ) : null}
         {general}
-        {configurable ? null : !headReady && !locked ? (
+        {configurable ? null : (
           <IllustratedMessage name="NoData" design="Small" titleText={t("CONFIG_COMPLETE_GENERAL")}
             subtitleText={t("CONFIG_COMPLETE_GENERAL_SUB")} />
-        ) : proc.lookups.error ? (
-          /* Why the options are missing is a page message; the retry it needs is not something
-             a message can carry, so the button stays here. */
-          <Button icon="refresh" style={{ alignSelf: "start" }} onClick={() => void proc.lookups.refetch()}>{t("CONFIG_RETRY_OPTIONS")}</Button>
-        ) : <BusyIndicator active delay={0} />}
+        )}
       </div>
     </ObjectPageSection>
   );
@@ -457,7 +452,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
       {[
         generalSection,
         ...(configurable ? configuratorSections({
-          model: model.definition, form, tables: proc.lookups.data!.tables,
+          model: model.definition, form, tables: view.tables,
           marks, onMarkPress: pressMark,
           rows: tables, readOnly: locked, querySource: { modelId: project.modelId }, formulaOverride: true,
           onChange: (key, v) => proc.commit(v === undefined ? { unset: [key] } : { set: { [key]: v } }),

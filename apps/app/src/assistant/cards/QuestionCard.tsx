@@ -48,7 +48,6 @@ export function QuestionCard({ projectId, view, questions, here, onKeep, onAnswe
   // "2 of 5": every question this card has shown counts, so the count holds as answers close them.
   const seen = useRef(new Set<string>());
   for (const x of questions) seen.current.add(x.key);
-  const lookups = useQuery({ ...orpc.configs.lookups.queryOptions({ input: { modelId: view.project.modelId } }), staleTime: 5 * 60_000 });
   const params = new Map((view.model?.definition.parameters ?? []).map((p) => [p.key, p]));
 
   const write = async (key: string, w: Write, said: string) => {
@@ -111,7 +110,7 @@ export function QuestionCard({ projectId, view, questions, here, onKeep, onAnswe
             onRowSelect={(row) => void write(q.key, { customer: { cardCode: String(row.CardCode ?? ""), cardName: String(row.CardName ?? "") } },
               `${label}: ${String(row.CardName ?? "")} (${String(row.CardCode ?? "")})`)} />
         ) : q.kind === "query" && ref && ref.source !== "manual" ? (
-          <CflField config={{ dialogConfig: cfl.masterdataQuery({ modelId: view.project.modelId }, ref, lookups.data?.tables[ref.table], { title: label }) }}
+          <CflField config={{ dialogConfig: cfl.masterdataQuery({ modelId: view.project.modelId }, ref, view.tables[ref.table], { title: label }) }}
             value={current ?? null} commitOnly accessibleName={label}
             onValueChange={(v) => { if (v !== null && v !== "") void setValue(q, v); }} />
         ) : q.kind === "options" && q.options.length > CHIPS_MAX ? (

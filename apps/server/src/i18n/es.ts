@@ -197,6 +197,7 @@ export const es: Partial<Record<keyof typeof en, string>> = {
   FORM_REQUIRED: "{0} ({1}) es obligatorio",
   FORM_INVALID: "{0} ({1}) tiene un valor no válido",
   FORM_TOO_LONG: "{0} ({1}) supera los {2} caracteres",
+  FORM_SHIP_TO_SAME: "Enviar a la dirección de facturación",
 
   SUBMIT_NO_CONFLICTS: "sin conflictos",
   SUBMIT_GAPS: "Antes de enviar: {0}",

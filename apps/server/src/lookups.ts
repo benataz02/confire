@@ -27,6 +27,10 @@ import { t as text } from "./i18n/index.ts";
  *  ponytail: one size for every tenant; make it a sap_connection column if tenants need different ones. */
 export const DEFAULT_PAGE = Math.max(1, Number(process.env.B1_PAGE_SIZE) || 100);
 
+/** The most rows a query table may have and still be a parameter's whole domain — the candidate
+ *  cap, since an open parameter wider than that could not be enumerated anyway. */
+const ENUM_MAX = 200;
+
 export type QueryPage = {
   rows: Record<string, unknown>[];
   /** $skip for the next page; absent = the last page. */
@@ -106,14 +110,6 @@ export function queryRowsFor(model: ModelDef, rows: MasterdataRow[]): Masterdata
   const named = referencedTables(model);
   return rows.filter((r): r is MasterdataQueryRow => r.kind === "query" && !!r.query && named.has(r.name));
 }
-
-// Bumped whenever a tenant's masterdata changes — an edit, or a finished sync. configs.ts folds it
-// into its lookup cache key so new rows show up at once instead of after the TTL.
-// ponytail: per-process, like the cache it feeds — a second server process would need the row's
-// updatedAt/syncedAt in the key instead.
-const versions = new Map<string, number>();
-export const masterdataVersion = (tenantId: string) => versions.get(tenantId) ?? 0;
-export const bumpMasterdata = (tenantId: string) => { versions.set(tenantId, Date.now()); };
 
 export const queryRowOf = (rows: MasterdataRow[], name: string): MasterdataQueryRow | undefined =>
   rows.find((r): r is MasterdataQueryRow => r.name === name && r.kind === "query" && !!r.query);
@@ -300,14 +296,16 @@ export async function resolveLookups(
 ): Promise<ResolvedLookups> {
   const tables = tablesFromMasterdata(rows);
 
-  // The canonical page of every query table the model names. Concurrent: each is its own SQL read.
+  // Every query table the model names, whole — or, past ENUM_MAX rows, its start marked `partial`:
+  // a domain is complete or it is not one, never whatever fits on a page. Concurrent SQL reads.
   const named = queryRowsFor(model, rows);
-  const pages = await Promise.all(named.map((r) => cache(r.id, { top: DEFAULT_PAGE })));
+  const pages = await Promise.all(named.map((r) => cache(r.id, { top: ENUM_MAX + 1 })));
   named.forEach((r, i) => {
     const raw = pages[i]!;
+    const partial = raw.length > ENUM_MAX;
     tables[r.name] = {
-      ...toResolvedTable(raw, r.query.columns),
-      ...(raw.length >= DEFAULT_PAGE ? { nextSkip: DEFAULT_PAGE } : {}),
+      ...toResolvedTable(partial ? raw.slice(0, ENUM_MAX) : raw, r.query.columns),
+      ...(partial ? { partial: true as const } : {}),
       ...(r.query.labels ? { labels: r.query.labels } : {}),
       ...(r.query.hidden ? { hidden: r.query.hidden } : {}),
     };

@@ -18,15 +18,16 @@ export type FieldConstraint = EntityConstraints["fields"][string];
 export type Constraints = Record<string, FieldConstraint>;
 
 /**
- * Labels in the reader's language. A field's label is the catalog's (`SAP_FIELD_<Name>`, parts/sap.*),
+ * Labels in the reader's language. A field's label is the catalog's (`SAP_FIELD_<Name>`, parts/sap.*;
+ * a flat prefixed key such as the portal onboarding form's `Contact.LastName` by its last part),
  * else SAP's (a field neither names shows its property name); an enum option's is `SAP_ENUM_<member>`, else the server's.
  * The catalog wins over SAP because SAP's labels are in the *agent's* SAP user's language, one for
  * every reader — and a Service Layer before 10.0 FP2608 sends none at all (packages/b1 metadata.ts).
  */
-export function localizeConstraints(c: EntityConstraints, text: (key: string) => string | undefined): EntityConstraints {
+export function localizeConstraints<C extends EntityConstraints>(c: C, text: (key: string) => string | undefined): C {
   const fields = (fs: Constraints): Constraints => Object.fromEntries(Object.entries(fs).map(([name, f]) => [name, {
     ...f,
-    Label: text(`SAP_FIELD_${name}`) ?? f.Label,
+    Label: text(`SAP_FIELD_${name.split(".").at(-1)}`) ?? f.Label,
     ...(f.Options ? { Options: f.Options.map((o) => ({ ...o, label: text(`SAP_ENUM_${o.value}`) ?? o.label })) } : {}),
     ...(f.Fields ? { Fields: fields(f.Fields) } : {}),
   }]));
@@ -66,12 +67,14 @@ export function useFieldConstraintsOf(entities: string[]): (EntityConstraints | 
 // Module-level, so useQueries keeps the combined array's identity while no result changed.
 const dataOf = <T,>(rs: { data?: T }[]) => rs.map((r) => r.data);
 
-function useLocalize() {
+/** `localizeConstraints` as a query's `select`, for constraints read some other way than
+ *  `entities.metadata` (the portal's onboarding form). */
+export function useLocalize() {
   // UI5's hook, not useUiI18n: i18n.ts drags in a .properties parser that needs `window` on import.
   useI18nBundle("@confire/ui"); // re-renders on a language switch, which re-keys `select`
   const language = getLocale().getLanguage();
   // The bundle's data, not getText: getText warns on every miss, and most fields have no catalog entry.
-  return useCallback((c: EntityConstraints) => {
+  return useCallback(<C extends EntityConstraints>(c: C): C => {
     const texts = getI18nBundleData("@confire/ui");
     return localizeConstraints(c, (key) => texts?.[key]);
   }, [language]); // eslint-disable-line react-hooks/exhaustive-deps

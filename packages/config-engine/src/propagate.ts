@@ -1,5 +1,5 @@
 import { evaluate, parse } from "./dsl";
-import type { Entries, ModelDef, Option, ResolvedLookups, TableRows, Val } from "./model";
+import type { Entries, ModelDef, Option, Param, ResolvedLookups, TableRows, Val } from "./model";
 import { derivedKey, derivedColumns, refKeyCols, requiredColumn, structureId } from "./model";
 import { evalTableRows, tableAggregates } from "./tables";
 
@@ -315,8 +315,12 @@ export function propagate(
     if (!changed) break;
   }
 
+  // A parameter over a partial query table is picked, not searched: its listed rows are only a
+  // start, so it is neither enumerated nor ever "short of values". A pick is still ruled on above.
+  const partial = (p: Param) =>
+    p.domain?.kind === "options" && p.domain.ref.source === "query" && !!lookups.tables[p.domain.ref.table]?.partial;
   const open = model.parameters
-    .filter((p) => domains[p.key] && !(p.key in b.values))
+    .filter((p) => domains[p.key] && !(p.key in b.values) && !partial(p))
     .map((p) => p.key);
   for (const k of open) {
     if (live(domains[k]!).length === 0)

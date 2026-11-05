@@ -76,3 +76,6 @@ export function ago(d: Date): string {
   const unit = UNITS.find(([, n]) => Math.abs(s) >= n);
   return unit ? f.format(Math.round(s / unit[1]), unit[0]) : f.format(0, "minute");
 }
+
+/** A field's `onChange` that keeps it upper case as typed (a business partner's name). */
+export const upper = (key: string) => (v: unknown) => (typeof v === "string" ? { [key]: v.toUpperCase() } : undefined);

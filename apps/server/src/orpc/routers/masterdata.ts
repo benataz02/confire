@@ -5,7 +5,7 @@ import { db, configMasterdata, configMasterdataRow, configModel } from "@confire
 import { ODataQueryZ, QuerySourceZ, ValZ, syncTables } from "@confire/config-engine";
 import { isYesNo, type B1Field } from "@confire/b1";
 import { adminProcedure } from "../base.ts";
-import { bumpMasterdata, DEFAULT_PAGE, fetchQueryTable, queryRowOf, withSearch, type MasterdataRow } from "../../lookups.ts";
+import { DEFAULT_PAGE, fetchQueryTable, queryRowOf, withSearch, type MasterdataRow } from "../../lookups.ts";
 import { syncNow } from "../../masterdata-sync.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { runnerFor, tenantConnector, viaB1 } from "../../b1.ts";
@@ -151,14 +151,12 @@ export const masterdataRouter = {
         await db
           .delete(configMasterdataRow)
           .where(and(eq(configMasterdataRow.tenantId, context.tenantId), eq(configMasterdataRow.masterdataId, input.id)));
-        bumpMasterdata(context.tenantId);
         return { id: input.id };
       }
       const [ins] = await db
         .insert(configMasterdata)
         .values({ tenantId: context.tenantId, ...values })
         .returning({ id: configMasterdata.id });
-      bumpMasterdata(context.tenantId);
       return { id: ins!.id };
     } catch (e) {
       if ((e as { code?: string }).code === "23505")
@@ -187,7 +185,6 @@ export const masterdataRouter = {
         kind: row.kind, columns: row.columns, rows: row.rows, query: row.query,
       })
       .returning({ id: configMasterdata.id });
-    bumpMasterdata(context.tenantId);
     return { id: ins!.id };
   }),
 
@@ -229,7 +226,6 @@ export const masterdataRouter = {
       await tx.delete(configMasterdata)
         .where(and(inArray(configMasterdata.id, input.ids), eq(configMasterdata.tenantId, context.tenantId)));
     });
-    bumpMasterdata(context.tenantId);
     return { ok: true };
   }),
 

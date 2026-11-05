@@ -5,7 +5,7 @@ import { MessageStrip } from "@ui5/webcomponents-react";
 import { AuthCard, AuthField, AuthHead, AuthTile } from "@confire/ui/auth/AuthLayout.tsx";
 import { authClient } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
-import { authUrl, hardRedirect, currentSlug } from "@confire/ui/host.ts";
+import { authUrl, guardRedirect, currentSlug } from "@confire/ui/host.ts";
 import { useI18n } from "../i18n.ts";
 
 function emph(template: string, value: string): ReactNode {
@@ -15,8 +15,8 @@ function emph(template: string, value: string): ReactNode {
 
 export const Route = createFileRoute("/forgot-password")({
   // Auth lives on the sign-in host, and the reset link comes back to it (redirectTo below).
-  beforeLoad: ({ location }) => {
-    if (currentSlug()) return hardRedirect(authUrl(`/forgot-password${location.searchStr}`));
+  beforeLoad: ({ location, preload }) => {
+    if (currentSlug()) return guardRedirect(authUrl(`/forgot-password${location.searchStr}`), preload);
   },
   component: ForgotPassword,
 });

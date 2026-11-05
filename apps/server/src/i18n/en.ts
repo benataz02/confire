@@ -207,6 +207,7 @@ export const en = {
   FORM_REQUIRED: "{0} ({1}) is required",
   FORM_INVALID: "{0} ({1}) has an invalid value",
   FORM_TOO_LONG: "{0} ({1}) is longer than {2}",
+  FORM_SHIP_TO_SAME: "Ship to the bill-to address",
 
   // The portal's projects (portal/orpc/projects.ts)
   SUBMIT_NO_CONFLICTS: "no conflicts",

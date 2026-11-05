@@ -1,5 +1,6 @@
 import type { FormField, HeaderConfig, Section } from "@confire/ui/types.ts";
 import type { TextFn } from "./labels.ts";
+import { upper } from "@confire/ui/format.ts";
 
 // The new-client onboarding form (spec §5.3), declared like apps/app's features/b1/business-partners:
 // a section tree the BP-create ObjectPage draws unchanged. Metadata (`onboarding.formSchema`) only
@@ -17,7 +18,8 @@ export const ONBOARDING_LOCKED = ["Contact.E_Mail"];
 
 /** The Company section is the code defaults, then the admin's extras in settings order. */
 export const onboardingSections = (extras: string[], t: TextFn): Section[] => [
-  { id: "company", label: t("PORTAL_COMPANY"), fields: fields(["CardName", "FederalTaxID", "Phone1", "EmailAddress", ...extras]) },
+  // Phone and email are the contact's: the server copies them onto the lead's header.
+  { id: "company", label: t("PORTAL_COMPANY"), fields: [{ key: "CardName", label: t("PORTAL_COMPANY_NAME"), onChange: upper("CardName") }, ...fields(["FederalTaxID", ...extras])] },
   { id: "billTo", label: t("PORTAL_BILL_TO"), fields: [...address("BillTo"), { key: "ShipToSame" }] },
   // Hidden while shipping to the bill-to address — and a hidden section is not validated.
   { id: "shipTo", label: t("PORTAL_SHIP_TO"), visible: (d) => !d.ShipToSame, fields: address("ShipTo") },

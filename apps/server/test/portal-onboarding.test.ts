@@ -38,6 +38,7 @@ beforeAll(() => {
     SeriesService_GetDocumentSeries: [
       { Series: 77, Name: "Leads", Locked: "tNO" },
       { Series: 78, Name: "Old leads", Locked: "tYES" },
+      { Series: 1, Name: "Manual", Locked: "tNO", IsManual: "tYES" },
     ],
     BusinessPartners: [],
   });
@@ -63,7 +64,7 @@ async function invited() {
   return { ...s, id, email, invitee, on };
 }
 
-const FORM = { CardName: "Neu GmbH", "BillTo.Street": "Hauptstr. 1", "BillTo.City": "Ulm", "BillTo.Country": "DE" };
+const FORM = { CardName: "Neu GmbH", FederalTaxID: "DE123", "BillTo.Street": "Hauptstr. 1", "BillTo.City": "Ulm", "BillTo.Country": "DE" };
 
 describe("portalInvitations.inviteNew", () => {
   test("a pending owner invitation with no company, listed without a CardCode, mailed as a new client", async () => {
@@ -147,7 +148,7 @@ describe("onboarding.submit", () => {
     }, on);
     const post = agent.calls.slice(before).find((c) => c.route === "/create" && c.body.entitySet === "BusinessPartners")!;
     const body = post.body.data as Record<string, unknown>;
-    expect(body).toMatchObject({ CardName: "Neu GmbH", Website: "neu.de", CardType: "cLid", Series: 77, U_CF_Key: leadKey(tenantId, id) });
+    expect(body).toMatchObject({ CardName: "NEU GMBH", Website: "neu.de", CardType: "cLid", Series: 77, U_CF_Key: leadKey(tenantId, id) });
     expect("CardCode" in body).toBe(false);
     expect(body.BPAddresses).toEqual([
       { Street: "Hauptstr. 1", City: "Ulm", Country: "DE", AddressName: "Bill to", AddressType: "bo_BillTo" },
@@ -157,7 +158,7 @@ describe("onboarding.submit", () => {
     expect(body.ContactEmployees).toEqual([{ FirstName: "Anna", LastName: email, E_Mail: email, Name: `Anna ${email}` }]);
 
     const [company] = await db.select().from(portalCompany).where(and(eq(portalCompany.tenantId, tenantId), eq(portalCompany.cardCode, res.cardCode)));
-    expect(company).toMatchObject({ cardName: "Neu GmbH", cardType: "cLid" });
+    expect(company).toMatchObject({ cardName: "NEU GMBH", cardType: "cLid" });
     const [inv] = await db.select().from(invitation).where(eq(invitation.id, id));
     expect(inv).toMatchObject({ status: "accepted", cardCode: company!.cardCode });
     const me = await call(portalRouter.me, undefined, on);
@@ -170,11 +171,11 @@ describe("onboarding.submit", () => {
     await notificationsSettled();
     const told = devOutbox.filter((m) => m.to === admin.email && m.subject.includes("joined your customer portal"));
     expect(told).toHaveLength(1);
-    expect(told[0]).toMatchObject({ subject: `Neu GmbH joined your customer portal (${res.cardCode})` });
+    expect(told[0]).toMatchObject({ subject: `NEU GMBH joined your customer portal (${res.cardCode})` });
     // …and on their bell, linking to the new business partner.
     expect(await call(router.notifications.list, undefined, as)).toMatchObject([{
       type: "client.onboarded", path: `/b1/BusinessPartners/${encodeURIComponent(res.cardCode)}`,
-      params: { companyName: "Neu GmbH", cardCode: res.cardCode },
+      params: { companyName: "NEU GMBH", cardCode: res.cardCode },
     }]);
   });
 

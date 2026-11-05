@@ -200,6 +200,27 @@ describe("propagate", () => {
     expect(empty.conflicts.some((c) => c.message.includes("no valid values remain for 'material'"))).toBe(true);
   });
 
+  test("a param over a partial query table is picked: never open, never short of values, still ruled on", () => {
+    const m2 = structuredClone(model);
+    m2.parameters.push({ key: "part", label: "Part", type: "string", ui: "select", domain: { kind: "options", ref: { source: "query", table: "parts" } } });
+    m2.constraints.push({ kind: "expr", assert: 'part != "P1" && part != "P2"', message: "not these" });
+    const parts = { columns: ["code"], rows: [["P1"], ["P2"]] };
+    const lk = (partial: boolean): ResolvedLookups => ({
+      domains: { ...lookups.domains, part: [{ value: "P1", label: "P1" }, { value: "P2", label: "P2" }] },
+      tables: { ...lookups.tables, parts: partial ? { ...parts, partial: true } : parts },
+    });
+    const short = (p: { conflicts: { message: string }[] }) => p.conflicts.some((c) => c.message.includes("no valid values remain for 'part'"));
+    // Whole, the rows are the domain: open, and short once the rule eliminates every one.
+    const whole = propagate(m2, lk(false), {});
+    expect(whole.open).toContain("part");
+    expect(short(whole)).toBe(true);
+    // Partial, they are only a start.
+    const start = propagate(m2, lk(true), {});
+    expect(start.open).not.toContain("part");
+    expect(short(start)).toBe(false);
+    expect(propagate(m2, lk(true), { part: "P1" }).conflicts.some((c) => c.message.includes("not these"))).toBe(true);
+  });
+
   test("domainless unbound table param is a wildcard, not a violation", () => {
     const m2 = structuredClone(model);
     m2.parameters.push({ key: "note", label: "Note", type: "string", ui: "input" });

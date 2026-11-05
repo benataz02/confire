@@ -8,20 +8,20 @@ import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { DOWNLOAD, useExpired } from "../components/PairingCode.tsx";
 import { lobbyQuery, orpc } from "../orpc.ts";
-import { authUrl, currentSlug, hardRedirect, isReserved, tenantUrl } from "@confire/ui/host.ts";
+import { authUrl, currentSlug, guardRedirect, hardRedirect, isReserved, tenantUrl } from "@confire/ui/host.ts";
 import { useI18n } from "../i18n.ts";
 
 export const Route = createFileRoute("/onboarding")({
   // Outside any workspace. A user with a company and an agent row belongs *in* the tenant;
   // a company without sap_connection stays here on the agent step.
-  beforeLoad: async ({ context }) => {
-    if (currentSlug()) return hardRedirect(authUrl("/onboarding"));
+  beforeLoad: async ({ context, preload }) => {
+    if (currentSlug()) return guardRedirect(authUrl("/onboarding"), preload);
     const data = await context.queryClient.ensureQueryData(sessionQuery);
     if (!data?.session) throw redirect({ to: "/login" });
     const { workspace } = await context.queryClient.fetchQuery(lobbyQuery);
     if (!workspace) return { agentSetupSlug: null as string | null };
     if (workspace.needsAgent) return { agentSetupSlug: workspace.slug };
-    return hardRedirect(workspace.url);
+    return guardRedirect(workspace.url, preload);
   },
   component: Onboarding,
 });

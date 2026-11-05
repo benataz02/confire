@@ -6,7 +6,7 @@ import { AuthCard, AuthField, AuthHead, AuthTile } from "@confire/ui/auth/AuthLa
 import { authClient, sessionQuery } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { SocialButtons } from "../components/SocialButtons.tsx";
-import { authUrl, hardRedirect, currentSlug } from "@confire/ui/host.ts";
+import { authUrl, guardRedirect, currentSlug } from "@confire/ui/host.ts";
 import { useI18n } from "../i18n.ts";
 
 /** `template` has a `\u0000` where `{0}` was, so the value can sit in `<strong>`. */
@@ -23,8 +23,8 @@ export const Route = createFileRoute("/signup")({
     email: typeof s.email === "string" ? s.email : undefined,
   }),
   // Already signed in: the dispatcher (/login) takes it from here.
-  beforeLoad: async ({ context, search, location }) => {
-    if (currentSlug()) return hardRedirect(authUrl(`/signup${location.searchStr}`));
+  beforeLoad: async ({ context, search, location, preload }) => {
+    if (currentSlug()) return guardRedirect(authUrl(`/signup${location.searchStr}`), preload);
     const data = await context.queryClient.ensureQueryData(sessionQuery);
     if (data?.session) throw redirect({ to: "/login", search });
   },

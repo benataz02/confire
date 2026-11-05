@@ -7,8 +7,8 @@ import { PortalShell } from "../components/PortalShell.tsx";
 // guard nor the shell runs for them. A link carries `slug` over from the current params and never
 // changes it: another supplier is always a hardRedirect.
 export const Route = createFileRoute("/$slug")({
-  beforeLoad: async ({ context, params }) => {
-    const me = await portalMe(context.queryClient, params.slug);
+  beforeLoad: async ({ context, params, preload }) => {
+    const me = await portalMe(context.queryClient, params.slug, preload);
     // No seat here: auto-join, or the invite-only page.
     if (!me.company) throw redirect({ to: "/$slug/onboarding", params });
   },

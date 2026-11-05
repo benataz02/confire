@@ -5,7 +5,7 @@ import { MessageStrip } from "@ui5/webcomponents-react";
 import { AuthCard, AuthField, AuthHead, AuthTile } from "@confire/ui/auth/AuthLayout.tsx";
 import { authClient } from "../auth-client.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
-import { authUrl, hardRedirect, currentSlug } from "@confire/ui/host.ts";
+import { authUrl, guardRedirect, currentSlug } from "@confire/ui/host.ts";
 import { useI18n } from "../i18n.ts";
 
 // The mailed link goes to Better Auth's /api/auth/reset-password/<token>, which checks the token and
@@ -15,8 +15,8 @@ export const Route = createFileRoute("/reset-password")({
     token: typeof s.token === "string" ? s.token : undefined,
     error: typeof s.error === "string" ? s.error : undefined,
   }),
-  beforeLoad: ({ location }) => {
-    if (currentSlug()) return hardRedirect(authUrl(`/reset-password${location.searchStr}`));
+  beforeLoad: ({ location, preload }) => {
+    if (currentSlug()) return guardRedirect(authUrl(`/reset-password${location.searchStr}`), preload);
   },
   component: ResetPassword,
 });

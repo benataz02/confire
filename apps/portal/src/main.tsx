@@ -26,6 +26,9 @@ const queryClient = new QueryClient({
 const router = createRouter({
   routeTree,
   context: { queryClient },
+  // As the staff app's: code ahead of the click, data the Query cache's, guards' side effects on click.
+  defaultPreload: "intent",
+  defaultPreloadStaleTime: 0,
   defaultErrorComponent: RouteError,
   defaultNotFoundComponent: RouteNotFound,
 });

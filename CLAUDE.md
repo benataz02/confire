@@ -578,7 +578,8 @@ failed`), never a thrown error, and is not stored.
 **One edit is one call.** `configs.calculate` writes the patch (name and customer too) and answers
 the view (`config-view.ts`: form state, `missing`, candidates' prices, per-quantity costs, coded
 `issues` — plain JSON, no raw engine output); `get`/`update` (the model switch, nothing else) add the
-model, `select` answers the same. The page commits on change, never per keystroke, with no timer:
+model and the option tables it names (`tables`: value-help seeds, table-cell options — one read, no
+separate lookups call), `select` answers the same. The page commits on change, never per keystroke, with no timer:
 `usePatchQueue` (`@confire/ui/configurator/patch.ts`) keeps one call in flight, merges commits
 meanwhile, puts picks behind edits, and the page draws the pending patch over the last answer
 (`useConfigProcess.ts`). A 4xx drops the pending patch and refetches; a failure to reach the server
@@ -654,10 +655,17 @@ line with its cached options, and a stale cache is a page message instead of a f
   in behind rather than hanging a page load. Failures land in `config_masterdata.syncError`.
 - `syncTables(model)` = `referencedTables` ∪ `history.table` ∪ `pricing.itemTable` — what has to be
   kept fresh, as opposed to what a client may page. The delete guard uses it.
-- `cachedLookups` splits in two on purpose: the canonical resolve is memoized per (tenant, model,
-  masterdata version), and `bindEntryValues` — which loads the rows a *stored* configuration names
-  past the canonical page — stays uncached, because entries are unbounded user input and a key that
-  grew with them would leak.
+- `cachedLookups` splits in two on purpose: the canonical resolve is memoized per (tenant, model),
+  one entry each, versioned by the model's `updatedAt` and every `syncTables` row's
+  `syncedAt`/`updatedAt` — the timestamps `isStale` reads, so neither process (staff, portal) can
+  recalculate against rows older than the ones that made it stale; there is no in-process version
+  counter. `bindEntryValues` — which loads the rows a *stored* configuration names past the
+  canonical page — stays uncached, because entries are unbounded user input and a key that grew
+  with them would leak.
+- **A query table is a domain only when it is whole.** The resolve reads up to 200 rows (the
+  candidate cap); a bigger table keeps its first 200 marked `partial`, and a parameter over it is
+  picked through the value help (a `dropdown` too), never enumerated and never "short of values" —
+  a pick is still ruled on. `DEFAULT_PAGE` is paging only.
 
 ## Writing to SAP
 

@@ -1,5 +1,6 @@
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import type { EntityFeature } from "@confire/ui/types.ts";
+import { upper } from "@confire/ui/format.ts";
 import { BpPortalSection, InviteToPortal } from "../../components/portal/BpPortal.tsx";
 
 // Business partners, declared. CardCode and CardType are requiredOnCreate but not in the write
@@ -45,7 +46,7 @@ export const businessPartners: EntityFeature = {
         id: "general",
         label: "General",
         groups: [
-          { id: "identity", label: "Business partner", fields: [{ key: "CardCode" }, { key: "CardName" }, { key: "CardType" }] },
+          { id: "identity", label: "Business partner", fields: [{ key: "CardCode" }, { key: "CardName", onChange: upper("CardName") }, { key: "CardType" }] },
           {
             id: "contact",
             label: "Contact",

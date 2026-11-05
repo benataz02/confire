@@ -5,7 +5,6 @@ import { db, configMasterdata, configMasterdataRow, configModel, configProject }
 import { itemsTable, type ModelDef } from "@confire/config-engine";
 import { liveEngine, liveProject, recalculate } from "../src/config-project.ts";
 import { buildQuoteLines } from "../src/config-quote.ts";
-import { bumpMasterdata } from "../src/lookups.ts";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
 
@@ -56,11 +55,11 @@ async function setup(def: ModelDef = PRICED, price = 3) {
   const [m] = await db.insert(configModel).values({ tenantId, name: def.name, definition: def }).returning({ id: configModel.id });
   const create = async (name = "Box", customer: typeof ACME | null = ACME) =>
     (await call(router.configs.create, { modelId: m!.id, name, customer }, ctx)).id;
-  /** A sync landing after the calculation: new rows, a newer syncedAt, the memo told. */
+  /** A sync landing after the calculation: new rows and a newer syncedAt, in the database only —
+   *  the lookup cache must see it from there, as another process's would. */
   const sync = async (p: number) => {
     await setPrice(p);
     await db.update(configMasterdata).set({ syncedAt: later() }).where(eq(configMasterdata.id, md!.id));
-    bumpMasterdata(tenantId);
   };
   const calc = (input: InferRouterInputs<typeof router>["configs"]["calculate"]) => call(router.configs.calculate, input, ctx);
   return { tenantId, ctx, modelId: m!.id, create, sync, calc };
@@ -173,6 +172,18 @@ describe.skipIf(!process.env.DATABASE_URL)("the configuration process", () => {
     await s.sync(7);
     const v = await call(router.configs.get, { id }, s.ctx);
     expect([v.project.status, price(v)]).toEqual(["quoted", 20]);
+  });
+
+  test("get carries the option tables the model names, and only those", async () => {
+    const color = { key: "color", label: "Color", type: "string", ui: "select", domain: { kind: "options", ref: { source: "table", table: "colors" } } } as const;
+    const s = await setup({ ...PRICED, parameters: [...PRICED.parameters, color] });
+    const col = (key: string) => ({ key, label: key, type: "string" as const });
+    await db.insert(configMasterdata).values([
+      { tenantId: s.tenantId, name: "colors", kind: "table", columns: [col("code"), col("name")], rows: [["R", "Red"]] },
+      { tenantId: s.tenantId, name: "unused", kind: "table", columns: [col("code")], rows: [["X"]] },
+    ]);
+    const v = await call(router.configs.get, { id: await s.create() }, s.ctx);
+    expect(v.tables).toEqual({ colors: { columns: ["code", "name"], rows: [["R", "Red"]] } });
   });
 
   test("a configuration's margin prices over the model's, recalculates, and is the staff's alone", async () => {

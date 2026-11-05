@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { origins, safeRedirect, siteUrl, slugOf, tenantPath } from "./host.ts";
+import { isNotFound } from "@tanstack/react-router";
+import { guardRedirect, origins, safeRedirect, siteUrl, slugOf, tenantPath } from "./host.ts";
 
 // Mirrors apps/server/src/tenant.ts (the server re-validates; this is UX and redirect safety).
 
@@ -56,4 +57,16 @@ test("siteUrl: the marketing site on the apex (dev: :4321), English unprefixed, 
   expect(siteUrl("/", "eu", app)).toBe("https://confire.ai/eu/");
   expect(siteUrl("/cookies/", "de", app)).toBe("https://confire.ai/cookies/"); // a language the site lacks reads English
   expect(siteUrl("/", "en", { protocol: "http:", hostname: "localhost" })).toBe("http://localhost:4321/");
+});
+
+test("guardRedirect: a preload never moves the window, it ends in a notFound the router drops", () => {
+  const assigned: string[] = [];
+  (globalThis as { window?: unknown }).window = { location: { assign: (u: string) => assigned.push(u) } };
+  let thrown: unknown;
+  try { void guardRedirect("https://x.test/", true); } catch (e) { thrown = e; }
+  expect(isNotFound(thrown)).toBe(true);
+  expect(assigned).toEqual([]);
+  void guardRedirect("https://x.test/", false);
+  expect(assigned).toEqual(["https://x.test/"]);
+  delete (globalThis as { window?: unknown }).window;
 });

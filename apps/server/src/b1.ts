@@ -7,7 +7,7 @@ import {
 } from "@confire/b1";
 import { decryptSecret } from "./crypto.ts";
 import { forgetEntityList } from "./entity-meta.ts";
-import { bumpMasterdata, DEFAULT_PAGE, type QueryRunner } from "./lookups.ts";
+import { DEFAULT_PAGE, type QueryRunner } from "./lookups.ts";
 import { t } from "./i18n/index.ts";
 
 export type { Connector };
@@ -57,9 +57,8 @@ export async function adoptCompany(tenantId: string, companyDb: string): Promise
     return true;
   });
   if (adopted) {
-    // The in-process halves: the entity list, and (through the version) the lookup and row caches.
+    // The in-process half: the entity list. The lookup cache sees the nulled syncedAt itself.
     forgetEntityList(tenantId);
-    bumpMasterdata(tenantId);
   }
   return adopted;
 }

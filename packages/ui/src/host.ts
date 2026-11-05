@@ -5,6 +5,7 @@
 // sign-in host. The server re-validates against membership — this is only for UX and redirects.
 
 import getLocale from "@ui5/webcomponents-base/dist/locale/getLocale.js";
+import { notFound } from "@tanstack/react-router";
 
 /** Never a slug: the staff SPA's own top-level pages, the server's routes, a few names kept back, the mail names. */
 const RESERVED = new Set([
@@ -48,6 +49,14 @@ export const currentSlug = () => slugOf(window.location.pathname);
 export function hardRedirect(url: string): Promise<never> {
   window.location.assign(url);
   return new Promise<never>(() => {});
+}
+
+/** hardRedirect from a router beforeLoad. A hovered link preloads its route, which runs every
+ *  beforeLoad on the way (redirects followed), and a hover must never move the window — the click
+ *  will. notFound() is what a preload drops silently. */
+export function guardRedirect(url: string, preload: boolean): Promise<never> {
+  if (preload) throw notFound();
+  return hardRedirect(url);
 }
 
 type Loc = { protocol: string; hostname: string };

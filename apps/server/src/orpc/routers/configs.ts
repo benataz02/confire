@@ -3,7 +3,7 @@ import { openapi } from "@orpc/openapi";
 import { z } from "zod";
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db, configModel, configProject, portalCompany, user } from "@confire/db";
-import { EntriesZ, historyFields, historyKey, syncTables, type Entries, type Val } from "@confire/config-engine";
+import { EntriesZ, historyFields, historyKey, referencedTables, syncTables, type Entries, type Val } from "@confire/config-engine";
 import { userProcedure } from "../base.ts";
 import { tenantCompany } from "../../b1.ts";
 import { queryRowOf } from "../../lookups.ts";
@@ -12,7 +12,7 @@ import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../
 import { scoreRows } from "../../similarity.ts";
 import { copyName } from "../../copy-name.ts";
 import {
-  cachedLookups, calculateProject, keepsCandidates, liveEngine, loadModel, masterdataRows, QueryPageZ, queryTablePage,
+  calculateProject, keepsCandidates, liveEngine, loadModel, masterdataRows, QueryPageZ, queryTablePage,
 } from "../../config-project.ts";
 import { PatchZ, SourcesZ, defaultQuantities, patchColumns, patchProblems, touchesEngine, writtenOf } from "../../config-patch.ts";
 import { configView } from "../../config-view.ts";
@@ -52,6 +52,7 @@ export async function searchSimilarRows(tenantId: string, projectId: string, ent
   const source = queryRowOf(md, h.table);
   if (!source) return { results: [] };
   ensureFresh(tenantId, [source]);
+  // ponytail: the whole history table per call; cache it keyed by source.syncedAt if it profiles slow.
   const rows = (await rowCache(tenantId)(source.id)) as Record<string, Val>[];
   const fields = historyFields(model.definition);
   const coerce = (key: string, v: Val): Val =>
@@ -113,11 +114,14 @@ async function viewOf(tenantId: string, id: string) {
 }
 
 /** viewOf plus what only a page load, a model switch or a lifecycle action can change: the model,
- *  and for a client's request the company and the assignee's name. */
+ *  the option tables it names (value-help seeds, table-cell options; already resolved for this
+ *  read), and for a client's request the company and the assignee's name. */
 async function fullView(tenantId: string, id: string) {
   const { live, ...view } = await viewOf(tenantId, id);
   const m = live.model;
-  return { ...view, model: { id: m.id, name: m.name, definition: m.definition }, request: await requestOf(tenantId, live.row) };
+  const named = referencedTables(m.definition);
+  const tables = Object.fromEntries(Object.entries(live.lookups.tables).filter(([k]) => named.has(k)));
+  return { ...view, model: { id: m.id, name: m.name, definition: m.definition }, tables, request: await requestOf(tenantId, live.row) };
 }
 
 /** What a partial answer is: the view without `live` (server-side only). */
@@ -192,7 +196,7 @@ export const configsRouter = {
   get: userProcedure
     .meta(openapi({
       summary: "Read a configuration",
-      description: "The configuration as the process page shows it: its fields, the model, the form state of every parameter (value, options, visibility, requiredness, price badge), what is still `missing`, the candidates with their prices per batch quantity, the cost breakdown per batch quantity, and the messages (`issues`). A stale calculation is brought up to date first. Fill what `missing` lists with `configs.calculate`.",
+      description: "The configuration as the process page shows it: its fields, the model, the form state of every parameter (value, options, visibility, requiredness, price badge), the option tables the model names (`tables`: the first rows of each, for drawing value helps and table cells), what is still `missing`, the candidates with their prices per batch quantity, the cost breakdown per batch quantity, and the messages (`issues`). A stale calculation is brought up to date first. Fill what `missing` lists with `configs.calculate`.",
     }))
     .input(z.object({ id: z.uuid().describe("The configuration's id") }))
     .handler(({ input, context }) => fullView(context.tenantId, input.id)),
@@ -308,20 +312,6 @@ export const configsRouter = {
     await db.delete(configProject).where(and(inArray(configProject.id, input.ids), eq(configProject.tenantId, context.tenantId), isNull(configProject.portalCardCode)));
     return { ok: true };
   }),
-
-  // The display tables a form draws from: value-help seeds, the table cells' options. Display data,
-  // not an input to any figure, and moved only by a sync — so a cached query of its own, rather
-  // than more weight on every edit's answer. Postgres only: it renders with the agent switched off.
-  lookups: userProcedure
-    .meta(openapi({
-      summary: "A model's option tables",
-      description: "The masterdata tables a model's fields and table cells pick from, first page of each query table. Display data for drawing a form; the options a field offers right now are in `configs.get`'s form state.",
-    }))
-    .input(z.object({ modelId: z.uuid().describe("The model") }))
-    .handler(async ({ input, context }) => {
-      const model = await loadModel(context.tenantId, input.modelId);
-      return { tables: (await cachedLookups(context.tenantId, model)).tables };
-    }),
 
   /** Refill the cache for every query table this configuration's model reads. The toolbar button;
    *  unlike the background refresh it reports failure, because a user asked for it. */

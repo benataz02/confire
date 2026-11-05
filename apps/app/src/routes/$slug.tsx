@@ -1,14 +1,14 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { ORPCError } from "@orpc/client";
 import { meQuery } from "../orpc.ts";
-import { authUrl, hardRedirect, isSlug, loginUrl } from "@confire/ui/host.ts";
+import { authUrl, guardRedirect, isSlug, loginUrl } from "@confire/ui/host.ts";
 import { AppShell } from "../components/AppShell.tsx";
 
 // The workspace `/<slug>/…`, and the app shell for every signed-in page. The sign-in pages are static
 // routes, which outrank this one; the bare origin is `index.tsx`. A link carries `slug` over from the
 // current params and never changes it: another workspace is always a hardRedirect.
 export const Route = createFileRoute("/$slug")({
-  beforeLoad: async ({ context, params }) => {
+  beforeLoad: async ({ context, params, preload }) => {
     // A reserved name is never a workspace (and the oRPC link sends no x-tenant for one).
     if (!isSlug(params.slug)) throw redirect({ to: "/login" });
 
@@ -28,7 +28,7 @@ export const Route = createFileRoute("/$slug")({
         if (code === "FORBIDDEN") return authUrl("/login");
         throw e;
       });
-    if (typeof me === "string") return hardRedirect(me);
+    if (typeof me === "string") return guardRedirect(me, preload);
     return { me };
   },
   component: AppShell,

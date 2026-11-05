@@ -6,7 +6,7 @@ import { authClient, sessionQuery } from "../auth-client.ts";
 import { lobbyQuery } from "../orpc.ts";
 import { AuthLayout } from "../components/AuthLayout.tsx";
 import { SocialButtons } from "../components/SocialButtons.tsx";
-import { authUrl, hardRedirect, currentSlug, safeRedirect } from "@confire/ui/host.ts";
+import { authUrl, guardRedirect, currentSlug, safeRedirect } from "@confire/ui/host.ts";
 import { authErrorMessage, notVerifiedMessage } from "@confire/ui/auth/messages.ts";
 import { AuthCard, AuthChip, AuthField, AuthHead, initials } from "@confire/ui/auth/AuthLayout.tsx";
 import { useI18n } from "../i18n.ts";
@@ -39,12 +39,12 @@ export const Route = createFileRoute("/login")({
     error: typeof s.error === "string" ? s.error : undefined,
     choose: s.choose !== undefined ? true : undefined,
   }),
-  beforeLoad: async ({ context, search, location }) => {
-    if (currentSlug()) return hardRedirect(authUrl(`/login${location.searchStr}`));
+  beforeLoad: async ({ context, search, location, preload }) => {
+    if (currentSlug()) return guardRedirect(authUrl(`/login${location.searchStr}`), preload);
     const data = await context.queryClient.ensureQueryData(sessionQuery);
     if (!data?.session) return { places: null, email: "" };
     const to = safeRedirect(search.redirect);
-    if (to) return hardRedirect(to);
+    if (to) return guardRedirect(to, preload);
     const { workspace, portals } = await context.queryClient.fetchQuery(lobbyQuery);
     if (!workspace && !portals.length) throw redirect({ to: "/onboarding" });
     if (workspace?.needsAgent) throw redirect({ to: "/onboarding" });
@@ -57,7 +57,7 @@ export const Route = createFileRoute("/login")({
     ];
     if (!search.choose) {
       const next = places.length === 1 ? places[0] : places.find((p) => p.active);
-      if (next) return hardRedirect(next.url);
+      if (next) return guardRedirect(next.url, preload);
     }
     return { places, email: data.user.email };
   },

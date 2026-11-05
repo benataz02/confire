@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar, Link, MessageStrip, ShellBar, ShellBarBranding } from "@ui5/webcomponents-react";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
 import { ObjectPageSkeleton } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
+import { useLocalize } from "@confire/ui/metadata.ts";
 import { authClient } from "../auth-client.ts";
 import { client, meQuery, orpc } from "../orpc.ts";
 import { InvitationUnusable } from "../components/AuthChrome.tsx";
@@ -31,9 +32,11 @@ function OnboardingForm() {
   const qc = useQueryClient();
   const navigate = useNavigate({ from: "/$slug" });
   const inv = useQuery(orpc.onboarding.invitation.queryOptions({ input: { id: invitationId }, retry: false }));
-  // Read once: a refetch would hand ObjectPage a new seed object, which resets the form.
+  // Read once: a refetch would hand ObjectPage a new seed object, which resets the form. The labels
+  // and options in the reader's language, as useFieldConstraints does (select keeps `seed` as it is).
   const schema = useQuery({
     ...orpc.onboarding.formSchema.queryOptions({ input: { id: invitationId } }),
+    select: useLocalize(),
     enabled: inv.data?.type === "new", retry: false, staleTime: Infinity, refetchOnWindowFocus: false,
   });
   const i18n = useI18n();

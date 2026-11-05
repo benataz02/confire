@@ -7,7 +7,7 @@ import {
   type Entries, type ModelDef, type Notice, type Propagation, type ResolvedLookups, type TableRows,
 } from "@confire/config-engine";
 import {
-  bindEntryValues, masterdataVersion, queryPageSource, resolveLookups, toResolvedTable,
+  bindEntryValues, queryPageSource, resolveLookups, toResolvedTable,
   type MasterdataRow, type RowCache,
 } from "./lookups.ts";
 import { ensureFresh, pageRows, rowCache } from "./masterdata-sync.ts";
@@ -62,15 +62,17 @@ export const modelLabels = (def: ModelDef | undefined): Record<string, string> =
   ...(def?.tables ?? []).map((t) => [t.key, t.title || t.key]),
 ]);
 
-// ponytail: per-process cache keyed by model updatedAt (auto-invalidates on save);
-// Redis/LRU only if the server ever scales past one Bun process.
+// One entry per (tenant, model), versioned by the database: the model's updatedAt and every row it
+// reads, synced or edited — the very timestamps isStale reads, so a process can never recalculate
+// against rows older than the ones that made the calculation stale (staff and portal are two
+// processes, and each has its own Map). A new version replaces the old entry: bounded by models.
 //
-// Short, because a miss is now a handful of indexed SQL reads rather than a round trip to the
-// customer's network. It exists to stop every view — one per committed edit — re-projecting the same
-// tables, and nothing more.
+// The TTL is not for correctness: it is how often a resolve re-runs ensureFresh. A miss is a
+// handful of indexed SQL reads; the cache only stops every view — one per committed edit —
+// re-projecting the same tables.
 const CACHE_TTL_MS = 30_000;
 // The *promise* is cached, not the value: concurrent cold callers then share one resolve.
-const lookupCache = new Map<string, { at: number; lookups: Promise<ResolvedLookups> }>();
+const lookupCache = new Map<string, { version: string; at: number; lookups: Promise<ResolvedLookups> }>();
 
 /** The model's canonical lookups, memoized.
  *
@@ -79,24 +81,24 @@ const lookupCache = new Map<string, { at: number; lookups: Promise<ResolvedLooku
  *  query table whose cache is empty resolves to an empty table, the form still renders, and
  *  `ensureFresh` fills it in behind the request.
  *
- *  Keyed by the model and the masterdata version and nothing else. A configuration's entries stay
- *  out of the key deliberately: they are unbounded user input, and a key that grew with them would
+ *  Keyed by the model, versioned by the rows it reads, and nothing else. A configuration's entries
+ *  stay out of the key deliberately: they are unbounded user input, and a key that grew with them would
  *  turn this Map into a leak and miss on every edit. `bindEntryValues` is the per-
  *  configuration half, and it is cheap enough not to need caching. */
 function canonicalLookups(
-  tenantId: string, model: LoadedModel, cache?: RowCache, rows?: MasterdataRow[],
+  tenantId: string, model: LoadedModel, md: MasterdataRow[], cache?: RowCache,
 ): Promise<ResolvedLookups> {
-  const key = `${tenantId}:${model.id}:${model.updatedAt.getTime()}:${masterdataVersion(tenantId)}`;
+  const key = `${tenantId}:${model.id}`;
+  const named = md.filter((r) => syncTables(model.definition).has(r.name));
+  // Per row, not a max: a company switch nulls every syncedAt, which a max could miss.
+  const version = [model.updatedAt.getTime(), ...named.map((r) => `${r.id}:${r.syncedAt?.getTime()}:${r.updatedAt?.getTime()}`)].join();
   const hit = lookupCache.get(key);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.lookups;
-  const p = (async () => {
-    const md = rows ?? (await masterdataRows(tenantId));
-    // Fire the frequency-driven refresh for the tables this model reads, off the request path.
-    ensureFresh(tenantId, md.filter((r) => syncTables(model.definition).has(r.name)));
-    return resolveLookups(model.definition, md, cache ?? rowCache(tenantId));
-  })();
+  if (hit?.version === version && Date.now() - hit.at < CACHE_TTL_MS) return hit.lookups;
+  // Fire the frequency-driven refresh for the tables this model reads, off the request path.
+  ensureFresh(tenantId, named);
+  const p = resolveLookups(model.definition, md, cache ?? rowCache(tenantId));
   p.catch(() => lookupCache.delete(key));
-  lookupCache.set(key, { at: Date.now(), lookups: p });
+  lookupCache.set(key, { version, at: Date.now(), lookups: p });
   return p;
 }
 
@@ -109,7 +111,7 @@ export async function cachedLookups(
 ): Promise<ResolvedLookups> {
   const md = rows ?? (await masterdataRows(tenantId));
   const rc = cache ?? rowCache(tenantId);
-  const canonical = await canonicalLookups(tenantId, model, rc, md);
+  const canonical = await canonicalLookups(tenantId, model, md, rc);
   return bindEntryValues(model.definition, md, canonical, rc, entries, tableRows);
 }
 

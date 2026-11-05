@@ -150,6 +150,8 @@ function checkSchemaNames(schema: B1EntitySchema, data: Record<string, unknown>)
 
 /** The data as the field rule lets it through: the profile's allowlist, or every schema name. */
 function ruled(rule: FieldRule, profile: EntityProfile, schema: B1EntitySchema, entity: string, data: Record<string, unknown>, create: boolean) {
+  // A business partner's name is always upper case, whoever writes it (the page shows it so as typed).
+  if (entity === "BusinessPartners" && typeof data.CardName === "string") data = { ...data, CardName: data.CardName.toUpperCase() };
   if (create) {
     const missing = missingRequired(profile, data);
     if (missing.length) throw new ORPCError("BAD_REQUEST", { message: t("ENTITY_NEEDS", entity, missing.join(", ")) });

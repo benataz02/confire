@@ -318,6 +318,9 @@ export type ResolvedTable = {
   labels?: Record<string, string>;
   /** keys the value-help dialog hides. Still fetched, still derived. */
   hidden?: string[];
+  /** a query table too big to reason over: `rows` is only its start, so a parameter over it is
+   *  picked (value help), never enumerated, and never short of options (propagate's `open`) */
+  partial?: true;
 };
 /** Everything external, already fetched: engine never sees source kinds. */
 export type ResolvedLookups = {

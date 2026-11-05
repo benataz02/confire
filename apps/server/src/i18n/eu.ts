@@ -197,6 +197,7 @@ export const eu: Partial<Record<keyof typeof en, string>> = {
   FORM_REQUIRED: "{0} ({1}) nahitaezkoa da",
   FORM_INVALID: "{0} ({1}) eremuaren balioa ez da baliozkoa",
   FORM_TOO_LONG: "{0} ({1}) eremuak {2} karaktere baino gehiago ditu",
+  FORM_SHIP_TO_SAME: "Bidali fakturazio-helbidera",
 
   SUBMIT_NO_CONFLICTS: "gatazkarik ez",
   SUBMIT_GAPS: "Bidali aurretik: {0}",

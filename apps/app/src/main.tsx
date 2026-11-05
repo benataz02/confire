@@ -28,6 +28,11 @@ const router = createRouter({
   context: {
     queryClient,
   },
+  // A hovered link fetches its route's code ahead of the click. The data is TanStack Query's: with
+  // a staleTime of 0 the router never serves its own copy over the cache's. A preload runs beforeLoad,
+  // so a guard's side effect waits for the click (`guardRedirect`).
+  defaultPreload: "intent",
+  defaultPreloadStaleTime: 0,
   // Router-wide floor; a route can still set its own errorComponent/notFoundComponent.
   defaultErrorComponent: RouteError,
   defaultNotFoundComponent: RouteNotFound,

@@ -248,7 +248,8 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
           onChange={(e) => set(key, e.target.value || undefined)} />
       );
 
-    if (p.ui !== "dropdown" && p.domain?.kind === "options" && p.domain.ref.source === "query") {
+    // A dropdown lists every option, so over a partial table (only its start is here) it is a value help too.
+    if (p.domain?.kind === "options" && p.domain.ref.source === "query" && (p.ui !== "dropdown" || tables[p.domain.ref.table]?.partial)) {
       const ref: LookupRef = p.domain.ref;
       const canonical = tables[ref.table];
       // Label mode: the option's label shows, its key is the entry. The server binds the picked

@@ -18,15 +18,6 @@ export function useConfigProcess(id: string, isNew: boolean, on: { left: (to: "l
   const qc = useQueryClient();
   const getKey = orpc.configs.get.queryKey({ input: { id } });
   const q = useQuery({ ...orpc.configs.get.queryOptions({ input: { id } }), enabled: !isNew });
-  const modelId = q.data?.project.modelId;
-  const lookupsKey = orpc.configs.lookups.queryKey({ input: { modelId: modelId! } });
-  // The display tables: value-help seeds and table-cell options. Moved by a sync only.
-  const lookups = useQuery({
-    ...orpc.configs.lookups.queryOptions({ input: { modelId: modelId! } }),
-    enabled: !!modelId,
-    staleTime: 5 * 60_000, // rows move only when a sync refills them; Sync data invalidates this
-    retry: false, // a failure is a page message plus its own Retry button, not a spinner
-  });
 
   const patchView = (v: EditAnswer) => qc.setQueryData(getKey, (prev) => (prev ? { ...prev, ...v } : prev));
   const refetch = () => void qc.invalidateQueries({ queryKey: getKey });
@@ -55,14 +46,12 @@ export function useConfigProcess(id: string, isNew: boolean, on: { left: (to: "l
   // Create quote with a single candidate picks it on the way out. Only offered while the queue is
   // idle, so it cannot overtake anything; its own call, so the page can go on once it answered.
   const pickNow = useMutation(orpc.configs.select.mutationOptions({ onSuccess: patchView }));
-  // A sync moves the display tables and, being newer than the calculation, the prices: both refetch.
-  const sync = useMutation(orpc.configs.sync.mutationOptions({
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: lookupsKey }); refetch(); },
-  }));
+  // A sync moves the option tables and, being newer than the calculation, the prices: one refetch.
+  const sync = useMutation(orpc.configs.sync.mutationOptions({ onSuccess: refetch }));
 
   const view = q.data;
   return {
-    q, view, lookups, queue, update, create, duplicate, remove, sync, pickNow, refetch,
+    q, view, queue, update, create, duplicate, remove, sync, pickNow, refetch,
     /** the project as the user sees it: their pending edit over the last answer */
     project: view ? overlay(view.project, queue.pending) : undefined,
     form: view ? overlayForm(view.form, queue.pending) : undefined,

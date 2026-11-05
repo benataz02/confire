@@ -14,19 +14,20 @@ import { t } from "../i18n/index.ts";
 // BPAddresses and ContactEmployees.
 
 /** No setting can put these on the form: the server's own (CardCode, CardType, Series, the dedup
- *  key) and the commercial terms a supplier sets, never its prospect. */
+ *  key, and the header's phone, email and default contact, which leadPayload copies from the
+ *  contact) and the commercial terms a supplier sets, never its prospect. */
 export const ONBOARDING_DENYLIST = new Set([
-  "CardCode", "CardType", "Series", "U_CF_Key", "CreditLimit", "MaxCommitment", "PriceListNum", "DiscountPercent",
-  "PayTermsGrpCode", "SalesPersonCode",
+  "CardCode", "CardType", "Series", "U_CF_Key", "Phone1", "EmailAddress", "ContactPerson",
+  "CreditLimit", "MaxCommitment", "PriceListNum", "DiscountPercent", "PayTermsGrpCode", "SalesPersonCode",
 ]);
 
 /** The Company section's code defaults, always first. The admin's extras follow in settings order. */
-export const COMPANY_DEFAULTS = ["CardName", "FederalTaxID", "Phone1", "EmailAddress"];
+export const COMPANY_DEFAULTS = ["CardName", "FederalTaxID"];
 const ADDRESS = ["Street", "ZipCode", "City", "Country"];
 const CONTACT = ["FirstName", "LastName", "Phone1", "E_Mail"];
 export const SHIP_TO_SAME = "ShipToSame";
 /** Required by code. A hidden Ship-to (ShipToSame) is not validated, on the page or here. */
-const REQUIRED = ["CardName", "BillTo.Street", "BillTo.City", "BillTo.Country", "ShipTo.Street", "ShipTo.City", "ShipTo.Country", "Contact.LastName"];
+const REQUIRED = ["CardName", "FederalTaxID", "BillTo.Street", "BillTo.City", "BillTo.Country", "ShipTo.Street", "ShipTo.City", "ShipTo.Country", "Contact.LastName"];
 export const COUNTRY_FIELDS = ["BillTo.Country", "ShipTo.Country"];
 
 const scalar = (f: B1Field) => f.kind !== "collection";
@@ -58,7 +59,7 @@ export function onboardingSchema(schema: B1EntitySchema, extraFields: PortalExtr
     ...COMPANY_DEFAULTS.flatMap((n) => (byName.has(n) ? [byName.get(n)!] : [])),
     ...extras.map((x) => byName.get(x.key)!),
     ...sub("BPAddresses", ADDRESS, "BillTo"),
-    { name: SHIP_TO_SAME, kind: "boolean", edmType: "Edm.Boolean", label: "Ship to the bill-to address" },
+    { name: SHIP_TO_SAME, kind: "boolean", edmType: "Edm.Boolean", label: t("FORM_SHIP_TO_SAME") },
     ...sub("BPAddresses", ADDRESS, "ShipTo"),
     ...sub("ContactEmployees", CONTACT, "Contact"),
   ];
@@ -127,7 +128,9 @@ const CONTACT_NAME_MAX = 50;
 
 /**
  * The BusinessPartners create body for a validated form (seed included). The contact's email is the
- * session's verified address, never the form's. CardType, Series and no CardCode are the server's:
+ * session's verified address, never the form's. The contact is the BP's default (ContactPerson), and
+ * its phone and email are the header's too: B1 does not copy a default contact's onto the header.
+ * ponytail: unverified (spec §16) — that B1 takes ContactPerson naming a contact in the same POST. CardType, Series and no CardCode are the server's:
  * B1 numbers the lead from the series (D16), or from its default lead series when none is set.
  * The dedup key is added by the caller, which owns the UDF's name.
  */
@@ -144,6 +147,11 @@ export function leadPayload(s: OnboardingSchema, form: Record<string, unknown>, 
   const name = [contact.FirstName, contact.LastName].filter((x) => !isEmpty(x)).join(" ").slice(0, CONTACT_NAME_MAX);
   return {
     ...header,
+    // Upper case, as entity-write.ts writes every business partner's name.
+    ...(typeof header.CardName === "string" ? { CardName: header.CardName.toUpperCase() } : {}),
+    ...(isEmpty(contact.Phone1) ? {} : { Phone1: contact.Phone1 }),
+    EmailAddress: o.email,
+    ContactPerson: name,
     CardType: "cLid",
     ...(o.series === undefined ? {} : { Series: o.series }),
     BPAddresses: [

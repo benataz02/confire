@@ -6,7 +6,7 @@ import { cachedLookups, calculateProject, liveEngine, liveProject, loadModel, re
 import { applySelection, buildQuoteLines, configDocumentCommandId, createQuote } from "../src/config-quote.ts";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
-import { bumpMasterdata, type RowCache } from "../src/lookups.ts";
+import type { RowCache } from "../src/lookups.ts";
 
 const tenantId = `test-cfg-${crypto.randomUUID()}`;
 
