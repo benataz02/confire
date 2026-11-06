@@ -356,8 +356,14 @@ or later; on 2012 R2 the Universal C Runtime, KB2999226, which cloudflared needs
      default wins), which must be a Crystal layout: Confire refuses a PLD default and names it. Agents
      before this asked for a layout per document type; Confire now ignores those, so check each
      company's defaults for quotations, orders, deliveries and invoices when it updates.
+   - **Direct printing** (Crystal, SQL Server): optional, for a B1 whose API Gateway cannot print or
+     prints slowly. It needs the **SAP Crystal Reports runtime for .NET, 64-bit**, installed on this
+     server (Control Panel lists it, e.g. 13.0.31.4010) and a SQL Server login that reads the company
+     database: server (default: the Service Layer's host), user, password. The test signs in, reads
+     the layouts (`RDOC`) and loads the runtime, and prints the runtime's version. Then switch the
+     workspace in *Settings → SAP agent → Print with → Direct*; the API Gateway stays the default.
    - **The pairing code**, last, so a long SAP section cannot use up its hour.
-3. It installs itself: `C:\Program Files\Confire\Agent\` (with `cloudflared` embedded), the service
+3. It installs itself: `C:\Program Files\Confire\Agent\` (with `cloudflared` and `confire-print.exe` embedded), the service
    `ConfireAgent` (automatic start, restarts on failure), and `C:\ProgramData\Confire\agent.json`
    (Administrators and SYSTEM only). Logs go to `C:\ProgramData\Confire\logs\`. When it prints
    *Tunnel… ✓ connected*, Confire's page turns green by itself.
@@ -381,13 +387,13 @@ and nothing else. The agent listens on `127.0.0.1` only. Port 4000, or a free po
 
 Run the exe again (double-click, or `confire-agent setup` in an elevated prompt). It offers:
 
-- **Change company**: re-tests SAP B1, Beas and printing against the new company, asking for
+- **Change company**: re-tests SAP B1, Beas, printing and direct printing against the new company, asking for
   credentials only where the old ones fail, then restarts the service. Confire follows by itself: its
   next call learns the new company, drops the old company's cached data and refills. Hand-editing
   `companyDb` in `agent.json` and restarting the `ConfireAgent` service does the same. **Portal clients
   then see the documents of their CardCode in the new company.** Between copies of one company (test ↔
   production) that is the same partner; in an unrelated company it may be someone else.
-- **Change SAP B1 / Beas / printing**: credentials, URLs. No new code needed. A print layout is
+- **Change SAP B1 / Beas / printing / direct printing**: credentials, URLs. No new code needed. A print layout is
   changed in SAP B1 itself (the document type's default); Confire picks it up within 2 hours.
 - **Pair again**: needs a new code. Use it to move a workspace to another server: pairing the new one
   retires the old tunnel and replaces the agent secret, so a forgotten old server stops serving.

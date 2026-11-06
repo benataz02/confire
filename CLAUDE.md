@@ -88,7 +88,15 @@ its child. SAP credentials live in its `agent.json` and never reach the cloud. I
 the SAP sessions and forwards an **allowlist** (`allow.go`, the security boundary, tested) of
 `{ method, path }` requests on `/{b1|beas}/request`, plus `/print` and `/health`; every path is still
 built by `packages/b1/src/query.ts`, now on the cloud side, so most changes ship with Confire and need
-no agent update. **Pairing** (`agent-pairing.ts`): `sap.pairingCode` stores a code in Better Auth's
+no agent update. **Printing** (`docs/superpowers/specs/2026-11-05-print-service-design.md`):
+`print.ts` resolves the document's default layout through B1's `ReportLayoutsService_GetDefaultReport`
+(per customer and item/service type, cached 2 h per company, a PLD default refused) and sends
+`/print { entity, docEntry, layout, engine }`; the agent checks the layout's prefix against the entity
+and renders it through the SAP API Gateway or, when `sap_connection.print_engine` is `crystal`, through
+**Direct printing**: `confire-print.exe` (`apps/agent/print`, C# on .NET Framework 4.8, Crystal loaded
+from the box's runtime), a child like `cloudflared` with the SQL login in its environment only, one
+print at a time (`crystal.go`). Settings → SAP agent offers Direct only once `/health` reports it.
+**Pairing** (`agent-pairing.ts`): `sap.pairingCode` stores a code in Better Auth's
 `verification` table; the agent redeems it on the plain route `POST /api/agent/pair` for its secret and
 tunnel token, and `cloudflare.ts` creates the tunnel, its route and the DNS name — with `CF_API_TOKEN`
 unset (dev) the answer is `http://localhost:<port>` instead. The Access service token is one for all

@@ -8,3 +8,5 @@ node_modules
 apps/agent/agent.json*
 apps/agent/*.exe
 apps/agent/bin/*.exe
+apps/agent/print/bin
+apps/agent/print/obj

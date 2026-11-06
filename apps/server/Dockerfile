@@ -6,12 +6,19 @@
 # 10" (subsystem 10.0), which that loader refuses outright. So Go 1.26 here, and cloudflared
 # 2026.10.0, the last release built with go1.26 (2026.10.3 is go1.27). The check after the build
 # fails the image rather than ship an exe the customer's server cannot start.
+# confire-print.exe, the agent's Direct printing (print spec §5.3): .NET Framework 4.8 built on Linux
+# against Microsoft's reference assemblies; Crystal itself is loaded from the customer's server.
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS print
+COPY apps/agent/print/ /src/
+RUN dotnet build /src -c Release -o /out
+
 FROM golang:1.26 AS agent
 ARG AGENT_VERSION=dev
 ARG CLOUDFLARED_VERSION=2026.10.0
 ARG CLOUDFLARED_SHA256=86aee4017b26625cee8484c113558f48effa4cd47f7aa05fcf425604e5d2b23c
 WORKDIR /src
 COPY apps/agent/ .
+COPY --from=print /out/confire-print.exe bin/
 RUN curl -fsSL -o bin/cloudflared.exe "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-windows-amd64.exe" \
  && echo "${CLOUDFLARED_SHA256}  bin/cloudflared.exe" | sha256sum -c - \
  && go vet ./... && GOOS=windows go vet ./... && go test ./... \
