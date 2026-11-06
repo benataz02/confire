@@ -123,8 +123,11 @@ describe("portal projects", () => {
     expect((await call(portalRouter.projects.get, { id }, s.portal)).prices.kind).toBe("request");
     await call(portalRouter.projects.submit, { id }, s.portal);
     await acceptAndPick(s, id);
+    expect((await call(portalRouter.projects.get, { id }, s.portal)).journey).toEqual({ step: 1, next: "review" });
+    expect((await call(router.configs.get, { id }, s.staff)).request?.journey).toEqual({ step: 1, next: "review" });
 
     const first = await quote(s, id);
+    expect((await call(portalRouter.projects.get, { id }, s.portal)).journey).toEqual({ step: 2, next: "answer" });
     expect(first.draft.replaces).toBeNull();
     expect(first.posted).toMatchObject({ mode: "created", reused: false });
     const doc = agent.store.Quotations!.find((q) => q.DocEntry === first.posted.docEntry)!;

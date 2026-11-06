@@ -108,6 +108,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the configuration process", () => {
     const s = await setup();
     const id = await s.create("Box", null);
     let v = await call(router.configs.get, { id }, s.ctx);
+    expect(v.request).toBeNull(); // an internal configuration is nobody's request, so it has no journey
     expect(codes(v)).toEqual(["customer_required", "param_required", "table_empty"]);
     expect([v.calculation.state, v.candidates.rows, v.costs]).toEqual(["waiting", [], []]);
 

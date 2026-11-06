@@ -19,6 +19,7 @@ import { configView } from "../../config-view.ts";
 import { applySelection, createQuote, quoteDraft, validateSelectionPairs } from "../../config-quote.ts";
 import { assertWritable, internalVisible, recordCreated, writableBy } from "../../project-lifecycle.ts";
 import { t } from "../../i18n/index.ts";
+import { journeyOf, type JourneyInput } from "../../portal/journey.ts";
 // The configuration process API: any member drives a project (draft -> quoted), and staff work a
 // client's request here once it is submitted (spec §10). The engine itself lives in
 // config-project.ts, shared with the portal process.
@@ -104,8 +105,9 @@ const configFields = (userId: string, company: string | null): SqlFields => ({
   updatedAt: { col: configProject.updatedAt, kind: "date" },
 });
 
-/** The company and assignee of a client's request; null for an internal configuration. */
-async function requestOf(tenantId: string, p: { portalCardCode: string | null; assigneeId: string | null }) {
+// ponytail: sapStep is refreshed only by the portal home's home.progress; staff may see a stale SAP step until a client opens home. Upgrade: run the same walk for this one project off the request path.
+/** The company, assignee and journey of a client's request; null for an internal configuration. */
+async function requestOf(tenantId: string, p: JourneyInput & { portalCardCode: string | null; assigneeId: string | null }) {
   if (p.portalCardCode === null) return null;
   const [company] = await db.select({ cardCode: portalCompany.cardCode, cardName: portalCompany.cardName })
     .from(portalCompany)
@@ -113,7 +115,7 @@ async function requestOf(tenantId: string, p: { portalCardCode: string | null; a
   const [assignee] = p.assigneeId
     ? await db.select({ name: user.name }).from(user).where(eq(user.id, p.assigneeId)).limit(1)
     : [];
-  return { cardCode: company?.cardCode ?? "", cardName: company?.cardName ?? "", assigneeName: assignee?.name ?? null };
+  return { cardCode: company?.cardCode ?? "", cardName: company?.cardName ?? "", assigneeName: assignee?.name ?? null, journey: journeyOf(p) };
 }
 
 /** What every edit answers: the view, plus the SAP company the agent serves now — the page links

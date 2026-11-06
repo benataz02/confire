@@ -16,7 +16,7 @@ import {
   toPortalForm, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalRows,
 } from "../projection.ts";
 import { t } from "../../i18n/index.ts";
-import { nextSql } from "../journey.ts";
+import { journeyOf, nextSql } from "../journey.ts";
 
 // The client's projects (spec §7, §9, §11). One project = one configuration, fenced on the seat's
 // company in every read and write. The engine runs here: the page gets the §7.1 projection and the
@@ -82,6 +82,7 @@ async function payload(c: Seat, id: string) {
       createdAt: p.createdAt, updatedAt: p.updatedAt, assigneeName: assignee?.name ?? null,
     },
     model: { id: model.id, name: model.name, portalPricing: model.portalPricing, definition: toPortalModelDef(def) },
+    journey: journeyOf(p),
     form,
     lookups: toPortalLookups(def, form, lookups),
     // The submit gate, in form order — the same rule the internal Create quote follows.
