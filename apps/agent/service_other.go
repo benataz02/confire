@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,6 +27,11 @@ func install() error                  { return nil }
 func restart() error                  { return nil }
 func installedVersion() string        { return "" }
 func prepareConfigDir(d string) error { return os.MkdirAll(d, 0o700) }
+
+// printExe: confire-print.exe is .NET Framework and Crystal is Windows-only.
+func printExe() (string, error) {
+	return "", errors.New("direct printing runs on Windows only")
+}
 
 // isInstalled: a dev agent is "installed" once its config exists, so setup offers its changes.
 func isInstalled(path string) bool {

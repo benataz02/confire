@@ -30,9 +30,10 @@ const serviceName = "ConfireAgent"
 
 const canInstall = true
 
-// bundled holds bin/cloudflared.exe: CI downloads the pinned release, checks its SHA-256 and drops
-// it in before the build (apps/server/Dockerfile), so install day needs no download a proxy could
-// block. A local build has only bin/.gitkeep and installs no tunnel.
+// bundled holds bin/cloudflared.exe — CI downloads the pinned release, checks its SHA-256 and drops it
+// in before the build (apps/server/Dockerfile), so install day needs no download a proxy could block —
+// and bin/confire-print.exe, Direct printing, which CI builds. A build without cloudflared installs
+// no tunnel; one without the print service offers no Direct printing.
 //
 //go:embed all:bin
 var bundled embed.FS
@@ -189,6 +190,12 @@ func install() error {
 		} else if !strings.EqualFold(filepath.Dir(self), dir) {
 			return errors.New("this build carries no cloudflared: download the agent from Confire")
 		}
+		// Direct printing is optional: a build without the print service installs none.
+		if pe, err := bundled.ReadFile("bin/confire-print.exe"); err == nil {
+			if err := os.WriteFile(filepath.Join(dir, "confire-print.exe"), pe, 0o755); err != nil {
+				return err
+			}
+		}
 		if err := os.MkdirAll(logDir(), 0o700); err != nil {
 			return err
 		}
@@ -209,6 +216,27 @@ func install() error {
 		}
 		return s.Start()
 	})
+}
+
+// printExe is the print service the wizard tests with, before install: this build's own copy,
+// written to %TEMP% under this version's name, else the one installed beside this exe.
+func printExe() (string, error) {
+	if pe, err := bundled.ReadFile("bin/confire-print.exe"); err == nil {
+		path := filepath.Join(os.TempDir(), "confire-print-"+version+".exe")
+		if err := os.WriteFile(path, pe, 0o755); err != nil {
+			return "", err
+		}
+		return path, nil
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(filepath.Dir(self), "confire-print.exe")
+	if _, err := os.Stat(path); err != nil {
+		return "", errors.New("this build carries no confire-print.exe: download the agent from Confire")
+	}
+	return path, nil
 }
 
 func restart() error {

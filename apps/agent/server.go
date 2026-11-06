@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -27,8 +29,9 @@ import (
 type Agent struct {
 	cfg        *Config
 	secretHash [32]byte
-	b1, beas   *Session // beas nil = not configured
-	gateway    *Gateway // nil = printing not configured
+	b1, beas   *Session      // beas nil = not configured
+	gateway    *Gateway      // nil = printing not configured
+	crystal    *crystalChild // nil = Direct printing not configured
 	tunnel     *atomic.Bool
 	log        *log.Logger
 }
@@ -55,6 +58,13 @@ func newAgent(cfg *Config, lg *log.Logger) (*Agent, error) {
 			return nil, fmt.Errorf("print: %w", err)
 		}
 		a.gateway = &Gateway{s: newSession("print", base, "login", "", "session", cfg.CompanyDb, cfg.Print.User, cfg.Print.Pass, lg)}
+	}
+	if cfg.Crystal != nil {
+		self, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		a.crystal = newCrystalChild(filepath.Join(filepath.Dir(self), "confire-print.exe"), crystalEnv(cfg), 60*time.Second, lg)
 	}
 	return a, nil
 }
@@ -119,7 +129,7 @@ func (a *Agent) guard(next http.Handler) http.Handler {
 func (a *Agent) health(w http.ResponseWriter, _ *http.Request) {
 	out := map[string]any{
 		"ok": a.b1.LastError() == nil, "version": version, "companyDb": a.cfg.CompanyDb,
-		"services": map[string]any{"b1": true, "beas": a.beas != nil, "print": map[string]bool{"gateway": a.gateway != nil, "crystal": false}},
+		"services": map[string]any{"b1": true, "beas": a.beas != nil, "print": map[string]bool{"gateway": a.gateway != nil, "crystal": a.crystal != nil}},
 	}
 	if err := a.b1.LastError(); err != nil {
 		out["error"] = err.Error()
@@ -231,13 +241,22 @@ func (a *Agent) print(w http.ResponseWriter, r *http.Request) {
 		}
 		reply(w, map[string]string{"pdf": pdf, "fileName": fmt.Sprintf("%s-%d.pdf", in.Entity, int64(in.DocEntry))})
 	case "crystal":
-		fail(w, http.StatusServiceUnavailable, &SAPError{Status: 503, Message: "Direct printing is not set up on the SAP server's agent. Add it in the agent's setup."})
+		if a.crystal == nil {
+			fail(w, http.StatusServiceUnavailable, &SAPError{Status: 503, Message: "Direct printing is not set up on the SAP server's agent. Add it in the agent's setup."})
+			return
+		}
+		pdf, err := a.crystal.Render(in.Layout, int64(in.DocEntry), objectType[in.Entity])
+		if err != nil {
+			sapFail(w, err)
+			return
+		}
+		reply(w, map[string]string{"pdf": pdf, "fileName": fmt.Sprintf("%s-%d.pdf", in.Entity, int64(in.DocEntry))})
 	default:
 		fail(w, http.StatusBadRequest, &SAPError{Status: 400, Message: fmt.Sprintf("No print engine %q", in.Engine)})
 	}
 }
 
-// layoutOf: the layout is the entity's type prefix, its 1 (service) or 2 (items) and up to 8 digits.
+// layoutOf: the layout is the entity's type prefix, its 1 (service) or 2 (items), then up to 8 digits.
 func layoutOf(prefix, layout string) bool {
 	digits, ok := strings.CutPrefix(layout, prefix)
 	if !ok || len(digits) < 2 || len(digits) > 9 {
@@ -260,6 +279,9 @@ func (a *Agent) logout() {
 	if a.gateway != nil {
 		a.gateway.s.Logout()
 	}
+	if a.crystal != nil {
+		a.crystal.Close()
+	}
 }
 
 // serve runs the agent until ctx ends: on 127.0.0.1 only, since cloudflared runs on the same machine
@@ -281,11 +303,14 @@ func serve(ctx context.Context, cfg *Config, lg *log.Logger, tunnel func(context
 			lg.Printf("SAP B1 login failed at start: %v", err)
 		}
 	}()
+	if a.crystal != nil {
+		go a.crystal.Warm()
+	}
 	if tunnel != nil {
 		a.tunnel = new(atomic.Bool)
 		go tunnel(ctx, a.tunnel)
 	}
-	lg.Printf("confire-agent %s on %s, company %s, beas %t, print %v", version, srv.Addr, cfg.CompanyDb, a.beas != nil, a.gateway != nil)
+	lg.Printf("confire-agent %s on %s, company %s, beas %t, print %v, direct %v", version, srv.Addr, cfg.CompanyDb, a.beas != nil, a.gateway != nil, a.crystal != nil)
 	select {
 	case err := <-errc:
 		return err

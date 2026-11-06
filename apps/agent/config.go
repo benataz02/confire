@@ -23,6 +23,7 @@ type Config struct {
 	B1        Service  `json:"b1"`
 	Beas      *Service `json:"beas,omitempty"`
 	Print     *Print   `json:"print,omitempty"`
+	Crystal   *Crystal `json:"crystal,omitempty"`
 }
 
 // Service is a Service Layer: B1's, or Beas'.
@@ -44,6 +45,14 @@ type Print struct {
 	URL  string `json:"url"`
 	User string `json:"user"`
 	Pass string `json:"pass"`
+}
+
+// Crystal is Direct printing (print spec §5.2): the SQL Server login confire-print.exe reads the
+// layouts and the documents with. The database is always CompanyDb.
+type Crystal struct {
+	Server string `json:"server"`
+	User   string `json:"user"`
+	Pass   string `json:"pass"`
 }
 
 const b1BasePath = "/b1s/v2/"

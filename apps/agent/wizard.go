@@ -87,6 +87,9 @@ func setup(path, server string) error {
 	if w.yes("Printing (SAP API Gateway) — configure?", false) {
 		cfg.Print = w.print(cfg)
 	}
+	if w.yes("Direct printing (Crystal, SQL Server) — configure?", false) {
+		cfg.Crystal = w.crystal(cfg)
+	}
 	cfg.Port = agentPort()
 	w.pair(cfg)
 	return w.finish(cfg)
@@ -379,6 +382,39 @@ func (w *wizard) print(cfg *Config) *Print {
 	}
 }
 
+// crystal asks for Direct printing's SQL Server login and tests it with confire-print.exe --check:
+// the login, the company's layouts (RDOC) and the Crystal runtime. nil when this build cannot run it.
+func (w *wizard) crystal(cfg *Config) *Crystal {
+	fmt.Fprintln(w.out, w.heading("Direct printing (Crystal, SQL Server)"))
+	fmt.Fprintln(w.out, w.dim("  Prints SAP Business One's Crystal layouts on this server, without the API Gateway."))
+	fmt.Fprintln(w.out, w.dim("  Needs the Crystal Reports runtime for .NET (64-bit) installed here."))
+	exe, err := printExe()
+	if err != nil {
+		fmt.Fprintf(w.out, "  %s\n\n", w.bad(err.Error()))
+		return cfg.Crystal
+	}
+	next := *cfg
+	c := &Crystal{}
+	if cfg.Crystal != nil {
+		*c = *cfg.Crystal
+	}
+	next.Crystal = c
+	host := "localhost"
+	if u, err := url.Parse(cfg.B1.URL); err == nil && u.Hostname() != "" {
+		host = u.Hostname()
+	}
+	for {
+		c.Server = w.must("SQL Server", or(c.Server, host))
+		c.User = w.must("User", or(c.User, "sa"))
+		c.Pass = w.password("Password", c.Pass, "")
+		var ready string
+		if w.test("SQL Server and Crystal ready", func() (err error) { ready, err = checkCrystal(exe, &next); return err }) {
+			fmt.Fprintf(w.out, "%s\n\n", w.dim("  "+ready))
+			return c
+		}
+	}
+}
+
 // ---- Pairing -----------------------------------------------------------------------------------
 
 type pairResult struct {
@@ -522,6 +558,14 @@ func (w *wizard) modify(cfg *Config) error {
 			}
 			return w.apply(cfg)
 		}},
+		{"Change direct printing", func() error {
+			if cfg.Crystal != nil && !w.yes("Keep direct printing?", true) {
+				cfg.Crystal = nil
+			} else {
+				cfg.Crystal = w.crystal(cfg)
+			}
+			return w.apply(cfg)
+		}},
 		{"Pair again (a new code from Confire)", func() error { w.pair(cfg); return w.apply(cfg) }},
 	}
 	if installed := installedVersion(); isNewer(version, installed) {
@@ -558,6 +602,11 @@ func (w *wizard) changeCompany(cfg *Config) error {
 	}
 	if cfg.Print != nil && !w.test("API Gateway signed in", func() error { return w.testPrint(cfg) }) {
 		cfg.Print = w.print(cfg)
+	}
+	if cfg.Crystal != nil {
+		if exe, err := printExe(); err == nil && !w.test("Direct printing ready in "+cfg.CompanyDb, func() error { _, err := checkCrystal(exe, cfg); return err }) {
+			cfg.Crystal = w.crystal(cfg)
+		}
 	}
 	return w.apply(cfg)
 }
