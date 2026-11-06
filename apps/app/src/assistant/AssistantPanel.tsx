@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bar, BusyIndicator, Button, FlexBox, Icon, Label, MessageStrip, Text, Title } from "@ui5/webcomponents-react";
+import { BusyIndicator, Button, Icon, MessageStrip } from "@ui5/webcomponents-react";
+import { getTheme } from "@ui5/webcomponents-base/dist/config/Theme.js";
+import { attachThemeLoaded, detachThemeLoaded } from "@ui5/webcomponents-base/dist/Theming.js";
 import { confirm } from "@confire/ui/confirm.ts";
 import { firstName } from "@confire/ui/format.ts";
 import { useI18n } from "../i18n.ts";
@@ -9,42 +11,41 @@ import { client, meQuery, orpc } from "../orpc.ts";
 import { useAssistantShell } from "./AssistantProvider.tsx";
 import { useAssistantThread, type Thread } from "./useAssistant.ts";
 import { REPORT_ROUTE, threadInput } from "./routeContext.ts";
+import { paletteFor, paletteVars, type Palette } from "./palette.ts";
 import { ChatView, kindOf, refusalText, useRoute } from "./ChatView.tsx";
 
-// The assistant panel (assistant spec §4.2, plan "The look"): Joule's side panel, floating over the
-// page's right edge — its head on the assistant gradient, and the chat of the page's configuration (or
-// the user's general one). Styled inline over the theme's own assistant parameters, so it follows
-// Horizon, Horizon Dark and the high-contrast themes.
+// The assistant panel (Joule spec): Joule's card, floating over the page's right edge — its header bar,
+// and the chat of the page's configuration or report (or one picked, or the general one). Styled inline
+// over Joule's palette in Horizon and Horizon Dark, the theme's own parameters elsewhere (palette.ts).
 
-/** Joule's head: the theme's assistant gradient (flat in the high-contrast themes), the bar on it drawn
- *  in the assistant's text colour through the parameters its components read. */
+/** The palette for the theme actually applied: UI5's, which Horizon Auto resolves by the OS. */
+function usePalette(): Palette {
+  const dark = () => matchMedia("(prefers-color-scheme: dark)").matches;
+  const [p, setP] = useState(() => paletteFor(getTheme(), dark()));
+  useEffect(() => {
+    const update = () => setP(paletteFor(getTheme(), dark()));
+    const os = matchMedia("(prefers-color-scheme: dark)");
+    attachThemeLoaded(update);
+    os.addEventListener("change", update);
+    return () => { detachThemeLoaded(update); os.removeEventListener("change", update); };
+  }, []);
+  return p;
+}
+
+/** The header bar's buttons in Joule's header colours, through the parameters UI5's buttons read. */
 const HEAD = {
-  background: "var(--sapAssistant_BackgroundGradient)",
-  "--sapPageHeader_Background": "transparent",
-  "--sapContent_HeaderShadow": "none",
-  "--sapTextColor": "var(--sapAssistant_TextColor)",
-  "--sapGroup_TitleTextColor": "var(--sapAssistant_TextColor)",
-  "--sapContent_LabelColor": "var(--sapAssistant_TextColor)",
-  "--sapButton_Lite_TextColor": "var(--sapAssistant_TextColor)",
-  "--sapButton_Lite_Hover_TextColor": "var(--sapAssistant_Hover_TextColor)",
-  "--sapButton_Lite_Hover_Background": "var(--sapAssistant_Hover_Background)",
-  "--sapButton_Lite_Hover_BorderColor": "var(--sapAssistant_Hover_BorderColor)",
-  "--sapButton_Lite_Active_Background": "var(--sapAssistant_Active_Background)",
-  "--sapButton_Lite_Active_BorderColor": "var(--sapAssistant_Active_BorderColor)",
-  "--sapButton_Active_TextColor": "var(--sapAssistant_Active_TextColor)",
+  height: "2.625rem", flex: "none", display: "flex", alignItems: "center", gap: "0.25rem", padding: "0 0.5rem 0 1rem",
+  background: "var(--cf-a-head)", color: "var(--cf-a-head-text)",
+  "--sapButton_Lite_TextColor": "var(--cf-a-head-text)",
+  "--sapButton_Lite_Hover_TextColor": "var(--cf-a-head-hover)",
+  "--sapButton_Active_TextColor": "var(--cf-a-head-active)",
+  "--sapButton_Lite_Background": "transparent",
+  "--sapButton_Lite_BorderColor": "transparent",
+  "--sapButton_Lite_Hover_Background": "transparent",
+  "--sapButton_Lite_Hover_BorderColor": "transparent",
+  "--sapButton_Lite_Active_Background": "transparent",
+  "--sapButton_Lite_Active_BorderColor": "transparent",
 } as CSSProperties;
-
-/** The greeting below the bar while the chat is empty; the first message collapses it — a 1fr → 0fr
- *  grid row, which animates where `auto` does not. */
-const hero = (shown: boolean): CSSProperties => ({
-  display: "grid",
-  gridTemplateRows: shown ? "1fr" : "0fr",
-  opacity: shown ? 1 : 0,
-  visibility: shown ? "visible" : "hidden",
-  transition: matchMedia("(prefers-reduced-motion: reduce)").matches ? "none"
-    : shown ? "grid-template-rows 0.4s ease-in-out, opacity 0.4s"
-    : "grid-template-rows 0.4s ease-in-out, opacity 0.25s, visibility 0s 0.4s",
-});
 
 export function AssistantPanel() {
   const shell = useAssistantShell();
@@ -110,42 +111,34 @@ export function AssistantPanel() {
     });
   };
   const subtitle = projectId ? config.data?.project.name ?? "" : t("ASSISTANT_GENERAL");
+  const palette = usePalette();
 
-  const head = (empty: boolean) => (
+  const head = (
     <>
       <div style={HEAD}>
-        <Bar
-          startContent={
-            <FlexBox alignItems="Baseline" gap="0.5rem" style={{ minWidth: 0 }}>
-              <Title level="H5" wrappingType="None" style={{ flexShrink: 0 }}>{t("ASSISTANT_TITLE")}</Title>
-              <Label wrappingType="None" style={{ minWidth: 0 }}>{subtitle}</Label>
-            </FlexBox>
-          }
-          endContent={
-            <>
-              <Button design="Transparent" icon="add" tooltip={t("ASSISTANT_NEW_CHAT")} accessibleName={t("ASSISTANT_NEW_CHAT")}
-                onClick={() => void newChat()} />
-              <Button design="Transparent" icon={wide ? "exit-full-screen" : "full-screen"}
-                tooltip={t(wide ? "ASSISTANT_COLLAPSE" : "ASSISTANT_EXPAND")} accessibleName={t(wide ? "ASSISTANT_COLLAPSE" : "ASSISTANT_EXPAND")}
-                onClick={() => setWide((w) => !w)} />
-              <Button design="Transparent" icon="decline" tooltip={t("ASSISTANT_CLOSE")} accessibleName={t("ASSISTANT_CLOSE")} onClick={shell.close} />
-            </>
-          } />
-        <div style={hero(empty)}>
-          <div style={{ minHeight: 0, overflow: "hidden" }}>
-            <FlexBox direction="Column" alignItems="Center" gap="0.5rem" style={{ padding: "1.5rem 1rem 2.5rem", textAlign: "center" }}>
-              <Icon name="ai" style={{ width: "3rem", height: "3rem", color: "var(--sapAssistant_TextColor)" }} />
-              <Title level="H3">{t("ASSISTANT_HELLO", firstName(me.data?.user))}</Title>
-              <Text>{t(kind === "configure" ? "ASSISTANT_WELCOME_CONFIGURE" : "ASSISTANT_WELCOME_GENERAL")}</Text>
-            </FlexBox>
-          </div>
-        </div>
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "1rem", fontWeight: "bold" }}>
+          {t("ASSISTANT_TITLE")}{subtitle ? <span style={{ fontWeight: "normal", fontSize: "0.875rem" }}> · {subtitle}</span> : null}
+        </span>
+        <Button design="Transparent" icon="add" tooltip={t("ASSISTANT_NEW_CHAT")} accessibleName={t("ASSISTANT_NEW_CHAT")}
+          onClick={() => void newChat()} />
+        <Button design="Transparent" icon={wide ? "exit-full-screen" : "full-screen"}
+          tooltip={t(wide ? "ASSISTANT_COLLAPSE" : "ASSISTANT_EXPAND")} accessibleName={t(wide ? "ASSISTANT_COLLAPSE" : "ASSISTANT_EXPAND")}
+          onClick={() => setWide((w) => !w)} />
+        <Button design="Transparent" icon="decline" tooltip={t("ASSISTANT_CLOSE")} accessibleName={t("ASSISTANT_CLOSE")} onClick={shell.close} />
       </div>
       {newChatError ? (
         <MessageStrip design="Negative" onClose={() => setNewChatError(null)} style={{ margin: "0.5rem 1rem 0", width: "auto" }}>
           {refusalText(i18n, newChatError)}
         </MessageStrip>
       ) : null}
+    </>
+  );
+  // Joule's welcome: the mark, the greeting, what the chat is for. Plain elements: the colour is inherited.
+  const welcome = (
+    <>
+      <Icon name="ai" style={{ width: "4rem", height: "4rem", color: "var(--cf-a-mark)" }} />
+      <div style={{ fontSize: "1rem", fontWeight: "bold", margin: "0.75rem 0 0.5rem" }}>{t("ASSISTANT_HELLO", firstName(me.data?.user))}</div>
+      <div>{t(kind === "configure" ? "ASSISTANT_WELCOME_CONFIGURE" : "ASSISTANT_WELCOME_START")}</div>
     </>
   );
 
@@ -157,18 +150,17 @@ export function AssistantPanel() {
     <aside role="complementary" aria-label={t("ASSISTANT_TITLE")}
       onKeyDown={(e: KeyboardEvent) => { if (e.key === "Escape") shell.close(); }}
       style={{
-        position: "fixed", zIndex: 1, top: `calc(${top}px + 0.5rem)`, bottom: "0.5rem", insetInlineEnd: "0.5rem",
-        width: `min(${wide ? "48rem, 60vw" : "26rem"}, 100vw - 1rem)`,
+        ...paletteVars(palette),
+        position: "fixed", zIndex: 1, top: `calc(${top}px + 0.5rem)`, bottom: "1rem", insetInlineEnd: "1rem",
+        width: `min(${wide ? "48rem, 60vw" : "26rem"}, 100vw - 2rem)`,
         display: shell.open ? "flex" : "none", flexDirection: "column", overflow: "hidden",
-        // A page's own background, as a List Report draws behind its table: cards and the composer stand out.
-        background: "var(--sapBackgroundColor)", color: "var(--sapTextColor)",
-        borderRadius: "var(--sapElement_BorderCornerRadius)", boxShadow: "var(--sapContent_Shadow2)",
+        background: "var(--cf-a-page)", color: "var(--cf-a-text)", borderRadius: "1rem", boxShadow: "var(--cf-a-shadow)",
       }}>
-      {thread.data ? <ChatView key={thread.data.id} thread={thread.data} route={route} kind={kind} head={({ empty }) => head(empty)}
+      {thread.data ? <ChatView key={thread.data.id} thread={thread.data} route={route} kind={kind} head={() => head} welcome={welcome}
         onTool={onTool} prefill={shell.asked?.text ? { text: shell.asked.text, at: shell.asked.at } : undefined} />
         : (
           <>
-            {head(false)}
+            {head}
             {thread.error ? <MessageStrip design="Negative" hideCloseButton style={{ margin: "1rem", width: "auto" }}>{thread.error.message}</MessageStrip>
               : <BusyIndicator active style={{ margin: "auto" }} />}
           </>

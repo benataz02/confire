@@ -10,6 +10,7 @@ import {
 import { Button as AiButton, ButtonState } from "@ui5/webcomponents-ai-react";
 import { useLanguage } from "@confire/ui/i18n.ts";
 import { FILE_MAX_MB } from "@confire/ui/files.ts";
+import { formatLocale } from "@confire/ui/format.ts";
 import { ORPCError } from "@orpc/client";
 import { useI18n } from "../i18n.ts";
 import { client, orpc } from "../orpc.ts";
@@ -23,6 +24,7 @@ import { Steps, type StepResult } from "./Steps.tsx";
 import { ACCEPT, extractDrop, fileIcon, fileOfPart, refuseFile, uploadDrop } from "./intake.ts";
 import { openQuestions, readAwaitsChat } from "./questions.ts";
 import { assistantToggle } from "./toggle.ts";
+import { stampText, timeOf } from "./stamp.ts";
 import { QuestionCard } from "./cards/QuestionCard.tsx";
 import { CandidatesCard } from "./cards/CandidatesCard.tsx";
 import type { ExtractResult } from "./cards/ExtractionCard.tsx";
@@ -33,7 +35,8 @@ const AUTO_WRITE_KEY = "assistant:autoWrite";
 // The chat (assistant spec §4.2), drawn by the panel (Joule spec): its greeting is the panel's
 // (`empty`), its composer one row under the chat. Text is for words, steps for the agent's work (its thinking
 // and tool calls, each tool's card behind its line), and a card in the chat only where the user decides
-// (steps.ts DECISION). One question on screen at a time. Every colour is a theme parameter, set inline.
+// (steps.ts DECISION). One question on screen at a time. Every colour is the panel's `--cf-a-*`
+// (palette.ts: Joule's in Horizon, the theme's elsewhere) or a theme parameter, set inline.
 
 /** `report`: a report's chat, on its report's page (Joule spec §5.8). */
 export type Kind = "configure" | "general" | "model" | "report";
@@ -101,8 +104,7 @@ const Working = ({ text }: { text: string }) => (
   <FlexBox alignItems="Center" gap="0.5rem" aria-live="polite"><BusyIndicator active size="S" /><Label>{text}</Label></FlexBox>
 );
 
-// The answer's markdown blocks: a paragraph's gap below it, which the bubble's missing bottom padding
-// takes back on the last one (no stylesheet, so no :last-child).
+// The answer's markdown blocks: a paragraph's gap below it.
 const block = { margin: "0 0 0.5rem" };
 const MARKDOWN = {
   p: (p: object) => <p {...p} style={block} />,
@@ -125,33 +127,25 @@ function AnswerText({ content, live }: { content: string; live: boolean }) {
   return <TextPart content={content.slice(0, shown)} role="assistant" components={MARKDOWN} />;
 }
 
-const BUBBLE: CSSProperties = {
-  maxWidth: "85%", padding: "0.5rem 0.75rem", borderRadius: "var(--sapElement_BorderCornerRadius)", overflowWrap: "anywhere",
-};
+/** The user's message: Joule's bubble, its square bottom-right corner the tail. The answer has none. */
 const QUESTION: CSSProperties = {
-  ...BUBBLE, whiteSpace: "pre-wrap",
-  background: "var(--sapAssistant_Question_Background)", color: "var(--sapAssistant_Question_TextColor)",
-  border: "1px solid var(--sapAssistant_Question_BorderColor)",
+  maxWidth: "85%", padding: "0.5rem 1rem", borderRadius: "8px 8px 0 8px", background: "var(--cf-a-question)",
+  whiteSpace: "pre-wrap", overflowWrap: "anywhere",
 };
-const ANSWER: CSSProperties = {
-  ...BUBBLE, alignSelf: "flex-start", paddingBottom: 0,
-  background: "var(--sapAssistant_Answer_Background)", color: "var(--sapAssistant_Answer_TextColor)",
-  border: "1px solid var(--sapAssistant_Answer_BorderColor)",
-};
+const ANSWER: CSSProperties = { alignSelf: "flex-start", overflowWrap: "anywhere" };
 
-/** The chat's emphasized buttons (send, the cards' actions) in the assistant's colour while the page's
- *  stay blue: custom properties inherit into shadow DOM, so scoping the button parameters is enough. */
+/** The chat's emphasized buttons (send, the cards' actions) in Joule's colour while the page's stay
+ *  blue: custom properties inherit into shadow DOM, so scoping the button parameters is enough. */
 const ASSISTANT_BUTTONS = {
-  "--sapButton_Emphasized_Background": "var(--sapAssistant_Background)",
-  "--sapButton_Emphasized_BorderColor": "var(--sapAssistant_BorderColor)",
-  "--sapButton_Emphasized_TextColor": "var(--sapAssistant_TextColor)",
-  "--sapButton_Emphasized_Hover_Background": "var(--sapAssistant_Hover_Background)",
-  "--sapButton_Emphasized_Hover_BorderColor": "var(--sapAssistant_Hover_BorderColor)",
+  "--sapButton_Emphasized_Background": "var(--cf-a-send)",
+  "--sapButton_Emphasized_BorderColor": "var(--cf-a-send)",
+  "--sapButton_Emphasized_TextColor": "var(--cf-a-send-text)",
+  "--sapButton_Emphasized_Hover_Background": "var(--cf-a-send)",
+  "--sapButton_Emphasized_Hover_BorderColor": "var(--cf-a-send)",
 } as CSSProperties;
 
-/** The textarea's own field look, switched off through its public parameters: the box around it draws
- *  the border and the focus instead. */
-const FOCUS = "var(--sapContent_FocusWidth) var(--sapContent_FocusStyle) var(--sapContent_FocusColor)";
+/** The textarea's own field look, switched off through its public parameters: the composer's pill
+ *  draws the border and the focus instead. */
 const BARE_FIELD = {
   width: "100%",
   margin: 0,
@@ -167,7 +161,7 @@ const BARE_FIELD = {
   "--sapField_Hover_Shadow": "none",
   "--sapContent_FocusWidth": "0",
 } as CSSProperties;
-/** The panel's composer is a row instead — attach, the field, send — with the textarea as tall as its
+/** The composer is a row — attach, the field, send — with the textarea as tall as its
  *  buttons at one row (36 px cozy, 26 compact): UI5 draws it 2 px taller (line + 8/7 px padding + a 1 px
  *  wrapper edge each side). Its padding variables also size the mirror `growing` measures, so they are
  *  the one knob — private (`--_ui5_`), so recheck on a UI5 bump; at worst it is 2 px off again. The
@@ -183,9 +177,10 @@ const ROW_FIELD = {
 const READING = "max(1rem, (100% - 48rem) / 2)";
 
 /** The chat: its messages, steps and cards, the question and candidates cards, the chat box. `head`
- *  draws above it with what the chat is doing. */
-export function ChatView({ thread, route, kind, head, onTool, prefill }: {
+ *  draws above it with what the chat is doing; `welcome`, centred while the chat is empty. */
+export function ChatView({ thread, route, kind, head, welcome, onTool, prefill }: {
   thread: Thread; route: RouteContext; kind: Kind;
+  welcome?: ReactNode;
   head?: (s: HeadState) => ReactNode;
   /** Once per tool call, when its result first arrives (not for the history it opened with). */
   onTool?: (name: string) => void;
@@ -207,6 +202,7 @@ export function ChatView({ thread, route, kind, head, onTool, prefill }: {
   const [pending, setPending] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const [begun, setBegun] = useState(false);
   const [threadProjectId, setThreadProjectId] = useState(thread.projectId);
   // What the chat works on: the page's configuration, else its own — the tools reach it from any page.
@@ -325,11 +321,12 @@ export function ChatView({ thread, route, kind, head, onTool, prefill }: {
     setTimeout(() => input.current?.focus(), 0);
   }, [prefill?.at]); // eslint-disable-line react-hooks/exhaustive-deps
   // One answer per run: its model turns are consecutive assistant messages, drawn as one so its steps
-  // fold together. Keyed by the first, so a run that grows never remounts what it already drew.
-  const turns = useMemo(() => chat.messages.reduce<{ key: string; m: UIMessage }[]>((out, m) => {
+  // fold together. Keyed by the first, so a run that grows never remounts what it already drew; the
+  // first also dates the turn. The merged `m` keeps the last message's id, which the live checks compare.
+  const turns = useMemo(() => chat.messages.reduce<{ key: string; m: UIMessage; first: UIMessage }[]>((out, m) => {
     const prev = out.at(-1);
     if (prev?.m.role === "assistant" && m.role === "assistant") prev.m = { ...m, parts: [...prev.m.parts, ...m.parts] };
-    else out.push({ key: m.id, m });
+    else out.push({ key: m.id, m, first: m });
     return out;
   }, []), [chat.messages]);
   const last = chat.messages.at(-1);
@@ -500,16 +497,23 @@ export function ChatView({ thread, route, kind, head, onTool, prefill }: {
   );
   // Enter sends, Shift+Enter breaks the line: a pasted email keeps its lines.
   const field = (
-    <TextArea ref={input} growing growingMaxRows={8} rows={1} value={text} style={ROW_FIELD}
+    <TextArea ref={input} growing growingMaxRows={8} rows={1} value={text} style={{ ...BARE_FIELD, ...ROW_FIELD }}
       disabled={disabled} readonly={busy} placeholder={t(kind === "report" ? "REPORT_PLACEHOLDER" : "ASSISTANT_PLACEHOLDER")} accessibleName={t(kind === "report" ? "REPORT_PLACEHOLDER" : "ASSISTANT_PLACEHOLDER")}
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
       onInput={(e) => setText(e.target.value)}
       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(text); } }} />
   );
   // Fiori's AI button: send turns into stop while the answer streams. A drop may come without text.
+  // Round, as Joule's, in UI5's own size (the AI button sizes its inner button itself); with nothing to
+  // send it is Joule's pale send colour rather than UI5's faded one.
+  const nothing = !chat.isLoading && (disabled || busy || (!text.trim() && !files.length));
   const sendButton = (
-    <AiButton design="Emphasized" state={chat.isLoading ? "generating" : "send"}
-      disabled={!chat.isLoading && (disabled || busy || (!text.trim() && !files.length))}
+    <AiButton design="Emphasized" state={chat.isLoading ? "generating" : "send"} disabled={nothing}
+      style={{
+        "--sapButton_BorderCornerRadius": "50%", "--sapContent_DisabledOpacity": "1",
+        "--sapButton_Emphasized_Background": nothing ? "var(--cf-a-send-empty)" : "var(--cf-a-send)",
+        "--sapButton_Emphasized_BorderColor": nothing ? "var(--cf-a-send-empty)" : "var(--cf-a-send)",
+      } as CSSProperties}
       aria-label={sendLabel} accessibilityAttributes={{ root: { title: sendLabel } }}
       onClick={() => (chat.isLoading ? chat.stop() : send(text))}>
       <ButtonState name="send" icon="paper-plane" />
@@ -530,17 +534,32 @@ export function ChatView({ thread, route, kind, head, onTool, prefill }: {
       }}>
     </ToggleButton>
   ) : null;
-  // The composer: one row.
+  // The composer: Joule's pill around one row, the files above it.
   const composer = (
     <>
       {tokens}
-      <FlexBox alignItems="End" gap="0.5rem">{attach}{autoToggle}{field}{sendButton}</FlexBox>
+      <FlexBox alignItems="End" gap="0.25rem" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
+        style={{
+          minHeight: "2.25rem", padding: "0 0.25rem", borderRadius: "1.25rem", border: "1px solid var(--cf-a-accent)",
+          background: "var(--cf-a-page)", boxShadow: hovered ? "var(--cf-a-hover-shadow)" : "none",
+          outline: focused ? "0.125rem solid var(--cf-a-focus)" : "none",
+        }}>
+        {attach}{autoToggle}{field}
+        {text ? <Button design="Transparent" icon="decline" tooltip={t("ASSISTANT_CLEAR")} accessibleName={t("ASSISTANT_CLEAR")}
+          onClick={() => { setText(""); input.current?.focus(); }} /> : null}
+        {sendButton}
+      </FlexBox>
     </>
   );
 
   // Quoting starts from a drop, which the welcome says.
   const prompts = kind === "configure" ? ["ASSISTANT_PROMPT_MISSING", "ASSISTANT_PROMPT_UNAVAILABLE"]
     : kind === "report" ? [] : ["ASSISTANT_PROMPT_WAITING", "ASSISTANT_PROMPT_MONTH"];
+  const quick = empty && !off && prompts.length ? (
+    <FlexBox wrap="Wrap" gap="0.5rem" justifyContent="Center">
+      {prompts.map((k) => <AiAction key={k} text={t(k)} disabled={disabled} onClick={() => send(t(k))} />)}
+    </FlexBox>
+  ) : null;
   const inline = "1rem";
 
   return (
@@ -548,7 +567,9 @@ export function ChatView({ thread, route, kind, head, onTool, prefill }: {
       style={{
         ...ASSISTANT_BUTTONS, flex: 1, minHeight: 0, position: "relative", isolation: "isolate",
         // The bubbles and steps are plain elements: the theme's font reaches them from here, not from a component.
-        fontFamily: "var(--sapFontFamily)", fontSize: "var(--sapFontSize)", color: "var(--sapTextColor)",
+        fontFamily: "var(--sapFontFamily)", fontSize: "var(--sapFontSize)",
+        // Empty, the welcome's colour fills the chat, as Joule's.
+        background: empty ? "var(--cf-a-head)" : "var(--cf-a-page)", color: empty ? "var(--cf-a-head-text)" : "var(--cf-a-text)",
         outline: dragging ? "2px dashed var(--sapContent_FocusColor)" : "none", outlineOffset: "-0.5rem",
       }}
       onDragOver={(e) => { if (disabled) return; e.preventDefault(); setDragging(true); }}
@@ -561,18 +582,19 @@ export function ChatView({ thread, route, kind, head, onTool, prefill }: {
             style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBlock: "1rem", paddingInline: inline }}
             onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 40; }}>
             {notices}
-            {/* The panel's empty chat: its greeting is the head's (`empty`), the quick prompts are here. */}
-            {empty && !off && prompts.length ? (
-              <FlexBox wrap="Wrap" gap="0.5rem" justifyContent="Center">
-                {prompts.map((k) => <AiAction key={k} text={t(k)} disabled={disabled} onClick={() => send(t(k))} />)}
-              </FlexBox>
-            ) : null}
-            {turns.map(({ key, m }, at) => {
+            {empty && welcome ? <div style={{ marginBlock: "auto", textAlign: "center" }}>{welcome}</div> : null}
+            {turns.map(({ key, m, first }, at) => {
               const parts = renderMessage(m, at).filter(Boolean);
               const attached = m.role === "user" ? attachedOf(m) : [];
               if (!parts.length && !attached.length) return null;
+              const when = timeOf(first);
               return (
                 <FlexBox key={key} direction="Column" gap="0.5rem" alignItems={m.role === "user" ? "End" : undefined}>
+                  {when ? (
+                    <div style={{ alignSelf: "center", fontSize: "0.75rem", color: "var(--cf-a-muted)" }}>
+                      {stampText(when, new Date(), formatLocale(), t)}
+                    </div>
+                  ) : null}
                   {attached.length ? <FlexBox wrap="Wrap" gap="0.25rem" justifyContent="End">{attached}</FlexBox> : null}
                   {parts.map((p, i) => <Fragment key={i}>{p}</Fragment>)}
                 </FlexBox>
@@ -603,10 +625,15 @@ export function ChatView({ thread, route, kind, head, onTool, prefill }: {
               </FlexBox>
             ) : null}
           </FlexBox>
-          <FlexBox direction="Column" gap="0.5rem" style={{ padding: "0.5rem 1rem 0.75rem", borderTop: "1px solid var(--sapGroup_TitleBorderColor)" }}>
+          <FlexBox direction="Column" gap="0.5rem" style={{ padding: "0.5rem 1rem 0.625rem" }}>
             {dropStrip}
             {readFiles ? <div>{readFiles}</div> : null}
             {composer}
+            {quick}
+            {/* Joule's faint disclaimer colour is too faint to read: the muted one instead. */}
+            <div style={{ textAlign: "center", fontSize: "0.6875rem", color: empty ? "var(--cf-a-head-text)" : "var(--cf-a-muted)" }}>
+              {t("ASSISTANT_DISCLAIMER")}
+            </div>
           </FlexBox>
       </>
     </FlexBox>
