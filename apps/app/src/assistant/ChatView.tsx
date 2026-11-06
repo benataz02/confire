@@ -178,9 +178,11 @@ const READING = "max(1rem, (100% - 48rem) / 2)";
 
 /** The chat: its messages, steps and cards, the question and candidates cards, the chat box. `head`
  *  draws above it with what the chat is doing; `welcome`, centred while the chat is empty. */
-export function ChatView({ thread, route, kind, head, welcome, onTool, prefill }: {
+export function ChatView({ thread, route, kind, head, welcome, wide = false, onTool, prefill }: {
   thread: Thread; route: RouteContext; kind: Kind;
   welcome?: ReactNode;
+  /** maximized: the conversation and the composer in a centred reading column */
+  wide?: boolean;
   head?: (s: HeadState) => ReactNode;
   /** Once per tool call, when its result first arrives (not for the history it opened with). */
   onTool?: (name: string) => void;
@@ -560,7 +562,7 @@ export function ChatView({ thread, route, kind, head, welcome, onTool, prefill }
       {prompts.map((k) => <AiAction key={k} text={t(k)} disabled={disabled} onClick={() => send(t(k))} />)}
     </FlexBox>
   ) : null;
-  const inline = "1rem";
+  const inline = wide ? READING : "1rem";
 
   return (
     <FlexBox direction="Column"
@@ -625,7 +627,7 @@ export function ChatView({ thread, route, kind, head, welcome, onTool, prefill }
               </FlexBox>
             ) : null}
           </FlexBox>
-          <FlexBox direction="Column" gap="0.5rem" style={{ padding: "0.5rem 1rem 0.625rem" }}>
+          <FlexBox direction="Column" gap="0.5rem" style={{ paddingBlock: "0.5rem 0.625rem", paddingInline: inline }}>
             {dropStrip}
             {readFiles ? <div>{readFiles}</div> : null}
             {composer}

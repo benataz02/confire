@@ -130,7 +130,6 @@ export function ChatDrawer({ open, mode, openId, chats, onPick, onNew, onHide, o
   const card = mode === "card";
   return (
     <nav aria-label={t("ASSISTANT_CHATS")} inert={!open}
-      onKeyDown={(e) => { if (e.key === "Escape" && card) { e.stopPropagation(); onHide(); } }}
       style={{
         width: "16rem", flex: "none", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "0.5rem",
         padding: "0 0.5rem 0.5rem", overflowY: "auto",

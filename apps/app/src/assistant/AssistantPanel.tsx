@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BusyIndicator, Button, Icon, MenuItem, MessageStrip } from "@ui5/webcomponents-react";
@@ -14,6 +14,7 @@ import { RenameField } from "./RenameField.tsx";
 import { useOpenForm } from "./cards/registry.tsx";
 import { REPORT_ROUTE, threadInput } from "./routeContext.ts";
 import { paletteFor, paletteVars, type Palette } from "./palette.ts";
+import { cardBox, clampPos, type Pos } from "./geometry.ts";
 import { ChatView, kindOf, refusalText, useRoute } from "./ChatView.tsx";
 
 // The assistant panel (Joule spec): Joule's card, floating over the page's right edge — its header bar,
@@ -36,7 +37,8 @@ function usePalette(): Palette {
 
 /** The header bar's buttons in Joule's header colours, through the parameters UI5's buttons read. */
 const HEAD = {
-  height: "2.625rem", flex: "none", display: "flex", alignItems: "center", gap: "0.25rem", padding: "0 0.5rem 0 1rem",
+  height: "2.625rem", flex: "none", display: "flex", alignItems: "center", gap: "0.25rem", padding: "0 0.5rem",
+  touchAction: "none", userSelect: "none",
   background: "var(--cf-a-head)", color: "var(--cf-a-head-text)",
   "--sapButton_Lite_TextColor": "var(--cf-a-head-text)",
   "--sapButton_Lite_Hover_TextColor": "var(--cf-a-head-hover)",
@@ -73,18 +75,56 @@ export function AssistantPanel() {
   const projectId = route.projectId ?? thread.data?.projectId ?? null;
   const config = useQuery({ ...orpc.configs.get.queryOptions({ input: { id: projectId ?? "" } }), enabled: !!projectId });
   const kind = projectId ? "configure" : thread.data?.reportId ? "report" : kindOf(route);
-  const [wide, setWide] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [menu, setMenu] = useState<HTMLElement | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
-  // Below the ShellBar, whatever its density: measured when the panel opens.
-  const [top, setTop] = useState(52);
+  // The box (geometry.ts). Local state is enough: the panel never unmounts once mounted, so a drag
+  // survives restore and close/reopen, and is forgotten on reload, as Joule's.
+  const [maximized, setMaximized] = useState(false);
+  const [sidebar, setSidebar] = useState(true);
+  const [pos, setPos] = useState<Pos | null>(null);
+  const [animating, setAnimating] = useState(false);
+  const [view, setView] = useState({ vw: innerWidth, vh: innerHeight });
+  useEffect(() => {
+    const onResize = () => setView({ vw: innerWidth, vh: innerHeight });
+    addEventListener("resize", onResize);
+    return () => removeEventListener("resize", onResize);
+  }, []);
+  // Under the ShellBar, whatever its density: measured when the panel opens.
+  const [top, setTop] = useState(60);
   useLayoutEffect(() => {
     const bottom = document.querySelector("ui5-shellbar")?.getBoundingClientRect().bottom;
-    if (bottom) setTop(bottom);
+    if (bottom) setTop(bottom + 8);
   }, [shell.open]);
+  const box = cardBox({ maximized, pos, ...view, top });
+  const aside = useRef<HTMLElement>(null);
+
+  /** Joule's transition, only while toggling (never while dragging); none with reduced motion. */
+  const resize = (max: boolean) => {
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setAnimating(true);
+      setTimeout(() => setAnimating(false), 600); // transitionend's fallback
+    }
+    setMaximized(max);
+  };
+  // Whenever the chat takes the user to a page, back to the card so the page shows (spec §5.4).
+  useEffect(() => { if (maximized) resize(false); }, [route]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!shell.open) setMaximized(false); }, [shell.open]);
+
+  // ponytail: drag by pointer only; arrow keys on the header if someone needs to move it without a mouse.
+  const drag = useRef<Pos | null>(null);
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    if (maximized || e.button !== 0 || (e.target as Element).closest("ui5-button, ui5-toggle-button, ui5-input, button, input")) return;
+    const r = aside.current!.getBoundingClientRect();
+    drag.current = { x: e.clientX - r.left, y: e.clientY - r.top };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (drag.current) setPos(clampPos({ x: e.clientX - drag.current.x, y: e.clientY - drag.current.y }, box, view.vw, view.vh));
+  };
+  const endDrag = () => { drag.current = null; };
 
   /** New chat: always a blank general one (the user's blank thread, if there is one). */
   const newChat = async () => {
@@ -148,8 +188,10 @@ export function AssistantPanel() {
   );
   const head = ({ empty }: { empty: boolean }) => (
     <>
-      <div style={HEAD}>
-        {icon("menu2", t("ASSISTANT_CHATS"), () => setDrawer((d) => !d), { accessibilityAttributes: { expanded: drawer } })}
+      <div style={{ ...HEAD, cursor: maximized ? "default" : "move" }}
+        onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag}>
+        {!maximized ? icon("menu2", t("ASSISTANT_CHATS"), () => setDrawer((d) => !d), { accessibilityAttributes: { expanded: drawer } })
+          : !sidebar ? icon("menu2", t("ASSISTANT_CHATS"), () => setSidebar(true), { accessibilityAttributes: { expanded: false } }) : null}
         {renaming && row
           ? <RenameField value={chats.label(row)} label={t("ASSISTANT_RENAME")} onDone={(v) => { setRenaming(false); chats.rename(row, v); }} />
           : (
@@ -158,7 +200,7 @@ export function AssistantPanel() {
             </span>
           )}
         {!empty && row ? icon("overflow", t("ASSISTANT_CHAT_ACTIONS"), (e) => setMenu(e.currentTarget as HTMLElement), { accessibilityAttributes: { hasPopup: "menu" } }) : null}
-        {icon(wide ? "exit-full-screen" : "full-screen", t(wide ? "ASSISTANT_COLLAPSE" : "ASSISTANT_EXPAND"), () => setWide((w) => !w))}
+        {icon(maximized ? "exit-full-screen" : "full-screen", t(maximized ? "ASSISTANT_RESTORE" : "ASSISTANT_MAXIMIZE"), () => resize(!maximized))}
         {icon("decline", t("ASSISTANT_CLOSE"), shell.close)}
       </div>
       {error ? (
@@ -171,30 +213,32 @@ export function AssistantPanel() {
   // Joule's welcome: the mark, the greeting, what the chat is for. Plain elements: the colour is inherited.
   const welcome = (
     <>
-      <Icon name="ai" style={{ width: "4rem", height: "4rem", color: "var(--cf-a-mark)" }} />
-      <div style={{ fontSize: "1rem", fontWeight: "bold", margin: "0.75rem 0 0.5rem" }}>{t("ASSISTANT_HELLO", firstName(me.data?.user))}</div>
+      <Icon name="ai" style={{ width: maximized ? "6rem" : "4rem", height: maximized ? "6rem" : "4rem", color: "var(--cf-a-mark)" }} />
+      <div style={{ fontSize: maximized ? "1.5rem" : "1rem", fontWeight: "bold", margin: "0.75rem 0 0.5rem" }}>{t("ASSISTANT_HELLO", firstName(me.data?.user))}</div>
       <div>{t(kind === "configure" ? "ASSISTANT_WELCOME_CONFIGURE" : "ASSISTANT_WELCOME_START")}</div>
     </>
   );
 
   return (
-    // Under the shell, over the page: NavigationLayout stacks its side nav at 2 and its ShellBar at 3 (so
-    // the collapsed nav's flyout overlaps the panel); an ObjectPage is its own context at 0, and a
-    // DynamicPage's layers stop at 1, which the panel wins by coming later in the DOM. Closed, it stays
-    // mounted: closing must not cut off an answer still streaming.
-    <aside role="complementary" aria-label={t("ASSISTANT_TITLE")}
-      onKeyDown={(e: KeyboardEvent) => { if (e.key === "Escape") shell.close(); }}
+    // Over the ShellBar (NavigationLayout's is at 3), which a dragged card or the maximized panel covers;
+    // UI5's popups render in the top layer, so menus and dialogs opened from here still show above it.
+    // Closed, it stays mounted, and the ChatView keeps its place in every state: an answer streaming
+    // goes on through close, maximize, restore and drag.
+    <aside ref={aside} role="complementary" aria-label={t("ASSISTANT_TITLE")}
+      // Escape closes the card's drawer first, then the panel.
+      onKeyDown={(e: KeyboardEvent) => { if (e.key === "Escape") (drawer && !maximized ? setDrawer(false) : shell.close()); }}
+      onTransitionEnd={(e) => { if (e.target === e.currentTarget) setAnimating(false); }}
       style={{
         ...paletteVars(palette),
-        position: "fixed", zIndex: 1, top: `calc(${top}px + 0.5rem)`, bottom: "1rem", insetInlineEnd: "1rem",
-        width: `min(${wide ? "48rem, 60vw" : "26rem"}, 100vw - 2rem)`,
+        position: "fixed", zIndex: 4, left: box.left, top: box.top, width: box.width, height: box.height, borderRadius: box.radius,
+        transition: animating ? "all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94)" : "none",
         display: shell.open ? "flex" : "none", overflow: "hidden",
-        background: "var(--cf-a-page)", color: "var(--cf-a-text)", borderRadius: "1rem", boxShadow: "var(--cf-a-shadow)",
+        background: "var(--cf-a-page)", color: "var(--cf-a-text)", boxShadow: maximized ? "none" : "var(--cf-a-shadow)",
       }}>
-      <ChatDrawer open={drawer} mode="card" openId={thread.data?.id ?? null} chats={chats}
-        onPick={pick} onNew={() => void newChat()} onHide={() => setDrawer(false)} onRemoved={removed} />
+      <ChatDrawer open={maximized ? sidebar : drawer} mode={maximized ? "sidebar" : "card"} openId={thread.data?.id ?? null} chats={chats}
+        onPick={pick} onNew={() => void newChat()} onHide={() => (maximized ? setSidebar(false) : setDrawer(false))} onRemoved={removed} />
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        {thread.data ? <ChatView key={thread.data.id} thread={thread.data} route={route} kind={kind} head={head} welcome={welcome}
+        {thread.data ? <ChatView key={thread.data.id} thread={thread.data} route={route} kind={kind} head={head} welcome={welcome} wide={maximized}
           onTool={onTool} prefill={shell.asked?.text ? { text: shell.asked.text, at: shell.asked.at } : undefined} />
           : (
             <>
