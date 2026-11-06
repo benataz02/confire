@@ -52,6 +52,13 @@ describe.skipIf(!process.env.DATABASE_URL)("reports", () => {
   }
   const code = (p: Promise<unknown>) => p.then(() => "ok", (e: { code?: string }) => e.code ?? String(e));
 
+  // The panel's delete confirm says the report goes too, then goes home (Joule spec §5.4).
+  test("deleting a report's chat deletes its report", async () => {
+    const w = await world();
+    await call(router.assistant.deleteThread, { id: w.r.threadId }, w.staff);
+    expect(await code(call(router.reports.get, { id: w.r.id }, w.staff))).toBe("NOT_FOUND");
+  });
+
   test("a general chat's first set makes it a report's; later sets change that report", async () => {
     const w = await world();
     expect(w.r.id).toBeTruthy();
