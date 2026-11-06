@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { and, eq } from "drizzle-orm";
-import { db, configModel, configProjectEvent, member, portalCompany, type PortalRole } from "@confire/db";
+import { and, eq, inArray } from "drizzle-orm";
+import { db, configModel, configProject, configProjectEvent, member, portalCompany, type PortalRole } from "@confire/db";
 import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
 import { devOutbox, mailDomain } from "../src/mail/mailer.ts";
@@ -413,6 +413,37 @@ describe("settings and home", () => {
     const other = await makePortalUser();
     await makePortalSeat(s.tenantId, other.userId, "buyer");
     expect((await call(portalRouter.home.overview, undefined, s.on(other.cookie))).byStatus).toEqual({});
+  });
+
+  test("home.progress: stores the furthest SAP step, forward only, in the agent's company only", async () => {
+    const s = await setup();
+    const [m] = await db.select().from(configModel).where(eq(configModel.tenantId, s.tenantId));
+    const quoted = (b1DocEntry: number, b1Company: string) => ({
+      tenantId: s.tenantId, modelId: m!.id, name: `Q${b1DocEntry}`, createdBy: s.buyer.userId,
+      portalCardCode: s.company.cardCode, status: "quoted" as const, b1DocEntry, b1Company, quotedAt: new Date(),
+    });
+    const [here, there] = await db.insert(configProject).values([quoted(501, agent.company.db), quoted(502, "OTHER")]).returning();
+    const line = (BaseType: number, BaseEntry: number) => ({ BaseType, BaseEntry });
+    agent.store.Orders = [
+      { DocEntry: 610, DocNum: 610, DocDate: "2026-11-01", CardCode: s.company.cardCode, DocumentLines: [line(23, 501)] },
+      { DocEntry: 611, DocNum: 611, DocDate: "2026-11-01", CardCode: s.company.cardCode, DocumentLines: [line(23, 502)] },
+    ];
+    try {
+      expect(await call(portalRouter.home.progress, undefined, s.on(s.viewer.cookie))).toEqual({ changed: 1 });
+      const rows = await db.select().from(configProject).where(inArray(configProject.id, [here!.id, there!.id]));
+      expect(rows.find((r) => r.id === here!.id)).toMatchObject({ sapStep: "ordered", sapStepAt: "2026-11-01" });
+      expect(rows.find((r) => r.id === there!.id)!.sapStep).toBeNull(); // quoted in another company
+
+      expect(await call(portalRouter.home.progress, undefined, s.on(s.viewer.cookie))).toEqual({ changed: 0 });
+
+      // Invoiced is final: never walked again.
+      await db.update(configProject).set({ sapStep: "invoiced" }).where(eq(configProject.id, here!.id));
+      const before = agent.calls.filter((c) => c.route === "/cross-join").length;
+      await call(portalRouter.home.progress, undefined, s.on(s.viewer.cookie));
+      expect(agent.calls.filter((c) => c.route === "/cross-join").length).toBe(before);
+    } finally {
+      delete agent.store.Orders;
+    }
   });
 
   test("home.documents: CardCode-fenced, ALWAYS fields only", async () => {
