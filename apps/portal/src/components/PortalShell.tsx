@@ -107,7 +107,7 @@ export function PortalShell() {
                 logo={me.tenant.logo
                   ? <img alt="" src={me.tenant.logo} />
                   : <Avatar icon="building" size="XS" colorScheme="Accent6" accessibleName={me.tenant.name} />}
-                onClick={() => go("/")}
+                onClick={() => go("/home")}
               >
                 {me.tenant.name}
               </ShellBarBranding>
@@ -174,7 +174,7 @@ export function PortalShell() {
             <SideNavigationItem text={i18n.getText("PORTAL_COMPANY")} icon="building" data-to="/company" selected={pathname === "/company"} />
           ) : undefined}
         >
-          <SideNavigationItem text={i18n.getText("NAV_HOME")} icon="home" data-to="/" selected={pathname === "/"} />
+          <SideNavigationItem text={i18n.getText("NAV_HOME")} icon="home" data-to="/home" selected={pathname === "/home"} />
           <SideNavigationItem text={i18n.getText("PORTAL_PROJECTS")} icon="product" data-to="/projects"
             selected={pathname === "/projects" || pathname.startsWith("/projects/")} />
           <SideNavigationGroup text={i18n.getText("PORTAL_DOCUMENTS")} expanded>
