@@ -105,7 +105,6 @@ const configFields = (userId: string, company: string | null): SqlFields => ({
   updatedAt: { col: configProject.updatedAt, kind: "date" },
 });
 
-// ponytail: sapStep is refreshed only by the portal home's home.progress; staff may see a stale SAP step until a client opens home. Upgrade: run the same walk for this one project off the request path.
 /** The company, assignee and journey of a client's request; null for an internal configuration. */
 async function requestOf(tenantId: string, p: JourneyInput & { portalCardCode: string | null; assigneeId: string | null }) {
   if (p.portalCardCode === null) return null;

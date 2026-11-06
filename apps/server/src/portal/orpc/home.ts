@@ -1,12 +1,12 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
-import { db, configProject, SAP_STEPS } from "@confire/db";
+import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { db, configProject } from "@confire/db";
 import { escapeLiteral, rowsOf } from "@confire/b1";
 import { portalMemberProcedure } from "./base.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
 import { ALWAYS, type DocEntity } from "../doc-fields.ts";
-import { furthestSteps } from "../../doc-chain.ts";
+import { advanceSapSteps } from "../../project-timeline.ts";
 import { getUserState, setUserState } from "../../ui-views.ts";
 import { figuresOf, isFinished, journeyOf, rankOf, type Next } from "../journey.ts";
 
@@ -95,31 +95,8 @@ export const homeRouter = {
     return { recent };
   }),
 
-  /** How far SAP has taken the company's quoted projects: walks the document chains of every open
-   *  quotation in the agent's company (a DocEntry means nothing in another) and stores each step that
-   *  moved. Forward only, `updated_at` untouched; an invoiced project is never walked again. The page
-   *  refetches the overview when something changed. */
-  progress: portalMemberProcedure.handler(async ({ context }) => {
-    const { b1, companyDb } = await tenantConnector(context.tenantId);
-    if (!companyDb) return { changed: 0 };
-    const open = await db.select({ id: configProject.id, docEntry: configProject.b1DocEntry, sapStep: configProject.sapStep })
-      .from(configProject)
-      .where(and(
-        mine(context), eq(configProject.status, "quoted"), isNotNull(configProject.b1DocEntry), eq(configProject.b1Company, companyDb),
-        sql`${configProject.sapStep} is distinct from 'invoiced'`,
-      ));
-    if (!open.length) return { changed: 0 };
-    const found = await viaB1(() => furthestSteps(b1, open.map((p) => p.docEntry!)));
-    let changed = 0;
-    for (const p of open) {
-      const f = found.get(p.docEntry!);
-      if (!f || SAP_STEPS.indexOf(f.step) <= (p.sapStep ? SAP_STEPS.indexOf(p.sapStep) : -1)) continue;
-      // Guarded on the value read, so a concurrent run can never move a step back.
-      const moved = await db.update(configProject).set({ sapStep: f.step, sapStepAt: f.at })
-        .where(and(eq(configProject.id, p.id), sql`${configProject.sapStep} is not distinct from ${p.sapStep}`))
-        .returning({ id: configProject.id });
-      changed += moved.length;
-    }
-    return { changed };
-  }),
+  /** How far SAP has taken the company's quoted projects (advanceSapSteps). The page refetches the
+   *  overview when something changed. */
+  progress: portalMemberProcedure.handler(async ({ context }) =>
+    ({ changed: await advanceSapSteps(context.tenantId, eq(configProject.portalCardCode, context.cardCode)) })),
 };

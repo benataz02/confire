@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BusyIndicator, Button, MessageStrip, Tag, Text, ToolbarButton } from "@ui5/webcomponents-react";
@@ -8,7 +9,7 @@ import type { TimelineEvent } from "@confire/ui/timeline/ProjectTimeline.tsx";
 import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
-import { formatLocale } from "@confire/ui/format.ts";
+import { formatLocale, parseIsoDate } from "@confire/ui/format.ts";
 import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
 import { useRefusals, type PageMessage } from "@confire/ui/PageMessages.tsx";
 import { PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
@@ -54,10 +55,14 @@ function ProjectPage({ id }: { id: string }) {
   const timeline = useQuery(orpc.timeline.list.queryOptions({ input: { projectId: id } }));
   // Live SAP, separate on purpose: a down agent costs these rows (and the quote's figures), never the page.
   const documents = useQuery({ ...orpc.timeline.documents.queryOptions({ input: { projectId: id } }), retry: false });
+  // Only while its figures show: beside an answerable quotation.
   const quotation = useQuery({
     ...orpc.projects.quotation.queryOptions({ input: { id } }),
-    enabled: q.data?.prices.kind === "quotation", retry: false,
+    enabled: buyer && q.data?.project.status === "quoted" && q.data.project.quoteResponse === null, retry: false,
   });
+  // SAP, off the page's path: brings the stored SAP step up to date, then the project redraws with it.
+  const progress = useQuery({ ...orpc.projects.progress.queryOptions({ input: { id } }), retry: false });
+  useEffect(() => { if (progress.data?.changed) void qc.invalidateQueries({ queryKey: getKey }); }, [progress.data]);
 
   // A status move: the list, the timeline and the documents all moved with it.
   const moved = (msg: string) => (p: Payload) => {
@@ -81,8 +86,9 @@ function ProjectPage({ id }: { id: string }) {
     onSuccess: () => void qc.invalidateQueries({ queryKey: timelineKey }),
   }));
   const acting = withdraw.isPending || respond.isPending || remove.isPending;
-  const error = withdraw.error ?? respond.error ?? remove.error ?? comment.error;
-  const refused = useRefusals(withdraw.error, respond.error, remove.error, comment.error);
+  // A comment's failure is the composer's own (ProjectTimeline's postError), not a page message.
+  const error = withdraw.error ?? respond.error ?? remove.error;
+  const refused = useRefusals(withdraw.error, respond.error, remove.error);
 
   const p = q.data;
   if (q.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
@@ -122,7 +128,7 @@ function ProjectPage({ id }: { id: string }) {
               <Text style={{ fontFamily: "var(--sapFontBoldFamily)" }}>
                 {/* Joined here: a .properties value loses its leading space (PORTAL_QUOTE_VALID's " · "). */}
                 {[t("PORTAL_TOTAL_AMOUNT", money(qd.docTotal, cur)),
-                  qd.validUntil && t("PORTAL_QUOTE_VALID", new Date(qd.validUntil).toLocaleDateString(formatLocale()))].filter(Boolean).join(" ")}
+                  qd.validUntil && t("PORTAL_QUOTE_VALID", parseIsoDate(qd.validUntil)?.toLocaleDateString(formatLocale()) ?? "")].filter(Boolean).join(" ")}
               </Text>
               {docEntry ? <PrintActions entity="Quotations" docEntry={docEntry} /> : null}
             </>

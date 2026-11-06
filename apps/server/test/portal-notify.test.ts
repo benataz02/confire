@@ -482,6 +482,41 @@ describe("settings and home", () => {
     }
   });
 
+  test("projects.progress / requests.progress: one project's SAP step, on each side, fenced", async () => {
+    const s = await setup();
+    const [m] = await db.select().from(configModel).where(eq(configModel.tenantId, s.tenantId));
+    const quoted = (b1DocEntry: number, v: Partial<typeof configProject.$inferInsert> = {}) => ({
+      tenantId: s.tenantId, modelId: m!.id, name: `Q${b1DocEntry}`, createdBy: s.buyer.userId, portalCardCode: s.company.cardCode,
+      status: "quoted" as const, b1DocEntry, b1Company: agent.company.db, quotedAt: new Date(), ...v,
+    });
+    const [a, b, elsewhere, otherDb] = await db.insert(configProject).values([
+      quoted(521), quoted(522), quoted(523, { portalCardCode: "OTHER" }), quoted(524, { b1Company: "OTHER" }),
+    ]).returning();
+    const line = (BaseEntry: number) => ({ BaseType: 23, BaseEntry });
+    agent.store.Orders = [521, 522, 523, 524].map((q, i) =>
+      ({ DocEntry: 620 + i, DocNum: 620 + i, DocDate: "2026-11-03", CardCode: s.company.cardCode, DocumentLines: [line(q)] }));
+    const stepOf = async (id: string) => (await db.select().from(configProject).where(eq(configProject.id, id)))[0]!.sapStep;
+    try {
+      // The client's page moves its own project only — the other one waits for its own page.
+      expect(await call(portalRouter.projects.progress, { id: a!.id }, s.on(s.viewer.cookie))).toEqual({ changed: true });
+      expect(await stepOf(a!.id)).toBe("ordered");
+      expect(await stepOf(b!.id)).toBeNull();
+      expect(await call(portalRouter.projects.progress, { id: a!.id }, s.on(s.viewer.cookie))).toEqual({ changed: false });
+
+      // Staff's page, the same walk.
+      expect(await call(router.requests.progress, { id: b!.id }, s.as(s.admin.cookie))).toEqual({ changed: true });
+      expect(await stepOf(b!.id)).toBe("ordered");
+
+      // Another client's project is refused; a quotation in another SAP company is never walked.
+      expect(await codeOf(call(portalRouter.projects.progress, { id: elsewhere!.id }, s.on(s.viewer.cookie)))).toBe("NOT_FOUND");
+      expect(await stepOf(elsewhere!.id)).toBeNull();
+      expect(await call(router.requests.progress, { id: otherDb!.id }, s.as(s.admin.cookie))).toEqual({ changed: false });
+      expect(await stepOf(otherDb!.id)).toBeNull();
+    } finally {
+      delete agent.store.Orders;
+    }
+  });
+
   test("a re-quote clears the stored SAP step: the new quotation is the customer's to answer", async () => {
     const s = await setup();
     const [m] = await db.select().from(configModel).where(eq(configModel.tenantId, s.tenantId));

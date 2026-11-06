@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListItemStandard, SelectDialog, Tag, Text, ToolbarButton } from "@ui5/webcomponents-react";
@@ -34,6 +34,9 @@ export function RequestOverview({ id }: { id: string }) {
   const timeline = useQuery(orpc.timeline.list.queryOptions({ input: { projectId: id } }));
   // Live SAP, so it may fail on its own without taking the events with it.
   const documents = useQuery({ ...orpc.timeline.documents.queryOptions({ input: { projectId: id } }), retry: false });
+  // SAP, off the page's path: brings the stored SAP step up to date, then the project redraws with it.
+  const progress = useQuery({ ...orpc.requests.progress.queryOptions({ input: { id } }), retry: false });
+  useEffect(() => { if (progress.data?.changed) void qc.invalidateQueries({ queryKey: getKey }); }, [progress.data]);
   const comment = useMutation(orpc.timeline.comment.mutationOptions({
     onSuccess: () => void qc.invalidateQueries({ queryKey: listKey }),
   }));

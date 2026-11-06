@@ -17,6 +17,7 @@ import {
 } from "../projection.ts";
 import { t } from "../../i18n/index.ts";
 import { journeyOf, nextSql } from "../journey.ts";
+import { projectProgress } from "../../project-timeline.ts";
 
 // The client's projects (spec §7, §9, §11). One project = one configuration, fenced on the seat's
 // company in every read and write. The engine runs here: the page gets the §7.1 projection and the
@@ -132,6 +133,10 @@ export const projectsRouter = {
   }),
 
   get: portalMemberProcedure.input(IdZ).handler(({ input, context }) => payload(context, input.id)),
+
+  /** How far SAP has taken this project (the home's walk, for one): the page refetches `get` when it moved. */
+  progress: portalMemberProcedure.input(IdZ).handler(({ input, context }) =>
+    projectProgress(context.tenantId, input.id, actorOf(context))),
 
   /** From the catalog: a published model, named. The customer is the company (spec §7). */
   create: portalBuyerProcedure

@@ -12,7 +12,7 @@ import { overlayForm, usePatchQueue, type InputPatch } from "@confire/ui/configu
 import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import { confirm } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
-import { formatLocale } from "@confire/ui/format.ts";
+import { formatLocale, parseIsoDate } from "@confire/ui/format.ts";
 import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
 import { FORM_LAYOUT } from "@confire/ui/formLayout.ts";
 import { PageMessages, useRefusals, type PageMessage } from "@confire/ui/PageMessages.tsx";
@@ -277,15 +277,16 @@ function Prices({ prices, quotation, quotationError, quotationLoading, currency,
     if (quotationError) return <MessageStrip design="Critical" hideCloseButton>{i18n.getText("PORTAL_QUOTE_UNAVAILABLE", quotationError.message)}</MessageStrip>;
     if (!quotation) return null;
     const cur = quotation.currency || currency;
-    const when = new Date(quotation.docDate).toLocaleDateString(formatLocale());
+    const when = parseIsoDate(quotation.docDate)?.toLocaleDateString(formatLocale()) ?? "";
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", maxWidth: "60rem" }}>
         {prices.declined ? (
           <MessageStrip design="Critical" hideCloseButton>{i18n.getText("PORTAL_QUOTE_DECLINED_AGAIN", supplier)}</MessageStrip>
         ) : null}
         <Text>
-          {i18n.getText("PORTAL_QUOTE_OF", String(quotation.docNum), when)}
-          {quotation.validUntil ? i18n.getText("PORTAL_QUOTE_VALID", new Date(quotation.validUntil).toLocaleDateString(formatLocale())) : ""}
+          {/* Joined here: a .properties value loses its leading space (PORTAL_QUOTE_VALID's " · "). */}
+          {[i18n.getText("PORTAL_QUOTE_OF", String(quotation.docNum), when),
+            quotation.validUntil && i18n.getText("PORTAL_QUOTE_VALID", parseIsoDate(quotation.validUntil)?.toLocaleDateString(formatLocale()) ?? "")].filter(Boolean).join(" ")}
         </Text>
         <Table headerRow={
           <TableHeaderRow>
