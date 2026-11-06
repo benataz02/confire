@@ -16,6 +16,7 @@ import {
   toPortalForm, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalRows,
 } from "../projection.ts";
 import { t } from "../../i18n/index.ts";
+import { nextSql } from "../journey.ts";
 
 // The client's projects (spec §7, §9, §11). One project = one configuration, fenced on the seat's
 // company in every read and write. The engine runs here: the page gets the §7.1 projection and the
@@ -33,6 +34,8 @@ const projectFields = (userId: string): SqlFields => ({
   status: { col: configProject.status, kind: "enum" },
   createdBy: { col: user.name, kind: "string" },
   mine: { col: sql<string>`case when ${configProject.createdBy} = ${userId} then 'yes' else 'no' end`, kind: "enum" },
+  // The home's journey (portal/journey.ts): its tiles open this list on their `next` values.
+  next: { col: nextSql(configProject), kind: "enum" },
   updatedAt: { col: configProject.updatedAt, kind: "date" },
 });
 

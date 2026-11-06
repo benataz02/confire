@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@ui5/webcomponents-react";
 import { useI18n } from "../../../i18n.ts";
 import { orpc } from "../../../orpc.ts";
+import { viewsQuery } from "@confire/ui/views.ts";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
 import { useListView } from "@confire/ui/useListView.ts";
 import { confirm } from "@confire/ui/confirm.ts";
@@ -40,7 +41,12 @@ function sourceLabel(raw: string, t: TextFn): string {
   return `${m[1]} · ${rest}`;
 }
 
-export const Route = createFileRoute("/$slug/masterdata/")({ head: () => title(t("NAV_MASTERDATA")), component: Masterdata });
+export const Route = createFileRoute("/$slug/masterdata/")({
+  head: () => title(t("NAV_MASTERDATA")),
+  // A hovered link (a home tile, a row's link) warms the views the list waits on, never awaited.
+  loader: ({ context }) => void context.queryClient.prefetchQuery(viewsQuery(orpc, "masterdata")),
+  component: Masterdata,
+});
 
 // Tenant masterdata: one list for both kinds. A "table" keeps its values here, a "query" caches
 // them from SAP on a sync — models reference either by name and never hold the definition.

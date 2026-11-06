@@ -1,4 +1,4 @@
-/* Launchpad tiles: Fiori's 11rem square (wide and flexing in the HeroBanner). UI5 Web Components has no
+/* Launchpad tiles: Fiori's 11rem square and its 2×1. UI5 Web Components has no
    GenericTile, so these draw from the theme's own tile parameters — every theme, dark and high
    contrast included, carries them. */
 .cf-tiles { display: flex; flex-wrap: wrap; gap: 0.5rem; }
@@ -9,7 +9,8 @@
   border: 1px solid var(--sapTile_BorderColor); border-radius: var(--sapTile_BorderCornerRadius);
   box-shadow: var(--sapContent_Shadow0); font-family: var(--sapFontFamily); text-decoration: none;
 }
-.cf-tile-wide { width: auto; flex: 1 1 16rem; max-width: 24rem; height: 9rem; }
+/* Two squares and the gap between them, so it keeps to the squares' grid. */
+.cf-tile-wide { width: 22.5rem; }
 a.cf-tile:hover { background: var(--sapTile_Hover_Background); box-shadow: var(--sapContent_Shadow2); }
 a.cf-tile:active { background: var(--sapTile_Active_Background); }
 a.cf-tile:focus-visible {
@@ -21,6 +22,5 @@ a.cf-tile:focus-visible {
 .cf-tile-foot { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 0.5rem; }
 .cf-tile-icon { width: 2rem; height: 2rem; color: var(--sapTile_IconColor); }
 .cf-tile-num { margin-inline-start: auto; font-family: var(--sapFontLightFamily); font-size: 2.25rem; line-height: 1; }
-.cf-tile-num small { font-family: var(--sapFontFamily); font-size: var(--sapFontSmallSize); margin-inline-start: 0.25rem; }
 .cf-tile-num.Critical { color: var(--sapCriticalTextColor); }
 .cf-tile-num.Negative { color: var(--sapNegativeTextColor); }

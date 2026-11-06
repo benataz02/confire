@@ -4,6 +4,7 @@ import { t, title } from "../../../head.ts";
 import { ObjectStatus, Text } from "@ui5/webcomponents-react";
 import { useI18n } from "../../../i18n.ts";
 import { orpc } from "../../../orpc.ts";
+import { viewsQuery } from "@confire/ui/views.ts";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
 import { useListView } from "@confire/ui/useListView.ts";
 import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
@@ -59,7 +60,12 @@ function requestCells(t: TextFn) {
 // Portal → Requests (spec §10): the clients' projects from their first submit on — a client's draft
 // is private. Any member. A row opens the configuration process page, which carries the decisions.
 
-export const Route = createFileRoute("/$slug/requests/")({ head: () => title(t("NAV_REQUESTS")), component: Requests });
+export const Route = createFileRoute("/$slug/requests/")({
+  head: () => title(t("NAV_REQUESTS")),
+  // A hovered link (a home tile, a row's link) warms the views the list waits on, never awaited.
+  loader: ({ context }) => void context.queryClient.prefetchQuery(viewsQuery(orpc, "requests")),
+  component: Requests,
+});
 
 function Requests() {
   const i18n = useI18n();

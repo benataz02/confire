@@ -8,17 +8,25 @@ import { PROJECT_STATUS, PROJECT_STATUS_OPTIONS } from "@confire/ui/timeline/pro
 import type { ListFeature, ListQuery, Row } from "@confire/ui/types.ts";
 import { PROJECT_STATUS_KEY, type TextFn } from "../../../features/labels.ts";
 import { useI18n } from "../../../i18n.ts";
+import { viewsQuery } from "@confire/ui/views.ts";
 import { meQuery, orpc } from "../../../orpc.ts";
 
 // Projects (spec §9): the company's projects, one configuration each, with personal views on top of
 // the declared ones. Buyers and owners start new ones from the catalog.
 
-export const Route = createFileRoute("/$slug/projects/")({ component: Projects });
+export const Route = createFileRoute("/$slug/projects/")({
+  // A hovered link warms the views the list waits on; not awaited, so a click never waits for it.
+  loader: ({ context }) => void context.queryClient.prefetchQuery(viewsQuery(orpc, "portal:projects")),
+  component: Projects,
+});
+
+/** The journey's next steps (server portal/journey.ts), in its order: the home tiles open this list on them. */
+const NEXT = ["finish", "review", "changes", "answer", "awaitOrder", "delivery", "invoice", "done", "declined"];
 
 /** Not yet quoted or declined; "Created by me" is the same, the user's own. */
 const OPEN = ["draft", "submitted", "in_review", "returned"];
 
-const projectsFeature = (t: TextFn): ListFeature => ({
+const projectsFeature = (t: TextFn, supplier: string): ListFeature => ({
   tableId: "portal:projects",
   title: t("PORTAL_PROJECTS"),
   columns: [
@@ -35,6 +43,10 @@ const projectsFeature = (t: TextFn): ListFeature => ({
   filterFields: [
     { key: "name" }, { key: "status" }, { key: "modelName" },
     { key: "mine", label: t("PORTAL_VIEW_MINE"), type: "enum", visible: false, options: [{ value: "yes", label: t("PORTAL_VIEW_MINE") }] },
+    {
+      key: "next", label: t("PORTAL_HOME_COL_NEXT"), type: "enum", visible: false,
+      options: NEXT.map((n) => ({ value: n, label: t(`PORTAL_HOME_NEXT_${n.toUpperCase()}`, supplier) })),
+    },
   ],
   // Code, not seeded rows: the portal shows personal views only (spec §9), never the tenant's shared ones.
   systemViews: [
@@ -47,7 +59,8 @@ const projectsFeature = (t: TextFn): ListFeature => ({
 function Projects() {
   const i18n = useI18n();
   const t = i18n.getText.bind(i18n);
-  const role = useQuery(meQuery).data?.company?.role;
+  const me = useQuery(meQuery).data;
+  const role = me?.company?.role;
   const [query, setQuery] = useState<ListQuery | null>(null);
   const data = useListView(
     {
@@ -62,7 +75,7 @@ function Projects() {
     { route: "/projects", keyOf: (r) => r.id, ...(role === "viewer" ? {} : { create: "/projects/new" }) },
   );
   return (
-    <ListReport feature={projectsFeature(t)} data={data} onQuery={setQuery} keyOf={(r) => String(r.id)} cellTemplates={{
+    <ListReport feature={projectsFeature(t, me?.tenant.name ?? "")} data={data} onQuery={setQuery} keyOf={(r) => String(r.id)} cellTemplates={{
       status: (row: Row) => {
         const key = row.status as keyof typeof PROJECT_STATUS;
         const s = PROJECT_STATUS[key];

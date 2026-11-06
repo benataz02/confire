@@ -2,6 +2,7 @@ import { useLayoutEffect, useState, type CSSProperties, type KeyboardEvent } fro
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bar, BusyIndicator, Button, FlexBox, Icon, Label, MessageStrip, Text, Title } from "@ui5/webcomponents-react";
 import { confirm } from "@confire/ui/confirm.ts";
+import { firstName } from "@confire/ui/format.ts";
 import { useI18n } from "../i18n.ts";
 import { client, meQuery, orpc } from "../orpc.ts";
 import { useAssistantShell } from "./AssistantProvider.tsx";
@@ -80,7 +81,6 @@ export function AssistantPanel() {
   };
   const kind = projectId ? "configure" : kindOf(route);
   const subtitle = projectId ? config.data?.project.name ?? "" : t("ASSISTANT_GENERAL");
-  const firstName = (me.data?.user?.name || me.data?.user?.email || "").split(/[ @]/)[0] ?? "";
 
   const head = (empty: boolean) => (
     <>
@@ -106,7 +106,7 @@ export function AssistantPanel() {
           <div style={{ minHeight: 0, overflow: "hidden" }}>
             <FlexBox direction="Column" alignItems="Center" gap="0.5rem" style={{ padding: "1.5rem 1rem 2.5rem", textAlign: "center" }}>
               <Icon name="ai" style={{ width: "3rem", height: "3rem", color: "var(--sapAssistant_TextColor)" }} />
-              <Title level="H3">{t("ASSISTANT_HELLO", firstName)}</Title>
+              <Title level="H3">{t("ASSISTANT_HELLO", firstName(me.data?.user))}</Title>
               <Text>{t(kind === "configure" ? "ASSISTANT_WELCOME_CONFIGURE" : "ASSISTANT_WELCOME_GENERAL")}</Text>
             </FlexBox>
           </div>

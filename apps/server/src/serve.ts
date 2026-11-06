@@ -123,9 +123,11 @@ export function serve({ auth, router, title, routes, spaDist, port, origin }: {
 
   // oRPC — browser session procedures.
   app.use("/rpc/*", async (c, next) => {
-    // A report's live run is a string of agent round trips, past Bun's 10 s idle timeout through a
-    // tunnel: two minutes for that call (the env is the Bun server; `.request()` in tests has none).
-    if (c.req.path === "/rpc/reports/run") (c.env as { timeout?: (req: Request, seconds: number) => void } | undefined)?.timeout?.(c.req.raw, 120);
+    // Bun closes a request idle for 10 s, but one SAP read through the agent can take longer (the same
+    // five-row read: 70 ms, then 15–33 s, measured live) and agentPost waits up to 70 s. 75 s, so a slow
+    // SAP answers late or as the agent's own 503, never a socket hang-up; a report's live run is a string
+    // of agent round trips: two minutes. The env is the Bun server; `.request()` in tests has none.
+    (c.env as { timeout?: (req: Request, seconds: number) => void } | undefined)?.timeout?.(c.req.raw, c.req.path === "/rpc/reports/run" ? 120 : 75);
     const { matched, response } = await rpc.handle(c.req.raw, {
       prefix: "/rpc",
       context: { headers: c.req.raw.headers },

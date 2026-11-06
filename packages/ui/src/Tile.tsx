@@ -2,15 +2,14 @@ import { Link } from "@tanstack/react-router";
 import { Icon } from "@ui5/webcomponents-react";
 import "./tile.css";
 
-// A launchpad tile (Fiori's 11rem square; `wide` flexes in a HeroBanner), shared by the staff home and
-// the portal home. A tile's count is a to-do; with `to` it opens its list, without it is a figure.
+// A launchpad tile (Fiori's 11rem square; `wide` is its 2×1, room for a money figure), shared by the
+// staff home and the portal home. A tile's count is a to-do; with `to` it opens its list, without it is a figure.
 
 export type TileProps = {
   title: string;
   subtitle?: string;
   icon?: string;
   value?: string | number;
-  unit?: string;
   state?: "Critical" | "Negative";
   /** tenant-relative (`/configs`); no `to` = a figure, not a link */
   to?: string;
@@ -29,7 +28,7 @@ export function Tile({ to, search, wide, loading, ...c }: TileProps) {
         {c.icon && <Icon name={c.icon} className="cf-tile-icon" />}
         {loading && <span className="cf-tile-num"><span className="confire-op-skel-bar" style={{ width: "2.5rem", height: "2rem" }} /></span>}
         {!loading && c.value !== undefined && (
-          <span className={`cf-tile-num ${c.state ?? ""}`}>{c.value}{c.unit && <small>{c.unit}</small>}</span>
+          <span className={`cf-tile-num ${c.state ?? ""}`}>{c.value}</span>
         )}
       </span>
     </>

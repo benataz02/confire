@@ -4,7 +4,7 @@ import { db, configMasterdata, configModel, configProject, invitation } from "@c
 import { userProcedure } from "../base.ts";
 import { openInvitation, portalInvitationOf } from "../../portal/members.ts";
 
-// The workspace home: the caller's own figures for the HeroBanner, and one to-do count per tile.
+// The workspace home: the caller's own figures (its Quick actions), and one to-do count per tile.
 // Postgres only — a home page that waited on the agent would be down whenever the agent is.
 // Each count is what its tile's list shows under the filter the tile links with.
 

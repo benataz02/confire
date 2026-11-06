@@ -4,6 +4,7 @@ import { t, title } from "../../../head.ts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, ObjectStatus, Text } from "@ui5/webcomponents-react";
 import { orpc } from "../../../orpc.ts";
+import { viewsQuery } from "@confire/ui/views.ts";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
 import { useListView } from "@confire/ui/useListView.ts";
 import { projectStatusText, statusUi } from "../../../components/configurator/runView.ts";
@@ -12,7 +13,12 @@ import { toast } from "@confire/ui/toast.ts";
 import { useI18n } from "../../../i18n.ts";
 import type { ListFeature, ListQuery, Row } from "@confire/ui/types.ts";
 
-export const Route = createFileRoute("/$slug/configs/")({ head: () => title(t("NAV_CONFIGS")), component: Configs });
+export const Route = createFileRoute("/$slug/configs/")({
+  head: () => title(t("NAV_CONFIGS")),
+  // A hovered link (a home tile, a row's link) warms the views the list waits on, never awaited.
+  loader: ({ context }) => void context.queryClient.prefetchQuery(viewsQuery(orpc, "configs")),
+  component: Configs,
+});
 
 function Configs() {
   const i18n = useI18n();

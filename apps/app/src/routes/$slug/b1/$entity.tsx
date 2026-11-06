@@ -7,6 +7,7 @@ import { useI18n } from "../../../i18n.ts";
 import { b1Feature } from "../../../features/b1/index.ts";
 import { localizedB1Feature, useCodeNames } from "../../../features/b1/localize.ts";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
+import { viewsQuery } from "@confire/ui/views.ts";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
 import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import { useFieldConstraints } from "@confire/ui/metadata.ts";
@@ -34,6 +35,9 @@ export const Route = createFileRoute("/$slug/b1/$entity")({
   beforeLoad: ({ params }) => {
     if (!b1Feature(params.entity)) throw redirect({ to: "/$slug", params });
   },
+  // The list's views alone (Postgres): the metadata and the rows go through the agent to SAP, which a
+  // hover never calls. Not awaited, so a click never waits for it.
+  loader: ({ context, params }) => void context.queryClient.prefetchQuery(viewsQuery(orpc, b1Feature(params.entity)!.list.tableId)),
   // Free-form: a list's URL filters live here too (`?CardCode=C1,C2`); only Copy to's two are typed.
   // The default parser turns `docs=5` into a number, hence String().
   validateSearch: (s: Record<string, unknown>): Record<string, unknown> & { from?: string; docs?: string } => ({

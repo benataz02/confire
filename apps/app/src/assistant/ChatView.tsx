@@ -11,6 +11,7 @@ import {
 import { Button as AiButton, ButtonState } from "@ui5/webcomponents-ai-react";
 import { useLanguage } from "@confire/ui/i18n.ts";
 import { FILE_MAX_MB } from "@confire/ui/files.ts";
+import { firstName } from "@confire/ui/format.ts";
 import { ORPCError } from "@orpc/client";
 import { useI18n } from "../i18n.ts";
 import { client, meQuery, orpc } from "../orpc.ts";
@@ -580,7 +581,6 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
   const prompts = kind === "configure" ? ["ASSISTANT_PROMPT_MISSING", "ASSISTANT_PROMPT_UNAVAILABLE"]
     : kind === "report" ? []
     : page ? ["REPORT_PROMPT_PIPELINE", "REPORT_PROMPT_OVERDUE"] : ["ASSISTANT_PROMPT_WAITING", "ASSISTANT_PROMPT_MONTH"];
-  const firstName = (me.data?.user?.name || me.data?.user?.email || "").split(/[ @]/)[0] ?? "";
   const inline = page ? READING : "1rem";
 
   return (
@@ -599,7 +599,7 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
       {page && empty ? (
         <FlexBox direction="Column" justifyContent="Center"
           style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBlock: "1.5rem clamp(1.5rem, 18vh, 10rem)", paddingInline: inline }}>
-          <HeroBanner style={BANNER} headerText={t("ASSISTANT_HELLO", firstName)} overlineText={t("ASSISTANT_PAGE_TITLE")}>
+          <HeroBanner style={BANNER} headerText={t("ASSISTANT_HELLO", firstName(me.data?.user))} overlineText={t("ASSISTANT_PAGE_TITLE")}>
             <FlexBox direction="Column" gap="1rem">
               <Text style={{ color: "inherit" }}>{t(kind === "configure" ? "ASSISTANT_WELCOME_CONFIGURE" : "ASSISTANT_WELCOME_START")}</Text>
               {notices}

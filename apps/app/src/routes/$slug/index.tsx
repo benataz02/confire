@@ -1,18 +1,20 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { t, title } from "../../head.ts";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Button, FlexBox, HeroBanner, Title } from "@ui5/webcomponents-react";
+import { ObjectPage, ObjectPageSection, ObjectPageTitle, Text, Title } from "@ui5/webcomponents-react";
 import { Tile, type TileProps } from "@confire/ui/Tile.tsx";
+import { useGreeting } from "@confire/ui/greeting.ts";
 import { meQuery, orpc, useCurrency, useIsAdmin } from "../../orpc.ts";
 import { formatLocale } from "@confire/ui/format.ts";
 import { useI18n } from "../../i18n.ts";
 import { B1_DOCUMENTS, B1_FEATURES } from "../../features/b1/index.ts";
-import { B1_NAV_KEY } from "../../components/AppShell.tsx";
+import { b1Label } from "../../components/AppShell.tsx";
 import { formatValue } from "../../reports/widgets.ts";
 
-// The workspace home: the caller's own figures in the HeroBanner, then the side nav's groups as
-// launchpad tiles. A tile's count is a to-do, and the tile opens its list filtered to exactly those
-// rows (the list reads its filters off the URL), so the number and the list never disagree.
+// The workspace home, the portal home's layout: the caller's own figures first, then the side nav's
+// groups, each a section of launchpad tiles. A tile's count is a to-do, and the tile opens its list
+// filtered to exactly those rows (the list reads its filters off the URL), so the number and the list
+// never disagree.
 export const Route = createFileRoute("/$slug/")({ head: () => title(t("NAV_HOME")), component: Home });
 
 const OPEN_DOC = { field: "DocumentStatus", op: "eq", value: "bost_Open" } as const;
@@ -21,10 +23,9 @@ const flag = (n: number | undefined, state: "Critical" | "Negative") => (n ? sta
 function Home() {
   const i18n = useI18n();
   const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
-  const navigate = useNavigate({ from: "/$slug" });
   const isAdmin = useIsAdmin();
   const currency = useCurrency();
-  const { data: me } = useQuery(meQuery);
+  const { greeting, today } = useGreeting(useQuery(meQuery).data?.user);
   const { data: o } = useQuery(orpc.home.overview.queryOptions());
   // The user's saved reports, each its last run's headline: no SAP call here (reports spec §6.1).
   const { data: reports } = useQuery(orpc.reports.tiles.queryOptions());
@@ -40,14 +41,24 @@ function Home() {
   });
   const openCount = Object.fromEntries(b1Docs.map((f, i) => [f.entity, openDocs[i]!]));
 
-  const firstName = (me?.user?.name || me?.user?.email || "").split(/[ @]/)[0]!;
-  const hour = new Date().getHours();
-  const greeting = t(hour < 12 ? "HOME_GREETING_MORNING" : hour < 18 ? "HOME_GREETING_AFTERNOON" : "HOME_GREETING_EVENING", firstName);
-  const compact = new Intl.NumberFormat(formatLocale(), { notation: "compact", maximumFractionDigits: 1 });
-
-  const groups: { title: string; tiles: TileProps[] }[] = [
+  const groups: { id: string; title: string; tiles: TileProps[] }[] = [
     {
-      title: t("NAV_CONFIGURATOR"),
+      id: "actions", title: t("HOME_QUICK_ACTIONS"),
+      tiles: [
+        { title: t("CONFIG_NEW"), icon: "add", to: "/configs/new" },
+        { title: t("HOME_MY_DRAFTS"), subtitle: t("HOME_MY_DRAFTS_SUB"), icon: "edit", value: o?.myDrafts, to: "/configs", search: { status: "draft", mine: "yes" } },
+        { title: t("HOME_MY_IN_REVIEW"), subtitle: t("HOME_MY_IN_REVIEW_SUB"), icon: "inbox", value: o?.myInReview, to: "/requests", search: { status: "in_review", mine: "yes" } },
+        // A figure, not a link: the report tiles' compact money ("€12.3K"), on a 2×1 — a square's
+        // number has no room for "123,5 mil €" beside the icon.
+        {
+          title: t("HOME_MY_QUOTED"), icon: "sales-document", wide: true,
+          subtitle: o && t(o.myQuoted === 1 ? "HOME_QUOTATIONS_ONE" : "HOME_QUOTATIONS_MANY", String(o.myQuoted)),
+          value: o && formatValue(o.myQuotedValue, "money", currency ?? null, formatLocale()),
+        },
+      ],
+    },
+    {
+      id: "configurator", title: t("NAV_CONFIGURATOR"),
       tiles: [
         // The chat alone, from the client's request to the quote page. Off, the page says why.
         { title: t("ASSISTANT_PAGE_TITLE"), subtitle: t("ASSISTANT_PAGE_SUB"), icon: "ai", to: "/assistant" },
@@ -59,7 +70,7 @@ function Home() {
       ],
     },
     {
-      title: t("HOME_REPORTS"),
+      id: "reports", title: t("HOME_REPORTS"),
       tiles: [
         // The AI page: a chat that asks for a report becomes the report's.
         { title: t("HOME_NEW_REPORT"), subtitle: t("HOME_NEW_REPORT_SUB"), icon: "add-document", to: "/assistant" },
@@ -72,7 +83,7 @@ function Home() {
       ],
     },
     {
-      title: t("NAV_PORTAL"),
+      id: "portal", title: t("NAV_PORTAL"),
       tiles: [
         { title: t("NAV_REQUESTS"), subtitle: t("HOME_NEW_REQUESTS"), icon: "inbox", value: o?.newRequests, state: flag(o?.newRequests, "Critical"), to: "/requests", search: { status: "submitted" } },
         ...(isAdmin ? [
@@ -82,42 +93,23 @@ function Home() {
     },
     // A document's tile counts its open ones and opens its list on them; master data has no to-do.
     {
-      title: t("NAV_SAP"),
+      id: "sap", title: t("NAV_SAP"),
       tiles: Object.values(B1_FEATURES).map((f) => ({
-        title: B1_NAV_KEY[f.entity] ? t(B1_NAV_KEY[f.entity]!) : f.entity, icon: f.icon, to: `/b1/${f.entity}`,
+        title: b1Label(f.entity, t), icon: f.icon, to: `/b1/${f.entity}`,
         ...(B1_DOCUMENTS.has(f.entity) ? { subtitle: t("HOME_OPEN"), value: openCount[f.entity]!.data, loading: openCount[f.entity]!.isPending, search: { DocumentStatus: "bost_Open" } } : {}),
       })),
     },
   ];
 
   return (
-    <FlexBox direction="Column" style={{ gap: "2rem", padding: "1rem 2rem 2rem" }}>
-      <HeroBanner
-        overlineText={new Date().toLocaleDateString(formatLocale(), { weekday: "long", day: "numeric", month: "long" })}
-        headerText={greeting}
-        actions={
-          <Button icon="add" onClick={() => void navigate({ to: "/$slug/configs/new" })}>{t("CONFIG_NEW")}</Button>
-        }
-      >
-        <div className="cf-tiles">
-          <Tile wide title={t("HOME_MY_DRAFTS")} subtitle={t("HOME_MY_DRAFTS_SUB")} icon="edit"
-            value={o?.myDrafts} to="/configs" search={{ status: "draft", mine: "yes" }} />
-          <Tile wide title={t("HOME_MY_IN_REVIEW")} subtitle={t("HOME_MY_IN_REVIEW_SUB")} icon="inbox"
-            value={o?.myInReview} to="/requests" search={{ status: "in_review", mine: "yes" }} />
-          <Tile wide title={t("HOME_MY_QUOTED")}
-            subtitle={o ? t(o.myQuoted === 1 ? "HOME_QUOTATIONS_ONE" : "HOME_QUOTATIONS_MANY", String(o.myQuoted)) : undefined}
-            icon="sales-document" value={o ? compact.format(o.myQuotedValue) : undefined} unit={currency} />
-        </div>
-      </HeroBanner>
-
+    <ObjectPage hidePinButton titleArea={<ObjectPageTitle header={<Title>{greeting}</Title>} subHeader={<Text>{today}</Text>} />}>
       {groups.map((g) => (
-        <section key={g.title}>
-          <Title level="H4" style={{ marginBottom: "0.75rem" }}>{g.title}</Title>
+        <ObjectPageSection key={g.id} id={g.id} titleText={g.title}>
           <div className="cf-tiles">
             {g.tiles.map((tile) => <Tile key={tile.to ?? tile.title} {...tile} />)}
           </div>
-        </section>
+        </ObjectPageSection>
       ))}
-    </FlexBox>
+    </ObjectPage>
   );
 }

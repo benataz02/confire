@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
-import { Outlet, useRouterState } from "@tanstack/react-router";
+import { Outlet, useCanGoBack, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Avatar, Button, NavigationLayout, ShellBar, ShellBarBranding, SideNavigation, SideNavigationGroup, SideNavigationItem,
@@ -18,11 +18,12 @@ import { initials } from "@confire/ui/format.ts";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { NotificationsPopover, useUnreadCount } from "@confire/ui/notifications/Notifications.tsx";
 import { DOC_PAGES } from "../features/documents.ts";
+import { PortalSearch, type SearchHit } from "./PortalSearch.tsx";
 
 // The supplier's portal chrome (spec §9): the same NavigationLayout + ShellBar + SideNavigation
-// pattern as the internal AppShell, wearing the supplier's name and logo (D20). Fiori: no shell-bar
-// Back button (the browser's does that), the branding element leads home, the profile opens the
-// user menu.
+// pattern as the internal AppShell, wearing the supplier's name and logo (D20): a Back button as the
+// staff shell's (off while there is nowhere in the portal to go back to — a mail link's first page),
+// the branding element leads home, the profile opens the user menu.
 
 /** The supplier's accent (D20) as Horizon's own variables, so the shell bar and every emphasized
  *  button follow it. Save refused an accent white text can't be read on (4.5:1). */
@@ -51,6 +52,8 @@ const accentVars = (accent: string): Record<string, string> => {
 
 export function PortalShell() {
   const go = useEntityNav();
+  const router = useRouter();
+  const canGoBack = useCanGoBack();
   const queryClient = useQueryClient();
   // Inside the supplier's portal, as the nav items name it.
   const pathname = useRouterState({ select: (s) => tenantPath(s.location.pathname) });
@@ -87,6 +90,16 @@ export function PortalShell() {
     if (to) go(to);
   };
 
+  // What the side nav opens, for the search's Pages group.
+  const searchPages: SearchHit[] = [
+    { text: i18n.getText("NAV_HOME"), icon: "home", to: "/" },
+    { text: i18n.getText("PORTAL_PROJECTS"), icon: "product", to: "/projects" },
+    ...Object.entries(DOC_PAGES).map(([entity, p]) =>
+      ({ text: i18n.getText(p.labelKey), description: i18n.getText("PORTAL_DOCUMENTS"), icon: p.icon, to: `/docs/${entity}` })),
+    ...(me.company.role === "owner" ? [{ text: i18n.getText("PORTAL_COMPANY"), icon: "building", to: "/company" }] : []),
+    { text: i18n.getText("NOTIF_MENU"), icon: "bell", to: "/notifications" },
+  ];
+
   const signOut = async () => {
     await authClient.signOut();
     queryClient.clear();
@@ -101,17 +114,24 @@ export function PortalShell() {
       header={
         <>
           <ShellBar
-            startButton={<Button icon="menu" tooltip={i18n.getText("PORTAL_MENU")} onClick={toggleNav} />}
+            startButton={
+              <>
+                <Button icon="nav-back" tooltip={i18n.getText("UI_GO_BACK")} disabled={!canGoBack} onClick={() => router.history.back()} />
+                <Button icon="menu" tooltip={i18n.getText("PORTAL_MENU")} onClick={toggleNav} />
+              </>
+            }
             branding={
               <ShellBarBranding
                 logo={me.tenant.logo
                   ? <img alt="" src={me.tenant.logo} />
                   : <Avatar icon="building" size="XS" colorScheme="Accent6" accessibleName={me.tenant.name} />}
-                onClick={() => go("/home")}
+                onClick={() => go("/")}
               >
                 {me.tenant.name}
               </ShellBarBranding>
             }
+            searchField={<PortalSearch pages={searchPages} />}
+            showSearchField
             profile={<Avatar id="portal-user-menu" initials={initials(me.user.name)}>
               {me.user.image ? <img src={me.user.image} alt={me.user.name} /> : null}
             </Avatar>}
@@ -174,7 +194,7 @@ export function PortalShell() {
             <SideNavigationItem text={i18n.getText("PORTAL_COMPANY")} icon="building" data-to="/company" selected={pathname === "/company"} />
           ) : undefined}
         >
-          <SideNavigationItem text={i18n.getText("NAV_HOME")} icon="home" data-to="/home" selected={pathname === "/home"} />
+          <SideNavigationItem text={i18n.getText("NAV_HOME")} icon="home" data-to="/" selected={pathname === "/"} />
           <SideNavigationItem text={i18n.getText("PORTAL_PROJECTS")} icon="product" data-to="/projects"
             selected={pathname === "/projects" || pathname.startsWith("/projects/")} />
           <SideNavigationGroup text={i18n.getText("PORTAL_DOCUMENTS")} expanded>

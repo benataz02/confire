@@ -66,6 +66,10 @@ export function formatValue(v: unknown, type?: FieldType, options?: Option[], in
 export const initials = (name: string) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
 
+/** What a greeting calls someone: the name's first word, else the email's local part. */
+export const firstName = (user?: { name?: string | null; email?: string | null } | null) =>
+  (user?.name || user?.email || "").split(/[ @]/)[0]!;
+
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["year", 31_536_000], ["month", 2_592_000], ["week", 604_800], ["day", 86_400], ["hour", 3_600], ["minute", 60],
 ];

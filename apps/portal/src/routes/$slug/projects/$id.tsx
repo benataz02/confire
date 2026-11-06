@@ -30,7 +30,11 @@ import { useI18n } from "../../../i18n.ts";
 // the internal page; the response IS the new state, so the cache is set from it rather than
 // refetched. A complete project is calculated by the read itself — nothing here asks for it.
 
-export const Route = createFileRoute("/$slug/projects/$id")({ component: Page });
+export const Route = createFileRoute("/$slug/projects/$id")({
+  // Warms the query the page reads (same key), so a hover's preload has the project ready by the click.
+  loader: ({ context, params }) => void context.queryClient.prefetchQuery(orpc.projects.get.queryOptions({ input: { id: params.id } })),
+  component: Page,
+});
 
 function Page() {
   const { id } = Route.useParams();

@@ -7,6 +7,7 @@ import { useFieldConstraints } from "@confire/ui/metadata.ts";
 import { useListView } from "@confire/ui/useListView.ts";
 import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import type { ListQuery, Row } from "@confire/ui/types.ts";
+import { viewsQuery } from "@confire/ui/views.ts";
 import { orpc } from "../../../orpc.ts";
 import { docFeature, isDocEntity, type DocEntity } from "../../../features/documents.ts";
 import { useI18n } from "../../../i18n.ts";
@@ -18,6 +19,8 @@ export const Route = createFileRoute("/$slug/docs/$entity")({
   beforeLoad: ({ params }) => {
     if (!isDocEntity(params.entity)) throw redirect({ to: "/$slug", params });
   },
+  // The views alone: the fields and the rows are SAP reads, which a hover never makes.
+  loader: ({ context, params }) => void context.queryClient.prefetchQuery(viewsQuery(orpc, `portal:docs:${params.entity}`)),
   component: DocsPage,
 });
 

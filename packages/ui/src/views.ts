@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useUiSource } from "./source.tsx";
+import { useUiSource, type UiSource } from "./source.tsx";
 import { isEmptyValue } from "./validation.ts";
 import type {
   FilterCond, FilterField, FilterValue, ListColumn, ListQuery, SystemView, ViewState,
@@ -288,6 +288,13 @@ export function decodeFilters(
 
 // --- the hook -----------------------------------------------------------------------------------
 
+/** A list's saved views: the first read a ListReport waits on before it asks for any rows. A list
+ *  route's loader prefetches it, so a hovered link (a tile, the side nav) warms it — Postgres only,
+ *  never the SAP rows. A failed list is not a broken page: the declared views still work, so it is
+ *  only "no saved views" — hence no retry. */
+export const viewsQuery = (orpc: Pick<UiSource["orpc"], "views">, tableId: string) =>
+  ({ ...orpc.views.list.queryOptions({ input: { tableId } }), retry: false, staleTime: 60_000 });
+
 export type ViewsApi<S> = ReturnType<typeof useViews<S>>;
 
 /**
@@ -305,10 +312,9 @@ export function useViews<S>({ tableId, systemViews, resolve, initial, local = fa
 }) {
   const qc = useQueryClient();
   const { orpc } = useUiSource();
-  const listOpts = orpc.views.list.queryOptions({ input: { tableId } });
-  // A failed list is not a broken page: the declared views still work, so it is only "no saved
-  // views" — hence isFetched rather than isSuccess as the gate.
-  const q = useQuery({ ...listOpts, enabled: !local, retry: false, staleTime: 60_000 });
+  const listOpts = viewsQuery(orpc, tableId);
+  // isFetched rather than isSuccess as the gate: a failed list still opens on the declared views.
+  const q = useQuery({ ...listOpts, enabled: !local });
   const system = useMemo(() => systemViewsOf(systemViews), [systemViews]);
   const views = useMemo<View<S>[]>(
     () => withSaved(system, (q.data?.views ?? []).map((v) => ({ ...v, state: v.state as unknown as Partial<S> }))),

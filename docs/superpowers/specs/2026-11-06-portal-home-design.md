@@ -20,7 +20,7 @@ one-click way to start a new one and the latest documents below.
 - **Quick actions:** *New project* and opening one inquiry (the row).
 - **Latest documents** below the inquiries.
 - **Pins:** a customer pins inquiries to keep them on top.
-- The page is **home**: its URL is `/<slug>/home`, no longer the slug's index.
+- The page is **home**, the slug's index (`/<slug>/`).
 
 ## Non-goals
 
@@ -117,13 +117,19 @@ project page already enforces that. *(Viewer wording unchanged: my call.)*
   the page writes pins with no new procedure. `home.overview` reads the key server-side (`getUserState`
   in `ui-views.ts`), so pinned finished projects come back in the same call. Ids that no longer
   resolve inside the company fence are ignored.
-- **Figures are not links** *(my call)*. The staff home's rule is that a tile's figure opens a list
-  showing exactly its rows, and two of these three cannot be expressed as Projects-list filters. The
-  table directly below already lists them.
-- **Route**: `routes/$slug/index.tsx` becomes `routes/$slug/home.tsx` (`/$slug/home`). The slug's
-  index stays as a `beforeLoad` redirect to it, so the lobby's `portalTenantUrl(slug)`, mail links and
-  the `navigate({ to: "/$slug" })` calls in accept, onboarding and company keep working. The shell's
-  Home item (`PortalShell.tsx`, `data-to="/"`, `selected={pathname === "/"}`) moves to `/home`.
+- **Figures are links**, as on the staff home: each opens the Projects list on the journey steps it
+  counts (`?next=answer,changes`, `?next=review,awaitOrder`, `?next=delivery,invoice`). The list's
+  `next` field is `nextSql` (`portal/journey.ts`): a SQL `case` built from `journeyOf` itself over every
+  (status, answer, SAP step), so the list and the figure cannot disagree. *(It replaces the first
+  call, "figures are not links": no status filter could express two of the three.)*
+- **The table and the list are Cards**: the card header carries the title (the section's is hidden,
+  kept for the anchor bar) and *All projects*, a router link (`@confire/ui/RouterLink.tsx`).
+- **Prefetch never reaches SAP**: a hovered link preloads its route, and a list route's loader warms
+  only its saved views (`viewsQuery`, Postgres) — the read a ListReport waits on before its rows.
+  B1 rows and metadata, and a project's page (whose read may start a masterdata sync), load on click.
+- **Route**: the page stays `routes/$slug/index.tsx` (`/$slug/`), so the lobby's
+  `portalTenantUrl(slug)`, mail links and the `navigate({ to: "/$slug" })` calls in accept, onboarding
+  and company land on it with no redirect, and the shell's Home item stays `data-to="/"`.
 - **Texts**: `apps/portal/src/i18n/parts/portal.{en,es,eu}.properties`. Add the new keys in all
   three languages and delete the `PORTAL_HOME_*` keys nothing uses any more.
 - **Theme**: every colour is a Horizon variable (`--sapPositiveColor`, `--sapInformativeColor`,

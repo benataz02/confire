@@ -1,12 +1,8 @@
 import { useNavigate, useRouter, useRouterState, Outlet } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Avatar, Button,
-  NavigationLayout, ShellBar, ShellBarBranding, SideNavigation, SideNavigationGroup, SideNavigationItem,
-  ToggleButton,
-  UserMenu,
-  UserMenuAccount,
-  UserMenuItem,
+  Avatar, Button, NavigationLayout, ShellBar, ShellBarBranding, SideNavigation, SideNavigationGroup, SideNavigationItem,
+  ToggleButton, UserMenu, UserMenuAccount, UserMenuItem,
 } from "@ui5/webcomponents-react";
 import type { SideNavigationPropTypes, NavigationLayoutDomRef, NavigationLayoutPropTypes } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
@@ -31,7 +27,7 @@ const CflDialog = lazy(() => import("@confire/ui/cfl/CflDialog.tsx"));
  *  lists' "Assigned to me" filters SalesPersonCode on. */
 const SALES_PERSON_KEY = "b1:salesPerson";
 
-export const B1_NAV_KEY: Record<string, string> = {
+const B1_NAV_KEY: Record<string, string> = {
   Quotations: "NAV_QUOTATIONS",
   Orders: "NAV_ORDERS",
   DeliveryNotes: "NAV_DELIVERIES",
@@ -70,6 +66,8 @@ function Shell() {
   const navigate = useNavigate({ from: "/$slug" });
   const openNotificationSettings = () => void navigate({ to: "/$slug/settings", search: { tab: "notifications" } });
   const pathname = useRouterState({ select: (s) => tenantPath(s.location.pathname) });
+  /** On the page `to` or one under it (`/configs/…`); home only on itself. */
+  const at = (to: string) => pathname === to || (to !== "/" && pathname.startsWith(`${to}/`));
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const navLayoutRef = useRef<NavigationLayoutDomRef>(null);
   // The user's last choice survives a reload (same localStorage as theme and density); "Auto" —
@@ -84,13 +82,14 @@ function Shell() {
   };
   const { theme, setTheme: setThemeState, density, setDensity } = useAppearance();
   const i18n = useI18n();
+  const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
   const { language, setLanguage } = useLanguage();
   const assistant = useAssistantShell();
   // Off here (the workspace's switch, or no API key on the server): the toggle is disabled and says why.
   const assistantStatus = useQuery(orpc.assistant.status.queryOptions());
-  const toggle = assistantToggle(assistantStatus.data, (k) => i18n.getText(k));
+  const toggle = assistantToggle(assistantStatus.data, t);
   const { open: assistantOpen, close: closeAssistant } = assistant;
-  const onAiPage = pathname === "/assistant" || pathname.startsWith("/assistant/");
+  const onAiPage = at("/assistant");
   useEffect(() => { if (toggle.disabled && assistantOpen && assistantStatus.data) closeAssistant(); },
     [toggle.disabled, assistantOpen, assistantStatus.data, closeAssistant]);
 
@@ -119,22 +118,37 @@ function Shell() {
     if (to) go(to);
   };
 
-  // The search's pages: the side nav's targets, the same admin cut.
-  const t = (key: string) => i18n.getText(key);
-  const searchPages: SearchHit[] = [
-    { text: t("NAV_HOME"), icon: "home", to: "/" },
-    ...Object.values(B1_FEATURES).map((f) => ({ text: b1Label(f.entity, t), description: t("NAV_SAP"), icon: f.icon, to: `/b1/${f.entity}` })),
-    { text: t("NAV_CONFIGS"), icon: "sales-quote", to: "/configs" },
-    { text: t("ASSISTANT_PAGE_TITLE"), icon: "ai", to: "/assistant" },
-    ...(isAdmin ? [
-      { text: t("NAV_MODELS"), icon: "tree", to: "/models" },
-      { text: t("NAV_MASTERDATA"), icon: "table-view", to: "/masterdata" },
-      { text: t("NAV_AI_USAGE"), description: t("NAV_AI"), icon: "area-chart", to: "/usage" },
-    ] : []),
-    { text: t("NAV_REQUESTS"), description: t("NAV_PORTAL"), icon: "inbox", to: "/requests" },
-    ...(isAdmin ? [{ text: t("NAV_INVITATIONS"), description: t("NAV_PORTAL"), icon: "paper-plane", to: "/portal/invitations" }] : []),
-    { text: t("NAV_SETTINGS"), icon: "action-settings", to: "/settings" },
+  // The side nav, which is also the search's pages: one list, the admin cut made once.
+  const home: SearchHit = { text: t("NAV_HOME"), icon: "home", to: "/" };
+  const settings: SearchHit = { text: t("NAV_SETTINGS"), icon: "action-settings", to: "/settings" };
+  const groups: { text: string; items: SearchHit[] }[] = [
+    { text: t("NAV_SAP"), items: Object.values(B1_FEATURES).map((f) => ({ text: b1Label(f.entity, t), icon: f.icon, to: `/b1/${f.entity}` })) },
+    {
+      text: t("NAV_CONFIGURATOR"), items: [
+        { text: t("NAV_CONFIGS"), icon: "sales-quote", to: "/configs" },
+        ...(isAdmin ? [
+          { text: t("NAV_MODELS"), icon: "tree", to: "/models" },
+          { text: t("NAV_MASTERDATA"), icon: "table-view", to: "/masterdata" },
+        ] : []),
+      ],
+    },
+    // The assistant for every member; what it costs for admins (assistant spec §4.7).
+    {
+      text: t("NAV_AI"), items: [
+        { text: t("ASSISTANT_PAGE_TITLE"), icon: "ai", to: "/assistant" },
+        ...(isAdmin ? [{ text: t("NAV_AI_USAGE"), icon: "area-chart", to: "/usage" }] : []),
+      ],
+    },
+    // The customer portal (spec §10): Requests for every member, the rest for admins.
+    {
+      text: t("NAV_PORTAL"), items: [
+        { text: t("NAV_REQUESTS"), icon: "inbox", to: "/requests" },
+        ...(isAdmin ? [{ text: t("NAV_INVITATIONS"), icon: "paper-plane", to: "/portal/invitations" }] : []),
+      ],
+    },
   ];
+  const searchPages = [home, ...groups.flatMap((g) => g.items.map((i) => ({ ...i, description: g.text }))), settings];
+  const navItem = (i: SearchHit) => <SideNavigationItem key={i.to} text={i.text} icon={i.icon} data-to={i.to} selected={at(i.to)} />;
 
   const signOut = async () => {
     await authClient.signOut();
@@ -151,21 +165,12 @@ function Shell() {
           <ShellBar
             startButton={
               <>
-                <Button
-                  icon="nav-back"
-                  tooltip={i18n.getText("SHELL_BACK")}
-                  onClick={() => router.history.back()}
-                />
-                <Button
-                  icon="menu2"
-                  tooltip={i18n.getText("SHELL_MENU")}
-                  onClick={toggleNav}
-                />
+                <Button icon="nav-back" tooltip={t("SHELL_BACK")} onClick={() => router.history.back()} />
+                <Button icon="menu2" tooltip={t("SHELL_MENU")} onClick={toggleNav} />
               </>
             }
             branding={
-              <ShellBarBranding logo={<img alt="Confire" src="/confire-logo.png" />}
-                onClick={() => go("/")}>
+              <ShellBarBranding logo={<img alt="Confire" src="/confire-logo.png" />} onClick={() => go("/")}>
                 Confire
               </ShellBarBranding>
             }
@@ -189,8 +194,7 @@ function Shell() {
               notifications: { expanded: bellOpener !== null, hasPopup: "dialog" },
               profile: { expanded: userMenuOpen, hasPopup: "menu" },
             }}
-          >
-          </ShellBar>
+          />
           <UserMenu
             open={userMenuOpen}
             opener="user-menu-opener"
@@ -206,124 +210,46 @@ function Shell() {
             }
             showEditAccounts
             showEditButton
-            //showManageAccount
-            //showOtherAccounts
           >
-            <UserMenuItem text={i18n.getText("NAV_THEMES")} icon="person-placeholder" >
-              {THEMES.map((item) => {
-                const themeKey = THEME_KEY[item.id];
-                return (
-                  <UserMenuItem
-                    key={item.id}
-                    text={themeKey ? i18n.getText(themeKey) : item.label}
-                    icon={theme === item.id ? "sys-enter" : ""}
-                    onClick={() => setThemeState(item.id)}
-                  >
-                  </UserMenuItem>
-                );
-              })}
+            <UserMenuItem text={t("NAV_THEMES")} icon="person-placeholder">
+              {THEMES.map((item) => (
+                <UserMenuItem key={item.id} text={THEME_KEY[item.id] ? t(THEME_KEY[item.id]!) : item.label}
+                  icon={theme === item.id ? "sys-enter" : ""} onClick={() => setThemeState(item.id)} />
+              ))}
             </UserMenuItem>
-            <UserMenuItem text={i18n.getText("USER_MENU_DENSITY")} icon="person-placeholder" >
-              <UserMenuItem
-                data-id="compact"
-                text={i18n.getText("NAV_COMPACT")}
-                icon={density === "compact" ? "sys-enter" : ""}
-                onClick={() => setDensity('compact')}
-              >
-              </UserMenuItem>
-              <UserMenuItem
-                data-id="cozy"
-                text={i18n.getText("NAV_COZY")}
-                icon={density === "cozy" ? "sys-enter" : ""}
-                onClick={() => setDensity('cozy')}
-              >
-              </UserMenuItem>
+            <UserMenuItem text={t("USER_MENU_DENSITY")} icon="person-placeholder">
+              <UserMenuItem text={t("NAV_COMPACT")} icon={density === "compact" ? "sys-enter" : ""} onClick={() => setDensity("compact")} />
+              <UserMenuItem text={t("NAV_COZY")} icon={density === "cozy" ? "sys-enter" : ""} onClick={() => setDensity("cozy")} />
             </UserMenuItem>
-            <UserMenuItem text={i18n.getText("USER_MENU_LANGUAGE")} icon="translate">
+            <UserMenuItem text={t("USER_MENU_LANGUAGE")} icon="translate">
               {LANGUAGES.map((l) => (
                 <UserMenuItem key={l.id} text={l.label} icon={language === l.id ? "sys-enter" : ""}
                   onClick={() => setLanguage(l.id)} />
               ))}
             </UserMenuItem>
-            <UserMenuItem text={i18n.getText("NOTIF_MENU")} icon="bell"
+            <UserMenuItem text={t("NOTIF_MENU")} icon="bell"
               onClick={() => { setUserMenuOpen(false); openNotificationSettings(); }} />
             <UserMenuItem icon="customer"
-              text={salesPerson ? i18n.getText("USER_MENU_SALES_PERSON_IS", salesPerson.name) : i18n.getText("USER_MENU_SALES_PERSON")}
+              text={salesPerson ? t("USER_MENU_SALES_PERSON_IS", salesPerson.name) : t("USER_MENU_SALES_PERSON")}
               onClick={() => { setUserMenuOpen(false); setPickingSalesPerson(true); }} />
           </UserMenu>
           {pickingSalesPerson && (
             <Suspense fallback={null}>
-              <CflDialog config={cfl.salesPersons({ title: i18n.getText("USER_MENU_SALES_PERSON") })} initialSearch="" multiSelect={false}
+              <CflDialog config={cfl.salesPersons({ title: t("USER_MENU_SALES_PERSON") })} initialSearch="" multiSelect={false}
                 onClose={() => setPickingSalesPerson(false)} onSelect={([row]) => { if (row) void pickSalesPerson(row); }} />
             </Suspense>
           )}
           <NotificationsPopover api={notifications} opener={bellOpener} open={bellOpener !== null}
-            onClose={() => setBellOpener(null)} getText={i18n.getText.bind(i18n)}
+            onClose={() => setBellOpener(null)} getText={t}
             onNavigate={go} onSettings={openNotificationSettings} />
         </>
       }
       sideContent={
-        <SideNavigation
-          onSelectionChange={onSelect}
-          fixedItems={
-            <SideNavigationItem text={i18n.getText("NAV_SETTINGS")} icon="action-settings" data-to="/settings"
-              selected={pathname === "/settings"} />
-          }
-        >
-          <SideNavigationItem text={i18n.getText("NAV_HOME")} icon="home" data-to="/" selected={pathname === "/"} />
-          <SideNavigationGroup text={i18n.getText("NAV_SAP")} expanded>
-            {Object.values(B1_FEATURES).map((f) => {
-              const navKey = B1_NAV_KEY[f.entity];
-              return (
-                <SideNavigationItem key={f.entity}
-                  text={navKey ? i18n.getText(navKey) : f.entity}
-                  icon={f.icon}
-                  data-to={`/b1/${f.entity}`}
-                  selected={pathname === `/b1/${f.entity}` || pathname.startsWith(`/b1/${f.entity}/`)} />
-              );
-            })}
-          </SideNavigationGroup>
-              <SideNavigationGroup text={i18n.getText("NAV_CONFIGURATOR")} expanded>
-                <SideNavigationItem
-                  text={i18n.getText("NAV_CONFIGS")}
-                  icon="sales-quote"
-                  data-to="/configs"
-                  selected={pathname === "/configs" || pathname.startsWith("/configs/")}
-                />
-                {isAdmin ? (
-                  <>
-                    <SideNavigationItem
-                      text={i18n.getText("NAV_MODELS")}
-                      icon="tree"
-                      data-to="/models"
-                      selected={pathname === "/models" || pathname.startsWith("/models/")}
-                    />
-                    <SideNavigationItem
-                      text={i18n.getText("NAV_MASTERDATA")}
-                      icon="table-view"
-                      data-to="/masterdata"
-                      selected={pathname === "/masterdata" || pathname.startsWith("/masterdata/")}
-                    />
-                  </>
-                ) : null}
-              </SideNavigationGroup>
-              {/* The assistant for every member; what it costs for admins (assistant spec §4.7). */}
-              <SideNavigationGroup text={i18n.getText("NAV_AI")} expanded>
-                <SideNavigationItem text={i18n.getText("ASSISTANT_PAGE_TITLE")} icon="ai" data-to="/assistant" selected={onAiPage} />
-                {isAdmin ? (
-                  <SideNavigationItem text={i18n.getText("NAV_AI_USAGE")} icon="area-chart" data-to="/usage"
-                    selected={pathname === "/usage"} />
-                ) : null}
-              </SideNavigationGroup>
-              {/* The customer portal (spec §10): Requests for every member, the rest for admins. */}
-              <SideNavigationGroup text={i18n.getText("NAV_PORTAL")} expanded>
-                <SideNavigationItem text={i18n.getText("NAV_REQUESTS")} icon="inbox" data-to="/requests"
-                  selected={pathname === "/requests"} />
-                {isAdmin ? (
-                  <SideNavigationItem text={i18n.getText("NAV_INVITATIONS")} icon="paper-plane" data-to="/portal/invitations"
-                    selected={pathname === "/portal/invitations"} />
-                ) : null}
-              </SideNavigationGroup>
+        <SideNavigation onSelectionChange={onSelect} fixedItems={navItem(settings)}>
+          {navItem(home)}
+          {groups.map((g) => (
+            <SideNavigationGroup key={g.text} text={g.text} expanded>{g.items.map(navItem)}</SideNavigationGroup>
+          ))}
         </SideNavigation>
       }
     >

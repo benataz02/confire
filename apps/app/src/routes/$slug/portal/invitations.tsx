@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@ui5/webcomponents-react";
 import { useI18n } from "../../../i18n.ts";
 import { orpc } from "../../../orpc.ts";
+import { viewsQuery } from "@confire/ui/views.ts";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
 import { useListView } from "@confire/ui/useListView.ts";
 import { confirm } from "@confire/ui/confirm.ts";
@@ -47,7 +48,12 @@ function invitationsFeature(t: TextFn): ListFeature {
 // Portal → Invitations (spec §5.1, §10): every invitation of the tenant, both types — the only place
 // a pending new-client one (no CardCode yet, P6) shows. Admins only, on the server.
 
-export const Route = createFileRoute("/$slug/portal/invitations")({ head: () => title(t("NAV_INVITATIONS")), component: Invitations });
+export const Route = createFileRoute("/$slug/portal/invitations")({
+  head: () => title(t("NAV_INVITATIONS")),
+  // A hovered link (a home tile, a row's link) warms the views the list waits on, never awaited.
+  loader: ({ context }) => void context.queryClient.prefetchQuery(viewsQuery(orpc, "portal:invitations")),
+  component: Invitations,
+});
 
 function Invitations() {
   const i18n = useI18n();

@@ -1,4 +1,5 @@
-import type { ProjectStatus, QuoteResponse, SapStep } from "@confire/db";
+import { sql, type Column, type SQL } from "drizzle-orm";
+import { PROJECT_STATUSES, SAP_STEPS, type ProjectStatus, type QuoteResponse, type SapStep } from "@confire/db";
 
 // The portal home's one rule (spec 2026-11-06-portal-home): where a project stands on
 // sent(0) · review(1) · quoted(2) · ordered(3) · delivered(4) · invoiced(5) — 6 is all done — and
@@ -40,6 +41,18 @@ export function rankOf(next: Next): 0 | 1 | 2 | 3 {
 /** Finished projects leave home (unless pinned): invoiced in SAP, or declined by the supplier. */
 export const isFinished = (p: Pick<JourneyInput, "status" | "sapStep">): boolean =>
   p.status === "declined" || p.sapStep === "invoiced";
+
+/** journeyOf's `next` in SQL, for the projects list's filter the home tiles open: one branch per
+ *  (status, answer, SAP step) the columns can hold, each mapped by journeyOf itself, so the list and
+ *  the tile's count can never disagree. ponytail: 72 branches over a company's few projects; a
+ *  stored `next` column if a list ever filters thousands. */
+export function nextSql(c: Record<"status" | "quoteResponse" | "sapStep", Column | SQL>): SQL<Next> {
+  const whens = PROJECT_STATUSES.flatMap((status) => ([null, "accepted", "declined"] as const).flatMap((quoteResponse) =>
+    ([null, ...SAP_STEPS] as const).map((sapStep) => sql`when ${c.status} = ${status}
+      and ${c.quoteResponse} is not distinct from ${quoteResponse} and ${c.sapStep} is not distinct from ${sapStep}
+      then ${journeyOf({ status, quoteResponse, sapStep }).next}`)));
+  return sql<Next>`(case ${sql.join(whens, sql` `)} end)`;
+}
 
 /** The banner's three to-dos. */
 export function figuresOf(nexts: Next[]): { needAnswer: number; withSupplier: number; inDelivery: number } {
