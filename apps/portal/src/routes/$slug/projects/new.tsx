@@ -32,7 +32,7 @@ function Catalog() {
   const create = useMutation(orpc.projects.create.mutationOptions({
     onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: orpc.projects.rows.key() });
-      void navigate({ to: "/$slug/projects/$id", params: { id: r.id } });
+      void navigate({ to: "/$slug/projects/$id/configuration", params: { id: r.id } });
     },
   }));
   const pick = (m: Model) => { setPicked(m); setName(m.name); create.reset(); };

@@ -92,7 +92,8 @@ export function ProjectOverview({
               <Icon name="document-text" style={{ width: "1.25rem", height: "1.25rem", color: "var(--sapContent_IconColor)", flex: "none" }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <Text style={{ fontFamily: "var(--sapFontBoldFamily)" }}>{config.label}</Text>
-                {config.summary.length ? <Label>{` · ${config.summary.join(" · ")}`}</Label> : null}
+                {/* The space outside the Label: inside, its leading space collapses ("Configuration· 500"). */}
+                {config.summary.length ? <>{" "}<Label>{`· ${config.summary.join(" · ")}`}</Label></> : null}
               </div>
               {config.emphasized
                 ? <Button design="Emphasized" onClick={config.onOpen}>{config.text}</Button>
