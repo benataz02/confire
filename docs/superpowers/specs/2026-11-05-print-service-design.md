@@ -151,6 +151,14 @@ printDocument(tenant, entity, docEntry)                       apps/server/src/pr
 
 ## 7. Unverified — what the spike answers
 
+**Answered 2026-11-06** on the old-version client's box, with `confire-print.exe` itself
+(`apps/agent/print/test-print.bat`) rather than the PowerShell spike: the box's Service Layer has
+`ReportLayoutsService`, `--check` passes against Crystal 13.0.31, and a document's default layout
+read from `RDOC.Template` renders to the same PDF as B1's print with the logon replaced. Not yet
+recorded: the warm time per print, and an order, delivery and invoice each.
+
+What it was:
+
 - That a B1 Crystal layout renders outside B1 once the logon is replaced. A layout whose tables use
   a connection only B1 can open would not.
 - That `RDOC.Template` holds a plain `.rpt`.
