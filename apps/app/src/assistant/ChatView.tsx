@@ -17,7 +17,7 @@ import { useI18n } from "../i18n.ts";
 import { client, meQuery, orpc } from "../orpc.ts";
 import { useAssistantShell } from "./AssistantProvider.tsx";
 import { nextReplies } from "./replies.ts";
-import { routeContext, type RouteContext } from "./routeContext.ts";
+import { REPORT_ROUTE, routeContext, type RouteContext } from "./routeContext.ts";
 import { useAssistantChat, useAssistantInvalidate, type Refusal, type Thread } from "./useAssistant.ts";
 import { progressText, renderTool, type CardCtx } from "./cards/registry.tsx";
 import { blocks, type ToolCall } from "./steps.ts";
@@ -43,7 +43,7 @@ const AUTO_WRITE_KEY = "assistant:autoWrite";
 /** `report`: a report's chat, its report beside it (reports spec §6.2). */
 export type Kind = "configure" | "general" | "model" | "report";
 export const kindOf = (r: RouteContext): Kind =>
-  r.projectId ? "configure" : r.routeId.startsWith("/$slug/models/") ? "model" : "general";
+  r.projectId ? "configure" : r.routeId === REPORT_ROUTE ? "report" : r.routeId.startsWith("/$slug/models/") ? "model" : "general";
 
 /** What the chat tells the head drawn above it. */
 export type HeadState = { busy: boolean; projectId: string | null; empty: boolean };

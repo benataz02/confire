@@ -1,19 +1,23 @@
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchServerSentEvents, useChat, type UIMessage } from "@tanstack/ai-react";
 import { callHeaders } from "@confire/ui/host.ts";
 import { orpc } from "../orpc.ts";
+import type { ThreadInput } from "./routeContext.ts";
 
-// The panel's data: this user's thread for the page's configuration (or their general one), and a
-// chat over it. History is the server's — `initialMessages` only paints it; every send carries just
+// The panel's data: the thread it shows (`threadInput`: a picked chat, the page's own, or the general
+// one), and a chat over it. History is the server's — `initialMessages` only paints it; every send carries just
 // the new text and the page it came from.
 
 export type Thread = { id: string; projectId: string | null; reportId: string | null; messages: UIMessage[] };
 
-const threadInput = (projectId: string | null) => (projectId ? { projectId } : {});
-
-export function useAssistantThread(projectId: string | null) {
-  return useQuery({ ...orpc.assistant.thread.queryOptions({ input: threadInput(projectId) }), staleTime: Infinity });
+/** null = wait (a report's page whose report is still loading). The previous thread stays on screen
+ *  meanwhile, so a chat that navigated itself (a first report) keeps its ChatView and its stream. */
+export function useAssistantThread(input: ThreadInput | null) {
+  return useQuery({
+    ...orpc.assistant.thread.queryOptions({ input: input ?? {} }),
+    enabled: !!input, placeholderData: keepPreviousData, staleTime: Infinity,
+  });
 }
 
 /** What changed after a run or a direct write: the configuration, the lists, the AI page's chat list. */

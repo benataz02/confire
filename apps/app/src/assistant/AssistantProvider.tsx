@@ -13,6 +13,10 @@ type AssistantShell = {
   open: boolean;
   toggle(): void;
   close(): void;
+  /** Mount and open the panel on the page's own chat, `text` (if any) put in its box: a report's Edit and chips. */
+  openChat(text?: string): void;
+  /** The last openChat: the panel goes back to the page's chat and fills its box each time `at` changes. */
+  asked: { text?: string; at: number } | null;
   /** the configuration page has an edit still on its way to the server */
   dirty: boolean;
   setDirty(b: boolean): void;
@@ -36,12 +40,14 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [questionKeys, setAll] = useState<Record<string, string[]>>({});
   const toggle = useCallback(() => { setMounted(true); setOpen((o) => !o); }, []);
   const close = useCallback(() => setOpen(false), []);
+  const [asked, setAsked] = useState<{ text?: string; at: number } | null>(null);
+  const openChat = useCallback((text?: string) => { setMounted(true); setOpen(true); setAsked({ text, at: Date.now() }); }, []);
   const setQuestionKeys = useCallback((projectId: string, keys: string[]) =>
     setAll((all) => (sameKeys(all[projectId], keys) ? all : { ...all, [projectId]: keys })), []);
-  const value = useMemo(() => ({ open, toggle, close, dirty, setDirty, questionKeys, setQuestionKeys }),
-    [open, toggle, close, dirty, questionKeys, setQuestionKeys]);
-  // The AI page and a report's page draw their own chat: no second one floats over them.
-  const onAiPage = useRouterState({ select: (s) => s.matches.some((m) => m.routeId.startsWith("/$slug/assistant") || m.routeId.startsWith("/$slug/reports")) });
+  const value = useMemo(() => ({ open, toggle, close, openChat, asked, dirty, setDirty, questionKeys, setQuestionKeys }),
+    [open, toggle, close, openChat, asked, dirty, questionKeys, setQuestionKeys]);
+  // The AI page draws its own chat: no second one floats over it.
+  const onAiPage = useRouterState({ select: (s) => s.matches.some((m) => m.routeId.startsWith("/$slug/assistant")) });
   return (
     <Ctx.Provider value={value}>
       {children}

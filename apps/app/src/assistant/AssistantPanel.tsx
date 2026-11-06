@@ -1,4 +1,5 @@
-import { useLayoutEffect, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bar, BusyIndicator, Button, FlexBox, Icon, Label, MessageStrip, Text, Title } from "@ui5/webcomponents-react";
 import { confirm } from "@confire/ui/confirm.ts";
@@ -6,7 +7,8 @@ import { firstName } from "@confire/ui/format.ts";
 import { useI18n } from "../i18n.ts";
 import { client, meQuery, orpc } from "../orpc.ts";
 import { useAssistantShell } from "./AssistantProvider.tsx";
-import { useAssistantThread } from "./useAssistant.ts";
+import { useAssistantThread, type Thread } from "./useAssistant.ts";
+import { REPORT_ROUTE, threadInput } from "./routeContext.ts";
 import { ChatView, kindOf, refusalText, useRoute } from "./ChatView.tsx";
 
 // The assistant panel (assistant spec §4.2, plan "The look"): Joule's side panel, floating over the
@@ -51,7 +53,16 @@ export function AssistantPanel() {
   const qc = useQueryClient();
   const route = useRoute();
   const me = useQuery(meQuery);
-  const thread = useAssistantThread(route.projectId);
+  const navigate = useNavigate({ from: "/$slug" });
+  // A report's page: the panel is its chat, found through the report.
+  const reportId = route.routeId === REPORT_ROUTE ? route.params.id ?? null : null;
+  const report = useQuery({ ...orpc.reports.get.queryOptions({ input: { id: reportId ?? "" } }), enabled: !!reportId });
+  const reportThread = report.error ? null : report.data ? report.data.threadId : undefined;
+  // A chat picked in the drawer, until a page with its own chat or an openChat takes over.
+  const [picked, setPicked] = useState<string | null>(null);
+  useEffect(() => { if (route.projectId || reportId) setPicked(null); }, [route.projectId, reportId]);
+  useEffect(() => { if (shell.asked) setPicked(null); }, [shell.asked?.at]); // eslint-disable-line react-hooks/exhaustive-deps
+  const thread = useAssistantThread(threadInput({ picked, projectId: route.projectId, reportId, reportThread }));
   // The chat's configuration: the page's, else the thread's (one the chat created, followed elsewhere).
   const projectId = route.projectId ?? thread.data?.projectId ?? null;
   const config = useQuery({ ...orpc.configs.get.queryOptions({ input: { id: projectId ?? "" } }), enabled: !!projectId });
@@ -79,7 +90,25 @@ export function AssistantPanel() {
       setNewChatError(e);
     }
   };
-  const kind = projectId ? "configure" : kindOf(route);
+  const kind = projectId ? "configure" : thread.data?.reportId ? "report" : kindOf(route);
+
+  /** The chat stored a report: the page re-reads it. A general chat's first report made the report,
+   *  so the thread is read again for it — past the cache, as the chat mounted from its copy — and the
+   *  user goes to its page. The copy seeded by id is what the report's page shows, so the ChatView
+   *  (keyed by the thread's id) stays, its answer still streaming. */
+  const onTool = (name: string) => {
+    if (name !== "report_set") return;
+    void qc.invalidateQueries({ queryKey: orpc.reports.get.key() });
+    void qc.invalidateQueries({ queryKey: orpc.reports.tiles.key() });
+    void qc.invalidateQueries({ queryKey: orpc.assistant.threads.key() });
+    const shown = thread.data;
+    if (!shown || shown.reportId) return;
+    void client.assistant.thread({ id: shown.id }).then((d) => {
+      if (!d.reportId) return;
+      qc.setQueryData(orpc.assistant.thread.queryKey({ input: { id: d.id } }), d as Thread);
+      void navigate({ to: "/$slug/reports/$id", params: { id: d.reportId } });
+    });
+  };
   const subtitle = projectId ? config.data?.project.name ?? "" : t("ASSISTANT_GENERAL");
 
   const head = (empty: boolean) => (
@@ -135,7 +164,8 @@ export function AssistantPanel() {
         background: "var(--sapBackgroundColor)", color: "var(--sapTextColor)",
         borderRadius: "var(--sapElement_BorderCornerRadius)", boxShadow: "var(--sapContent_Shadow2)",
       }}>
-      {thread.data ? <ChatView key={thread.data.id} thread={thread.data} route={route} kind={kind} head={({ empty }) => head(empty)} />
+      {thread.data ? <ChatView key={thread.data.id} thread={thread.data} route={route} kind={kind} head={({ empty }) => head(empty)}
+        onTool={onTool} prefill={shell.asked?.text ? { text: shell.asked.text, at: shell.asked.at } : undefined} />
         : (
           <>
             {head(false)}
