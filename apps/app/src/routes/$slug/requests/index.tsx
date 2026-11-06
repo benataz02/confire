@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { t, title } from "../../../head.ts";
 import { ObjectStatus, Text } from "@ui5/webcomponents-react";
 import { useI18n } from "../../../i18n.ts";
 import { orpc } from "../../../orpc.ts";
@@ -31,20 +32,13 @@ function requestsFeature(t: TextFn): ListFeature {
       { key: "modelName", label: t("ADMIN_COL_MODEL"), groupable: true },
       { key: "status", label: t("ADMIN_STATUS"), type: "enum", options: statusOptions, width: 170, groupable: true },
       { key: "assignee", label: t("ADMIN_COL_ASSIGNEE"), groupable: true },
-      // The server computes it per caller: the "Mine" view filters on it.
+      // The server computes it per caller: the seeded "Assigned to me" view filters on it.
       { key: "mine", label: t("ADMIN_COL_MINE"), type: "enum", options: [{ value: "yes", label: t("ADMIN_YES") }, { value: "no", label: t("ADMIN_NO") }], hidden: true },
       { key: "quoteResponse", label: t("ADMIN_COL_QUOTE_RESPONSE"), type: "enum", options: [{ value: "accepted", label: t("ADMIN_ACCEPTED") }, { value: "declined", label: t("ADMIN_STATUS_DECLINED") }], width: 150 },
       { key: "updatedAt", label: t("ADMIN_LAST_CHANGED"), type: "date", width: 150 },
     ],
+    // All / Open / Assigned to me are the workspace's seeded shared views (server ui-views.ts).
     filterFields: [{ key: "cardName" }, { key: "status" }, { key: "assignee" }],
-    systemViews: [
-      { key: "new", name: t("ADMIN_VIEW_NEW"), state: { filterValues: { status: ["submitted"] } }, isDefault: true },
-      { key: "mine", name: t("ADMIN_VIEW_MINE"), state: { filterValues: { status: ["in_review"], mine: ["yes"] }, adaptFilterKeys: ["cardName", "status", "mine"] } },
-      { key: "returned", name: t("ADMIN_CHANGES_REQUESTED"), state: { filterValues: { status: ["returned"] } } },
-      { key: "declined", name: t("ADMIN_VIEW_DECLINED"), state: { filterValues: { status: ["declined"] } } },
-      { key: "quoted", name: t("ADMIN_VIEW_QUOTED"), state: { filterValues: { status: ["quoted"] } } },
-      { key: "responses", name: t("ADMIN_VIEW_RESPONSES"), state: { filterValues: { quoteResponse: ["accepted", "declined"] }, adaptFilterKeys: ["cardName", "status", "quoteResponse"] } },
-    ],
   };
 }
 
@@ -65,7 +59,7 @@ function requestCells(t: TextFn) {
 // Portal → Requests (spec §10): the clients' projects from their first submit on — a client's draft
 // is private. Any member. A row opens the configuration process page, which carries the decisions.
 
-export const Route = createFileRoute("/$slug/requests/")({ component: Requests });
+export const Route = createFileRoute("/$slug/requests/")({ head: () => title(t("NAV_REQUESTS")), component: Requests });
 
 function Requests() {
   const i18n = useI18n();

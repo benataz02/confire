@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { t, title } from "../../../head.ts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@ui5/webcomponents-react";
 import { useI18n } from "../../../i18n.ts";
@@ -39,7 +40,7 @@ function sourceLabel(raw: string, t: TextFn): string {
   return `${m[1]} · ${rest}`;
 }
 
-export const Route = createFileRoute("/$slug/masterdata/")({ component: Masterdata });
+export const Route = createFileRoute("/$slug/masterdata/")({ head: () => title(t("NAV_MASTERDATA")), component: Masterdata });
 
 // Tenant masterdata: one list for both kinds. A "table" keeps its values here, a "query" caches
 // them from SAP on a sync — models reference either by name and never hold the definition.
@@ -68,7 +69,7 @@ function Masterdata() {
       }),
       enabled: !!query,
     },
-    { route: "/masterdata", keyOf: (r) => r.id },
+    { route: "/masterdata", keyOf: (r) => r.id, create: "/masterdata/new" },
   );
 
   const remove = useMutation(orpc.masterdata.remove.mutationOptions({ onSuccess: invalidate }));
@@ -118,7 +119,6 @@ function Masterdata() {
       cellTemplates={{ source: (row) => sourceLabel(String(row.source ?? ""), t) }}
       toolbarActions={({ rows: sel, clear }) => (
         <>
-          <Button icon="add" design="Transparent" onClick={() => navigate({ to: "/$slug/masterdata/new" })}>{t("ADMIN_CREATE")}</Button>
           <Button icon="copy" design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}
             onClick={() => duplicate.mutate({ id: String(sel[0]!.id) })}>
             {t("ADMIN_DUPLICATE")}

@@ -9,7 +9,7 @@ import { CflField } from "../cfl/CflField.tsx";
 import { keysToTokens, tokensToKeys } from "../cfl/cfl-configs.ts";
 import { useUiI18n } from "../i18n.ts";
 import {
-  cleanValues, isEmptyFilter, isMultiField, isRangeField, pickInitial, STANDARD_ID, type View, type ViewsApi,
+  cleanValues, isEmptyFilter, isMultiField, isRangeField, pickInitial, viewLabel, type View, type ViewsApi,
 } from "../views.ts";
 import type { FilterField, FilterValue, Row, ViewState } from "../types.ts";
 
@@ -39,17 +39,16 @@ export const ViewTitle = memo(function ViewTitle({ slot, title, views, size }: {
   size?: "H4" | "H5" | "H6";
 }) {
   const i18n = useUiI18n();
-  const standard = i18n.getText("UI_STANDARD_VIEW");
   const items = useMemo(
     () =>
       views.views.map((v) => (
         <VariantItem key={v.id} data-view-id={v.id} selected={v.id === views.active?.id}
           isDefault={v.isDefault} global={v.visibility === "shared"} author={v.author}
           readOnly={!v.canEdit} labelReadOnly={!v.canEdit}           hideDelete={!v.canEdit}>
-          {v.id === STANDARD_ID ? standard : v.name}
+          {viewName(v, i18n)}
         </VariantItem>
       )),
-    [views.views, views.active, standard],
+    [views.views, views.active, i18n],
   );
   if (views.local && views.views.length < 2) return <Title slot={slot} level="H4">{title}</Title>;
   return (
@@ -94,7 +93,7 @@ export const ViewTitle = memo(function ViewTitle({ slot, title, views, size }: {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- list and object views alike
 type AnyViews = ViewsApi<any>;
 type I18n = ReturnType<typeof useUiI18n>;
-const viewName = (v: View<unknown>, i18n: I18n) => (v.id === STANDARD_ID ? i18n.getText("UI_STANDARD_VIEW") : v.name);
+const viewName = (v: View<unknown>, i18n: I18n) => viewLabel(v, (k) => i18n.getText(k));
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** The Object Page's layout views as a toolbar button, styled like Copy to: the views
@@ -186,7 +185,7 @@ function SaveViewDialog({ views, onClose }: { views: AnyViews; onClose: () => vo
 function ManageViewsDialog({ views, onClose }: { views: AnyViews; onClose: () => void }) {
   const i18n = useUiI18n();
   const [drafts, setDrafts] = useState<Record<string, { name: string; shared: boolean }>>(() => Object.fromEntries(
-    views.views.filter((v) => v.canEdit).map((v) => [v.id, { name: v.name, shared: v.visibility === "shared" }]),
+    views.views.filter((v) => v.canEdit).map((v) => [v.id, { name: viewName(v, i18n), shared: v.visibility === "shared" }]),
   ));
   const [deleted, setDeleted] = useState<string[]>([]);
   const [defaultId, setDefaultId] = useState(() => pickInitial(views.views, null).id);
@@ -199,8 +198,10 @@ function ManageViewsDialog({ views, onClose }: { views: AnyViews; onClose: () =>
       updated: kept.flatMap((v) => {
         const d = drafts[v.id];
         if (!d) return [];
+        // A seeded name shown translated is stored as it was unless its text was edited.
+        const typed = d.name.trim();
         const next = {
-          id: v.id, name: d.name.trim(), isDefault: v.id === defaultId,
+          id: v.id, name: typed === viewName(v, i18n) ? v.name : typed, isDefault: v.id === defaultId,
           visibility: (views.isAdmin ? (d.shared ? "shared" : "personal") : v.visibility) as "personal" | "shared",
         };
         return next.name !== v.name || next.visibility !== v.visibility || next.isDefault !== v.isDefault ? [next] : [];

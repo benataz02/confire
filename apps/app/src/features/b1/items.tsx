@@ -24,6 +24,8 @@ export const items: EntityFeature = {
       { key: "ItemCode" },
       { key: "ItemName" },
       { key: "ItemsGroupCode" },
+      // Hidden, for the seeded Active view (not frozen).
+      { key: "Frozen", visible: false },
     ],
   },
   detail: {

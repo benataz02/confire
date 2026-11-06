@@ -81,6 +81,17 @@ body {
   }
 }
 
+/* Grid's fill mode stretches the table's frame over the part of a row AutoWithEmptyRows leaves
+   over; the table's own bottom rules (the body's footer border and the scroll area's sticky ::after)
+   would draw a line where the rows stop with that band under it. The last row's border ends it.
+   ponytail: the ::after is internal; recheck on a webcomponents-react upgrade. */
+.confire-fill-table {
+  --sapList_TableFooterBorder: transparent;
+}
+.confire-fill-table [data-component-name="AnalyticalTableContainer"]::after {
+  display: none;
+}
+
 /* Grid's `statusRows`: a closed line reads muted. */
 .confire-row-closed [data-column-id-cell] {
   color: var(--sapContent_LabelColor);

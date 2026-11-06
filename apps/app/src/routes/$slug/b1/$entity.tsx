@@ -19,6 +19,7 @@ import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import { CloseQuotations, CopyTo } from "../../../features/b1/documents.tsx";
 import { InviteNewClientDialog } from "../../../components/portal/BpPortal.tsx";
 import { b1Label } from "../../../components/AppShell.tsx";
+import { t, title } from "../../../head.ts";
 import type { EntityFeature, ListQuery, Row } from "@confire/ui/types.ts";
 
 // One declared B1 entity's list — or, with the `#create` fragment, its object page in create mode
@@ -27,6 +28,7 @@ import type { EntityFeature, ListQuery, Row } from "@confire/ui/types.ts";
 // have a page; any other entity set name goes home.
 
 export const Route = createFileRoute("/$slug/b1/$entity")({
+  head: ({ params }) => title(b1Label(params.entity, t)),
   beforeLoad: ({ params }) => {
     if (!b1Feature(params.entity)) throw redirect({ to: "/$slug", params });
   },

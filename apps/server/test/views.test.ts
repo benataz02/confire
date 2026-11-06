@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
+import { seedViews, SEEDED_VIEWS, withMine } from "../src/ui-views.ts";
 
 // Saved views: who may publish, who may change what, one name per scope, one default per scope,
 // and the active view remembered per user.
@@ -74,5 +75,27 @@ describe.skipIf(!process.env.DATABASE_URL)("views", () => {
     await call(router.views.setState, { key, value: null }, as);
     expect(await call(router.views.getState, { key }, as)).toBeNull();
     expect(await code(call(router.views.setState, { key: "configs::activeView", value: "x" }, as))).toBe("BAD_REQUEST");
+  });
+});
+
+test("B1 `mine` is the caller's sales employee: yes eq, no ne, both nothing, none picked refused", () => {
+  const q = (value: string[]) => ({ select: [], orderby: [], filter: [{ field: "DocNum", op: "eq" as const, value: 1 }, { field: "mine", op: "in" as const, value }] });
+  expect(withMine(q(["yes"]), 4).filter).toEqual([{ field: "DocNum", op: "eq", value: 1 }, { field: "SalesPersonCode", op: "eq", value: 4 }]);
+  expect(withMine(q(["no"]), 4).filter.at(-1)).toEqual({ field: "SalesPersonCode", op: "ne", value: 4 });
+  expect(withMine(q(["yes", "no"]), undefined).filter).toEqual([{ field: "DocNum", op: "eq", value: 1 }]);
+  expect(() => withMine(q(["yes"]), undefined)).toThrow();
+});
+
+describe.skipIf(!process.env.DATABASE_URL)("seeded views", () => {
+  test("a new workspace gets All / Open / Mine as shared views, Open a document list's default", async () => {
+    const { tenantId, slug } = await makeTenant();
+    const owner = await makeUser("owner", tenantId);
+    await seedViews(tenantId, owner.userId);
+    const member = await makeUser("member", tenantId);
+    const list = await call(router.views.list, { tableId: "b1:Quotations" }, { context: { headers: tenantHeaders(slug, member.cookie) } });
+    expect(list.views.map((v) => [v.name, v.visibility, v.isDefault, v.canEdit])).toEqual([
+      ["All", "shared", false, false], ["Assigned to me", "shared", false, false], ["Open", "shared", true, false],
+    ]);
+    expect(Object.keys(SEEDED_VIEWS).length).toBe(7);
   });
 });

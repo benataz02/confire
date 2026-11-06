@@ -4,6 +4,7 @@ import { useI18n } from "../../../i18n.ts";
 import { b1Feature } from "../../../features/b1/index.ts";
 import { localizedB1Feature, useCodeNames } from "../../../features/b1/localize.ts";
 import { b1Label } from "../../../components/AppShell.tsx";
+import { t, title } from "../../../head.ts";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
 import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import { useDetailView } from "@confire/ui/useDetailView.ts";
@@ -13,6 +14,7 @@ import { useDetailView } from "@confire/ui/useDetailView.ts";
 // the row — a concurrent change comes back as a conflict instead of a silent overwrite.
 
 export const Route = createFileRoute("/$slug/b1/$entity_/$key")({
+  head: ({ params }) => title(params.key, b1Label(params.entity, t)),
   beforeLoad: ({ params }) => {
     if (!b1Feature(params.entity)) throw redirect({ to: "/$slug", params });
   },

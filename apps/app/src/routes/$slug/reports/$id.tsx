@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { t, title } from "../../../head.ts";
 import { useQuery } from "@tanstack/react-query";
 import { BusyIndicator, FlexBox, MessageStrip } from "@ui5/webcomponents-react";
 import { AssistantPage } from "../../../assistant/AssistantPage.tsx";
@@ -7,7 +8,13 @@ import { useI18n } from "../../../i18n.ts";
 import { orpc } from "../../../orpc.ts";
 
 // A saved report (reports spec §6.2): the AI page on the report's chat, opened to be read.
-export const Route = createFileRoute("/$slug/reports/$id")({ component: Report });
+export const Route = createFileRoute("/$slug/reports/$id")({
+  // As configs/$id: the page's own query, warmed for the title.
+  loader: ({ context, params }) =>
+    context.queryClient.ensureQueryData(orpc.reports.get.queryOptions({ input: { id: params.id } })).catch(() => undefined),
+  head: ({ loaderData }) => title(loaderData?.title, t("ASSISTANT_PAGE_TITLE")),
+  component: Report,
+});
 
 function Report() {
   const { id } = Route.useParams();

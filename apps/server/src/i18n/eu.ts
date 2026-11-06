@@ -29,6 +29,7 @@ export const eu: Partial<Record<keyof typeof en, string>> = {
 
   VIEW_STATE_INVALID: "Ikuspegiaren egoera ez da baliozkoa: {0}",
   VIEW_NOT_YOURS: "Ezin duzu ikuspegi hau aldatu",
+  VIEW_MINE_NO_SALES_PERSON: "Aukeratu zure salmenta-langilea erabiltzailearen menuan (Nire salmenta-langilea) zuri esleitutakoa ikusteko",
   VIEW_SHARED_NAME_TAKEN: "Badago izen hau duen ikuspegi partekatu bat",
   VIEW_PERSONAL_NAME_TAKEN: "Badago izen hau duen ikuspegi pertsonal bat",
   VIEW_SHARED_ADMINS: "Administratzaileek soilik argitara ditzakete ikuspegi partekatuak",

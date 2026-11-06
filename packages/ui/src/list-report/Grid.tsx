@@ -34,7 +34,9 @@ const tableStyle: CSSProperties = {
   borderRadius: "var(--sapElement_BorderCornerRadius)",
 };
 // AutoWithEmptyRows rounds the row count down, so up to a row of the slot is left over: the frame
-// takes it inside its own background, or it reads as a deeper bottom margin than the sides'.
+// takes it inside its own background, or it reads as a deeper bottom margin than the sides'. The
+// lines the table draws where its rows stop go too (`confire-fill-table`, global.css), or the band
+// reads as a strip under the table rather than more of it.
 const fillTableStyle: CSSProperties = { ...tableStyle, height: "100%", background: "var(--sapList_Background)" };
 
 // Full screen is the page, not the browser's. AutoWithEmptyRows counts rows from the table's
@@ -56,8 +58,10 @@ const fullPageStyle: CSSProperties = {
 };
 
 /** A link cell (§3 linkConfig): only for a plain string column — no template, no options, no
- *  other type — with a non-empty value. Anything typed is formatted instead, as in Beas. */
-const isLinkCell = (c: ListColumn) => !!c.linkConfig && !c.options && (!c.type || c.type === "string");
+ *  other type — with a non-empty value. Anything typed is formatted instead, as in Beas; an
+ *  `integer` (a DocNum) formats to its own digits, so it may link too. */
+const isLinkCell = (c: ListColumn) =>
+  !!c.linkConfig && !c.options && (!c.type || c.type === "string" || (c.type === "number" && !!c.integer));
 
 /** The .xlsx export (ExcelExportService): the visible columns, typed cells, option labels. */
 async function exportXlsx(title: string, columns: ListColumn[], rows: Row[]) {
@@ -175,6 +179,15 @@ export function Grid({
   const [exporting, setExporting] = useState(false);
   const slotRef = useRef<HTMLDivElement>(null);
   const [maximized, setMaximized] = useState(false);
+  // The table lays its columns out only once the fonts are in (it measures header text): before
+  // that every column is react-table's 150px, a header bunched up on the left. Its own fonts-ready
+  // flag (useFontsReady, ui5 2.27) can also miss the load finishing between its render and its
+  // effect and then never lays out. So it mounts after `document.fonts.ready`, which resolves
+  // whenever it is asked, and its own flag starts true.
+  const [fontsReady, setFontsReady] = useState(() => document.fonts.status === "loaded");
+  useEffect(() => {
+    if (!fontsReady) void document.fonts.ready.then(() => setFontsReady(true));
+  }, [fontsReady]);
   // Dropping the `popover` attribute hides it again, so only opening needs a call.
   useLayoutEffect(() => {
     if (maximized) slotRef.current?.showPopover();
@@ -212,8 +225,9 @@ export function Grid({
       visible.map((c) => {
         const template = cellTemplates?.[c.key];
         // Inverted, as the local lists draw their status cells (configs, requests).
-        const show = (v: unknown) => {
-          const text = formatValue(v, c.type, c.options, c.integer);
+        const show = (v: unknown, unit?: unknown) => {
+          const value = formatValue(v, c.type, c.options, c.integer);
+          const text = value && unit ? `${value} ${String(unit)}` : value;
           return c.status && text ? <ObjectStatus inverted state={statusState(v)}>{text}</ObjectStatus> : <span>{text}</span>;
         };
         const Cell = ({ cell }: AnalyticalTableCellInstance) => {
@@ -233,13 +247,14 @@ export function Grid({
                 </EntityLink>
               );
           }
-          return show(v);
+          return show(v, c.unitField ? r[c.unitField] : undefined);
         };
         return {
           id: c.key,
           accessor: (row: Row) => row[c.key],
           // A Label, not "*" in the text: UI5 draws the asterisk and announces "required".
           Header: c.required ? () => <Label required>{c.label ?? c.key}</Label> : c.label ?? c.key,
+          ...(c.minWidth ? { minWidth: c.minWidth } : {}),
           ...(state.columnWidths?.[c.key] ?? c.width ? { width: state.columnWidths?.[c.key] ?? c.width } : {}),
           ...(endAligned(c.type) ? { hAlign: "End" as const } : {}),
           disableSortBy: c.sortable === false,
@@ -397,7 +412,7 @@ export function Grid({
   return (
     <>
       <div ref={slotRef} popover={maximized ? "manual" : undefined} style={maximized ? fullPageStyle : slotStyle}>
-        <AnalyticalTable
+        {fontsReady ? <AnalyticalTable
           key={epoch}
           columns={tableColumns}
           data={rows}
@@ -408,6 +423,7 @@ export function Grid({
           // undoes the user's resize.
           retainColumnWidth
           style={fill || maximized ? fillTableStyle : tableStyle}
+          className={fill || maximized ? "confire-fill-table" : undefined}
           extension={toolbar}
           loading={loading}
           minRows={1}
@@ -444,7 +460,7 @@ export function Grid({
             const original = e.detail.row.original as Row | undefined;
             if (original) onRowClick?.(original);
           }}
-        />
+        /> : null}
       </div>
       {settingsOpen ? (
         <GridSettingsDialog columns={columns} state={state}

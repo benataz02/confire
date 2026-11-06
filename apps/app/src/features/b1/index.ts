@@ -12,12 +12,18 @@ const hasPage = (entity: string) => entity in B1_FEATURES;
 
 // Problems stay on the fields. The title's messages button is for pages whose problems are not a
 // field (the model builder, the configurator).
+const DOCUMENTS = [
+  documentFeature("Quotations", { label: "Sales quotations", one: "sales quotation", icon: "sales-quote", hasPage }),
+  documentFeature("Orders", { label: "Sales orders", one: "sales order", icon: "sales-order", hasPage }),
+  documentFeature("DeliveryNotes", { label: "Deliveries", one: "delivery", icon: "shipping-status", hasPage }),
+  //documentFeature("Invoices", { label: "A/R invoices", one: "A/R invoice", icon: "monitor-payments", hasPage }),
+];
+/** The marketing documents (a DocumentStatus to be open), as opposed to master data. */
+export const B1_DOCUMENTS = new Set(DOCUMENTS.map((f) => f.entity));
+
 export const B1_FEATURES: Record<string, EntityFeature> = Object.fromEntries(
   [
-    documentFeature("Quotations", { label: "Sales quotations", one: "sales quotation", icon: "sales-quote", hasPage }),
-    documentFeature("Orders", { label: "Sales orders", one: "sales order", icon: "sales-order", hasPage }),
-    documentFeature("DeliveryNotes", { label: "Deliveries", one: "delivery", icon: "shipping-status", hasPage }),
-    //documentFeature("Invoices", { label: "A/R invoices", one: "A/R invoice", icon: "monitor-payments", hasPage }),
+    ...DOCUMENTS,
     businessPartners,
     items,
   ].map((f) => [f.entity, { ...f, detail: { ...f.detail, noMessages: true } }]),

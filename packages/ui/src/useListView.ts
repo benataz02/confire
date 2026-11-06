@@ -33,9 +33,10 @@ const flatten = (data: InfiniteData<Page> | undefined) => (data?.pages ?? []).fl
 /**
  * `options` is an oRPC `infiniteOptions(...)` (or any infinite-query options whose pages carry
  * `rows`). `nav`: where a row opens (`entityPath(route, keyOf(row))`) and, with `create`, where
- * Create goes (`route#create`, the createModeMatch of Beas).
+ * ListReport's Create goes: `true` is `route#create` (the createModeMatch of Beas), a string a route
+ * of its own (`/configs/new`).
  */
-export function useListView(options: object, nav?: { route: string; keyOf: (row: Row) => unknown; create?: boolean }): ListData {
+export function useListView(options: object, nav?: { route: string; keyOf: (row: Row) => unknown; create?: true | string }): ListData {
   const open = useEntityNav();
   const page = useInfiniteQuery({
     retry: false,
@@ -52,6 +53,7 @@ export function useListView(options: object, nav?: { route: string; keyOf: (row:
     return flatten(res.data).slice(0, LOAD_ALL_CAP);
   }, [page]);
 
+  const create = nav?.create;
   return {
     rows,
     total: page.data?.pages[0]?.total ?? rows.length,
@@ -71,7 +73,7 @@ export function useListView(options: object, nav?: { route: string; keyOf: (row:
             const key = nav.keyOf(row);
             if (key !== undefined && key !== null && key !== "") open(nav.route, key);
           },
-          ...(nav.create ? { onCreate: () => open(nav.route, undefined, "create") } : {}),
+          ...(create ? { onCreate: () => (create === true ? open(nav.route, undefined, "create") : open(create)) } : {}),
         }
       : {}),
   };

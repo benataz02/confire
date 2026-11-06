@@ -32,6 +32,10 @@ export type ListColumn = {
   type?: FieldType;
   options?: Option[];
   width?: number;
+  /** the narrowest the table may lay it out; past every column's, the grid scrolls sideways */
+  minWidth?: number;
+  /** a unit read off the row and drawn after the value (DocTotal's DocCurrency); fetched with it */
+  unitField?: string;
   /** not visible by default — still offered in the settings dialog and as a hidden filter */
   hidden?: boolean;
   sortable?: boolean;

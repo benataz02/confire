@@ -2,6 +2,7 @@ import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import type { EntityFeature } from "@confire/ui/types.ts";
 import { upper } from "@confire/ui/format.ts";
 import { BpPortalSection, InviteToPortal } from "../../components/portal/BpPortal.tsx";
+import { MINE_FILTER } from "./documents.tsx";
 
 // Business partners, declared. CardCode and CardType are requiredOnCreate but not in the write
 // allowlist, so metadata makes them editable while creating and read-only after — nothing here
@@ -28,6 +29,9 @@ export const businessPartners: EntityFeature = {
       { key: "CardCode" },
       { key: "CardName" },
       { key: "CardType" },
+      // Hidden, for the seeded views: Active (not frozen) and Assigned to me.
+      { key: "Frozen", visible: false },
+      MINE_FILTER,
     ],
   },
   detail: {

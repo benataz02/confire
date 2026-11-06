@@ -786,7 +786,13 @@ generates a page.
 - **One combined view per list** (`views.ts`): layout + filters in one `ViewState`, Beas'
   own field names. System views are code (`system:<key>`, Standard first unless a feature declares
   `default`); personal/shared ones are `ui_view` rows, the active one per user a `ui_user_state`
-  key. Dirty is a canonical-JSON compare — jsonb reorders keys. On first load the URL's filters
+  key. A new workspace is **seeded** with shared All / Open / Mine rows on the SAP lists,
+  Configurations and Requests (`SEEDED_VIEWS`, `ui-views.ts`, from `afterCreateOrganization`;
+  migration 0016 backfilled older ones), and a shared default stands in for Standard (`withSaved`).
+  `mine` is a per-caller pseudo-field: a configuration's creator, a request's assignee, and on B1
+  lists the user's own sales employee (user menu, `ui_user_state` `b1:salesPerson`), which
+  `entities.rows` turns into `SalesPersonCode` (`withMine`). The portal shows no shared views
+  (spec §9), so its lists declare the same three in code. Dirty is a canonical-JSON compare — jsonb reorders keys. On first load the URL's filters
   win (`?CardCode=C1,C2`, `?DocDate=a~b`); Go and view switches rewrite it.
 - **`ListQuery` is the wire query.** `toQuery` turns a state into it (range → ge/lt-next-day, list
   → `in`, string → `contains`/`eq` for `exact`); `entity-list.ts` compiles it to OData,

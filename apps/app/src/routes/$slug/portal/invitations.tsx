@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { t, title } from "../../../head.ts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@ui5/webcomponents-react";
 import { useI18n } from "../../../i18n.ts";
@@ -46,7 +47,7 @@ function invitationsFeature(t: TextFn): ListFeature {
 // Portal → Invitations (spec §5.1, §10): every invitation of the tenant, both types — the only place
 // a pending new-client one (no CardCode yet, P6) shows. Admins only, on the server.
 
-export const Route = createFileRoute("/$slug/portal/invitations")({ component: Invitations });
+export const Route = createFileRoute("/$slug/portal/invitations")({ head: () => title(t("NAV_INVITATIONS")), component: Invitations });
 
 function Invitations() {
   const i18n = useI18n();

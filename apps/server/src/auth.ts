@@ -13,6 +13,7 @@ import { EXTERNAL_ROLES } from "@confire/db/schema";
 import { authUrl, cookieDomain, mcpUrl, portalUrl, tenantSlug } from "./tenant.ts";
 import { authMail } from "./mail/auth-mail.tsx";
 import { t } from "./i18n/index.ts";
+import { seedViews } from "./ui-views.ts";
 
 /** The web's SLUG_RE is UX; this is the gate. Better Auth takes any non-empty slug, and one the path
  *  rule cannot hand back is a workspace no URL can ever reach — with a one-workspace limit and
@@ -119,9 +120,9 @@ const orgPlugin = organization({
   organizationHooks: {
     beforeCreateOrganization: async ({ organization }) => assertSlug(organization.slug),
     beforeUpdateOrganization: async ({ organization }) => assertSlug(organization.slug),
+    // The lists' shared All / Open / Mine views (ui-views.ts' SEEDED_VIEWS), the creator their author.
+    afterCreateOrganization: async ({ organization, user }) => seedViews(organization.id, user.id),
   },
-  // No seeding hook: every list's Standard view is declared in code (the web features), so a
-  // new tenant has nothing to be given.
 });
 
 /** The organization a user is staff of — at most one (organizationLimit) — or undefined. */

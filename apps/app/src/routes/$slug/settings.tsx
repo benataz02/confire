@@ -1,4 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { t, title } from "../../head.ts";
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -22,6 +23,7 @@ type SettingsTab = (typeof TABS)[number];
 // Notifications is every member's own switches (notifications spec §10). The other tabs are
 // admin-only: the route sends anyone else to Notifications, and their procedures are adminProcedure.
 export const Route = createFileRoute("/$slug/settings")({
+  head: () => title(t("NAV_SETTINGS")),
   validateSearch: (s: Record<string, unknown>): { tab?: SettingsTab } => ({
     tab: TABS.includes(s.tab as SettingsTab) ? (s.tab as SettingsTab) : undefined,
   }),

@@ -10,7 +10,7 @@ import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import { DOCUMENT_STATUS } from "@confire/ui/documentStatus.ts";
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import { toIsoDay } from "@confire/ui/format.ts";
-import type { EntityFeature, HeaderActionContext, Row } from "@confire/ui/types.ts";
+import type { EntityFeature, FilterField, HeaderActionContext, Row } from "@confire/ui/types.ts";
 
 // The B1 marketing documents, declared. One builder for all four: Quotations and Orders are
 // writable, DeliveryNotes and Invoices read-only — which is the server's word (entities.metadata
@@ -125,6 +125,13 @@ const plusDays = (n: number) => {
 /** Newest first — DocEntry, not DocNum, which restarts per series. */
 const NEWEST = [{ field: "DocEntry", direction: "desc" as const }];
 
+/** No SAP field: the server turns it into SalesPersonCode against the caller's own sales employee
+ *  (the user menu's pick) — the seeded "Assigned to me" view filters on it. */
+export const MINE_FILTER: FilterField = {
+  key: "mine", label: "Assigned to me", type: "enum", visible: false,
+  options: [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }],
+};
+
 export function documentFeature(entity: string, o: {
   /** plural, the list's title */
   label: string;
@@ -150,19 +157,18 @@ export function documentFeature(entity: string, o: {
         { key: "DocDueDate", width: 120 },
         { key: "NumAtCard" },
         { key: "DocumentStatus", width: 120, groupable: true },
-        { key: "DocTotal", width: 130 },
-        { key: "DocCurrency", width: 90, hidden: true },
+        { key: "DocTotal", width: 150, unitField: "DocCurrency" },
       ],
       filterFields: [
         { key: "DocNum", exact: true },
         { key: "CardCode", cfl: { dialogConfig: cfl.customers() } },
         { key: "DocDate" },
         { key: "DocumentStatus" },
+        MINE_FILTER,
       ],
-      systemViews: [
-        { key: "default", name: "Standard", isDefault: true, state: { sortBy: NEWEST } },
-        { key: "open", name: "Open", state: { sortBy: NEWEST, filterValues: { DocumentStatus: ["bost_Open"] } } },
-      ],
+      // All / Open / Assigned to me are the workspace's seeded shared views (server ui-views.ts);
+      // Standard is the fallback when an admin takes their default away, and GlobalSearch's order.
+      systemViews: [{ key: "default", name: "Standard", isDefault: true, state: { sortBy: NEWEST } }],
     },
     detail: {
       header: {

@@ -2,7 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { openapi } from "@orpc/openapi";
 import { z } from "zod";
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
-import { db, configModel, configProject, portalCompany, user } from "@confire/db";
+import { db, configModel, configProject, configProjectEvent, portalCompany, user } from "@confire/db";
 import { EntriesZ, historyFields, historyKey, referencedTables, syncTables, type Entries, type Val } from "@confire/config-engine";
 import { userProcedure } from "../base.ts";
 import { tenantCompany } from "../../b1.ts";
@@ -81,12 +81,24 @@ const SelectionZ = z.object({
  *  Customer like any other column. It used to be flattened in the browser, which only worked while
  *  the page held every row. */
 const CUSTOMER_NAME = sql<string>`${configProject.customer}->>'cardName'`;
+const CARD_CODE = sql<string>`${configProject.customer}->>'cardCode'`;
+/** The current quotation's DocEntry, only in the company it lives in (`quotationIn`): elsewhere it means nothing. */
+const quoteEntry = (company: string | null) =>
+  sql<number | null>`case when ${configProject.b1Company} = ${company} then ${configProject.b1DocEntry} end`;
+/** Its DocNum, which only the `quoted` event keeps — the latest one for that DocEntry that read it. */
+const quoteNum = (company: string | null) => sql<number | null>`(
+  select (e.payload->>'docNum')::int from ${configProjectEvent} e
+  where e.project_id = ${configProject.id} and e.kind = 'quoted' and e.payload->>'docNum' is not null
+    and (e.payload->>'docEntry')::int = ${quoteEntry(company)}
+  order by e.at desc limit 1)`;
 
 /** Filterable/sortable columns of the configurations list. `mine` is per caller, so the fields are too. */
-const configFields = (userId: string): SqlFields => ({
+const configFields = (userId: string, company: string | null): SqlFields => ({
   name: { col: configProject.name, kind: "string" },
   modelName: { col: configModel.name, kind: "string" },
+  cardCode: { col: CARD_CODE, kind: "string" },
   customerName: { col: CUSTOMER_NAME, kind: "string" },
+  quoteDocNum: { col: quoteNum(company), kind: "number" },
   status: { col: configProject.status, kind: "enum" },
   mine: { col: sql<string>`case when ${configProject.createdBy} = ${userId} then 'yes' else 'no' end`, kind: "enum" },
   updatedAt: { col: configProject.updatedAt, kind: "date" },
@@ -171,14 +183,16 @@ export const configsRouter = {
   rows: userProcedure
     .meta(openapi({
       summary: "List the configurations",
-      description: "One page of the workspace's own configurations (clients' requests are `requests.rows`). Fields: name, modelName, customerName, status (draft, quoted), mine (yes when the caller started it), updatedAt. Filter with `query.filter` (eq, in, contains…), search with `query.search`; newest first. Answers `rows`, `total` and `nextSkip`.",
+      description: "One page of the workspace's own configurations (clients' requests are `requests.rows`). Fields: name, modelName, cardCode, customerName, quoteDocNum (the current quotation's DocNum; quoteDocEntry opens it), status (draft, quoted), mine (yes when the caller started it), updatedAt. Filter with `query.filter` (eq, in, contains…), search with `query.search`; newest first. Answers `rows`, `total` and `nextSkip`.",
     }))
     .input(ListPageZ).handler(async ({ input, context }) => {
-    const { where, orderBy } = compileQuery(configFields(context.userId), input.query);
+    const company = await tenantCompany(context.tenantId);
+    const { where, orderBy } = compileQuery(configFields(context.userId, company), input.query);
     const raw = await db
       .select({
         id: configProject.id, name: configProject.name, status: configProject.status,
-        customerName: CUSTOMER_NAME, modelName: configModel.name, updatedAt: configProject.updatedAt,
+        cardCode: CARD_CODE, customerName: CUSTOMER_NAME, modelName: configModel.name, updatedAt: configProject.updatedAt,
+        quoteDocEntry: quoteEntry(company), quoteDocNum: quoteNum(company),
         _total: TOTAL,
       })
       .from(configProject)

@@ -31,6 +31,7 @@ export const en = {
   // Saved views (ui-views.ts) and notifications
   VIEW_STATE_INVALID: "Invalid view state: {0}",
   VIEW_NOT_YOURS: "Not allowed to change this view",
+  VIEW_MINE_NO_SALES_PERSON: "Pick your sales employee in the user menu (My sales employee) to see what is assigned to you",
   VIEW_SHARED_NAME_TAKEN: "A shared view with this name already exists",
   VIEW_PERSONAL_NAME_TAKEN: "A personal view with this name already exists",
   VIEW_SHARED_ADMINS: "Only admins can publish shared views",

@@ -10,19 +10,26 @@ import {
 } from "@ui5/webcomponents-react";
 import type { SideNavigationPropTypes, NavigationLayoutDomRef, NavigationLayoutPropTypes } from "@ui5/webcomponents-react";
 import { authClient } from "../auth-client.ts";
-import { meQuery, notifications, orpc, useIsAdmin } from "../orpc.ts";
+import { client, meQuery, notifications, orpc, useIsAdmin } from "../orpc.ts";
 import { authUrl, hardRedirect, tenantPath } from "@confire/ui/host.ts";
 import { initials } from "@confire/ui/format.ts";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { NotificationsPopover, useUnreadCount } from "@confire/ui/notifications/Notifications.tsx";
 import { B1_FEATURES } from "../features/b1/index.ts";
 import { GlobalSearch, type SearchHit } from "./GlobalSearch.tsx";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 import { LANGUAGES, useLanguage } from "@confire/ui/i18n.ts";
 import { useI18n } from "../i18n.ts";
 import { AssistantProvider, useAssistantShell } from "../assistant/AssistantProvider.tsx";
 import { assistantToggle } from "../assistant/toggle.ts";
+
+const CflDialog = lazy(() => import("@confire/ui/cfl/CflDialog.tsx"));
+
+/** The user's own B1 sales employee — the server's SALES_PERSON_KEY (ui-views.ts), which the SAP
+ *  lists' "Assigned to me" filters SalesPersonCode on. */
+const SALES_PERSON_KEY = "b1:salesPerson";
 
 export const B1_NAV_KEY: Record<string, string> = {
   Quotations: "NAV_QUOTATIONS",
@@ -97,6 +104,15 @@ function Shell() {
   // The bell (notifications spec §10): the count polls, the list loads while the popover is open.
   const unread = useUnreadCount(notifications);
   const [bellOpener, setBellOpener] = useState<HTMLElement | null>(null);
+  const salesPersonState = orpc.views.getState.queryOptions({ input: { key: SALES_PERSON_KEY } });
+  const salesPerson = useQuery(salesPersonState).data as { code: number; name: string } | null | undefined;
+  const [pickingSalesPerson, setPickingSalesPerson] = useState(false);
+  const pickSalesPerson = async (row: Record<string, unknown>) => {
+    setPickingSalesPerson(false);
+    await client.views.setState({ key: SALES_PERSON_KEY, value: { code: Number(row.SalesEmployeeCode), name: String(row.SalesEmployeeName ?? "") } });
+    void queryClient.invalidateQueries({ queryKey: salesPersonState.queryKey });
+    void queryClient.invalidateQueries({ queryKey: orpc.entities.rows.key() });
+  };
 
   const onSelect: SideNavigationPropTypes["onSelectionChange"] = (e) => {
     const to = (e.detail.item as HTMLElement).dataset.to;
@@ -231,7 +247,16 @@ function Shell() {
             </UserMenuItem>
             <UserMenuItem text={i18n.getText("NOTIF_MENU")} icon="bell"
               onClick={() => { setUserMenuOpen(false); openNotificationSettings(); }} />
+            <UserMenuItem icon="customer"
+              text={salesPerson ? i18n.getText("USER_MENU_SALES_PERSON_IS", salesPerson.name) : i18n.getText("USER_MENU_SALES_PERSON")}
+              onClick={() => { setUserMenuOpen(false); setPickingSalesPerson(true); }} />
           </UserMenu>
+          {pickingSalesPerson && (
+            <Suspense fallback={null}>
+              <CflDialog config={cfl.salesPersons({ title: i18n.getText("USER_MENU_SALES_PERSON") })} initialSearch="" multiSelect={false}
+                onClose={() => setPickingSalesPerson(false)} onSelect={([row]) => { if (row) void pickSalesPerson(row); }} />
+            </Suspense>
+          )}
           <NotificationsPopover api={notifications} opener={bellOpener} open={bellOpener !== null}
             onClose={() => setBellOpener(null)} getText={i18n.getText.bind(i18n)}
             onNavigate={go} onSettings={openNotificationSettings} />

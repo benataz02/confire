@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   buildPool, decodeFilters, defaultState, encodeFilters, mergeKnownColumns, pickInitial, resolveListState,
-  sameState, systemViewsOf, toQuery, type View,
+  sameState, systemViewsOf, toQuery, viewLabel, withSaved, type View,
 } from "./views.ts";
 import type { FilterField, ListColumn, ViewState } from "./types.ts";
 
@@ -106,4 +106,21 @@ test("system views: Standard first unless declared; the active id, then defaults
   expect(pickInitial([...sys, shared, mine], null).id).toBe("p");
   expect(pickInitial([...sys, shared], "deleted").id).toBe("s");
   expect(pickInitial(sys, null).id).toBe("system:default");
+});
+
+test("a shared default (the seeded All) stands in for Standard; Standard comes back without it", () => {
+  const sys = systemViewsOf<ViewState>([{ key: "open", name: "Open", state: {} }]);
+  const all: View<ViewState> = { id: "a", name: "All", visibility: "shared", isDefault: true, canEdit: false, state: null };
+  expect(withSaved(sys, [all]).map((v) => v.id)).toEqual(["system:open", "a"]);
+  expect(withSaved(sys, [{ ...all, isDefault: false }]).map((v) => v.id)).toEqual(["system:default", "system:open", "a"]);
+  expect(withSaved(sys, [{ ...all, visibility: "personal" }]).map((v) => v.id)).toEqual(["system:default", "system:open", "a"]);
+});
+
+test("seeded shared names read in the user's language; a renamed or personal one as written", () => {
+  const getText = (k: string) => `<${k}>`;
+  const v = (name: string, visibility: "shared" | "personal" = "shared") => ({ id: "x", name, visibility });
+  expect(viewLabel(v("Assigned to me"), getText)).toBe("<UI_VIEW_ASSIGNED_TO_ME>");
+  expect(viewLabel({ id: "system:default", name: "Standard", visibility: "system" }, getText)).toBe("<UI_STANDARD_VIEW>");
+  expect(viewLabel(v("Mis abiertos"), getText)).toBe("Mis abiertos");
+  expect(viewLabel(v("Open", "personal"), getText)).toBe("Open");
 });

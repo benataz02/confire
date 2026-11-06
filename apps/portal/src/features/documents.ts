@@ -53,7 +53,7 @@ export function docFeature(entity: DocEntity, c: EntityConstraints, t: TextFn): 
       columns: scalars.map((key) => ({ key, ...(WIDTH[key] ? { width: WIDTH[key] } : {}) })),
       filterFields: [{ key: "DocNum", exact: true }, { key: "DocDate" }, { key: "DocumentStatus" }],
       systemViews: [
-        { key: "default", name: t("PORTAL_VIEW_STANDARD"), isDefault: true, state: { sortBy: NEWEST } },
+        { key: "default", name: t("PORTAL_VIEW_ALL"), isDefault: true, state: { sortBy: NEWEST } },
         { key: "open", name: t("PORTAL_VIEW_OPEN"), state: { sortBy: NEWEST, filterValues: { DocumentStatus: ["bost_Open"] } } },
       ],
     },

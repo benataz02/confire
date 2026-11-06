@@ -32,6 +32,14 @@ const show = (v: Val): string =>
 
 const header = (c: TableColumn) => c.label + (c.unit ? ` (${c.unit})` : "");
 
+/** A display cell keeps the row's height: one line, cut with an ellipsis, the whole value on hover.
+ *  A bare Text wraps (maxLines is unbounded) and spills out of the row. */
+/** A column's narrowest width: its control's, or its header's when that is wider.
+ *  ponytail: the header is guessed at 8px a character; measure it if headers come out cut. */
+const floor = (label: string, control: number) => Math.max(control, label.length * 8 + 40);
+
+const CellText = ({ text }: { text: string }) => <Text maxLines={1} title={text}>{text}</Text>;
+
 /**
  * The one table component for both roles. An `items` table becomes n quotation lines; a `calc`
  * table only feeds sums into the model's formulas — the difference is entirely in what the server
@@ -94,7 +102,7 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
     const stored = rows[ri]?.[PRICE_COL];
     const overridden = typeof stored === "number";
     const value = overridden ? stored : money?.rows[ri]?.unitPrice;
-    if (readOnly) return <Text>{moneyText(value)}</Text>;
+    if (readOnly) return <CellText text={moneyText(value)} />;
     return (
       <Input style={{ width: "100%" }} type="Number" accessibleName={priceHeader}
         value={value === undefined ? "" : show(value)}
@@ -130,15 +138,15 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
     const ai = mark?.kind === "assistant" ? mark : undefined;
 
     if (readOnly || (computed && !formulaOverride)) {
-      if (computed) return <Text>{show(value ?? null)}</Text>;
+      if (computed) return <CellText text={show(value ?? null)} />;
       if (c.type === "boolean")
-        return <Text>{displayValue(stored, [{ value: true, label: i18n.getText("UI_YES") }, { value: false, label: i18n.getText("UI_NO") }])}</Text>;
+        return <CellText text={displayValue(stored, [{ value: true, label: i18n.getText("UI_YES") }, { value: false, label: i18n.getText("UI_NO") }])} />;
       if (c.cell.kind === "options") {
         // Items grid: the stored code is what rides to SAP; don't swap it for the lookup label.
         const opts = def.role === "items" ? [] : columnOptions(c, tables);
-        return <Text>{displayValue(value, opts)}</Text>;
+        return <CellText text={displayValue(value, opts)} />;
       }
-      return <Text>{displayValue(stored, [])}</Text>;
+      return <CellText text={displayValue(stored, [])} />;
     }
 
     if (c.type === "boolean")
@@ -211,16 +219,19 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
 
   // The declared columns, then the two money ones. Not sortable: row order is the quotation's line
   // order, and Grid's sort is a server's job it would only ask the view to do.
-  // ponytail: no widths — AnalyticalTable shares the row evenly (the user can drag a column wider).
-  // A width off the cell text would change per keystroke and rebuild every cell; size from the
-  // headers if narrow columns become a complaint.
+  // Columns share the width out but never below a floor: past every floor the grid scrolls sideways
+  // and a cell cuts what does not fit with an ellipsis, rather than squeezing to the table's 60px.
+  // The floor is static (the header and the control), never the cell text, which would change per
+  // commit and rebuild every cell.
   const columns = useMemo<ListColumn[]>(() => [
     ...def.columns.map((c) => ({
       key: c.key, label: header(c), type: c.type, sortable: false, required: !readOnly && requiredColumn(def, c),
+      // a value help carries two icons beside its code
+      minWidth: floor(header(c), !readOnly && c.cell.kind === "options" && c.cell.ref.source === "query" ? 200 : 140),
     })),
     ...(showMoney ? [
-      { key: COST_COL, label: costHeader, type: "number" as const, sortable: false },
-      { key: PRICE_COL, label: priceHeader, type: "number" as const, sortable: false },
+      { key: COST_COL, label: costHeader, type: "number" as const, sortable: false, minWidth: floor(costHeader, 140) },
+      { key: PRICE_COL, label: priceHeader, type: "number" as const, sortable: false, minWidth: floor(priceHeader, 140) },
     ] : []),
   ], [def, readOnly, showMoney, costHeader, priceHeader]);
   const state = useMemo<GridState>(() => ({ columns: columns.map((c) => c.key), sortBy: [], groupBy: [] }), [columns]);
@@ -231,7 +242,7 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
   // as long as the column set does and read this render's cells through the ref.
   const render = useRef<(ri: number, key: string) => ReactNode>(null);
   render.current = (ri, key) =>
-    key === COST_COL ? <Text>{moneyText(money?.rows[ri]?.unitCost)}</Text>
+    key === COST_COL ? <CellText text={moneyText(money?.rows[ri]?.unitCost)} />
     : key === PRICE_COL ? priceCell(ri)
     : cell(ri, def.columns.find((c) => c.key === key)!);
   const cellTemplates = useMemo(

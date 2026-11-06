@@ -29,7 +29,7 @@ test("columns and form follow the server's field order; lines are the table", ()
   expect(f.list.systemViews!.map((v) => v.key)).toEqual(["default", "open"]);
   expect(f.label).toBe("Sales orders");
   expect(f.list.title).toBe("Sales orders");
-  expect(f.list.systemViews!.map((v) => v.name)).toEqual(["PORTAL_VIEW_STANDARD", "PORTAL_VIEW_OPEN"]);
+  expect(f.list.systemViews!.map((v) => v.name)).toEqual(["PORTAL_VIEW_ALL", "PORTAL_VIEW_OPEN"]);
   expect(f.detail.sections.map((s) => s.label)).toEqual(["PORTAL_GENERAL", "PORTAL_LINES"]);
   expect(f.detail.sections[0]!.groups![0]!.label).toBe("PORTAL_DOCUMENT");
   expect(f.detail.header.facets?.[0]?.statusMapping?.bost_Open?.text).toBe("PORTAL_DOC_STATUS_OPEN");

@@ -44,7 +44,6 @@ const GROUP: Record<string, string> = {
 
 const VIEW: Record<string, string> = {
   default: "ADMIN_VIEW_STANDARD",
-  open: "ADMIN_OPEN",
 };
 
 function docStatus(t: AdminText): NonNullable<Facet["statusMapping"]> {
@@ -69,6 +68,9 @@ export function localizedB1Feature(entity: string, t: AdminText): EntityFeature 
       ...f.list,
       title,
       systemViews: f.list.systemViews?.map((v) => ({ ...v, name: VIEW[v.key] ? t(VIEW[v.key]!) : v.name })),
+      filterFields: f.list.filterFields?.map((x) => x.key !== "mine" ? x : {
+        ...x, label: t("ADMIN_COL_MINE"), options: [{ value: "yes", label: t("ADMIN_YES") }, { value: "no", label: t("ADMIN_NO") }],
+      }),
     },
     detail: {
       ...f.detail,

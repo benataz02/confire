@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { t, title } from "../../../head.ts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@ui5/webcomponents-react";
 import { orpc } from "../../../orpc.ts";
@@ -10,7 +11,7 @@ import { confirm } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
 import type { ListFeature, ListQuery, Row } from "@confire/ui/types.ts";
 
-export const Route = createFileRoute("/$slug/models/")({ component: Models });
+export const Route = createFileRoute("/$slug/models/")({ head: () => title(t("NAV_MODELS")), component: Models });
 
 function Models() {
   const i18n = useI18n();
@@ -40,7 +41,7 @@ function Models() {
       }),
       enabled: !!query,
     },
-    { route: "/models", keyOf: (r) => r.id },
+    { route: "/models", keyOf: (r) => r.id, create: "/models/new" },
   );
 
   const remove = useMutation(orpc.models.remove.mutationOptions({ onSuccess: invalidate }));
@@ -88,7 +89,6 @@ function Models() {
       error={remove.error ?? duplicate.error}
       toolbarActions={({ rows: sel, clear }) => (
         <>
-          <Button icon="add" design="Transparent" onClick={() => { void navigate({ to: "/$slug/models/new" }); }}>{t("ADMIN_CREATE")}</Button>
           <Button icon="copy" design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}
             onClick={() => duplicate.mutate({ id: String(sel[0]!.id) })}>
             {t("MODEL_DUPLICATE")}

@@ -3,13 +3,14 @@ import { z } from "zod";
 import { and, eq, ne, or } from "drizzle-orm";
 import {
   db, uiUserState, uiView, user, ObjectViewStateZ, OBJECT_TABLE_SUFFIX, ViewStateZ,
-  type ObjectViewState, type ViewState,
+  type ListQuery, type ObjectViewState, type ViewState,
 } from "@confire/db";
 import { t } from "./i18n/index.ts";
 
 // Saved views, a copy of the Beas GridViews API (list / create / update / delete) plus the
 // UserGridStates half: the active view per table, and the value-help dialog layouts. System views
-// are not here — a feature declares them in code and the client prepends them.
+// are not here — a feature declares them in code and the client prepends them. The shared views
+// every workspace starts with are (SEEDED_VIEWS, below).
 //
 // Rules: shared views are admin-only to create or change; a personal view belongs to whoever
 // created it; names are unique per scope (one user's personal views, or the tenant's shared ones).
@@ -102,6 +103,90 @@ async function clearOtherDefaults(
   ));
 }
 
+
+// --- the seeded views -----------------------------------------------------------------------------
+
+/** A list state that is the declared defaults plus these filters: empty `columns` and
+ *  `adaptFilterKeys` resolve to the feature's own (`resolveListState`), so a column added later
+ *  still shows. */
+const seeded = (filterValues: ViewState["filterValues"] = {}, sortBy: ViewState["sortBy"] = []): ViewState => ({
+  columns: [], knownColumns: [], sortBy, groupBy: [], adaptFilterKeys: [], filterValues, searchTerm: "",
+});
+const NEWEST: ViewState["sortBy"] = [{ field: "DocEntry", direction: "desc" }];
+/** Each list's Open (or Active) filters; its Mine view is the same plus `mine` — what is still
+ *  the user's to do. */
+const OPEN_DOC = { DocumentStatus: ["bost_Open"] };
+const ACTIVE = { Frozen: ["tNO"] };
+const OPEN_CONFIG = { status: ["draft"] };
+const OPEN_REQUEST = { status: ["submitted", "in_review", "returned"] };
+const MINE = { mine: ["yes"] };
+// Open first: a document list opens on what is still to do.
+const DOCUMENTS = [
+  ["Open", seeded(OPEN_DOC, NEWEST)],
+  ["All", seeded({}, NEWEST)],
+  ["Assigned to me", seeded({ ...OPEN_DOC, ...MINE }, NEWEST)],
+] as const;
+
+/** Every workspace's starting views: shared rows, the first of each table its default (the list
+ *  shows them by name, so the order says nothing else), which
+ *  replaces the declared Standard (`useViews`). `mine` is no column: each list's server reads it
+ *  per caller — the sales employee the user picked (B1, `withMine`), the configuration's creator,
+ *  the request's assignee. Migration 0016 gave them to the workspaces made before; keep the two
+ *  in step.
+ *  The names are stored in English and shown translated while unchanged (`viewLabel`, @confire/ui). */
+export const SEEDED_VIEWS: Record<string, readonly (readonly [string, ViewState])[]> = {
+  "b1:Quotations": DOCUMENTS,
+  "b1:Orders": DOCUMENTS,
+  "b1:DeliveryNotes": DOCUMENTS,
+  "b1:BusinessPartners": [
+    ["All", seeded()],
+    ["Active", seeded(ACTIVE)],
+    ["Assigned to me", seeded({ ...ACTIVE, ...MINE })],
+  ],
+  // An item has no sales employee: no "mine".
+  "b1:Items": [["All", seeded()], ["Active", seeded(ACTIVE)]],
+  configs: [
+    ["All", seeded()],
+    ["Open", seeded(OPEN_CONFIG)],
+    ["Created by me", seeded({ ...OPEN_CONFIG, ...MINE })],
+  ],
+  requests: [
+    ["All", seeded()],
+    ["Open", seeded(OPEN_REQUEST)],
+    ["Assigned to me", seeded({ ...OPEN_REQUEST, ...MINE })],
+  ],
+};
+
+/** A new workspace's shared views, authored by whoever created it (auth.ts' hook). */
+export async function seedViews(tenantId: string, userId: string): Promise<void> {
+  await db.insert(uiView).values(Object.entries(SEEDED_VIEWS).flatMap(([tableId, vs]) =>
+    vs.map(([name, state], i) => ({ tenantId, userId, tableId, name, visibility: "shared" as const, isDefault: i === 0, state }))));
+}
+
+/** The user's own SAP sales employee (`{ code, name }`, picked in the user menu), under a
+ *  `ui_user_state` key: it only narrows a list, so it is the user's to set. */
+export const SALES_PERSON_KEY = "b1:salesPerson";
+
+/** `mine` on a B1 list is no SAP field: it becomes SalesPersonCode against the caller's own sales
+ *  employee — `yes` eq, `no` ne, both nothing. `code` undefined = none picked yet, refused. */
+export function withMine(q: ListQuery, code: number | undefined): ListQuery {
+  const mine = q.filter.filter((c) => c.field === "mine");
+  if (!mine.length) return q;
+  const filter = q.filter.filter((c) => c.field !== "mine");
+  for (const c of mine) {
+    const v = [c.value].flat();
+    const yes = v.includes("yes"), no = v.includes("no");
+    if (yes === no) continue;
+    if (code === undefined) throw new ORPCError("BAD_REQUEST", { message: t("VIEW_MINE_NO_SALES_PERSON") });
+    filter.push({ field: "SalesPersonCode", op: yes ? "eq" : "ne", value: code });
+  }
+  return { ...q, filter };
+}
+
+export async function salesPersonOf(tenantId: string, userId: string): Promise<number | undefined> {
+  const v = await getUserState(tenantId, userId, SALES_PERSON_KEY) as { code?: unknown } | null;
+  return typeof v?.code === "number" ? v.code : undefined;
+}
 
 export const ListInputZ = z.object({ tableId: TableIdZ });
 export const CreateInputZ = z.object({

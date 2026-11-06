@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { t, title } from "../../../head.ts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, ObjectStatus, Text } from "@ui5/webcomponents-react";
 import { orpc } from "../../../orpc.ts";
@@ -11,7 +12,7 @@ import { toast } from "@confire/ui/toast.ts";
 import { useI18n } from "../../../i18n.ts";
 import type { ListFeature, ListQuery, Row } from "@confire/ui/types.ts";
 
-export const Route = createFileRoute("/$slug/configs/")({ component: Configs });
+export const Route = createFileRoute("/$slug/configs/")({ head: () => title(t("NAV_CONFIGS")), component: Configs });
 
 function Configs() {
   const i18n = useI18n();
@@ -33,7 +34,7 @@ function Configs() {
       }),
       enabled: !!query,
     },
-    { route: "/configs", keyOf: (r) => r.id },
+    { route: "/configs", keyOf: (r) => r.id, create: "/configs/new" },
   );
 
   const remove = useMutation(orpc.configs.remove.mutationOptions({ onSuccess: invalidate }));
@@ -79,6 +80,8 @@ function Configs() {
   const colName = t("CONFIG_COL_NAME");
   const colModel = t("CONFIG_COL_MODEL");
   const colCustomer = t("CONFIG_COL_CUSTOMER");
+  const colCardCode = t("CONFIG_COL_CARD_CODE");
+  const colQuote = t("CONFIG_COL_QUOTE");
   const colStatus = t("CONFIG_COL_STATUS");
   const colUpdated = t("CONFIG_COL_UPDATED");
   const colMine = t("CONFIG_COL_MINE");
@@ -94,6 +97,7 @@ function Configs() {
     columns: [
       { key: "name", label: colName, type: "string" },
       { key: "modelName", label: colModel, type: "string", groupable: true },
+      { key: "cardCode", label: colCardCode, type: "string", linkConfig: { route: "/b1/BusinessPartners" } },
       { key: "customerName", label: colCustomer, type: "string", groupable: true },
       {
         key: "status", label: colStatus, type: "enum", groupable: true,
@@ -102,12 +106,14 @@ function Configs() {
           { value: "quoted", label: quotedText },
         ],
       },
+      // Shows the DocNum, opens by DocEntry; the server leaves both empty for another company's quote.
+      { key: "quoteDocNum", label: colQuote, type: "number", integer: true, linkConfig: { route: "/b1/Quotations", idField: "quoteDocEntry" } },
       { key: "updatedAt", label: colUpdated, type: "date" },
       // The server computes it per caller: the home page's "My drafts" links here with ?mine=yes.
       { key: "mine", label: colMine, type: "enum", options: [{ value: "yes", label: yes }, { value: "no", label: no }], hidden: true },
     ],
     filterFields: [{ key: "name" }, { key: "customerName" }, { key: "status" }],
-  }), [title, colName, colModel, colCustomer, colStatus, colUpdated, colMine, yes, no, draftText, quotedText]);
+  }), [title, colName, colModel, colCardCode, colCustomer, colQuote, colStatus, colUpdated, colMine, yes, no, draftText, quotedText]);
   const cells = useMemo(() => ({
     status: (row: Row) => {
       const known = statusUi(t)[row.status as "draft" | "quoted"];
@@ -126,15 +132,11 @@ function Configs() {
       keyOf={(r) => String(r.id)}
       cellTemplates={cells}
       error={remove.error ?? duplicate.error}
+      createDisabled={first ? undefined : t("CONFIG_NO_MODELS")}
       toolbarActions={({ rows: sel, clear }) => {
         const quotedSel = sel.some((r) => r.status === "quoted");
         return (
           <>
-            <Button icon="add" design="Transparent" disabled={!first}
-              tooltip={first ? undefined : t("CONFIG_NO_MODELS")}
-              onClick={() => { void navigate({ to: "/$slug/configs/new" }); }}>
-              {t("ADMIN_CREATE")}
-            </Button>
             <Button icon="copy" design="Transparent" disabled={sel.length !== 1 || duplicate.isPending}
               onClick={() => duplicate.mutate({ id: String(sel[0]!.id) })}>
               {duplicate.isPending ? t("CONFIG_DUPLICATING") : t("CONFIG_DUPLICATE")}

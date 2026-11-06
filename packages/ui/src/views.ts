@@ -24,6 +24,25 @@ export type View<S> = {
 
 export const STANDARD_ID = "system:default";
 
+/** The workspace's seeded shared views (server ui-views.ts' SEEDED_VIEWS) are rows named in
+ *  English; these are their names' texts. Only shared views, and only while the stored name is
+ *  still the seeded one — an admin's rename is shown as written. Display only: Manage writes the
+ *  stored name back unless the text itself was edited. */
+const SEEDED_NAME: Record<string, string> = {
+  "All": "UI_VIEW_ALL",
+  "Open": "UI_VIEW_OPEN",
+  "Active": "UI_VIEW_ACTIVE",
+  "Assigned to me": "UI_VIEW_ASSIGNED_TO_ME",
+  "Created by me": "UI_VIEW_CREATED_BY_ME",
+};
+
+/** What a person reads as a view's name: Standard and the seeded names in their language. */
+export function viewLabel(v: Pick<View<unknown>, "id" | "name" | "visibility">, getText: (key: string) => string): string {
+  if (v.id === STANDARD_ID) return getText("UI_STANDARD_VIEW");
+  const key = v.visibility === "shared" ? SEEDED_NAME[v.name] : undefined;
+  return key ? getText(key) : v.name;
+}
+
 /** ks(): declared views as read-only `system:<key>` views, Standard first unless declared. */
 export function systemViewsOf<S>(declared: SystemView<S>[] = []): View<S>[] {
   const own: View<S>[] = declared.map((v) => ({
@@ -34,6 +53,13 @@ export function systemViewsOf<S>(declared: SystemView<S>[] = []): View<S>[] {
     { id: STANDARD_ID, name: "Standard", visibility: "system", isDefault: !declared.some((v) => v.isDefault), canEdit: false, state: null },
     ...own,
   ];
+}
+
+/** The declared views, then the saved ones. A shared default — the workspace's seeded "All", or
+ *  one an admin chose — stands in for Standard, which comes back if that default goes. */
+export function withSaved<S>(system: View<S>[], saved: View<S>[]): View<S>[] {
+  const own = saved.some((v) => v.visibility === "shared" && v.isDefault);
+  return [...(own ? system.filter((v) => v.id !== STANDARD_ID) : system), ...saved];
 }
 
 /** Which view opens: the one this user last had active, then their personal default, then the
@@ -285,7 +311,7 @@ export function useViews<S>({ tableId, systemViews, resolve, initial, local = fa
   const q = useQuery({ ...listOpts, enabled: !local, retry: false, staleTime: 60_000 });
   const system = useMemo(() => systemViewsOf(systemViews), [systemViews]);
   const views = useMemo<View<S>[]>(
-    () => [...system, ...(q.data?.views ?? []).map((v) => ({ ...v, state: v.state as unknown as Partial<S> }))],
+    () => withSaved(system, (q.data?.views ?? []).map((v) => ({ ...v, state: v.state as unknown as Partial<S> }))),
     [system, q.data],
   );
   const loaded = local || q.isFetched;

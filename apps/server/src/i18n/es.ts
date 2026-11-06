@@ -29,6 +29,7 @@ export const es: Partial<Record<keyof typeof en, string>> = {
 
   VIEW_STATE_INVALID: "Estado de vista no válido: {0}",
   VIEW_NOT_YOURS: "No puede cambiar esta vista",
+  VIEW_MINE_NO_SALES_PERSON: "Elija su empleado de ventas en el menú de usuario (Mi empleado de ventas) para ver lo que tiene asignado",
   VIEW_SHARED_NAME_TAKEN: "Ya existe una vista compartida con este nombre",
   VIEW_PERSONAL_NAME_TAKEN: "Ya existe una vista personal con este nombre",
   VIEW_SHARED_ADMINS: "Solo los administradores pueden publicar vistas compartidas",

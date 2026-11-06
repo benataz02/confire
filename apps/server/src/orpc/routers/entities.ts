@@ -14,6 +14,7 @@ import { printDocument } from "../../print.ts";
 import { bad, readOne, readRows } from "../../entity-read.ts";
 import { DEFAULT_PAGE } from "../../lookups.ts";
 import { t } from "../../i18n/index.ts";
+import { salesPersonOf, withMine } from "../../ui-views.ts";
 
 // The B1 entity surface: read an entity's constraints, page rows, open one row — for any entity
 // set. Which entities a user can *browse* is the web's declared feature registry; this router does
@@ -73,7 +74,11 @@ export const entitiesRouter = {
       assertReadable(input.entity, context.role);
       const b1 = await b1Of(context.tenantId);
       const schema = await viaB1(() => entitySchema(context.tenantId, b1, input.entity)).catch(bad);
-      return readRows(b1, schema, input.entity, { ...input, pageSize: DEFAULT_PAGE },
+      // A list's "Assigned to me": `mine` is the caller's sales employee, read only when asked for.
+      const query = input.query.filter.some((c) => c.field === "mine")
+        ? withMine(input.query, await salesPersonOf(context.tenantId, context.userId))
+        : input.query;
+      return readRows(b1, schema, input.entity, { ...input, query, pageSize: DEFAULT_PAGE },
         { tenantId: context.tenantId, key: "internal" });
     }),
 

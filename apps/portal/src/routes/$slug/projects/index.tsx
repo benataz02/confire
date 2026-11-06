@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Button, ObjectStatus, Text } from "@ui5/webcomponents-react";
+import { ObjectStatus, Text } from "@ui5/webcomponents-react";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
 import { useListView } from "@confire/ui/useListView.ts";
 import { PROJECT_STATUS, PROJECT_STATUS_OPTIONS } from "@confire/ui/timeline/projectStatus.ts";
@@ -14,6 +14,9 @@ import { meQuery, orpc } from "../../../orpc.ts";
 // the declared ones. Buyers and owners start new ones from the catalog.
 
 export const Route = createFileRoute("/$slug/projects/")({ component: Projects });
+
+/** Not yet quoted or declined; "Created by me" is the same, the user's own. */
+const OPEN = ["draft", "submitted", "in_review", "returned"];
 
 const projectsFeature = (t: TextFn): ListFeature => ({
   tableId: "portal:projects",
@@ -28,20 +31,22 @@ const projectsFeature = (t: TextFn): ListFeature => ({
     { key: "createdBy", label: t("PORTAL_CREATED_BY"), groupable: true },
     { key: "updatedAt", label: t("PORTAL_LAST_CHANGED"), type: "date", width: 150 },
   ],
-  filterFields: [{ key: "name" }, { key: "status" }, { key: "modelName" }],
+  // `mine` is no column: the server computes it per caller, for "Created by me".
+  filterFields: [
+    { key: "name" }, { key: "status" }, { key: "modelName" },
+    { key: "mine", label: t("PORTAL_VIEW_MINE"), type: "enum", visible: false, options: [{ value: "yes", label: t("PORTAL_VIEW_MINE") }] },
+  ],
+  // Code, not seeded rows: the portal shows personal views only (spec §9), never the tenant's shared ones.
   systemViews: [
     { key: "all", name: t("PORTAL_VIEW_ALL"), state: null, isDefault: true },
-    { key: "drafts", name: t("PORTAL_VIEW_DRAFTS"), state: { filterValues: { status: ["draft"] } } },
-    { key: "progress", name: t("PORTAL_VIEW_IN_PROGRESS"), state: { filterValues: { status: ["submitted", "in_review"] } } },
-    { key: "returned", name: t("PORTAL_STATUS_RETURNED"), state: { filterValues: { status: ["returned"] } } },
-    { key: "quoted", name: t("PORTAL_STATUS_QUOTED"), state: { filterValues: { status: ["quoted"] } } },
+    { key: "open", name: t("PORTAL_VIEW_OPEN"), state: { filterValues: { status: OPEN } } },
+    { key: "mine", name: t("PORTAL_VIEW_MINE"), state: { filterValues: { status: OPEN, mine: ["yes"] } } },
   ],
 });
 
 function Projects() {
   const i18n = useI18n();
   const t = i18n.getText.bind(i18n);
-  const navigate = useNavigate({ from: "/$slug" });
   const role = useQuery(meQuery).data?.company?.role;
   const [query, setQuery] = useState<ListQuery | null>(null);
   const data = useListView(
@@ -53,7 +58,8 @@ function Projects() {
       }),
       enabled: !!query,
     },
-    { route: "/projects", keyOf: (r) => r.id },
+    // A viewer may not start a project.
+    { route: "/projects", keyOf: (r) => r.id, ...(role === "viewer" ? {} : { create: "/projects/new" }) },
   );
   return (
     <ListReport feature={projectsFeature(t)} data={data} onQuery={setQuery} keyOf={(r) => String(r.id)} cellTemplates={{
@@ -62,9 +68,6 @@ function Projects() {
         const s = PROJECT_STATUS[key];
         return s ? <ObjectStatus inverted state={s.state}>{t(PROJECT_STATUS_KEY[key])}</ObjectStatus> : <Text>{String(row.status ?? "")}</Text>;
       },
-    }}
-      toolbarActions={role === "viewer" ? undefined : () => (
-        <Button design="Transparent" icon="add" onClick={() => void navigate({ to: "/$slug/projects/new" })}>{t("PORTAL_NEW_PROJECT")}</Button>
-      )} />
+    }} />
   );
 }

@@ -26,13 +26,15 @@ const actorOf = (c: Seat): Actor => ({ userId: c.user.id, side: "external", card
 /** The seat's company's projects: a company is (tenant, CardCode), never the CardCode alone. */
 const seatFence = (c: Seat) => and(eq(configProject.tenantId, c.tenantId), eq(configProject.portalCardCode, c.cardCode));
 
-const PROJECT_FIELDS: SqlFields = {
+/** The list's columns. `mine` is per caller (the "Created by me" view), so the fields are too. */
+const projectFields = (userId: string): SqlFields => ({
   name: { col: configProject.name, kind: "string" },
   modelName: { col: configModel.name, kind: "string" },
   status: { col: configProject.status, kind: "enum" },
   createdBy: { col: user.name, kind: "string" },
+  mine: { col: sql<string>`case when ${configProject.createdBy} = ${userId} then 'yes' else 'no' end`, kind: "enum" },
   updatedAt: { col: configProject.updatedAt, kind: "date" },
-};
+});
 
 async function ownProject(c: Seat, id: string): Promise<ConfigProject> {
   const [p] = await db.select().from(configProject)
@@ -109,7 +111,7 @@ const IdZ = z.object({ id: z.uuid() });
 
 export const projectsRouter = {
   rows: portalMemberProcedure.input(ListPageZ).handler(async ({ input, context }) => {
-    const { where, orderBy } = compileQuery(PROJECT_FIELDS, input.query);
+    const { where, orderBy } = compileQuery(projectFields(context.user.id), input.query);
     const raw = await db
       .select({
         id: configProject.id, name: configProject.name, modelName: configModel.name, status: configProject.status,

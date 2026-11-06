@@ -1,5 +1,6 @@
 import { useMemo, useState, type CSSProperties, type ComponentProps } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { t, title } from "../../head.ts";
 import { useQuery } from "@tanstack/react-query";
 import {
   AnalyticalCardHeader, BusyIndicator, Card, CardHeader, FlexBox, IllustratedMessage, MessageStrip, NumericSideIndicator, Text, Title,
@@ -18,7 +19,7 @@ import { sortRows } from "../../reports/widgets.ts";
 // monthly limit. Drawn as a report is — KPI cards, charts in cards, the people in a Grid — over
 // `assistant.usageReport`, which reads `ai_usage` (assistant/usage.ts). Costs are USD: the meter's.
 
-export const Route = createFileRoute("/$slug/usage")({ component: Usage });
+export const Route = createFileRoute("/$slug/usage")({ head: () => title(t("NAV_AI_USAGE")), component: Usage });
 
 const CHART_HEIGHT = "16rem";
 const grid = (min: string): CSSProperties => ({ display: "grid", gridTemplateColumns: `repeat(auto-fit, minmax(${min}, 1fr))`, gap: "1rem" });

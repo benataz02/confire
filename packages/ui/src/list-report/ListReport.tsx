@@ -15,17 +15,21 @@ import type { ListFeature, ListQuery, Row, ViewState } from "../types.ts";
 // views — over whatever the page pages. The view state (one combined variant: layout + filters)
 // lives here; the page only hears the query it implies (`onQuery`) and hands back the rows.
 
-// Trims the title bar to the view selector's own height; the default padding and 4rem min-height
-// leave dead space above and below it. ponytail: private theme vars, revisit if they get renamed.
+// Trims the title bar to a Toolbar's height; the default padding and 4rem min-height leave dead
+// space above and below it. A Toolbar, not the view selector: a list with `headerActions` is that
+// tall, and every list's title must be, or its filters and table sit lower than the next list's.
+// The height is ui5-toolbar's own expression (cozy or compact, by the document's density).
+// ponytail: private theme vars, revisit if they get renamed.
 const titleStyle = {
   "--_ui5_dynamic_page_title_padding_top": "0.25rem",
   "--_ui5_dynamic_page_title_padding_bottom": "0.25rem",
-  "--_ui5_dynamic_page_title_min_height": "2rem",
+  "--_ui5_dynamic_page_title_min_height":
+    "var(--_ui5-compact-size, var(--sapElement_Compact_LineHeight)) var(--_ui5-cozy-size, var(--sapElement_LineHeight))",
   "--_ui5_dynamic_page_title_heading_padding_top": "0",
 } as CSSProperties;
 
 export function ListReport({
-  feature, constraints, data, onQuery, keyOf, toolbarActions, headerActions, readOnly, localViews,
+  feature, constraints, data, onQuery, keyOf, toolbarActions, headerActions, readOnly, createDisabled, localViews,
   showSearch = true, cellTemplates, filterTemplates, footer, error,
 }: {
   feature: ListFeature;
@@ -40,6 +44,8 @@ export function ListReport({
   headerActions?: ReactElement;
   /** hides Create */
   readOnly?: boolean;
+  /** Create stays but is off, and this says why (its tooltip) */
+  createDisabled?: string;
   /** system views only, no server calls */
   localViews?: boolean;
   showSearch?: boolean;
@@ -75,7 +81,13 @@ export function ListReport({
   const state = views.state;
 
   // The page refetches only when the query changes — not on a resize, a rename or a reorder.
-  const queryJson = state ? JSON.stringify(toQuery(state, pool)) : null;
+  // A visible column's unit is read too, column or not.
+  const queryJson = useMemo(() => {
+    if (!state) return null;
+    const q = toQuery(state, pool);
+    const units = columns.flatMap((c) => (c.unitField && state.columns.includes(c.key) ? [c.unitField] : []));
+    return JSON.stringify({ ...q, select: [...new Set([...q.select, ...units])].sort() });
+  }, [state, pool, columns]);
   useEffect(() => {
     if (queryJson) onQuery(JSON.parse(queryJson) as ListQuery);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -144,7 +156,9 @@ export function ListReport({
               toolbarActions={(sel) => (
                 <>
                   {data.onCreate && !readOnly ? (
-                    <Button design="Transparent" icon="add" onClick={data.onCreate}>{i18n.getText("UI_CREATE")}</Button>
+                    <Button design="Transparent" icon="add" onClick={data.onCreate} disabled={!!createDisabled} tooltip={createDisabled}>
+                      {i18n.getText("UI_CREATE")}
+                    </Button>
                   ) : null}
                   {toolbarActions?.(sel)}
                 </>
