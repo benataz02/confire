@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
-  boolean, customType, doublePrecision, index, jsonb, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid,
+  boolean, customType, date, doublePrecision, index, jsonb, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid,
 } from "drizzle-orm/pg-core";
 import type { Entries, ModelDef, Outputs, QuerySource, TableRows, Val } from "@confire/config-engine";
 
@@ -80,6 +80,9 @@ export type ValueSource = { file: string; page: number | null; quote: string } |
 /** By field key (a parameter, a table, or `batches`): the value the source wrote, and the source. */
 export type ProjectSources = Record<string, { value: unknown; source: ValueSource }>;
 export type QuoteResponse = "accepted" | "declined";
+/** How far SAP has taken a quoted project, in order: the portal home's journey past "Quoted". */
+export const SAP_STEPS = ["ordered", "delivered", "invoiced"] as const;
+export type SapStep = (typeof SAP_STEPS)[number];
 
 // One enumerated configuration, priced per batch quantity, and the user's pick of one.
 export type ConfigCandidate = { assignment: Entries; perBatch: { batchQty: number; outputs: Outputs }[] };
@@ -139,6 +142,11 @@ export const configProject = pgTable(
     // nothing in another company: there a re-quote creates instead of patching, and no link shows.
     b1Company: text("b1_company"),
     quotedAt: timestamp("quoted_at", { withTimezone: true }),
+    // The furthest SAP document descending from the quotation (an order, a delivery, an invoice) and
+    // its DocDate: the portal home's journey past "Quoted", stored so it draws with SAP down. Written
+    // only by the portal's `home.progress`, forward only, and never bumps `updated_at`.
+    sapStep: text("sap_step").$type<SapStep>(),
+    sapStepAt: date("sap_step_at", { mode: "string" }),
     // Engineered value/cost of the selected candidates, captured when the quotation is confirmed
     // so the posted document's DocTotal can be checked against a frozen figure. Recomputing would
     // resolve the model's live lookups and could disagree with what was posted.
