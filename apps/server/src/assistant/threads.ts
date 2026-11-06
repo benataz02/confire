@@ -110,13 +110,6 @@ export async function deleteThread(tenantId: string, userId: string, id: string)
   await withThread(t.id, () => db.delete(assistantThread).where(eq(assistantThread.id, t.id)));
 }
 
-/** A configuration's chat starts over (the panel's New chat there): its thread is deleted and a new
- *  empty one takes its place — the unique index allows one per (user, configuration). */
-export async function clearThread(tenantId: string, userId: string, projectId: string): Promise<Thread> {
-  await deleteThread(tenantId, userId, (await threadFor(tenantId, userId, projectId)).id);
-  return threadFor(tenantId, userId, projectId);
-}
-
 /** A thread of this user in this workspace, or NOT_FOUND. */
 export async function ownThread(tenantId: string, userId: string, threadId: string): Promise<Thread> {
   const [t] = await db.select(cols).from(assistantThread).where(and(

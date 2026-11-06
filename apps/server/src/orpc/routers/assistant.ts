@@ -8,7 +8,7 @@ import { extractInto } from "../../assistant/extract.ts";
 import { copyToProject, fileParts, FileRefZ, type FileRef } from "../../assistant/files.ts";
 import { ASSISTANT_MODEL, available } from "../../assistant/model.ts";
 import {
-  appendMessages, blankThread, clearThread, deleteThread, dehydrate, lastDrop, linkProject, listThreads, ownThread, setThread,
+  appendMessages, blankThread, deleteThread, dehydrate, lastDrop, linkProject, listThreads, ownThread, setThread,
   threadFor, withThread, type Thread, withoutContext,
 } from "../../assistant/threads.ts";
 import { userAutoWrite, workspaceAutoWrite } from "../../assistant/auto.ts";
@@ -94,14 +94,11 @@ export const assistantRouter = {
       return { id: t.id, projectId: t.projectId, reportId: t.reportId, messages: modelMessagesToUIMessages(withoutContext(t.messages)) };
     }),
 
-  /** New chat: a blank general thread, or with a configuration its thread started over. */
+  /** New chat: a blank general thread (the user's blank one, if there is one). A configuration's chat
+   *  starts over by Delete: the next open makes a fresh one. */
   newThread: userProcedure
-    .input(z.object({ projectId: z.uuid().optional() }).optional())
-    .handler(async ({ input, context }) => ({
-      id: (input?.projectId
-        ? await clearThread(context.tenantId, context.userId, input.projectId)
-        : await blankThread(context.tenantId, context.userId)).id,
-    })),
+    .input(z.object({}).optional())
+    .handler(async ({ context }) => ({ id: (await blankThread(context.tenantId, context.userId)).id })),
 
   /** The AI page's chat list: this user's own, pinned first, optionally searched. */
   threads: userProcedure
