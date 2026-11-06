@@ -178,6 +178,12 @@ export function AssistantPanel() {
     });
   };
 
+  // A chip's text goes into one chat's box, once: a chat drawn later (another one picked) does not get
+  // it again. Marked after the chat it was for has drawn — a child's effects run before its parent's.
+  const used = useRef(0);
+  const prefill = shell.asked?.text && shell.asked.at > used.current ? { text: shell.asked.text, at: shell.asked.at } : undefined;
+  useEffect(() => { if (prefill && thread.data && !thread.isPlaceholderData) used.current = prefill.at; });
+
   const row = chats.rows.find((r) => r.id === thread.data?.id);
   // Open configuration, unless its form is what the page shows (a client's request's form is its own page).
   const formRoute = config.data?.request ? "/$slug/configs/$id_/configuration" : "/$slug/configs/$id";
@@ -246,7 +252,7 @@ export function AssistantPanel() {
         onPick={pick} onNew={() => void newChat()} onHide={() => setChatsOpen(false)} onRemoved={removed} />
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         {thread.data ? <ChatView key={thread.data.id} thread={thread.data} route={route} kind={kind} head={head} welcome={welcome} wide={maximized}
-          onTool={onTool} prefill={shell.asked?.text ? { text: shell.asked.text, at: shell.asked.at } : undefined} />
+          onTool={onTool} prefill={prefill} />
           : (
             <>
               {head({ empty: true })}
