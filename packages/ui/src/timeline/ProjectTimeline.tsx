@@ -11,6 +11,7 @@ import { formatLocale } from "../format.ts";
 import { documentStatusText } from "../documentStatus.ts";
 import { PrintActions } from "../PrintActions.tsx";
 import { FILE_MAX_MB, fileSize, fileUrl } from "../files.ts";
+import { mergeEntries } from "./chapters.ts";
 
 // A project's timeline (spec §8), for both apps: one merged, time-ordered feed of the project's
 // events and the SAP documents its quotations became, with a comment box. Props-driven — each app
@@ -135,10 +136,6 @@ function Revision({ payload, labels }: { payload: unknown; labels: Record<string
   );
 }
 
-type Entry =
-  | { at: number; kind: "event"; e: TimelineEvent }
-  | { at: number; kind: "doc"; d: TimelineDoc; superseded: boolean };
-
 export function ProjectTimeline({
   events, labels, loading, error, documents, documentsError, side, currency, canComment, onComment, onUpload,
   onOpenDocument, canPreview,
@@ -171,13 +168,7 @@ export function ProjectTimeline({
   const [postError, setPostError] = useState<string | null>(null);
 
   // Oldest first, like a chat: the newest sits right above the comment box.
-  const entries = useMemo<Entry[]>(() => [
-    ...(events ?? []).map((e) => ({ at: new Date(e.at).getTime(), kind: "event" as const, e })),
-    ...(documents?.quotations ?? []).flatMap((q) => [q.quotation, ...q.chain].map((d) => ({
-      // A document has a posting date, not a time: it sorts at the start of its day.
-      at: new Date(d.docDate).getTime() || 0, kind: "doc" as const, d, superseded: !q.current && d.entity === "Quotations",
-    }))),
-  ].sort((a, b) => a.at - b.at), [events, documents]);
+  const entries = useMemo(() => mergeEntries(events, documents), [events, documents]);
 
   // Remounts the uploader after each pick, so choosing the same file again still fires a change.
   const [picks, setPicks] = useState(0);
