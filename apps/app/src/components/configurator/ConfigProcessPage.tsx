@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  IllustratedMessage, Input, Label, ListItemStandard,
-  Link, ObjectPage, ObjectPageSection, ObjectPageTitle, Panel, Popover, ResponsivePopover, SelectDialog, Tag, Text, Title,
+  IllustratedMessage, Input, Label,
+  Link, ObjectPage, ObjectPageSection, ObjectPageTitle, Panel, Popover, ResponsivePopover, Tag, Text, Title,
   ToggleButton, Toolbar,
   ToolbarButton, ToolbarItem,
 } from "@ui5/webcomponents-react";
@@ -14,8 +14,6 @@ import { orpc, useCurrency } from "../../orpc.ts";
 import { money as formatMoney } from "@confire/ui/money.ts";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
 import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
-import { ProjectTimeline } from "@confire/ui/timeline/ProjectTimeline.tsx";
-import { FILE_MAX_MB, uploadFile } from "@confire/ui/files.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { configuratorSections } from "@confire/ui/configurator/ConfiguratorForm.tsx";
 import { GENERAL_SECTION } from "@confire/ui/configurator/formHelpers.ts";
@@ -40,10 +38,12 @@ type Head = { name: string; modelId: string; customer: { cardCode: string; cardN
 // The General fields the configurator waits for: the form shows once none is missing.
 const GENERAL = new Set(["name_required", "customer_required", "batches_required"]);
 
-// One scrolling page — General, the model's sections, Candidates, Similar configurations and a
-// request's Timeline — with the cost rail beside every section, and one finalizing action in the
-// footer once everything the quote needs is filled. The server computes everything on the page
-// (configs.get's view); this draws it, sends what the user changed, and waits for the answer.
+// One scrolling page — General, the model's sections, Candidates and Similar configurations — with
+// the cost rail beside every section, and one finalizing action in the footer once everything the
+// quote needs is filled. The server computes everything on the page (configs.get's view); this draws
+// it, sends what the user changed, and waits for the answer.
+// A client's request opens on its project page (RequestOverview: the timeline, Reassign, Attach); this
+// is its configuration, at /configs/<id>/configuration.
 // `new` (/configs/new) is the General form alone: there is no id yet, and nothing that reads one
 // runs before the configuration exists.
 export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string; new?: boolean }) {
@@ -94,35 +94,6 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const sendBack = useMutation(orpc.requests.sendBack.mutationOptions({ onSuccess: decided(t("CONFIG_TOAST_SENT_BACK")) }));
   const decline = useMutation(orpc.requests.decline.mutationOptions({ onSuccess: decided(t("CONFIG_TOAST_DECLINED")) }));
   const deciding = accept.isPending || sendBack.isPending || decline.isPending;
-  // Reassign (notifications spec §6): any colleague, from a picker of the workspace's staff. The answer
-  // names the new assignee, so the header is patched rather than refetched.
-  const [reassigning, setReassigning] = useState(false);
-  const [staffSearch, setStaffSearch] = useState("");
-  const assignable = useQuery({ ...orpc.requests.assignable.queryOptions(), enabled: reassigning });
-  const reassign = useMutation(orpc.requests.assign.mutationOptions({
-    onSuccess: (r) => {
-      qc.setQueryData(getKey, (cur) => (cur?.request
-        ? { ...cur, project: { ...cur.project, assigneeId: r.assigneeId }, request: { ...cur.request, assigneeName: r.assigneeName } }
-        : cur));
-      void qc.invalidateQueries({ queryKey: orpc.requests.rows.key() });
-      void qc.invalidateQueries({ queryKey: orpc.timeline.list.queryKey({ input: { projectId: id } }) });
-      toast(t("CONFIG_TOAST_REASSIGNED", r.assigneeName));
-    },
-  }));
-  // The header's Attach: the timeline's upload, for the client to see — the internal-only toggle
-  // stays on the timeline's own composer. The size check is here because the server's refusal of an
-  // oversized body may reach the browser as a reset connection rather than its message.
-  const fileInput = useRef<HTMLInputElement>(null);
-  const attach = useMutation({
-    mutationFn: (file: File) => file.size > FILE_MAX_MB * 1024 * 1024
-      ? Promise.reject(new Error(t("CONFIG_FILE_MAX", String(FILE_MAX_MB))))
-      : uploadFile(id, file),
-    onSuccess: (_, file) => {
-      void qc.invalidateQueries({ queryKey: orpc.timeline.list.queryKey({ input: { projectId: id } }) });
-      toast(t("CONFIG_TOAST_ATTACHED", file.name));
-    },
-  });
-
   const model = view?.model;
   // A DocEntry means something only in the SAP company it was posted in: elsewhere there is no
   // quotation to open, and quoting creates one (the server decides the same way).
@@ -292,7 +263,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
     missing: view.missing, issues: view.issues, form, calculation: view.calculation,
     syncError: proc.sync.error as Error | null,
     writeError: queue.error,
-    configErrors: [proc.update.error, proc.pickNow.error, proc.duplicate.error, proc.remove.error, accept.error, sendBack.error, decline.error, reassign.error, attach.error] as (Error | null)[],
+    configErrors: [proc.update.error, proc.pickNow.error, proc.duplicate.error, proc.remove.error, accept.error, sendBack.error, decline.error] as (Error | null)[],
     locked: locked && { request: !!request, status: project.status, quoteResponse: project.quoteResponse },
   });
 
@@ -363,9 +334,10 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
       ref={setPage}
       titleArea={
         <ObjectPageTitle
-          breadcrumbs={<PageBreadcrumbs items={[request
-            ? { text: t("NAV_REQUESTS"), to: "/requests" }
-            : { text: t("NAV_CONFIGS"), to: "/configs" }]} current={project.name.trim() || t("CONFIG_NEW")} />}
+          breadcrumbs={request
+            ? <PageBreadcrumbs current={t("CONFIG_CONFIGURATION")}
+                items={[{ text: t("NAV_REQUESTS"), to: "/requests" }, { text: project.name.trim() || t("CONFIG_NEW"), to: `/configs/${id}` }]} />
+            : <PageBreadcrumbs items={[{ text: t("NAV_CONFIGS"), to: "/configs" }]} current={project.name.trim() || t("CONFIG_NEW")} />}
           header={<Title>{project.name.trim() || t("CONFIG_NEW")}</Title>}
           subHeader={request ? (
             <Text>{t("CONFIG_REQUEST_SUB", request.cardName, request.assigneeName ? t("CONFIG_ASSIGNED", request.assigneeName) : t("CONFIG_NOT_ACCEPTED"))}</Text>
@@ -408,15 +380,6 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
           }
           actionsBar={
             <Toolbar design="Transparent">
-              {request ? (
-                <ToolbarButton icon="employee" design="Transparent" disabled={reassign.isPending}
-                  text={t("CONFIG_REASSIGN")} accessibilityAttributes={{ hasPopup: "dialog" }}
-                  onClick={() => setReassigning(true)} />
-              ) : null}
-              {request ? (
-                <ToolbarButton icon="attachment" design="Transparent" disabled={attach.isPending}
-                  text={t("CONFIG_ATTACH")} onClick={() => fileInput.current?.click()} />
-              ) : null}
               <ToolbarButton icon="copy" design="Transparent" disabled={queue.busy || proc.duplicate.isPending}
                 tooltip={queue.busy ? t("CONFIG_CALCULATING") : t("CONFIG_DUPLICATE_TIP")}
                 text={proc.duplicate.isPending ? t("CONFIG_DUPLICATING") : t("CONFIG_DUPLICATE")}
@@ -495,11 +458,6 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
             <SimilarConfigs projectId={id} model={model.definition} entries={entries} tables={tables} onCopy={copyValues} />
           </ObjectPageSection>
         ),
-        !!request && (
-          <ObjectPageSection key="timeline" id="timeline" titleText={t("CONFIG_SECTION_TIMELINE")}>
-            <RequestTimeline id={id} />
-          </ObjectPageSection>
-        ),
       ]}
     </ObjectPage>
     {rail}
@@ -520,55 +478,6 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
     <Popover open={!!noticeOpener} opener={noticeOpener ?? undefined} onClose={() => setNoticeOpener(null)}>
       <Text style={{ maxWidth: "22rem", display: "block" }}>{t("ASSISTANT_NOTICE_LONG")}</Text>
     </Popover>
-    {request ? (
-      <SelectDialog open={reassigning} headerText={t("CONFIG_REASSIGN_TITLE")} searchPlaceholder={t("CONFIG_REASSIGN_SEARCH")}
-        // The dialog closes itself on confirm and cancel, fires onClose after either, and resets its
-        // search on close (onSearchReset).
-        onSearchInput={(e) => setStaffSearch(e.detail.value)} onSearchReset={() => setStaffSearch("")}
-        onClose={() => setReassigning(false)}
-        onConfirm={(e) => {
-          const userId = (e.detail.selectedItems[0] as HTMLElement | undefined)?.dataset.id;
-          if (userId && userId !== project.assigneeId) reassign.mutate({ projectId: id, userId });
-        }}>
-        {(assignable.data ?? [])
-          .filter((m) => `${m.name} ${m.email}`.toLowerCase().includes(staffSearch.trim().toLowerCase()))
-          .map((m) => (
-            <ListItemStandard key={m.userId} data-id={m.userId} text={m.name} description={m.email}
-              selected={m.userId === project.assigneeId} />
-          ))}
-      </SelectDialog>
-    ) : null}
-    {/* The Attach button's picker. Cleared after each pick, so the same file again still fires. */}
-    <input ref={fileInput} type="file" hidden onChange={(e) => {
-      const file = e.target.files?.[0];
-      e.target.value = "";
-      if (file) attach.mutate(file);
-    }} />
     </>
-  );
-}
-
-/** A client's request's history: events and comments from Postgres, and the SAP document chain.
- *  Its own component so its fetches re-render this tab, not the whole configurator. */
-function RequestTimeline({ id }: { id: string }) {
-  const qc = useQueryClient();
-  const navigate = useNavigate({ from: "/$slug" });
-  const currency = useCurrency();
-  const listKey = orpc.timeline.list.queryKey({ input: { projectId: id } });
-  const timeline = useQuery(orpc.timeline.list.queryOptions({ input: { projectId: id } }));
-  // Live SAP, so it may fail on its own without taking the events with it.
-  const documents = useQuery({ ...orpc.timeline.documents.queryOptions({ input: { projectId: id } }), retry: false });
-  const comment = useMutation(orpc.timeline.comment.mutationOptions({
-    onSuccess: () => void qc.invalidateQueries({ queryKey: listKey }),
-  }));
-  return (
-    <ProjectTimeline side="internal" currency={currency} canComment
-      events={timeline.data?.events} labels={timeline.data?.labels ?? {}}
-      loading={timeline.isPending} error={timeline.error as Error | null}
-      documents={documents.data} documentsError={documents.error as Error | null}
-      onComment={(note, internalOnly) => comment.mutateAsync({ projectId: id, note, internalOnly })}
-      onUpload={(file, internalOnly) => uploadFile(id, file, internalOnly).then(() => qc.invalidateQueries({ queryKey: listKey }))}
-      onOpenDocument={(entity, key) => void navigate({ to: "/$slug/b1/$entity/$key", params: { entity, key: String(key) } })}
-      canPreview />
   );
 }
