@@ -1,13 +1,11 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { useRouterState } from "@tanstack/react-router";
 import { AssistantPanel } from "./AssistantPanel.tsx";
 
 // The panel is shell state, not page state (assistant spec §4.2): open or not, the page's unsaved
 // edit, and each configuration's open questions live here, around the whole app shell, so a thread
 // survives navigation. Once opened the panel stays mounted (hidden when closed): closing it must not
-// cut off an answer still streaming. The AI page (`AssistantPage`) is the chat itself, so the panel is
-// not drawn there: one thread is never live in two places, and leaving the page for a configuration's
-// opens the panel on the same thread.
+// cut off an answer still streaming. It is the one place a chat is drawn (Joule spec §5.1), so one
+// thread is never live in two places.
 
 type AssistantShell = {
   open: boolean;
@@ -46,12 +44,10 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setAll((all) => (sameKeys(all[projectId], keys) ? all : { ...all, [projectId]: keys })), []);
   const value = useMemo(() => ({ open, toggle, close, openChat, asked, dirty, setDirty, questionKeys, setQuestionKeys }),
     [open, toggle, close, openChat, asked, dirty, questionKeys, setQuestionKeys]);
-  // The AI page draws its own chat: no second one floats over it.
-  const onAiPage = useRouterState({ select: (s) => s.matches.some((m) => m.routeId.startsWith("/$slug/assistant")) });
   return (
     <Ctx.Provider value={value}>
       {children}
-      {mounted && !onAiPage ? <AssistantPanel /> : null}
+      {mounted ? <AssistantPanel /> : null}
     </Ctx.Provider>
   );
 }

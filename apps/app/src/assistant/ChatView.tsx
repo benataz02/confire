@@ -1,20 +1,18 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { flushSync } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import type { UIMessage } from "@tanstack/ai-react";
 import { TextPart } from "@tanstack/ai-react/ui";
 import {
-  BusyIndicator, Button, FlexBox, HeroBanner, Icon, Label, Link, MessageStrip, Tag, Text, TextArea, ToggleButton, Token, Tokenizer,
+  BusyIndicator, Button, FlexBox, Icon, Label, Link, MessageStrip, Tag, Text, TextArea, ToggleButton, Token, Tokenizer,
   type TextAreaDomRef,
 } from "@ui5/webcomponents-react";
 import { Button as AiButton, ButtonState } from "@ui5/webcomponents-ai-react";
 import { useLanguage } from "@confire/ui/i18n.ts";
 import { FILE_MAX_MB } from "@confire/ui/files.ts";
-import { firstName } from "@confire/ui/format.ts";
 import { ORPCError } from "@orpc/client";
 import { useI18n } from "../i18n.ts";
-import { client, meQuery, orpc } from "../orpc.ts";
+import { client, orpc } from "../orpc.ts";
 import { useAssistantShell } from "./AssistantProvider.tsx";
 import { nextReplies } from "./replies.ts";
 import { REPORT_ROUTE, routeContext, type RouteContext } from "./routeContext.ts";
@@ -28,19 +26,16 @@ import { assistantToggle } from "./toggle.ts";
 import { QuestionCard } from "./cards/QuestionCard.tsx";
 import { CandidatesCard } from "./cards/CandidatesCard.tsx";
 import type { ExtractResult } from "./cards/ExtractionCard.tsx";
-import { WavingDots } from "./WavingDots.tsx";
 
 /** The user's auto-mode switch, a ui_user_state key: the server's assistant/auto.ts AUTO_WRITE_KEY. */
 const AUTO_WRITE_KEY = "assistant:autoWrite";
 
-// The chat (assistant spec §4.2), drawn by the panel and by the AI page. Empty on the page, it is a
-// welcome: a HeroBanner with the greeting and the chat box inside, which the first send turns into the
-// chat — the messages, and the same box at their foot. The panel's greeting is its head's (`empty`), its
-// composer one row under the chat. Text is for words, steps for the agent's work (its thinking
+// The chat (assistant spec §4.2), drawn by the panel (Joule spec): its greeting is the panel's
+// (`empty`), its composer one row under the chat. Text is for words, steps for the agent's work (its thinking
 // and tool calls, each tool's card behind its line), and a card in the chat only where the user decides
 // (steps.ts DECISION). One question on screen at a time. Every colour is a theme parameter, set inline.
 
-/** `report`: a report's chat, its report beside it (reports spec §6.2). */
+/** `report`: a report's chat, on its report's page (Joule spec §5.8). */
 export type Kind = "configure" | "general" | "model" | "report";
 export const kindOf = (r: RouteContext): Kind =>
   r.projectId ? "configure" : r.routeId === REPORT_ROUTE ? "report" : r.routeId.startsWith("/$slug/models/") ? "model" : "general";
@@ -154,25 +149,8 @@ const ASSISTANT_BUTTONS = {
   "--sapButton_Emphasized_Hover_BorderColor": "var(--sapAssistant_Hover_BorderColor)",
 } as CSSProperties;
 
-/** The welcome's banner in Joule's gradient rather than the shell's blue: its parameters are read on
- *  its own host, so setting them here is enough. Flat black in the high-contrast themes. */
-const BANNER = {
-  "--sapShell_HeroBanner_Background": "var(--sapAssistant_Background)",
-  "--sapShell_HeroBanner_BackgroundImage": "var(--sapAssistant_BackgroundGradient)",
-  "--sapShell_HeroBanner_TextColor": "var(--sapAssistant_TextColor)",
-} as CSSProperties;
-
-/** The chat box: a field-coloured box around a borderless textarea and its buttons. The textarea's own
- *  field look is switched off through its public parameters, and the box draws the focus instead. */
-const BOX: CSSProperties = {
-  padding: "0.25rem 0.5rem 0.5rem",
-  background: "var(--sapField_Background)",
-  border: "var(--sapField_BorderWidth) solid var(--sapField_BorderColor)",
-  borderRadius: "var(--sapTile_BorderCornerRadius)",
-  boxShadow: "var(--sapContent_Shadow1)",
-  // One name in both places, so the browser moves the box from the banner to the foot (begin()).
-  viewTransitionName: "cf-chat-box",
-};
+/** The textarea's own field look, switched off through its public parameters: the box around it draws
+ *  the border and the focus instead. */
 const FOCUS = "var(--sapContent_FocusWidth) var(--sapContent_FocusStyle) var(--sapContent_FocusColor)";
 const BARE_FIELD = {
   width: "100%",
@@ -201,13 +179,13 @@ const ROW_FIELD = {
   "--_ui5_textarea_padding_bottom": "var(--_ui5-compact-size, .0625rem) var(--_ui5-cozy-size, .375rem)",
 } as CSSProperties;
 
-/** On the AI page the reading column is centred by padding, so the scrollbar stays at the page's edge. */
+/** A wide chat's reading column, centred by padding so the scrollbar stays at the edge. */
 const READING = "max(1rem, (100% - 48rem) / 2)";
 
-/** The chat: its messages, steps and cards, the question and candidates cards, the chat box. `page` is
- *  the AI page (no form beside it); `head` draws above it with what the chat is doing. */
-export function ChatView({ thread, route, kind, page = false, head, onTool, prefill }: {
-  thread: Thread; route: RouteContext; kind: Kind; page?: boolean;
+/** The chat: its messages, steps and cards, the question and candidates cards, the chat box. `head`
+ *  draws above it with what the chat is doing. */
+export function ChatView({ thread, route, kind, head, onTool, prefill }: {
+  thread: Thread; route: RouteContext; kind: Kind;
   head?: (s: HeadState) => ReactNode;
   /** Once per tool call, when its result first arrives (not for the history it opened with). */
   onTool?: (name: string) => void;
@@ -219,7 +197,6 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
   const t = (k: string, ...a: string[]) => i18n.getText(k, ...a);
   const navigate = useNavigate({ from: "/$slug" });
   const { language } = useLanguage();
-  const me = useQuery(meQuery);
   const status = useQuery(orpc.assistant.status.queryOptions());
   const { chat, refusal, declined, clearRefusal } = useAssistantChat(thread);
   const invalidate = useAssistantInvalidate();
@@ -257,17 +234,8 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
   const errorText = (e: unknown) => refusalText(i18n, e);
   const append = (ms: UIMessage[]) => { chat.setMessages([...latest.current, ...ms]); invalidate(); };
 
-  /** Runs the first step out of the welcome. On the page the banner gives way to the chat, the box
-   *  gliding to the foot: the step runs inside the transition, so its first render lands in the new
-   *  picture. The panel's greeting collapses on its own (its head's `empty`). */
-  const begin = (step: () => void) => {
-    if (!page || !empty || !document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setBegun(true);
-      step();
-      return;
-    }
-    document.startViewTransition(() => { flushSync(() => setBegun(true)); step(); });
-  };
+  /** Runs the first step out of the welcome: the panel's greeting gives way to the chat. */
+  const begin = (step: () => void) => { setBegun(true); step(); };
 
   const addFiles = (list: FileList | File[]) => {
     const picked = [...list];
@@ -335,8 +303,8 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
     });
   };
 
-  // Focus the box on open and once it moved to the foot; follow new parts unless the user scrolled up to read.
-  useEffect(() => { if (shell.open || page) setTimeout(() => input.current?.focus(), 0); }, [shell.open, page, empty]);
+  // Focus the box on open; follow new parts unless the user scrolled up to read.
+  useEffect(() => { if (shell.open) setTimeout(() => input.current?.focus(), 0); }, [shell.open]);
   useEffect(() => {
     const el = scroller.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
@@ -435,11 +403,10 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
     qc.setQueryData(orpc.assistant.thread.queryKey({ input: { projectId: id } }), { id: thread.id, projectId: id, reportId: null, messages: [...latest.current] });
     qc.setQueryData(orpc.assistant.thread.queryKey({ input: {} }), (t: Thread | undefined) => (t?.id === thread.id ? { ...t, projectId: id } : t));
   };
-  // The proposal card's Create opens the configuration's form; the AI page stays where it is, and
-  // offers "Open configuration" in its head.
+  // The proposal card's Create opens the configuration's form.
   const onStarted = async (id: string) => {
     link(id);
-    if (!page) await navigate({ to: "/$slug/configs/$id", params: { id } });
+    await navigate({ to: "/$slug/configs/$id", params: { id } });
   };
   // A typed request has no proposal card: the chat creates the configuration itself (configs_create)
   // and goes on with it where the user is.
@@ -450,9 +417,9 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
   })).at(-1) : undefined;
   useEffect(() => { if (typedStart) link(typedStart); }, [typedStart]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // One thread has a cached copy per place it opens (the AI page by id, the panel by configuration):
+  // One thread has a cached copy per way the panel opens it (by id, by configuration, the general one):
   // each run's end is written into every copy, because a chat mounts from its copy and reads it once
-  // (useChat's initialMessages) — the panel opened from the AI page must not start an answer behind.
+  // (useChat's initialMessages) — a chat opened another way must not start an answer behind.
   useEffect(() => {
     if (chat.isLoading) return;
     for (const [key, d] of qc.getQueriesData<Thread>({ queryKey: orpc.assistant.thread.key() }))
@@ -506,7 +473,7 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
   const notices = (
     <>
       {limited ? <MessageStrip design="Critical" hideCloseButton>{t("ASSISTANT_LIMIT")}</MessageStrip> : null}
-      {/* The panel never opens while off; the AI page does, so it says why. */}
+      {/* The panel never opens while off; one already open when it goes off says why. */}
       {off ? <MessageStrip design="Critical" hideCloseButton>{assistantToggle(status.data, (k) => t(k)).tooltip}</MessageStrip> : null}
     </>
   );
@@ -533,7 +500,7 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
   );
   // Enter sends, Shift+Enter breaks the line: a pasted email keeps its lines.
   const field = (
-    <TextArea ref={input} growing growingMaxRows={8} rows={page && empty ? 3 : 1} value={text} style={page ? BARE_FIELD : ROW_FIELD}
+    <TextArea ref={input} growing growingMaxRows={8} rows={1} value={text} style={ROW_FIELD}
       disabled={disabled} readonly={busy} placeholder={t(kind === "report" ? "REPORT_PLACEHOLDER" : "ASSISTANT_PLACEHOLDER")} accessibleName={t(kind === "report" ? "REPORT_PLACEHOLDER" : "ASSISTANT_PLACEHOLDER")}
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
       onInput={(e) => setText(e.target.value)}
@@ -561,28 +528,20 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
         void client.views.setState({ key: AUTO_WRITE_KEY, value: on ? true : null })
           .finally(() => void qc.invalidateQueries({ queryKey: orpc.assistant.status.key() }));
       }}>
-      {page ? t("ASSISTANT_AUTO_TOGGLE") : null}
     </ToggleButton>
   ) : null;
-  // The page's chat box, its buttons under the field; the panel's composer, one row.
-  const composer = page ? (
-    <FlexBox direction="Column" gap="0.25rem" style={{ ...BOX, outline: focused ? FOCUS : "none" }}>
-      {tokens}
-      {field}
-      <FlexBox alignItems="Center" justifyContent="SpaceBetween"><FlexBox alignItems="Center">{attach}{autoToggle}</FlexBox>{sendButton}</FlexBox>
-    </FlexBox>
-  ) : (
+  // The composer: one row.
+  const composer = (
     <>
       {tokens}
       <FlexBox alignItems="End" gap="0.5rem">{attach}{autoToggle}{field}{sendButton}</FlexBox>
     </>
   );
 
-  // The AI page's empty chat offers a report or two; quoting starts from a drop, which the welcome says.
+  // Quoting starts from a drop, which the welcome says.
   const prompts = kind === "configure" ? ["ASSISTANT_PROMPT_MISSING", "ASSISTANT_PROMPT_UNAVAILABLE"]
-    : kind === "report" ? []
-    : page ? ["REPORT_PROMPT_PIPELINE", "REPORT_PROMPT_OVERDUE"] : ["ASSISTANT_PROMPT_WAITING", "ASSISTANT_PROMPT_MONTH"];
-  const inline = page ? READING : "1rem";
+    : kind === "report" ? [] : ["ASSISTANT_PROMPT_WAITING", "ASSISTANT_PROMPT_MONTH"];
+  const inline = "1rem";
 
   return (
     <FlexBox direction="Column"
@@ -595,28 +554,8 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
       onDragOver={(e) => { if (disabled) return; e.preventDefault(); setDragging(true); }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
       onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled) addFiles(e.dataTransfer.files); }}>
-      {page && empty ? <WavingDots /> : null}
       {head?.({ busy, projectId, empty })}
-      {page && empty ? (
-        <FlexBox direction="Column" justifyContent="Center"
-          style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBlock: "1.5rem clamp(1.5rem, 18vh, 10rem)", paddingInline: inline }}>
-          <HeroBanner style={BANNER} headerText={t("ASSISTANT_HELLO", firstName(me.data?.user))} overlineText={t("ASSISTANT_PAGE_TITLE")}>
-            <FlexBox direction="Column" gap="1rem">
-              <Text style={{ color: "inherit" }}>{t(kind === "configure" ? "ASSISTANT_WELCOME_CONFIGURE" : "ASSISTANT_WELCOME_START")}</Text>
-              {notices}
-              {dropStrip}
-              {composer}
-              {readFiles || prompts.length ? (
-                <FlexBox wrap="Wrap" gap="0.5rem">
-                  {readFiles}
-                  {prompts.map((k) => <AiAction key={k} text={t(k)} disabled={disabled} onClick={() => send(t(k))} />)}
-                </FlexBox>
-              ) : null}
-            </FlexBox>
-          </HeroBanner>
-        </FlexBox>
-      ) : (
-        <>
+      <>
           {/* 1 rem from the edge, 1.5 rem between groupings, 0.5 rem inside one. */}
           <FlexBox ref={scroller} direction="Column" gap="1.5rem"
             style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBlock: "1rem", paddingInline: inline }}
@@ -664,15 +603,12 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
               </FlexBox>
             ) : null}
           </FlexBox>
-          <FlexBox direction="Column" gap="0.5rem" style={page
-            ? { paddingBlock: "0.5rem 1rem", paddingInline: READING }
-            : { padding: "0.5rem 1rem 0.75rem", borderTop: "1px solid var(--sapGroup_TitleBorderColor)" }}>
+          <FlexBox direction="Column" gap="0.5rem" style={{ padding: "0.5rem 1rem 0.75rem", borderTop: "1px solid var(--sapGroup_TitleBorderColor)" }}>
             {dropStrip}
             {readFiles ? <div>{readFiles}</div> : null}
             {composer}
           </FlexBox>
-        </>
-      )}
+      </>
     </FlexBox>
   );
 }

@@ -89,7 +89,6 @@ function Shell() {
   const assistantStatus = useQuery(orpc.assistant.status.queryOptions());
   const toggle = assistantToggle(assistantStatus.data, t);
   const { open: assistantOpen, close: closeAssistant } = assistant;
-  const onAiPage = at("/assistant");
   useEffect(() => { if (toggle.disabled && assistantOpen && assistantStatus.data) closeAssistant(); },
     [toggle.disabled, assistantOpen, assistantStatus.data, closeAssistant]);
 
@@ -132,13 +131,8 @@ function Shell() {
         ] : []),
       ],
     },
-    // The assistant for every member; what it costs for admins (assistant spec §4.7).
-    {
-      text: t("NAV_AI"), items: [
-        { text: t("ASSISTANT_PAGE_TITLE"), icon: "ai", to: "/assistant" },
-        ...(isAdmin ? [{ text: t("NAV_AI_USAGE"), icon: "area-chart", to: "/usage" }] : []),
-      ],
-    },
+    // What the assistant costs, for admins (assistant spec §4.7). The assistant itself is the ShellBar's toggle.
+    ...(isAdmin ? [{ text: t("NAV_AI"), items: [{ text: t("NAV_AI_USAGE"), icon: "area-chart", to: "/usage" }] }] : []),
     // The customer portal (spec §10): Requests for every member, the rest for admins.
     {
       text: t("NAV_PORTAL"), items: [
@@ -186,9 +180,8 @@ function Shell() {
               const target = e.detail.targetRef;
               setBellOpener((cur) => (cur ? null : target));
             }}
-            // On the AI configuration page the chat is the page: the toggle shows it, and has nothing to switch.
-            assistant={<ToggleButton icon="da" pressed={assistant.open || onAiPage} disabled={toggle.disabled || onAiPage}
-              tooltip={toggle.tooltip} accessibleName={toggle.tooltip} accessibilityAttributes={{ expanded: assistant.open || onAiPage }}
+            assistant={<ToggleButton icon="da" pressed={assistant.open} disabled={toggle.disabled}
+              tooltip={toggle.tooltip} accessibleName={toggle.tooltip} accessibilityAttributes={{ expanded: assistant.open }}
               onClick={assistant.toggle} />}
             accessibilityAttributes={{
               notifications: { expanded: bellOpener !== null, hasPopup: "dialog" },

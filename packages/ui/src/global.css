@@ -222,20 +222,6 @@ body {
 ui5-shellbar-search.confire-shellbar-search {
   background-image: none;
 }
-/* The AI page points at the search (its chat list): a ring in the assistant's colour, three times,
-   on the field's own pill. */
-@keyframes confire-search-pulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sapAssistant_BorderColor) 70%, transparent) }
-  70%, 100% { box-shadow: 0 0 0 0.625rem transparent }
-}
-ui5-shellbar-search.confire-search-pulse {
-  border-radius: var(--_ui5_search_input_border_radius, 1.125rem);
-  animation: confire-search-pulse 1.6s ease-out 400ms 3;
-}
-@media (prefers-reduced-motion: reduce) {
-  ui5-shellbar-search.confire-search-pulse { animation: none }
-}
-
 /* The price chart (PriceAnalysis): each row one pill, its parts split by a hairline. BarChart passes
    no `radius` or `shape` on to recharts' <Bar>, so the rounding is a clip: every part is inset 1px a
    side (the gap), the first part's left end and the last part's right end round — a 999px radius

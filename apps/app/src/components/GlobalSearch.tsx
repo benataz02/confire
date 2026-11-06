@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
-import { useParams, useRouterState } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
 import {
   SearchItem, SearchItemGroup, SearchItemShowMore, SearchMessageArea, SearchScope, ShellBarSearch,
 } from "@ui5/webcomponents-react";
@@ -12,12 +12,11 @@ import { orpc } from "../orpc.ts";
 import { useI18n } from "../i18n.ts";
 import { B1_FEATURES } from "../features/b1/index.ts";
 import { b1Label } from "./AppShell.tsx";
+import { parseRecent, recentKey, type Recent } from "./searchRecent.ts";
 
 /** One thing the search opens: `to` is a path inside the workspace, as the side nav's `data-to`. */
 export type SearchHit = { text: string; description?: string; icon: string; to: string };
 type Group = { key: string; header: string; hits: SearchHit[] };
-/** A hit once picked, with the scope it was found under (a group's key up to its `:`). */
-type Recent = SearchHit & { scope: string };
 
 const ALL = "all";
 // Unscoped, one group cannot bury the others; scoped, there is one list, so let it breathe.
@@ -25,17 +24,6 @@ const CAP = { all: 5, scoped: 20 };
 // The empty field's list: this many first, as many more per Show more, never more than KEEP.
 const RECENT = { step: 5, keep: 20 };
 
-// ponytail: localStorage per workspace, like the model builder's collapsed rows — a ui_user_state
-// key only if the history has to follow the user to another browser.
-const recentKey = (slug: string) => `search.recent.${slug}`;
-function readRecent(slug: string): Recent[] {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(recentKey(slug)) ?? "[]");
-    return Array.isArray(parsed) ? parsed.filter((r): r is Recent => typeof r?.to === "string" && typeof r?.text === "string") : [];
-  } catch {
-    return [];
-  }
-}
 const ISO_DAY = /^\d{4}-\d\d-\d\d/;
 const cell = (v: unknown) => (typeof v === "string" && ISO_DAY.test(v) ? formatValue(v, "date") : String(v));
 const join = (...v: unknown[]) => v.filter((x) => x != null && x !== "").map(cell).join(" · ") || undefined;
@@ -55,7 +43,7 @@ function b1Query(f: EntityFeature, term: string): ListQuery {
 }
 
 // The shellbar's search over everything a staff member can open: the pages, SAP's declared lists,
-// configurations, requests, models and master data (admins), and the user's own chats. Every source is
+// configurations, requests, and models and master data (admins). Every source is
 // its list's own procedure with `query.search`, so the server's permission is the list's; each group
 // fills in as its source answers, and SAP (the slowest, through the agent) comes last so nothing jumps.
 // ponytail: one call per source per settled term (B1's page is its fixed 100 rows, cut here); a server
@@ -68,13 +56,9 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
   const [term, setTerm] = useState("");
   useEffect(() => { const id = setTimeout(() => setTerm(q.trim()), 250); return () => clearTimeout(id); }, [q]);
   const [open, setOpen] = useState(false);
-  // The AI page has no chat list of its own: there this search is it, scoped to chats, and pulses on
-  // arrival so it is noticed. Leaving the page puts the scope back.
-  const onAiPage = useRouterState({ select: (s) => s.matches.some((m) => m.routeId.startsWith("/$slug/assistant")) });
-  const [scope, setScope] = useState(onAiPage ? "chats" : ALL);
-  useEffect(() => setScope(onAiPage ? "chats" : ALL), [onAiPage]);
+  const [scope, setScope] = useState(ALL);
   const { slug } = useParams({ from: "/$slug" });
-  const [recent, setRecent] = useState(() => readRecent(slug));
+  const [recent, setRecent] = useState(() => parseRecent(localStorage.getItem(recentKey(slug))));
   const remember = (hit: Recent) => {
     const next = [hit, ...recent.filter((r) => r.to !== hit.to)].slice(0, RECENT.keep);
     localStorage.setItem(recentKey(slug), JSON.stringify(next));
@@ -91,9 +75,6 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
   const page = { query: { select: [], filter: [], orderby: [], search: term }, top: cap };
   const configs = useQuery({ ...orpc.configs.rows.queryOptions({ input: page }), enabled: on("configs"), ...opts });
   const requests = useQuery({ ...orpc.requests.rows.queryOptions({ input: page }), enabled: on("requests"), ...opts });
-  const chats = useQuery({ ...orpc.assistant.threads.queryOptions({ input: { q: term } }), enabled: on("chats"), ...opts });
-  // The AI page's own list (same key), so an empty field there offers the latest chats.
-  const latestChats = useQuery({ ...orpc.assistant.threads.queryOptions({ input: undefined }), enabled: open && scope === "chats" && !q.trim() });
   const models = useQuery({ ...orpc.models.rows.queryOptions({ input: page }), enabled: on("models", isAdmin), ...opts });
   const masterdata = useQuery({ ...orpc.masterdata.rows.queryOptions({ input: page }), enabled: on("masterdata", isAdmin), ...opts });
   const features = Object.values(B1_FEATURES);
@@ -108,16 +89,8 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
   const hits = <T,>(s: string, rows: T[] | undefined, hit: (r: T) => SearchHit, allowed = true) =>
     on(s, allowed) ? (rows ?? []).slice(0, cap).map(hit) : [];
   const needle = q.trim().toLowerCase();
-  // A report's chat opens its report with the chat docked beside it (`#chat`, AssistantPage).
-  const chatHit = (r: { id: string; title: string; projectName: string | null; reportId: string | null; reportTitle: string | null }) => ({
-    text: r.title || r.reportTitle || r.projectName || t("ASSISTANT_UNTITLED"), description: join(r.reportTitle ?? r.projectName),
-    icon: r.reportId ? "business-objects-experience" : "ai", to: r.reportId ? `/reports/${r.reportId}#chat` : `/assistant/${r.id}`,
-  });
-  // The empty field: scoped to chats, the AI page's list (pinned first, as there); else what was
-  // picked here last under this scope.
-  const latest: Recent[] = scope === "chats"
-    ? (latestChats.data ?? []).map((r) => ({ ...chatHit(r), scope: "chats" }))
-    : recent.filter((r) => scope === ALL || r.scope === scope);
+  // The empty field: what was picked here last under this scope.
+  const latest: Recent[] = recent.filter((r) => scope === ALL || r.scope === scope);
   const results: Group[] = [
     {
       key: "pages", header: t("SHELL_SEARCH_PAGES"),
@@ -128,7 +101,6 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
       ({ text: r.name, description: join(r.customerName, r.modelName), icon: "sales-quote", to: `/configs/${r.id}` })) },
     { key: "requests", header: t("NAV_REQUESTS"), hits: hits("requests", requests.data?.rows, (r) =>
       ({ text: r.name, description: join(r.cardName, r.modelName), icon: "inbox", to: `/configs/${r.id}` })) },
-    { key: "chats", header: t("SHELL_SEARCH_CHATS"), hits: hits("chats", chats.data, chatHit) },
     { key: "models", header: t("NAV_MODELS"), hits: hits("models", models.data?.rows, (r) =>
       ({ text: r.name, icon: "tree", to: `/models/${r.id}` }), isAdmin) },
     { key: "masterdata", header: t("NAV_MASTERDATA"), hits: hits("masterdata", masterdata.data?.rows, (r) =>
@@ -144,7 +116,7 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
     })),
   ].filter((g) => g.hits.length);
   const groups: Group[] = needle ? results
-    : latest.length ? [{ key: "recent", header: t(scope === "chats" ? "SHELL_SEARCH_RECENT_CHATS" : "SHELL_SEARCH_RECENT"), hits: latest }] : [];
+    : latest.length ? [{ key: "recent", header: t("SHELL_SEARCH_RECENT"), hits: latest }] : [];
   // A picked hit keeps the scope it was found under; a recent one already carries its own.
   const pick = (to: string): Recent | undefined =>
     groups.flatMap((g) => g.hits.map((h) => ({ scope: g.key.split(":")[0]!, ...h }))).find((h) => h.to === to);
@@ -157,13 +129,12 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
     if (el) { revealed.current = null; void el.focus(); }
   }, []);
 
-  const busy = q.trim() !== term || latestChats.isLoading
-    || [configs, requests, chats, models, masterdata, ...b1].some((r) => r.isFetching);
+  const busy = q.trim() !== term || [configs, requests, models, masterdata, ...b1].some((r) => r.isFetching);
 
   return (
     <ShellBarSearch
       slot="searchField"
-      className={onAiPage ? "confire-shellbar-search confire-search-pulse" : "confire-shellbar-search"}
+      className="confire-shellbar-search"
       value={q}
       showClearIcon
       noTypeahead
@@ -179,7 +150,6 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
           <SearchScope value="pages" text={t("SHELL_SEARCH_PAGES")} />
           <SearchScope value="configs" text={t("NAV_CONFIGS")} />
           <SearchScope value="requests" text={t("NAV_REQUESTS")} />
-          <SearchScope value="chats" text={t("SHELL_SEARCH_CHATS")} />
           {isAdmin ? <SearchScope value="models" text={t("NAV_MODELS")} /> : null}
           {isAdmin ? <SearchScope value="masterdata" text={t("NAV_MASTERDATA")} /> : null}
           <SearchScope value="b1" text={t("NAV_SAP")} />

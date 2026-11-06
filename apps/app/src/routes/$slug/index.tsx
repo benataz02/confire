@@ -60,8 +60,6 @@ function Home() {
     {
       id: "configurator", title: t("NAV_CONFIGURATOR"),
       tiles: [
-        // The chat alone, from the client's request to the quote page. Off, the page says why.
-        { title: t("ASSISTANT_PAGE_TITLE"), subtitle: t("ASSISTANT_PAGE_SUB"), icon: "ai", to: "/assistant" },
         { title: t("NAV_CONFIGS"), subtitle: t("HOME_DRAFTS"), icon: "sales-quote", value: o?.drafts, to: "/configs", search: { status: "draft" } },
         ...(isAdmin ? [
           { title: t("NAV_MODELS"), icon: "tree", value: o?.models, to: "/models" },
@@ -72,8 +70,6 @@ function Home() {
     {
       id: "reports", title: t("HOME_REPORTS"),
       tiles: [
-        // The AI page: a chat that asks for a report becomes the report's.
-        { title: t("HOME_NEW_REPORT"), subtitle: t("HOME_NEW_REPORT_SUB"), icon: "add-document", to: "/assistant" },
         // The 11rem square holds the title and the figure. The report's subtitle stays on its page.
         ...(reports ?? []).map((r): TileProps => ({
           title: r.title || t("REPORT_UNTITLED"), icon: "business-objects-experience",
@@ -101,9 +97,11 @@ function Home() {
     },
   ];
 
+  // A section with no tiles (Reports, before a report is saved) is left out.
+  const shown = groups.filter((g) => g.tiles.length);
   return (
     <ObjectPage hidePinButton titleArea={<ObjectPageTitle header={<Title>{greeting}</Title>} subHeader={<Text>{today}</Text>} />}>
-      {groups.map((g) => (
+      {shown.map((g) => (
         <ObjectPageSection key={g.id} id={g.id} titleText={g.title}>
           <div className="cf-tiles">
             {g.tiles.map((tile) => <Tile key={tile.to ?? tile.title} {...tile} />)}
