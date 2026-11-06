@@ -224,7 +224,10 @@ transaction (it opens its own, then notifies after commit); `assertWritable(…,
 event together, a download is always an attachment, and the one row served without a session is the
 tenant's branding logo (`projectId` null), which mail links to absolutely. Staff work requests in Portal →
 Requests (`orpc/routers/requests.ts`) and on the existing process page. The timeline is
-`project-timeline.ts`: events from Postgres, SAP document chains as a separate live read.
+`project-timeline.ts`: events from Postgres, SAP document chains as a separate live read. A client
+project opens, in both apps, on its progress and chaptered timeline (`@confire/ui/project/ProjectOverview.tsx`,
+`docs/superpowers/specs/2026-11-06-client-project-page-design.md`), its form at `…/configuration` (portal
+`/projects/<id>/configuration`, staff `/configs/<id>/configuration`); internal configurations are unchanged.
 
 **Portal documents** (spec §13.1): a client's own quotations, orders, deliveries and invoices.
 `portal/doc-fields.ts` is the one field rule — `ALWAYS` (DocNum, status, total…), `NEVER` (CardCode),
