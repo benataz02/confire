@@ -1,6 +1,6 @@
 /* Launchpad tiles: Fiori's 11rem square (wide and flexing in the HeroBanner). UI5 Web Components has no
    GenericTile, so these draw from the theme's own tile parameters — every theme, dark and high
-   contrast included, carries them. The `-` prefix keeps the router from reading this as a route. */
+   contrast included, carries them. */
 .cf-tiles { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .cf-tile {
   box-sizing: border-box; width: 11rem; height: 11rem; max-width: 100%; padding: 1rem;

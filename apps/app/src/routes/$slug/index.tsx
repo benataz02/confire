@@ -1,55 +1,19 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { t, title } from "../../head.ts";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Button, FlexBox, HeroBanner, Icon, Title } from "@ui5/webcomponents-react";
+import { Button, FlexBox, HeroBanner, Title } from "@ui5/webcomponents-react";
+import { Tile, type TileProps } from "@confire/ui/Tile.tsx";
 import { meQuery, orpc, useCurrency, useIsAdmin } from "../../orpc.ts";
 import { formatLocale } from "@confire/ui/format.ts";
 import { useI18n } from "../../i18n.ts";
 import { B1_DOCUMENTS, B1_FEATURES } from "../../features/b1/index.ts";
 import { B1_NAV_KEY } from "../../components/AppShell.tsx";
 import { formatValue } from "../../reports/widgets.ts";
-import "./-home.css";
 
 // The workspace home: the caller's own figures in the HeroBanner, then the side nav's groups as
 // launchpad tiles. A tile's count is a to-do, and the tile opens its list filtered to exactly those
 // rows (the list reads its filters off the URL), so the number and the list never disagree.
 export const Route = createFileRoute("/$slug/")({ head: () => title(t("NAV_HOME")), component: Home });
-
-type TileProps = {
-  title: string;
-  subtitle?: string;
-  icon?: string;
-  value?: string | number;
-  unit?: string;
-  state?: "Critical" | "Negative";
-  /** tenant-relative (`/configs`); no `to` = a figure, not a link */
-  to?: string;
-  search?: Record<string, string>;
-  wide?: boolean;
-  /** the value is on its way: a shimmer bar (global.css' skeleton) holds its place */
-  loading?: boolean;
-};
-
-function Tile({ to, search, wide, loading, ...c }: TileProps) {
-  const body = (
-    <>
-      <span className="cf-tile-title">{c.title}</span>
-      {c.subtitle && <span className="cf-tile-sub">{c.subtitle}</span>}
-      <span className="cf-tile-foot">
-        {c.icon && <Icon name={c.icon} className="cf-tile-icon" />}
-        {loading && <span className="cf-tile-num"><span className="confire-op-skel-bar" style={{ width: "2.5rem", height: "2rem" }} /></span>}
-        {!loading && c.value !== undefined && (
-          <span className={`cf-tile-num ${c.state ?? ""}`}>{c.value}{c.unit && <small>{c.unit}</small>}</span>
-        )}
-      </span>
-    </>
-  );
-  const className = wide ? "cf-tile cf-tile-wide" : "cf-tile";
-  // A real <a>: keyboard, middle-click and "open in new tab" come with it.
-  return to
-    ? <Link to={`/$slug${to}` as string} search={search} className={className}>{body}</Link>
-    : <div className={className}>{body}</div>;
-}
 
 const OPEN_DOC = { field: "DocumentStatus", op: "eq", value: "bost_Open" } as const;
 const flag = (n: number | undefined, state: "Critical" | "Negative") => (n ? state : undefined);
