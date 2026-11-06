@@ -1,7 +1,7 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import {
   Button, CheckBox, FileUploader, IllustratedMessage, Link, MessageStrip, ObjectStatus, Text, TextArea, Timeline,
-  TimelineItem,
+  TimelineGroupItem, TimelineItem,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoActivities.js";
 import { addCustomCSS } from "@ui5/webcomponents-base/dist/Theming.js";
@@ -11,7 +11,7 @@ import { formatLocale } from "../format.ts";
 import { documentStatusText } from "../documentStatus.ts";
 import { PrintActions } from "../PrintActions.tsx";
 import { FILE_MAX_MB, fileSize, fileUrl } from "../files.ts";
-import { mergeEntries } from "./chapters.ts";
+import { chaptersOf, mergeEntries, type Chapter, type Entry } from "./chapters.ts";
 
 // A project's timeline (spec §8), for both apps: one merged, time-ordered feed of the project's
 // events and the SAP documents its quotations became, with a comment box. Props-driven — each app
@@ -138,7 +138,7 @@ function Revision({ payload, labels }: { payload: unknown; labels: Record<string
 
 export function ProjectTimeline({
   events, labels, loading, error, documents, documentsError, side, currency, canComment, onComment, onUpload,
-  onOpenDocument, canPreview,
+  onOpenDocument, canPreview, chapters, entryActions,
 }: {
   events: TimelineEvent[] | undefined;
   labels: Record<string, string>;
@@ -160,6 +160,10 @@ export function ProjectTimeline({
   /** a Preview of each document's SAP print layout, through the app's source — only for a reader the
    *  server lets print (any seat on the portal, admins internally) */
   canPreview?: boolean;
+  /** group entries into the journey's chapters; labels are the six step names */
+  chapters?: { labels: string[]; draft: boolean };
+  /** extra controls under one event's content (the portal's decisions, Withdraw) */
+  entryActions?: (e: TimelineEvent) => ReactNode;
 }) {
   const i18n = useUiI18n();
   const [note, setNote] = useState("");
@@ -168,7 +172,21 @@ export function ProjectTimeline({
   const [postError, setPostError] = useState<string | null>(null);
 
   // Oldest first, like a chat: the newest sits right above the comment box.
-  const entries = useMemo(() => mergeEntries(events, documents), [events, documents]);
+  const grouped = !!chapters;
+  const entries = useMemo(
+    () => mergeEntries(events, documents, grouped ? { docsAfterDay: true } : undefined), [events, documents, grouped]);
+  const groups = chapters ? chaptersOf(entries) : null;
+
+  // "Quoted · 5 Nov – 7 Nov": the chapter's first and last day. A document counts by its posting date,
+  // not the end-of-day sort key mergeEntries gave it (that would read as the next day east of UTC).
+  const chapterTitle = (c: Chapter) => {
+    const name = c.step === 0 && chapters?.draft ? i18n.getText("UI_CHAPTER_DRAFT") : chapters?.labels[c.step] ?? "";
+    const days = c.entries.map((x) => (x.kind === "doc" ? new Date(x.d.docDate).getTime() : x.at)).filter(Boolean);
+    if (!days.length) return name;
+    const day = (t: number) => new Date(t).toLocaleDateString(formatLocale(), { day: "numeric", month: "short" });
+    const [from, to] = [day(Math.min(...days)), day(Math.max(...days))];
+    return i18n.getText("UI_CHAPTER_TITLE", name, from === to ? from : `${from} – ${to}`);
+  };
 
   // Remounts the uploader after each pick, so choosing the same file again still fires a change.
   const [picks, setPicks] = useState(0);
@@ -196,6 +214,67 @@ export function ProjectTimeline({
     void busy(() => onUpload(file, side === "internal" && internalOnly), () => {});
   };
 
+  const renderEntry = (x: Entry) => {
+    if (x.kind === "doc") {
+      const meta = ENTITY[x.d.entity];
+      const docName = meta ? i18n.getText(meta.key) : x.d.entity;
+      return (
+        <TimelineItem key={`${x.d.entity}:${x.d.docEntry}`} icon={meta?.icon ?? "document"} style={tipVars(docName)}
+          titleText={i18n.getText(x.superseded ? "UI_DOC_TITLE_SUPERSEDED" : "UI_DOC_TITLE", docName, String(x.d.docNum))}
+          subtitleText={x.d.docDate ? new Date(x.d.docDate).toLocaleDateString(formatLocale()) : undefined}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+            <Text>{money(x.d.docTotal, currency)}</Text>
+            <ObjectStatus state={x.d.docStatus === "bost_Open" ? "Information" : "None"}>
+              {documentStatusText(x.d.docStatus, x.d.docStatus, i18n.getText.bind(i18n))}
+            </ObjectStatus>
+            {onOpenDocument ? (
+              <Link onClick={() => onOpenDocument(x.d.entity, x.d.docEntry)}>{i18n.getText("UI_OPEN")}</Link>
+            ) : null}
+            {canPreview ? <PrintActions entity={x.d.entity} docEntry={x.d.docEntry} /> : null}
+          </div>
+        </TimelineItem>
+      );
+    }
+    const e = x.e;
+    const known = KIND[e.kind];
+    const k = known ?? { title: () => e.kind, icon: "history" };
+    const q = e.payload as { docNum?: number | null; mode?: string; value?: number } | null;
+    const f = e.kind === "file" ? e.payload as { fileId: string; name: string; size: number } | null : null;
+    const sent = e.kind === "document_sent" ? e.payload as DocumentSent | null : null;
+    const sentName = sent ? `${ENTITY[sent.entity] ? i18n.getText(ENTITY[sent.entity]!.key) : sent.entity} ${sent.docNum ?? sent.docEntry}` : "";
+    const title = sent
+      ? (sent.to.length ? i18n.getText("UI_EVT_DOC_SENT", sentName, sent.to.join(", ")) : sentName)
+      : e.kind === "quoted" && q
+      ? i18n.getText(q.mode === "updated" ? "UI_QUOTE_UPDATED" : "UI_QUOTE_SENT", q.docNum == null ? "" : String(q.docNum)).replace(/\s+/g, " ")
+      : e.kind === "assigned" ? i18n.getText("UI_EVT_ASSIGNED", (e.payload as { assigneeName?: string } | null)?.assigneeName ?? "")
+      : e.kind === "created" && (e.payload as { via?: string } | null)?.via === "assistant" ? i18n.getText("UI_EVT_CREATED_ASSISTANT")
+      : e.kind === "created" && (e.payload as { via?: string } | null)?.via === "mcp" ? i18n.getText("UI_EVT_CREATED_MCP")
+      : known ? i18n.getText(k.title(side)) : k.title(side);
+    const mine = e.actorSide === side;
+    return (
+      <TimelineItem key={e.id} icon={sent ? ENTITY[sent.entity]?.icon ?? k.icon : k.icon}
+        state={sent?.to.length ? "Positive" : k.state ?? "None"} titleText={title}
+        name={e.actorName ?? undefined} subtitleText={when(new Date(e.at))} data-mine={mine || undefined}
+        style={tipVars(title, e.visibility === "internal" ? i18n.getText("UI_INTERNAL_TAG") : undefined)}>
+        {/* The body sits on its side as a block; a note's lines still read from the left. */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", textAlign: "start", alignItems: mine ? "flex-end" : "flex-start" }}>
+          {e.kind === "revised" ? <Revision payload={e.payload} labels={labels} /> : null}
+          {e.kind === "quoted" && q?.value !== undefined ? <Text>{money(q.value, currency)}</Text> : null}
+          {f ? <Link href={fileUrl(f.fileId)} icon="download">{`${f.name} (${fileSize(f.size)})`}</Link> : null}
+          {/* The PDF as it was sent, not a fresh print. */}
+          {sent ? <Link href={fileUrl(sent.fileId)} icon="pdf-attachment">{`${sentName}.pdf`}</Link> : null}
+          {sent?.error ? (
+            <ObjectStatus state="Critical" showDefaultIcon>
+              {i18n.getText("UI_EVT_DOC_NOT_EMAILED", NOT_EMAILED[sent.error] ? i18n.getText(NOT_EMAILED[sent.error]!) : sent.error)}
+            </ObjectStatus>
+          ) : null}
+          {e.note ? <Text style={{ whiteSpace: "pre-wrap" }}>{e.note}</Text> : null}
+          {entryActions?.(e)}
+        </div>
+      </TimelineItem>
+    );
+  };
+
   return (
     // Centered in the section: a reading column, not a strip down the left of a wide page.
     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", width: "100%", maxWidth: "60rem", marginInline: "auto" }}>
@@ -210,65 +289,13 @@ export function ProjectTimeline({
           subtitleText={i18n.getText("UI_TIMELINE_EMPTY_SUB")} />
       ) : (
         <Timeline loading={loading} accessibleName={i18n.getText("UI_TIMELINE")}>
-          {entries.map((x) => {
-            if (x.kind === "doc") {
-              const meta = ENTITY[x.d.entity];
-              const docName = meta ? i18n.getText(meta.key) : x.d.entity;
-              return (
-                <TimelineItem key={`${x.d.entity}:${x.d.docEntry}`} icon={meta?.icon ?? "document"} style={tipVars(docName)}
-                  titleText={i18n.getText(x.superseded ? "UI_DOC_TITLE_SUPERSEDED" : "UI_DOC_TITLE", docName, String(x.d.docNum))}
-                  subtitleText={x.d.docDate ? new Date(x.d.docDate).toLocaleDateString(formatLocale()) : undefined}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-                    <Text>{money(x.d.docTotal, currency)}</Text>
-                    <ObjectStatus state={x.d.docStatus === "bost_Open" ? "Information" : "None"}>
-                      {documentStatusText(x.d.docStatus, x.d.docStatus, i18n.getText.bind(i18n))}
-                    </ObjectStatus>
-                    {onOpenDocument ? (
-                      <Link onClick={() => onOpenDocument(x.d.entity, x.d.docEntry)}>{i18n.getText("UI_OPEN")}</Link>
-                    ) : null}
-                    {canPreview ? <PrintActions entity={x.d.entity} docEntry={x.d.docEntry} /> : null}
-                  </div>
-                </TimelineItem>
-              );
-            }
-            const e = x.e;
-            const known = KIND[e.kind];
-            const k = known ?? { title: () => e.kind, icon: "history" };
-            const q = e.payload as { docNum?: number | null; mode?: string; value?: number } | null;
-            const f = e.kind === "file" ? e.payload as { fileId: string; name: string; size: number } | null : null;
-            const sent = e.kind === "document_sent" ? e.payload as DocumentSent | null : null;
-            const sentName = sent ? `${ENTITY[sent.entity] ? i18n.getText(ENTITY[sent.entity]!.key) : sent.entity} ${sent.docNum ?? sent.docEntry}` : "";
-            const title = sent
-              ? (sent.to.length ? i18n.getText("UI_EVT_DOC_SENT", sentName, sent.to.join(", ")) : sentName)
-              : e.kind === "quoted" && q
-              ? i18n.getText(q.mode === "updated" ? "UI_QUOTE_UPDATED" : "UI_QUOTE_SENT", q.docNum == null ? "" : String(q.docNum)).replace(/\s+/g, " ")
-              : e.kind === "assigned" ? i18n.getText("UI_EVT_ASSIGNED", (e.payload as { assigneeName?: string } | null)?.assigneeName ?? "")
-              : e.kind === "created" && (e.payload as { via?: string } | null)?.via === "assistant" ? i18n.getText("UI_EVT_CREATED_ASSISTANT")
-              : e.kind === "created" && (e.payload as { via?: string } | null)?.via === "mcp" ? i18n.getText("UI_EVT_CREATED_MCP")
-              : known ? i18n.getText(k.title(side)) : k.title(side);
-            const mine = e.actorSide === side;
-            return (
-              <TimelineItem key={e.id} icon={sent ? ENTITY[sent.entity]?.icon ?? k.icon : k.icon}
-                state={sent?.to.length ? "Positive" : k.state ?? "None"} titleText={title}
-                name={e.actorName ?? undefined} subtitleText={when(new Date(e.at))} data-mine={mine || undefined}
-                style={tipVars(title, e.visibility === "internal" ? i18n.getText("UI_INTERNAL_TAG") : undefined)}>
-                {/* The body sits on its side as a block; a note's lines still read from the left. */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", textAlign: "start", alignItems: mine ? "flex-end" : "flex-start" }}>
-                  {e.kind === "revised" ? <Revision payload={e.payload} labels={labels} /> : null}
-                  {e.kind === "quoted" && q?.value !== undefined ? <Text>{money(q.value, currency)}</Text> : null}
-                  {f ? <Link href={fileUrl(f.fileId)} icon="download">{`${f.name} (${fileSize(f.size)})`}</Link> : null}
-                  {/* The PDF as it was sent, not a fresh print. */}
-                  {sent ? <Link href={fileUrl(sent.fileId)} icon="pdf-attachment">{`${sentName}.pdf`}</Link> : null}
-                  {sent?.error ? (
-                    <ObjectStatus state="Critical" showDefaultIcon>
-                      {i18n.getText("UI_EVT_DOC_NOT_EMAILED", NOT_EMAILED[sent.error] ? i18n.getText(NOT_EMAILED[sent.error]!) : sent.error)}
-                    </ObjectStatus>
-                  ) : null}
-                  {e.note ? <Text style={{ whiteSpace: "pre-wrap" }}>{e.note}</Text> : null}
-                </div>
-              </TimelineItem>
-            );
-          })}
+          {groups
+            ? groups.map((c) => (
+              <TimelineGroupItem key={c.step} groupName={chapterTitle(c)} data-chapter={c.step}>
+                {c.entries.map(renderEntry)}
+              </TimelineGroupItem>
+            ))
+            : entries.map(renderEntry)}
         </Timeline>
       )}
       {canComment || onUpload ? (
@@ -299,3 +326,5 @@ export function ProjectTimeline({
     </div>
   );
 }
+
+export type ProjectTimelineProps = Parameters<typeof ProjectTimeline>[0];
