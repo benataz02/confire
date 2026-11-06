@@ -1,4 +1,5 @@
 import type { B1Transport, CrossJoinSpec } from "@confire/b1";
+import { SAP_STEPS, type SapStep } from "@confire/db";
 
 // The forward document walk: from the quotation Confire wrote (config_project.b1DocEntry — the only B1
 // link Confire stores) to whatever SAP has since made of it.
@@ -55,12 +56,16 @@ export function chainQuery(entity: ChainEntity, clauses: string[], top = 50): Cr
   };
 }
 
+const pairsOf = (json: unknown): Record<string, unknown>[] => {
+  const pairs = Array.isArray(json) ? json : ((json as { value?: unknown } | null)?.value ?? []);
+  return Array.isArray(pairs) ? pairs as Record<string, unknown>[] : [];
+};
+
 /** Crossjoin pairs -> documents, deduped by DocEntry (one pair per matching line). */
 export function flattenChain(entity: ChainEntity, json: unknown): ChainDoc[] {
-  const pairs = Array.isArray(json) ? json : ((json as { value?: unknown } | null)?.value ?? []);
-  if (!Array.isArray(pairs)) return [];
+  const pairs = pairsOf(json);
   const seen = new Map<number, ChainDoc>();
-  for (const p of pairs as Record<string, unknown>[]) {
+  for (const p of pairs) {
     const d = (p[entity] ?? {}) as Record<string, unknown>;
     const docEntry = Number(d.DocEntry ?? 0);
     if (!docEntry || seen.has(docEntry)) continue;
@@ -139,4 +144,80 @@ export async function documentChain(b1: B1Transport, quotationDocEntry: number):
   ]);
 
   return [...orders, ...deliveries, ...invoices];
+}
+
+/** A document with every line's base: what a batched walk needs to say where each one came from. */
+type Linked = { docEntry: number; docDate: string; bases: { type: number; entry: number }[] };
+
+function linkedChain(entity: ChainEntity, json: unknown): Linked[] {
+  const docs = new Map<number, Linked>();
+  for (const p of pairsOf(json)) {
+    const d = (p[entity] ?? {}) as Record<string, unknown>;
+    const l = (p[`${entity}/DocumentLines`] ?? {}) as Record<string, unknown>;
+    const docEntry = Number(d.DocEntry ?? 0);
+    if (!docEntry) continue;
+    const doc = docs.get(docEntry) ?? { docEntry, docDate: String(d.DocDate ?? "").slice(0, 10), bases: [] };
+    doc.bases.push({ type: Number(l.BaseType), entry: Number(l.BaseEntry) });
+    docs.set(docEntry, doc);
+  }
+  return [...docs.values()];
+}
+
+// ponytail: 25 quotations per walk (the OR group rides in the URL) and $top 1000 pairs per hop —
+//           $top counts (doc, line) pairs (see chainQuery); raise it if a chunk's orders carry more lines.
+const CHUNK = 25;
+const PAIRS = 1000;
+
+/**
+ * How far SAP has taken each quotation (the portal home's journey past "Quoted"): ordered, delivered
+ * or invoiced, with the latest DocDate of that step. One walk per 25 quotations — three crossjoins,
+ * not three per quotation. A document counts for a quotation only through a line base that points
+ * into the previous hop's set, so a reply wider than the filter (the test agent ignores filters)
+ * credits nothing to anyone. A quotation with no order has no key.
+ */
+export async function furthestSteps(
+  b1: Pick<B1Transport, "crossJoin">, quotations: number[],
+): Promise<Map<number, { step: SapStep; at: string }>> {
+  const out = new Map<number, { step: SapStep; at: string }>();
+  const record = (qs: Iterable<number>, step: SapStep, at: string) => {
+    for (const q of qs) {
+      const cur = out.get(q);
+      const rank = SAP_STEPS.indexOf(step) - (cur ? SAP_STEPS.indexOf(cur.step) : -1);
+      if (rank > 0 || (rank === 0 && at > cur!.at)) out.set(q, { step, at });
+    }
+  };
+  /** docEntry → the quotations behind it, through the bases of `type` that `from` knows. */
+  const credit = (docs: Linked[], from: { type: number; of: Map<number, Set<number>> }[]) => {
+    const of = new Map<number, Set<number>>();
+    for (const d of docs) {
+      const qs = new Set<number>();
+      for (const b of d.bases) for (const f of from) if (b.type === f.type) for (const q of f.of.get(b.entry) ?? []) qs.add(q);
+      if (qs.size) of.set(d.docEntry, qs);
+    }
+    return of;
+  };
+
+  for (let i = 0; i < quotations.length; i += CHUNK) {
+    const chunk = quotations.slice(i, i + CHUNK);
+    const hop = async (entity: ChainEntity, clauses: string[]) =>
+      clauses.length ? linkedChain(entity, (await b1.crossJoin(chainQuery(entity, clauses, PAIRS))).data) : [];
+
+    const asked = new Map(chunk.map((q) => [q, new Set([q])]));
+    const orders = await hop("Orders", [baseClause("Orders", 23, chunk)]);
+    const ofOrder = credit(orders, [{ type: 23, of: asked }]);
+    const deliveries = await hop("DeliveryNotes", ofOrder.size ? [baseClause("DeliveryNotes", 17, [...ofOrder.keys()])] : []);
+    const ofDelivery = credit(deliveries, [{ type: 17, of: ofOrder }]);
+    // An invoice can be raised straight from the order OR from the delivery — both, in one read.
+    const invoices = await hop("Invoices", [
+      ...(ofOrder.size ? [baseClause("Invoices", 17, [...ofOrder.keys()])] : []),
+      ...(ofDelivery.size ? [baseClause("Invoices", 15, [...ofDelivery.keys()])] : []),
+    ]);
+    const ofInvoice = credit(invoices, [{ type: 17, of: ofOrder }, { type: 15, of: ofDelivery }]);
+
+    // Each hop dates its own documents: DocEntry is numbered per document type, so order 10 and
+    // delivery 10 are strangers.
+    for (const [docs, of, step] of [[orders, ofOrder, "ordered"], [deliveries, ofDelivery, "delivered"], [invoices, ofInvoice, "invoiced"]] as const)
+      for (const d of docs) record(of.get(d.docEntry) ?? [], step, d.docDate);
+  }
+  return out;
 }
