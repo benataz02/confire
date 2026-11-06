@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chaptersOf, mergeEntries, type Entry } from "./chapters.ts";
+import { chaptersOf, mergeEntries, stepDates, type Entry } from "./chapters.ts";
 import type { TimelineDoc, TimelineEvent } from "./ProjectTimeline.tsx";
 
 let n = 0;
@@ -58,4 +58,19 @@ test("a fresh draft is one chapter", () => {
   const [created] = mergeEntries(seq("created"), undefined);
   expect(chaptersOf([created!])).toEqual([{ step: 0, entries: [created!] }]);
   expect(chaptersOf(mergeEntries(undefined, undefined))).toEqual([]);
+});
+
+test("stepDates: a step's date is its milestone's, a document's its posting day, no chapter none", () => {
+  const events = seq("created", "comment", "submitted", "accepted");
+  const dates = stepDates(chaptersOf(mergeEntries(events, docs(doc("Quotations", "2026-11-04T00:00:00Z")), { docsAfterDay: true })));
+  expect(dates).toHaveLength(6);
+  expect(dates[0]).toBe(events[2]!.at.getTime()); // submitted, not created
+  expect(dates[1]).toBe(events[3]!.at.getTime());
+  expect(dates[2]).toBe(new Date(2026, 10, 4).getTime()); // local day, read off the string
+  expect(dates.slice(3)).toEqual([undefined, undefined, undefined]);
+});
+
+test("stepDates: a chapter without its milestone falls back to its first entry", () => {
+  const events = seq("created", "comment");
+  expect(stepDates(chaptersOf(mergeEntries(events, undefined)))[0]).toBe(events[0]!.at.getTime());
 });

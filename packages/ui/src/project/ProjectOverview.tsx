@@ -4,12 +4,12 @@ import {
   ToolbarItem, type ObjectPageDomRef,
 } from "@ui5/webcomponents-react";
 import { useUiI18n } from "../i18n.ts";
-import { formatLocale, parseIsoDate } from "../format.ts";
+import { formatLocale } from "../format.ts";
 import { PageMessages, type PageMessage } from "../PageMessages.tsx";
 import { JourneyBar, JOURNEY_ICONS } from "../journey/JourneyBar.tsx";
 import type { JourneyNext, Side } from "../journey/ring.ts";
 import { ProjectTimeline, type ProjectTimelineProps } from "../timeline/ProjectTimeline.tsx";
-import { chaptersOf, mergeEntries } from "../timeline/chapters.ts";
+import { chaptersOf, mergeEntries, stepDates } from "../timeline/chapters.ts";
 
 // A client project's page, in both apps (client-project-page spec, "The project page", mockup C): the
 // title with the progress bar, the configuration as one line, the timeline in chapters, then the steps
@@ -41,17 +41,10 @@ export function ProjectOverview({
   const i18n = useUiI18n();
   const page = useRef<ObjectPageDomRef>(null);
 
-  // A done step's date is the day its chapter starts. A document has a posting day, not a time:
-  // read off the string, as mergeEntries' end-of-day sort key would read as the next day east of UTC.
-  const dates = useMemo(() => {
-    const out: (string | undefined)[] = [];
-    for (const c of chaptersOf(mergeEntries(timeline.events, timeline.documents, { docsAfterDay: true }))) {
-      const x = c.entries[0]!;
-      const d = x.kind === "doc" ? parseIsoDate(x.d.docDate) : new Date(x.at);
-      out[c.step] = d?.toLocaleDateString(formatLocale(), { day: "numeric", month: "short" });
-    }
-    return out;
-  }, [timeline.events, timeline.documents]);
+  // A done step's date: its chapter's milestone (stepDates), drawn as "29 Oct".
+  const dates = useMemo(() => stepDates(chaptersOf(mergeEntries(timeline.events, timeline.documents, { docsAfterDay: true })))
+    .map((t) => (t === undefined ? undefined : new Date(t).toLocaleDateString(formatLocale(), { day: "numeric", month: "short" }))),
+  [timeline.events, timeline.documents]);
 
   const scrollTo = (selector: string) =>
     page.current?.querySelector<HTMLElement>(selector)?.scrollIntoView({ block: "start" });
@@ -60,7 +53,9 @@ export function ProjectOverview({
     ? [] : journey.labels.map((label, i) => ({ label, i })).filter(({ i }) => i > journey.step);
 
   return (
-    <ObjectPage hidePinButton ref={page}
+    // Pinned: the bar is how one jumps between chapters, so the header never snaps away under the scroll
+    // (wcr adds its height to the scroll padding, so a chapter lands below it), nor on a title click.
+    <ObjectPage hidePinButton headerPinned preserveHeaderStateOnClick ref={page}
       titleArea={
         <ObjectPageTitle header={<Title>{title}</Title>} subHeader={<Text>{subtitle}</Text>} breadcrumbs={breadcrumbs}
           actionsBar={
