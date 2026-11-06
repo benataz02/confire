@@ -570,6 +570,9 @@ func (w *wizard) modify(cfg *Config) error {
 	}
 	if installed := installedVersion(); isNewer(version, installed) {
 		opts = append(opts, option{fmt.Sprintf("Update the agent from %s to %s", installed, version), func() error { return w.finish(cfg) }})
+	} else if installed == version && installedDiffers() {
+		// Same version, other bytes: a rebuilt dev agent. Never offered for an older version.
+		opts = append(opts, option{fmt.Sprintf("Install this build (%s) over the installed one", version), func() error { return w.finish(cfg) }})
 	}
 	opts = append(opts, option{"Uninstall", w.uninstall})
 	for i, o := range opts {

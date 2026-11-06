@@ -251,6 +251,14 @@ func restart() error {
 	})
 }
 
+// installedDiffers: this exe is not the installed one and its bytes differ — a rebuilt agent of the
+// same version (every dev build is "dev").
+func installedDiffers() bool {
+	self, err := os.Executable()
+	inst := filepath.Join(installDir(), "confire-agent.exe")
+	return err == nil && !strings.EqualFold(filepath.Clean(self), filepath.Clean(inst)) && !sameFile(self, inst)
+}
+
 // installedVersion asks the installed exe; "" when there is none.
 func installedVersion() string {
 	out, err := exec.Command(filepath.Join(installDir(), "confire-agent.exe"), "version").Output()

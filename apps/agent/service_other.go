@@ -26,6 +26,7 @@ func pause()                          {}
 func install() error                  { return nil }
 func restart() error                  { return nil }
 func installedVersion() string        { return "" }
+func installedDiffers() bool          { return false }
 func prepareConfigDir(d string) error { return os.MkdirAll(d, 0o700) }
 
 // printExe: confire-print.exe is .NET Framework and Crystal is Windows-only.

@@ -13,6 +13,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -113,4 +114,15 @@ func isNewer(a, b string) bool {
 		}
 	}
 	return false
+}
+
+// sameFile: both exist and hold the same bytes. Every dev build is version "dev", so isNewer cannot
+// tell a new dev exe from the installed one; this can.
+func sameFile(a, b string) bool {
+	x, err := os.ReadFile(a)
+	if err != nil {
+		return false
+	}
+	y, err := os.ReadFile(b)
+	return err == nil && bytes.Equal(x, y)
 }
