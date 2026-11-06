@@ -76,8 +76,7 @@ export function progressText(name: string, t: (key: string) => string): string {
 /** The configuration page's field anchor (the one configMessages.ts jumps to): scrolled into view
  *  and focused, after opening the configuration when the panel is elsewhere. */
 export function useScrollToField() {
-  const navigate = useNavigate({ from: "/$slug" });
-  const qc = useQueryClient();
+  const openForm = useOpenForm();
   return (projectId: string, key: string, here: boolean) => {
     const go = () => {
       const el = document.querySelector<HTMLElement>(`[data-param="${CSS.escape(key)}"]`) ?? document.getElementById(key);
@@ -85,11 +84,18 @@ export function useScrollToField() {
       (el?.querySelector<HTMLElement>(FOCUSABLE) ?? el)?.focus();
     };
     if (here) return go();
-    // A client's request draws its form at /configuration; an internal one's is /configs/$id (whose
-    // /configuration would only redirect there). Unknown: /configuration, which serves both.
+    void openForm(projectId).then(() => setTimeout(go, 300));
+  };
+}
+
+/** Opens a configuration's form. A client's request draws it at /configuration; an internal one's is
+ *  /configs/$id (whose /configuration would only redirect there). Unknown: /configuration, which serves both. */
+export function useOpenForm() {
+  const navigate = useNavigate({ from: "/$slug" });
+  const qc = useQueryClient();
+  return (projectId: string) => {
     const internal = qc.getQueryData<ConfigView>(orpc.configs.get.queryKey({ input: { id: projectId } }))?.request === null;
-    void navigate({ to: internal ? "/$slug/configs/$id" : "/$slug/configs/$id/configuration", params: { id: projectId } })
-      .then(() => setTimeout(go, 300));
+    return navigate({ to: internal ? "/$slug/configs/$id" : "/$slug/configs/$id/configuration", params: { id: projectId } });
   };
 }
 
@@ -236,7 +242,7 @@ function ConfigCard({ view, ctx }: { view: ConfigView; ctx: Ctx }) {
       ]}
       actions={
         <>
-          {here ? null : <Button onClick={() => open({ to: `/configs/${p.id}` })}>{t("ASSISTANT_CARD_OPEN")}</Button>}
+          {here ? null : <Button onClick={() => open({ to: `/configs/${p.id}/configuration` })}>{t("ASSISTANT_CARD_OPEN")}</Button>}
           {picked && p.status !== "quoted"
             ? <Button design="Emphasized" onClick={() => open({ to: `/configs/${p.id}/quote` })}>{t("ASSISTANT_CARD_REVIEW")}</Button>
             : null}

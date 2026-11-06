@@ -11,8 +11,9 @@ test("the deepest match wins", () => {
     .toEqual({ routeId: "/$slug/requests", params: { slug: "acme" }, projectId: null });
 });
 
-test("a configuration's page and its quote page carry the configuration", () => {
+test("a configuration's page, its form page and its quote page carry the configuration", () => {
   expect(routeContext([m("/$slug"), m("/$slug/configs/$id", { id: "p1" })]).projectId).toBe("p1");
+  expect(routeContext([m("/$slug"), m("/$slug/configs/$id_/configuration", { id: "p1" })]).projectId).toBe("p1");
   expect(routeContext([m("/$slug"), m("/$slug/configs/$id_/quote", { id: "p1" })]).projectId).toBe("p1");
 });
 

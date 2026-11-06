@@ -16,6 +16,7 @@ import type { Result } from "../reports/widgets.ts";
 import { useAssistantShell } from "./AssistantProvider.tsx";
 import { ChatView, refusalText, useRoute, type HeadState } from "./ChatView.tsx";
 import type { Thread } from "./useAssistant.ts";
+import { useOpenForm } from "./cards/registry.tsx";
 
 // The AI page (assistant spec §4.2): one chat for everything — the chat loads the skill the user's ask
 // needs (server, skills.ts). `/assistant` is a new chat (the user's blank thread, `blankThread`),
@@ -202,9 +203,10 @@ export function AssistantPage({ threadId, reportId: openedReport }: { threadId: 
   };
 
   // To the configuration's form, the chat open beside it in the panel.
+  const openForm = useOpenForm();
   const openConfig = (id: string) => {
     if (!shell.open) shell.toggle();
-    void navigate({ to: "/$slug/configs/$id", params: { id } });
+    void openForm(id);
   };
 
   // A new chat has nothing to put on the bar, so it has none; a docked chat's actions are the report's.
