@@ -164,13 +164,25 @@ export async function withThread<T>(threadId: string, fn: () => Promise<T>): Pro
   }
 }
 
-/** Append, never replace. The title is set once, by the first append that names one. */
-export async function appendMessages(threadId: string, msgs: ModelMessage[], title?: string): Promise<void> {
+/** Each message with when it was stored (`metadata.at`), for the panel's stamps; one already stamped
+ *  keeps its time. On the message, never on a part: the Anthropic adapter copies a part's metadata
+ *  onto Claude's block, which refuses unknown keys (400, see `unlabeled`), and never reads a
+ *  message's (`@tanstack/ai-anthropic` 1.0.0, `adapters/text.js`) — where `prefix` already lives, so
+ *  the stamp never reaches the prompt or `prefixHash`. */
+export function stamped(msgs: ModelMessage[], at: Date): ModelMessage[] {
+  return msgs.map((m) => ((m.metadata as MessageMeta | undefined)?.at ? m : { ...m, metadata: { ...m.metadata, at: at.toISOString() } }));
+}
+
+/** Append, never replace, and answer what was stored. The title is set once, by the first append
+ *  that names one. */
+export async function appendMessages(threadId: string, msgs: ModelMessage[], title?: string): Promise<ModelMessage[]> {
+  const stored = stamped(msgs, new Date());
   await db.update(assistantThread).set({
-    messages: sql`${assistantThread.messages} || ${JSON.stringify(msgs)}::jsonb`,
+    messages: sql`${assistantThread.messages} || ${JSON.stringify(stored)}::jsonb`,
     updatedAt: new Date(),
     ...(title ? { title: sql`case when ${assistantThread.title} = '' then ${title} else ${assistantThread.title} end` } : {}),
   }).where(eq(assistantThread.id, threadId));
+  return stored;
 }
 
 /** A general thread that started a configuration becomes that configuration's thread. */
@@ -196,8 +208,8 @@ export function withoutContext(ms: ModelMessage[]): ModelMessage[] {
 
 /** What an assistant message records about the run that produced it. `prefix` is the hash of that
  *  run's system prompts and tools (route.ts `prefixHash`); `resetThinking` on a user turn marks a
- *  thinking refusal, after which nothing older is replayed. */
-export type MessageMeta = { prefix?: string; resetThinking?: boolean };
+ *  thinking refusal, after which nothing older is replayed. `at` is when it was stored (`stamped`). */
+export type MessageMeta = { prefix?: string; resetThinking?: boolean; at?: string };
 const metaOf = (m: ModelMessage) => (m.metadata ?? {}) as MessageMeta;
 
 /** An earlier run's message without its thinking. */

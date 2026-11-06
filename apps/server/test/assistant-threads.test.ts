@@ -5,7 +5,7 @@ import { db, assistantFile, configModel, configProjectEvent, projectFile } from 
 import { utils, write } from "xlsx";
 import { assistantFileRoutes, copyToProject, filePart, fileParts, unlabeled, type FileRef } from "../src/assistant/files.ts";
 import {
-  appendMessages, clearThread, dehydrate, hydrate, lastDrop, newThread, ownThread, threadFor, withThread,
+  appendMessages, clearThread, dehydrate, hydrate, lastDrop, newThread, ownThread, stamped, threadFor, withThread,
 } from "../src/assistant/threads.ts";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
@@ -37,6 +37,18 @@ test("a file label reaches the model without its metadata; the file keeps its ow
   const doc = filePart(ref, PDF)!;
   const label = { type: "text" as const, content: "File: drawing.pdf", metadata: { fileLabel: true } };
   expect(unlabeled([label, doc])).toEqual([{ type: "text", content: "File: drawing.pdf" }, doc]);
+});
+
+test("each stored message carries when it was stored, on the message, never on a part", () => {
+  const at = new Date("2026-11-06T13:34:00Z");
+  const [u, a] = stamped([
+    { role: "user", content: [{ type: "text", content: "hi" }] },
+    { role: "assistant", content: "ok", metadata: { prefix: "p" } },
+  ], at);
+  expect(u!.metadata).toEqual({ at: "2026-11-06T13:34:00.000Z" });
+  expect(a!.metadata).toEqual({ prefix: "p", at: "2026-11-06T13:34:00.000Z" });
+  expect((u!.content as { metadata?: unknown }[])[0]!.metadata).toBeUndefined();
+  expect(stamped([u!], new Date("2026-11-07T00:00:00Z"))[0]!.metadata).toEqual({ at: "2026-11-06T13:34:00.000Z" });
 });
 
 describe.skipIf(!process.env.DATABASE_URL)("threads", () => {
@@ -108,6 +120,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads", () => {
     const [back] = await hydrate(w.tenantId, stored.messages, { projectId: w.projectId });
     expect((back!.content as { source?: { value: string } }[])[0]!.source!.value).toBe(PDF.toString("base64"));
     expect(lastDrop(stored.messages)).toEqual({ refs: [ref], text: "50 pcs" });
+    expect(stored.messages.every((m) => typeof (m.metadata as { at?: unknown } | undefined)?.at === "string")).toBe(true);
+    const ui = await call(router.assistant.thread, { id: t.id }, { context: { headers: tenantHeaders(w.slug, w.a.cookie) } });
+    expect(ui.messages.every((m) => typeof m.metadata?.at === "string")).toBe(true); // survives modelMessagesToUIMessages
   });
 
   test("the AI page's list: own chats with something in them, pinned first, searched, renamed, deleted", async () => {

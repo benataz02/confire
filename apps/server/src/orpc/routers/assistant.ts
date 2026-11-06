@@ -44,9 +44,7 @@ const userMessage = (parts: ContentPart[], text: string): ModelMessage => ({
 
 /** Store, then answer what was stored, as the panel draws it: no file bytes either way. */
 async function append(threadId: string, msgs: ModelMessage[], title?: string) {
-  const stored = msgs.map(dehydrate);
-  await appendMessages(threadId, stored, title);
-  return modelMessagesToUIMessages(stored);
+  return modelMessagesToUIMessages(await appendMessages(threadId, msgs.map(dehydrate), title));
 }
 
 /** A general thread's configuration: created `via` the assistant, the thread linked to it (and
