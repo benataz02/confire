@@ -41,7 +41,8 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
   const navigate = useNavigate({ from: "/$slug" });
   const meta = useFieldConstraints("Quotations");
   const draft = useQuery({ ...orpc.configs.quoteDraft.queryOptions({ input: { projectId } }), retry: false });
-  const backToConfig = () => navigate({ to: "/$slug/configs/$id", params: { id: projectId } });
+  // A client's request draws its configuration at /configuration; its /configs/$id is the project page.
+  const backToConfig = () => navigate({ to: draft.data?.portal ? "/$slug/configs/$id/configuration" : "/$slug/configs/$id", params: { id: projectId } });
   // The lines' only editor: the configuration's items grid.
   const tableActions = {
     lines: () => (
@@ -106,6 +107,7 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
       breadcrumbs={[
         d.portal ? { text: t("NAV_REQUESTS"), to: "/requests" } : { text: t("NAV_CONFIGS"), to: "/configs" },
         { text: d.name.trim() || t("CONFIG_NEW"), to: `/configs/${projectId}` },
+        ...(d.portal ? [{ text: t("CONFIG_CONFIGURATION"), to: `/configs/${projectId}/configuration` }] : []),
       ]}
       // The draft carries the commandId it was built from, so the server refuses to post a
       // selection that moved between preview and Create rather than quoting something else.
@@ -117,7 +119,7 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
         // A request goes back to the request: its status and timeline are what moved.
         if (d.portal) {
           toast(withMail(r.mode === "updated" ? t("CONFIG_TOAST_QUOTE_UPDATED") : t("CONFIG_TOAST_QUOTE_SENT"), r.mail, t));
-          void backToConfig();
+          void navigate({ to: "/$slug/configs/$id", params: { id: projectId } });
           return;
         }
         // SAP answers the POST with the whole document, which is exactly what entities.one reads —

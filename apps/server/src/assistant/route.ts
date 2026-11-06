@@ -218,7 +218,7 @@ export function assistantRoutes(): Hono {
     // page), and a configure page whose thread is no configuration's is a general page.
     const hinted = pageFor(props.route.routeId);
     // A report's chat is the report's on any page; no other chat is a report page's.
-    const page = thread.reportId ? REPORT
+    let page = thread.reportId ? REPORT
       : thread.projectId ? (hinted.kind === "configure" ? hinted : CONFIGURE_CHAT)
       : hinted.kind === "configure" || hinted.kind === "report" ? GENERAL : hinted;
     let hydrated: ModelMessage[];
@@ -239,6 +239,8 @@ export function assistantRoutes(): Hono {
         const where = and(eq(configProject.id, thread.projectId), eq(configProject.tenantId, tenantId), internalVisible)!;
         const { live, view } = await configView(tenantId, where).catch(() => ({ live: null, view: null }));
         if (live && view) { block = modelBlock(live.model.definition, view.form, live.lookups.tables); name = view.project.name; }
+        // A client's request opens on its project page (the timeline); its form is /configuration.
+        if (live?.row.portalCardCode && props.route.routeId === "/$slug/configs/$id" && page.kind === "configure") page = CONFIGURE_CHAT;
       }
     } catch (e) {
       await releaseLease(thread.id, lease);

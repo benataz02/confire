@@ -65,8 +65,8 @@ export function RequestOverview({ id }: { id: string }) {
       toast(t("CONFIG_TOAST_ATTACHED", file.name));
     },
   });
-  const error = reassign.error ?? attach.error ?? comment.error;
-  const refused = useRefusals(reassign.error, attach.error, comment.error);
+  // A comment's failure is the composer's own (ProjectTimeline's postError), not a page message.
+  const refused = useRefusals(reassign.error, attach.error);
 
   const v = q.data;
   if (q.isPending) return <ObjectPageSkeleton />;
@@ -80,9 +80,9 @@ export function RequestOverview({ id }: { id: string }) {
   const labels = STEP_KEYS.map((k) => t(k));
   // A DocEntry means something only in the SAP company it was posted in (as on the configuration page).
   const quotationHere = project.b1DocEntry !== null && project.b1Company === v.sapCompany;
-  const messages: PageMessage[] = error
-    ? [{ id: "error", type: "Negative", text: t("CONFIG_CHANGE_FAILED"), detail: error.message, group: t("CONFIG_SECTION_TIMELINE") }]
-    : [];
+  const failed = (id: string, e: Error | null): PageMessage[] =>
+    e ? [{ id, type: "Negative", text: t("CONFIG_CHANGE_FAILED"), detail: e.message, group: t("CONFIG_SECTION_TIMELINE") }] : [];
+  const messages = [...failed("reassign", reassign.error), ...failed("attach", attach.error)];
 
   return (
     <>

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { fakeText } from "@tanstack/ai/testing";
-import { db, aiUsage, assistantSettings, assistantThread, configModel } from "@confire/db";
+import { db, aiUsage, assistantSettings, assistantThread, configModel, configProject } from "@confire/db";
 import type { ModelMessage } from "@tanstack/ai";
 import { useTestAdapter } from "../src/assistant/model.ts";
 import { assistantRoutes, CHAT_OPTIONS, completeUpTo, REFUSAL_EVENT } from "../src/assistant/route.ts";
@@ -107,6 +107,20 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/assistant", () => {
     const t = await w.stored(pt.id);
     expect(t.messages.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant"]);
     expect(JSON.stringify(t.messages[2])).toContain("ACME cable");
+  });
+
+  test("a client's request: its /configs/$id (the project page) has no form, its /configuration has", async () => {
+    const w = await world();
+    const [m] = await db.insert(configModel).values({ tenantId: w.tenantId, name: "Cable", definition: TEST_MODEL }).returning({ id: configModel.id });
+    const { id } = await call(router.configs.create, { modelId: m!.id, name: "ACME cable", customer: null }, { context: { headers: tenantHeaders(w.slug, w.u.cookie) } });
+    await db.update(configProject).set({ portalCardCode: "C1", status: "in_review" }).where(eq(configProject.id, id));
+    const pt = await threadFor(w.tenantId, w.u.userId, id);
+    const lastNote = async () => JSON.stringify(note((await w.stored(pt.id)).messages.findLast((x) => x.role === "user")!));
+    w.fake.setResponses([{ text: "a" }, { text: "b" }]);
+    await (await w.post({ threadId: pt.id, route: { routeId: "/$slug/configs/$id", params: { id } } })).text();
+    expect(await lastNote()).toContain("no form on screen");
+    await (await w.post({ threadId: pt.id, route: { routeId: "/$slug/configs/$id_/configuration", params: { id } } })).text();
+    expect(await lastNote()).toContain("has its page open beside this chat");
   });
 
   test("ask_user ends the run on its result; the answer is the next turn", async () => {

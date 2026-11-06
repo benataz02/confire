@@ -218,8 +218,6 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
   const i18n = useI18n();
   const t = (k: string, ...a: string[]) => i18n.getText(k, ...a);
   const navigate = useNavigate({ from: "/$slug" });
-  // The form on screen, if any: elsewhere a card's "show me the field" leaves for the configuration's page.
-  const formHere = route.projectId;
   const { language } = useLanguage();
   const me = useQuery(meQuery);
   const status = useQuery(orpc.assistant.status.queryOptions());
@@ -237,6 +235,9 @@ export function ChatView({ thread, route, kind, page = false, head, onTool, pref
   // What the chat works on: the page's configuration, else its own — the tools reach it from any page.
   const projectId = route.projectId ?? threadProjectId;
   const view = useQuery({ ...orpc.configs.get.queryOptions({ input: { id: projectId ?? "" } }), enabled: !!projectId });
+  // The form on screen, if any: elsewhere a card's "show me the field" leaves for the configuration's page.
+  // A client's request's `/configs/$id` is its project page, which draws no form.
+  const formHere = route.routeId === "/$slug/configs/$id" && view.data?.request ? null : route.projectId;
   const [kept, setKept] = useState<ReadonlySet<string>>(new Set());
   const input = useRef<TextAreaDomRef>(null);
   const picker = useRef<HTMLInputElement>(null);

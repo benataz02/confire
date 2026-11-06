@@ -5,7 +5,7 @@
 export type RouteContext = { routeId: string; params: Record<string, string>; projectId: string | null };
 
 /** The routes whose `$id` is a configuration. */
-const CONFIGURATION = new Set(["/$slug/configs/$id", "/$slug/configs/$id_/quote"]);
+const CONFIGURATION = new Set(["/$slug/configs/$id", "/$slug/configs/$id_/configuration", "/$slug/configs/$id_/quote"]);
 
 export function routeContext(matches: { routeId: string; params: Record<string, string> }[]): RouteContext {
   const deepest = matches.at(-1);

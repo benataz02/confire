@@ -68,7 +68,9 @@ export const PAGES: Record<string, Page> = {
   // The AI page: `$id` is the chat, and route.ts makes a configuration's chat CONFIGURE_CHAT.
   "/$slug/assistant/": start,
   "/$slug/assistant/$id": start,
+  // A client's request: `$id` is its project page, which route.ts makes CONFIGURE_CHAT (no form on it).
   "/$slug/configs/$id": configure,
+  "/$slug/configs/$id_/configuration": configure,
   "/$slug/configs/$id_/quote": configure,
   "/$slug/models/$id": model,
   "/$slug/models/new": model,

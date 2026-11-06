@@ -77,14 +77,19 @@ export function progressText(name: string, t: (key: string) => string): string {
  *  and focused, after opening the configuration when the panel is elsewhere. */
 export function useScrollToField() {
   const navigate = useNavigate({ from: "/$slug" });
+  const qc = useQueryClient();
   return (projectId: string, key: string, here: boolean) => {
     const go = () => {
       const el = document.querySelector<HTMLElement>(`[data-param="${CSS.escape(key)}"]`) ?? document.getElementById(key);
       el?.scrollIntoView({ block: "center" });
       (el?.querySelector<HTMLElement>(FOCUSABLE) ?? el)?.focus();
     };
-    if (here) go();
-    else void navigate({ to: "/$slug/configs/$id", params: { id: projectId } }).then(() => setTimeout(go, 300));
+    if (here) return go();
+    // A client's request draws its form at /configuration; an internal one's is /configs/$id (whose
+    // /configuration would only redirect there). Unknown: /configuration, which serves both.
+    const internal = qc.getQueryData<ConfigView>(orpc.configs.get.queryKey({ input: { id: projectId } }))?.request === null;
+    void navigate({ to: internal ? "/$slug/configs/$id" : "/$slug/configs/$id/configuration", params: { id: projectId } })
+      .then(() => setTimeout(go, 300));
   };
 }
 
@@ -215,7 +220,7 @@ function ConfigCard({ view, ctx }: { view: ConfigView; ctx: Ctx }) {
   return (
     <ObjectCard title={p.name} subtitle={[p.customer?.cardName, view.model?.name].filter(Boolean).join(" · ") || undefined}
       status={{ text: projectStatusLabel(p.status, t), state: PROJECT_STATUS[p.status].state }}
-      onOpen={here ? undefined : () => open({ to: `/configs/${p.id}` })}
+      onOpen={here ? undefined : () => open({ to: `/configs/${p.id}/configuration` })}
       facts={[
         {
           label: t("ASSISTANT_CARD_MISSING"),
