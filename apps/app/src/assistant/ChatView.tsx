@@ -4,7 +4,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import type { UIMessage } from "@tanstack/ai-react";
 import { TextPart } from "@tanstack/ai-react/ui";
 import {
-  BusyIndicator, Button, FlexBox, Icon, Label, Link, MessageStrip, Tag, Text, TextArea, ToggleButton, Token, Tokenizer,
+  BusyIndicator, Button, FlexBox, Icon, Label, Link, MessageStrip, Tag, TextArea, ToggleButton, Token, Tokenizer,
   type TextAreaDomRef,
 } from "@ui5/webcomponents-react";
 import { Button as AiButton, ButtonState } from "@ui5/webcomponents-ai-react";

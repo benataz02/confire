@@ -105,26 +105,34 @@ export function AssistantPanel() {
   const resize = (max: boolean) => {
     if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setAnimating(true);
-      setTimeout(() => setAnimating(false), 600); // transitionend's fallback
+      setTimeout(() => setAnimating(false), 600); // the 0.5 s transition, done
     }
     setMaximized(max);
   };
+  // The chats beside the chat: the card's drawer, or the maximized panel's sidebar.
+  const chatsOpen = maximized ? sidebar : drawer;
+  const setChatsOpen = maximized ? setSidebar : setDrawer;
   // Whenever the chat takes the user to a page, back to the card so the page shows (spec §5.4).
   useEffect(() => { if (maximized) resize(false); }, [route]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!shell.open) setMaximized(false); }, [shell.open]);
 
+  // A drag moves the element itself and is stored once, on release: state per pointer move would
+  // re-render the whole chat at pointer rate.
   // ponytail: drag by pointer only; arrow keys on the header if someone needs to move it without a mouse.
-  const drag = useRef<Pos | null>(null);
+  const drag = useRef<{ dx: number; dy: number; at: Pos } | null>(null);
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (maximized || e.button !== 0 || (e.target as Element).closest("ui5-button, ui5-toggle-button, ui5-input, button, input")) return;
-    const r = aside.current!.getBoundingClientRect();
-    drag.current = { x: e.clientX - r.left, y: e.clientY - r.top };
+    drag.current = { dx: e.clientX - box.left, dy: e.clientY - box.top, at: { x: box.left, y: box.top } };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (drag.current) setPos(clampPos({ x: e.clientX - drag.current.x, y: e.clientY - drag.current.y }, box, view.vw, view.vh));
+    const d = drag.current;
+    if (!d || !aside.current) return;
+    d.at = clampPos({ x: e.clientX - d.dx, y: e.clientY - d.dy }, box, view.vw, view.vh);
+    aside.current.style.left = `${d.at.x}px`;
+    aside.current.style.top = `${d.at.y}px`;
   };
-  const endDrag = () => { drag.current = null; };
+  const endDrag = () => { if (drag.current) setPos(drag.current.at); drag.current = null; };
 
   /** New chat: always a blank general one (the user's blank thread, if there is one). */
   const newChat = async () => {
@@ -190,8 +198,8 @@ export function AssistantPanel() {
     <>
       <div style={{ ...HEAD, cursor: maximized ? "default" : "move" }}
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag}>
-        {!maximized ? icon("menu2", t("ASSISTANT_CHATS"), () => setDrawer((d) => !d), { accessibilityAttributes: { expanded: drawer } })
-          : !sidebar ? icon("menu2", t("ASSISTANT_CHATS"), () => setSidebar(true), { accessibilityAttributes: { expanded: false } }) : null}
+        {/* Maximized, an open sidebar has its own ☰. */}
+        {!maximized || !sidebar ? icon("menu2", t("ASSISTANT_CHATS"), () => setChatsOpen((o) => !o), { accessibilityAttributes: { expanded: chatsOpen } }) : null}
         {renaming && row
           ? <RenameField value={chats.label(row)} label={t("ASSISTANT_RENAME")} onDone={(v) => { setRenaming(false); chats.rename(row, v); }} />
           : (
@@ -227,7 +235,6 @@ export function AssistantPanel() {
     <aside ref={aside} role="complementary" aria-label={t("ASSISTANT_TITLE")}
       // Escape closes the card's drawer first, then the panel.
       onKeyDown={(e: KeyboardEvent) => { if (e.key === "Escape") (drawer && !maximized ? setDrawer(false) : shell.close()); }}
-      onTransitionEnd={(e) => { if (e.target === e.currentTarget) setAnimating(false); }}
       style={{
         ...paletteVars(palette),
         position: "fixed", zIndex: 4, left: box.left, top: box.top, width: box.width, height: box.height, borderRadius: box.radius,
@@ -235,8 +242,8 @@ export function AssistantPanel() {
         display: shell.open ? "flex" : "none", overflow: "hidden",
         background: "var(--cf-a-page)", color: "var(--cf-a-text)", boxShadow: maximized ? "none" : "var(--cf-a-shadow)",
       }}>
-      <ChatDrawer open={maximized ? sidebar : drawer} mode={maximized ? "sidebar" : "card"} openId={thread.data?.id ?? null} chats={chats}
-        onPick={pick} onNew={() => void newChat()} onHide={() => (maximized ? setSidebar(false) : setDrawer(false))} onRemoved={removed} />
+      <ChatDrawer open={chatsOpen} mode={maximized ? "sidebar" : "card"} openId={thread.data?.id ?? null} chats={chats}
+        onPick={pick} onNew={() => void newChat()} onHide={() => setChatsOpen(false)} onRemoved={removed} />
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         {thread.data ? <ChatView key={thread.data.id} thread={thread.data} route={route} kind={kind} head={head} welcome={welcome} wide={maximized}
           onTool={onTool} prefill={shell.asked?.text ? { text: shell.asked.text, at: shell.asked.at } : undefined} />

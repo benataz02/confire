@@ -125,7 +125,6 @@ export function GlobalSearch({ pages, isAdmin }: { pages: SearchHit[]; isAdmin: 
   // once everything is shown, which would otherwise drop focus out of the popover.
   const revealed = useRef<number | null>(null);
   const focusRevealed = useCallback((el: HTMLElement | null) => {
-    console.log("DBG ref", el?.tagName, (el as { text?: string } | null)?.text, el?.isConnected);
     if (el) { revealed.current = null; void el.focus(); }
   }, []);
 
