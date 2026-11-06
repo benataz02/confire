@@ -46,15 +46,21 @@ export function ProjectOverview({
     .map((t) => (t === undefined ? undefined : new Date(t).toLocaleDateString(formatLocale(), { day: "numeric", month: "short" }))),
   [timeline.events, timeline.documents]);
 
-  const scrollTo = (selector: string) =>
+  // Focus first, as the portal's goSection does: wcr sets the scroller's scroll-padding (the sticky title
+  // and the pinned header) only while focus is inside the content, and the bar sits outside it, so
+  // without it the target scrolls under the header. The section is what takes the focus (a plain div
+  // wcr makes focusable): a UI5 host's focus() is async and lands in its shadow, after the scroll.
+  const scrollTo = (selector: string) => {
+    page.current?.querySelector<HTMLElement>(`[id="ObjectPageSection-${TIMELINE}"]`)?.focus({ preventScroll: true });
     page.current?.querySelector<HTMLElement>(selector)?.scrollIntoView({ block: "start" });
+  };
 
   const ahead = journey.next === "done" || journey.next === "declined"
     ? [] : journey.labels.map((label, i) => ({ label, i })).filter(({ i }) => i > journey.step);
 
   return (
-    // Pinned: the bar is how one jumps between chapters, so the header never snaps away under the scroll
-    // (wcr adds its height to the scroll padding, so a chapter lands below it), nor on a title click.
+    // Pinned: the bar is how one jumps between chapters, so the header never snaps away under the scroll,
+    // nor on a title click. A jump clears it through the scroll padding (scrollTo).
     <ObjectPage hidePinButton headerPinned preserveHeaderStateOnClick ref={page}
       titleArea={
         <ObjectPageTitle header={<Title>{title}</Title>} subHeader={<Text>{subtitle}</Text>} breadcrumbs={breadcrumbs}
