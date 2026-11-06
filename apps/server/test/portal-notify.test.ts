@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq, inArray } from "drizzle-orm";
-import { db, configModel, configProject, configProjectEvent, member, portalCompany, type PortalRole } from "@confire/db";
+import { db, configModel, configProject, configProjectEvent, member, portalCompany, uiUserState, type PortalRole } from "@confire/db";
 import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
 import { devOutbox, mailDomain } from "../src/mail/mailer.ts";
@@ -403,16 +403,51 @@ describe("files", () => {
 });
 
 describe("settings and home", () => {
-  test("home.overview: the company's projects by status and the quotes awaiting an answer", async () => {
+  test("home.overview: open inquiries with their journey and figures, fenced, finished ones only when pinned", async () => {
     const s = await setup();
-    const a = await s.draft();
-    await s.draft();
-    await call(portalRouter.projects.submit, { id: a }, s.on(s.buyer.cookie));
+    const [m] = await db.select().from(configModel).where(eq(configModel.tenantId, s.tenantId));
+    const t0 = Date.now();
+    const p = (name: string, v: Partial<typeof configProject.$inferInsert>, ago = 0) => ({
+      tenantId: s.tenantId, modelId: m!.id, name, createdBy: s.buyer.userId, portalCardCode: s.company.cardCode,
+      updatedAt: new Date(t0 - ago * 60_000), ...v,
+    });
+    const ids = Object.fromEntries((await db.insert(configProject).values([
+      p("draft", {}),
+      p("sent", { status: "submitted" }, 5),
+      p("returned", { status: "returned" }, 1),
+      p("answer", { status: "quoted", quotedAt: new Date(), quotedValue: "6950" }, 2),
+      p("accepted", { status: "quoted", quoteResponse: "accepted", quoteRespondedAt: new Date() }, 3),
+      p("ordered", { status: "quoted", sapStep: "ordered", sapStepAt: "2026-11-01" }, 4),
+      p("invoiced", { status: "quoted", sapStep: "invoiced", sapStepAt: "2026-11-02" }),
+      p("declined", { status: "declined" }),
+      p("elsewhere", { portalCardCode: "OTHER" }),
+    ]).returning()).map((r) => [r.name, r.id]));
+
     const o = await call(portalRouter.home.overview, undefined, s.on(s.viewer.cookie));
-    expect(o).toEqual({ byStatus: { draft: 1, submitted: 1 }, awaiting: [] });
-    const other = await makePortalUser();
-    await makePortalSeat(s.tenantId, other.userId, "buyer");
-    expect((await call(portalRouter.home.overview, undefined, s.on(other.cookie))).byStatus).toEqual({});
+    expect(o.figures).toEqual({ needAnswer: 2, withSupplier: 2, inDelivery: 1 });
+    expect(o.inquiries.map((r) => r.name)).toEqual(["returned", "answer", "accepted", "ordered", "sent", "draft"]);
+    expect(o.inquiries.find((r) => r.name === "answer")).toMatchObject({ step: 2, next: "answer", quotedValue: 6950, pinned: false });
+    expect(o.inquiries.find((r) => r.name === "ordered")!.at).toStartWith("2026-11-01");
+
+    // A pin is the user's own and keeps a finished project on top.
+    await call(portalRouter.home.pin, { id: ids.invoiced!, pinned: true }, s.on(s.viewer.cookie));
+    const pinned = await call(portalRouter.home.overview, undefined, s.on(s.viewer.cookie));
+    expect(pinned.inquiries[0]).toMatchObject({ name: "invoiced", pinned: true, step: 6, next: "done" });
+    expect(pinned.figures).toEqual(o.figures);
+    expect((await call(portalRouter.home.overview, undefined, s.on(s.buyer.cookie))).inquiries.map((r) => r.name)).not.toContain("invoiced");
+    await call(portalRouter.home.pin, { id: ids.invoiced!, pinned: false }, s.on(s.viewer.cookie));
+    expect((await call(portalRouter.home.overview, undefined, s.on(s.viewer.cookie))).inquiries.map((r) => r.name)).not.toContain("invoiced");
+
+    // Another company's project cannot be pinned.
+    expect(await codeOf(call(portalRouter.home.pin, { id: ids.elsewhere!, pinned: true }, s.on(s.viewer.cookie)))).toBe("NOT_FOUND");
+  });
+
+  test("home.overview: a pins row holding garbage or a deleted project is ignored", async () => {
+    const s = await setup();
+    await db.insert(uiUserState).values({ tenantId: s.tenantId, userId: s.viewer.userId, key: "portal:homePins", value: ["not-a-uuid", 5, crypto.randomUUID()] });
+    expect((await call(portalRouter.home.overview, undefined, s.on(s.viewer.cookie))).inquiries).toEqual([]);
+    await db.update(uiUserState).set({ value: { not: "an array" } }).where(eq(uiUserState.userId, s.viewer.userId));
+    expect((await call(portalRouter.home.overview, undefined, s.on(s.viewer.cookie))).inquiries).toEqual([]);
   });
 
   test("home.progress: stores the furthest SAP step, forward only, in the agent's company only", async () => {

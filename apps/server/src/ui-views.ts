@@ -45,7 +45,7 @@ export async function getUserState(tenantId: string, userId: string, key: string
   return row?.value ?? null;
 }
 
-async function setUserState(tenantId: string, userId: string, key: string, value: unknown): Promise<void> {
+export async function setUserState(tenantId: string, userId: string, key: string, value: unknown): Promise<void> {
   if (value === null) {
     await db.delete(uiUserState)
       .where(and(eq(uiUserState.tenantId, tenantId), eq(uiUserState.userId, userId), eq(uiUserState.key, key)));
