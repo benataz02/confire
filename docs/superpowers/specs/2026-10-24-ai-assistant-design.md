@@ -150,6 +150,8 @@ collide, because the patch is merged in SQL (`entries || set - unset`).
 
 ### 4.2 The panel
 
+Superseded by `2026-11-06-joule-assistant-design.md`.
+
 - The toggle in `AppShell.tsx` opens one panel. The panel keeps its thread while the user navigates
   (it is shell state, not page state).
 - It floats over the right edge of the content, Joule-style, and doesn't push the page. On the process

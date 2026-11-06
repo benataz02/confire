@@ -22,10 +22,6 @@ test("registry: a configuration page configures; unknown routes are general", ()
   expect(pageFor("/$slug/models/$id").kind).toBe("model");
   expect(pageFor("/$slug/whatever").kind).toBe("general");
   expect(pageFor("/$slug/whatever")).toBe(GENERAL);
-  // The AI page: general, for the bare page and a chat alike (`$id` is the chat; the route makes a
-  // configuration's chat CONFIGURE_CHAT).
-  expect(pageFor("/$slug/assistant/").kind).toBe("general");
-  expect(pageFor("/$slug/assistant/$id").kind).toBe("general");
   expect(CHAT_TOOLS).toContain("configs_create");
   expect([...CHAT_TOOLS]).toEqual([...CHAT_TOOLS].sort()); // a fixed order: the prompt prefix stays the same
 });

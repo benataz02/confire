@@ -48,7 +48,7 @@ export async function newThread(tenantId: string, userId: string): Promise<Threa
 }
 
 /** New chat with no configuration: the user's blank one if there is one (no message, no file, not
- *  answering), made the latest again, so opening the AI page over and over leaves no trail of empty
+ *  answering), made the latest again, so New chat over and over leaves no trail of empty
  *  chats. Else a new one. */
 export async function blankThread(tenantId: string, userId: string): Promise<Thread> {
   const [t] = await db.update(assistantThread).set({ updatedAt: new Date() }).where(and(
@@ -66,7 +66,7 @@ export type ThreadRow = {
   reportId: string | null; reportTitle: string | null; pinned: boolean; updatedAt: Date;
 };
 
-/** The AI page's list: the user's chats with anything in them, pinned first, then the latest. `q`
+/** The panel's chat drawer: the user's chats with anything in them, pinned first, then the latest. `q`
  *  matches the title, the configuration's name, and the words of the chat — the user's and the
  *  assistant's text, not tool output, which holds field names that would match nearly anything. */
 // ponytail: the latest 100, and a search scans the user's own jsonb; paging and a tsvector column once

@@ -280,6 +280,8 @@ still hold whatever a model does; this is a hint, as every page note is.
 
 ### 6.2 The report page — three states (the approved storyboard)
 
+Superseded by `2026-11-06-joule-assistant-design.md`.
+
 1. **Ask** (`/reports/new`): `ChatView` in page mode with its HeroBanner — "New report", "What do you
    want to see?", the chat box, and 3–4 starter suggestions (pipeline by month, stock below minimum,
    overdue invoices, top items this year) that fill the box.

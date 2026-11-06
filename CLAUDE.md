@@ -442,7 +442,9 @@ only: the portal has no assistant.
   (`takeLease`/`withThread`, `THREAD_BUSY`); one thread per (user, configuration) plus general ones.
   A user's chats are listed (`listThreads`: pinned, then the latest; search over title, configuration
   name and the chat's text), renamed, pinned and deleted (`deleteThread`, under the lease) — their own
-  only. A general New chat is the user's blank thread if there is one (`blankThread`).
+  only. New chat is the user's blank thread if there is one (`blankThread`); a configuration's chat
+  starts over by Delete. Each message carries when it was stored (`metadata.at`, `stamped`): on the
+  message, never a part, so it never reaches the model or `prefixHash`.
   Stored file parts keep a reference (`metadata.file`), never bytes; `hydrate` refills them. File refs
   are fenced by tenant and by their own project or thread. PDF, PNG and JPEG, by their bytes, and
   spreadsheets (`sheet.ts`, SheetJS from its CDN — npm's is stale): xlsx, xls, ods by bytes, CSV by
@@ -502,24 +504,25 @@ only: the portal has no assistant.
   brief first (`ask_user`'s `more`: up to four questions in one card). `filters` is the report's filter
   bar — the list's `FilterHeader` in a card, every header field of the report's data in Adapt
   Filters (`ReportResult.filters`); `reports.run` takes its values and
-  `barConds` (`plan.ts`) turns them into each dataset's conditions (a measure's own one stands). The AI page docks
-  the chat right on the first `report_set` (a view transition); a report opened later (`/reports/$id`,
-  the same `AssistantPage` in read mode) shows
-  without its chat until *Edit* (a chat search hit, `#chat`, opens it docked); it runs live on open, and
-  *Save to home* makes it a tile: `reports.tiles` shows the last run's first KPI (hidden after a company
+  `barConds` (`plan.ts`) turns them into each dataset's conditions (a measure's own one stands).
+  `/reports/$id` is `ReportPage`, the report alone, and its chat is the panel: *Edit* opens it and a
+  chip puts "change this" in its box (`openChat`), the panel's `report_set` re-reads the page, and a
+  general chat's first `report_set` navigates there mid-answer, the same ChatView streaming on. It runs
+  live on open, and *Save to home* makes it a tile: `reports.tiles` shows the last run's first KPI (hidden after a company
   switch) and re-runs stale ones off the request path. A report over Confire's Configurations taints
   the chat (auto mode). Not an MCP tool.
-- **The panel** (`AssistantPanel.tsx`) is shell state (`AssistantProvider` around `AppShell`), floating
-  over the page's right edge. **The AI page** (`AssistantPage.tsx`, the home tile; *New report* goes
-  there too) is a page of its own: one chat under a `Bar` (the title's menu pins, renames, deletes), with
-  the report beside it once the chat is a report's; its chats are found with the
-  shell's search, which the page scopes to Chats and pulses on arrival (`GlobalSearch`),
-  `/assistant` = a new one, `/assistant/$id` = the chat's id,
-  never a configuration's. Both draw `ChatView.tsx`. The page's empty chat is a `HeroBanner` with the
-  greeting and the chat box inside, the first send moving the box to the chat's foot (a view transition);
-  the panel keeps Joule's gradient head, whose greeting collapses once the chat starts. The panel is not
-  drawn there, so one thread is never live twice, and leaving mid-answer stops it; *Open configuration*
-  (after the answer) opens the form with the panel on the same thread. Each `ChatView` writes its
+- **The panel** (`AssistantPanel.tsx`, `docs/superpowers/specs/2026-11-06-joule-assistant-design.md`) is
+  Joule's card, shell state (`AssistantProvider` around `AppShell`), and the ShellBar's toggle is the
+  only way into a chat. Once opened it stays mounted, and its `ChatView` keeps its
+  place in every state, so an answer streams on through close, maximize, restore, drag and a page
+  change. It shows one chat (`threadInput`): one picked in its ☰ drawer (`ChatDrawer.tsx`: New chat,
+  Pinned and Chats, each row's ••• to pin, rename, delete), else the page's own (a configuration's, a
+  report's via `reports.get`), else the latest general one. A report's chat picked goes to its page; a
+  configuration's stays put, with *Open configuration* in the header's •••. Its box is `cardBox`
+  (`geometry.ts`): 416 px under the ShellBar at the right, wherever it was dragged by its header
+  (clamped into the window, over the ShellBar too), or maximized to the whole window with the drawer as
+  a sidebar and Joule's 0.5 s transition (none with reduced motion); any navigation by the chat brings
+  it back to the card. Each `ChatView` writes its
   finished messages into every cached copy of its thread, as a chat reads its copy once. **Only a
   decision is a card in the chat** (`steps.ts` `DECISION`: `read_request`, `ask_user`,
   `propose_quotation`); everything else the agent does is a **step** — its thinking and each other tool
@@ -539,9 +542,10 @@ only: the portal has no assistant.
   lead in order until the candidates show: the panel's parameters and customer first (it waits), then
   what the card does not ask (a table's rows, a broken rule), one per answer and never ending on
   nothing while something is missing; then the user picks in the candidates card and "Review and
-  post" opens the quote page. The model selects or prepares the quotation only when asked. Colours come only from the theme's `--sapAssistant_*` parameters, and there is no
-  stylesheet: every style is inline on the UI5 components (theme parameters set on them, which reach their
-  shadow DOM). `scripts/assistant-eval.ts` is the hand-run eval (it spends
+  post" opens the quote page. The model selects or prepares the quotation only when asked. Colours are Joule's palette in Horizon
+  and Horizon Dark (Horizon Auto by the OS) and the theme's own parameters elsewhere (`palette.ts`, the
+  `--cf-a-*` properties set inline on the panel), and there is no stylesheet: every style is inline on
+  the UI5 components (parameters set on them, which reach their shadow DOM). `scripts/assistant-eval.ts` is the hand-run eval (it spends
   money and says so first) for the extraction; `scripts/assistant-chat-eval.ts` scores the chat's
   loop on scripted scenarios per effort level (`assistant/chat-eval.ts`, the same warning).
 

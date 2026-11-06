@@ -20,7 +20,7 @@ export function useAssistantThread(input: ThreadInput | null) {
   });
 }
 
-/** What changed after a run or a direct write: the configuration, the lists, the AI page's chat list. */
+/** What changed after a run or a direct write: the configuration, the lists, the drawer's chat list. */
 export function useAssistantInvalidate() {
   const qc = useQueryClient();
   return () => {

@@ -105,7 +105,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads", () => {
     expect(ui.messages.every((m) => typeof m.metadata?.at === "string")).toBe(true); // survives modelMessagesToUIMessages
   });
 
-  test("the AI page's list: own chats with something in them, pinned first, searched, renamed, deleted", async () => {
+  test("the drawer's list: own chats with something in them, pinned first, searched, renamed, deleted", async () => {
     const w = await world();
     const as = (u: { cookie: string }) => ({ context: { headers: tenantHeaders(w.slug, u.cookie) } });
     const list = (q?: string, u = w.a) => call(router.assistant.threads, q === undefined ? undefined : { q }, as(u));

@@ -47,15 +47,10 @@ export const GENERAL: Page = {
   section: () => "The user is in the staff app, outside any one configuration: on the home page or a list. You can start a configuration from the files dropped in this chat or from what the user tells you, build a report, answer about configurations, clients' requests and anything in SAP, and create, change or copy SAP records. Once you create a configuration or a report, this chat is that one's: go on with it here.",
 };
 
-/** The AI page (the staff app's /assistant): the chat alone, no form on screen. */
+/** A configuration's chat away from its form: the chat alone, no form on screen. */
 const NO_FORM = "The user works in this chat alone, with no form on screen, so a table's rows come from you: ask for them and write them.";
 
-const start: Page = {
-  ...GENERAL,
-  section: () => "The user is on the AI page: this chat alone, no form on screen. They may want a client's request quoted (they drop its files, paste an email or tell you what was asked), a report built or rebuilt from a file, or an answer about SAP and Confire. A report you build is drawn beside this chat.",
-};
-
-/** A configuration's chat with no form beside it: the AI page, or the panel elsewhere. */
+/** A configuration's chat with no form beside it: the panel anywhere but the form. */
 export const CONFIGURE_CHAT: Page = { ...configure, section: (p) => [about(p), WRITE, NO_FORM].join("\n") };
 
 /** A report's chat (reports spec §5): the thread is the report's, on any page. */
@@ -65,9 +60,6 @@ export const REPORT: Page = {
 };
 
 export const PAGES: Record<string, Page> = {
-  // The AI page: `$id` is the chat, and route.ts makes a configuration's chat CONFIGURE_CHAT.
-  "/$slug/assistant/": start,
-  "/$slug/assistant/$id": start,
   // A client's request: `$id` is its project page, which route.ts makes CONFIGURE_CHAT (no form on it).
   "/$slug/configs/$id": configure,
   "/$slug/configs/$id_/configuration": configure,

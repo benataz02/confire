@@ -83,7 +83,7 @@ export const assistantRouter = {
     };
   }),
 
-  /** One of this user's threads by id (the AI page), else theirs for a configuration, else their latest
+  /** One of this user's threads by id (one picked in the drawer, a report's), else theirs for a configuration, else their latest
    *  general one. */
   thread: userProcedure
     .input(z.object({ projectId: z.uuid().optional(), id: z.uuid().optional() }))
@@ -100,7 +100,7 @@ export const assistantRouter = {
     .input(z.object({}).optional())
     .handler(async ({ context }) => ({ id: (await blankThread(context.tenantId, context.userId)).id })),
 
-  /** The AI page's chat list: this user's own, pinned first, optionally searched. */
+  /** The panel drawer's chat list: this user's own, pinned first, optionally searched. */
   threads: userProcedure
     .input(z.object({ q: z.string().max(200).optional() }).optional())
     .handler(({ input, context }) => listThreads(context.tenantId, context.userId, input?.q)),

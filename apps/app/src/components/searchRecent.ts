@@ -8,7 +8,7 @@ export type Recent = SearchHit & { scope: string };
 export const recentKey = (slug: string) => `search.recent.${slug}`;
 
 /** The stored list, without what no longer opens: the Chats scope is gone, and its hits led to the
- *  removed AI page (Joule spec §5.1). */
+ *  assistant page, which is gone (Joule spec §5.1). */
 export function parseRecent(raw: string | null): Recent[] {
   try {
     const parsed: unknown = JSON.parse(raw ?? "[]");
