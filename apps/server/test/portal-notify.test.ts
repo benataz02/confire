@@ -5,6 +5,7 @@ import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
 import { devOutbox, mailDomain } from "../src/mail/mailer.ts";
 import { notificationsSettled } from "../src/notify.ts";
+import { transition } from "../src/project-lifecycle.ts";
 import { NOTIFICATION_TYPES } from "../src/notifications.ts";
 import { fileRoutes, imageType, cleanName } from "../src/files.ts";
 import { contrastOnWhite } from "../src/portal/settings.ts";
@@ -479,6 +480,25 @@ describe("settings and home", () => {
     } finally {
       delete agent.store.Orders;
     }
+  });
+
+  test("a re-quote clears the stored SAP step: the new quotation is the customer's to answer", async () => {
+    const s = await setup();
+    const [m] = await db.select().from(configModel).where(eq(configModel.tenantId, s.tenantId));
+    // Q1 was ordered in SAP, the customer still declined it here (back to in_review), and staff re-quote.
+    const [p] = await db.insert(configProject).values({
+      tenantId: s.tenantId, modelId: m!.id, name: "Requoted", createdBy: s.buyer.userId, portalCardCode: s.company.cardCode,
+      status: "in_review", b1DocEntry: 501, b1Company: agent.company.db, sapStep: "ordered", sapStepAt: "2026-11-01",
+    }).returning();
+    await transition({
+      tenantId: s.tenantId, projectId: p!.id, action: "quote", actor: { userId: s.admin.userId, side: "internal" },
+      set: { b1DocEntry: 502, quotedAt: new Date() },
+    });
+    await notificationsSettled();
+    const [row] = await db.select().from(configProject).where(eq(configProject.id, p!.id));
+    expect(row).toMatchObject({ status: "quoted", sapStep: null, sapStepAt: null });
+    const o = await call(portalRouter.home.overview, undefined, s.on(s.buyer.cookie));
+    expect(o.inquiries.find((r) => r.id === p!.id)).toMatchObject({ step: 2, next: "answer" });
   });
 
   test("home.documents: CardCode-fenced, ALWAYS fields only", async () => {

@@ -144,7 +144,8 @@ export const configProject = pgTable(
     quotedAt: timestamp("quoted_at", { withTimezone: true }),
     // The furthest SAP document descending from the quotation (an order, a delivery, an invoice) and
     // its DocDate: the portal home's journey past "Quoted", stored so it draws with SAP down. Written
-    // only by the portal's `home.progress`, forward only, and never bumps `updated_at`.
+    // by the portal's `home.progress` (forward only, never bumping `updated_at`) and cleared by a
+    // (re-)quote in project-lifecycle.ts, which may link a new quotation.
     sapStep: text("sap_step").$type<SapStep>(),
     sapStepAt: date("sap_step_at", { mode: "string" }),
     // Engineered value/cost of the selected candidates, captured when the quotation is confirmed

@@ -313,7 +313,9 @@ async function step(tx: Tx, o: Parameters<typeof transition>[0]) {
       ...(o.action === "accept" ? { assigneeId: row.assigneeId ?? o.actor.userId } : {}),
       ...(o.action === "quoteAccept" ? { quoteResponse: "accepted" as const, quoteRespondedAt: now } : {}),
       ...(o.action === "quoteDecline" ? { quoteResponse: "declined" as const, quoteRespondedAt: now } : {}),
-      ...(o.action === "quote" ? { quoteResponse: null, quoteRespondedAt: null } : {}),
+      // A (re-)quote starts the journey past "Quoted" over: the next home.progress re-derives the SAP
+      // step from the quotation now linked, which may be a new one (a stale "ordered" would hide it).
+      ...(o.action === "quote" ? { quoteResponse: null, quoteRespondedAt: null, sapStep: null, sapStepAt: null } : {}),
       ...o.set,
     })
     .where(eq(configProject.id, row.id));

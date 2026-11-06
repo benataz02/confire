@@ -22,6 +22,15 @@ describe("Prefer: odata.maxpagesize", () => {
     expect(calls[0]!.headers).toEqual({ Prefer: "odata.maxpagesize=100" });
   });
 
+  test("a crossjoin's $top implies its page size too — the doc-chain walks send $top alone", async () => {
+    const { calls, t } = spy();
+    const spec = { entities: ["Orders", "Orders/DocumentLines"], expand: [{ entity: "Orders", select: ["DocEntry"] }], top: 1000 };
+    await t.crossJoin(spec);
+    expect(calls[0]!.headers).toEqual({ Prefer: "odata.maxpagesize=1000" });
+    await t.crossJoin({ ...spec, maxPageSize: 100 });
+    expect(calls[1]!.headers).toEqual({ Prefer: "odata.maxpagesize=100" });
+  });
+
   test("an explicit maxPageSize wins over $top", async () => {
     const { calls, t } = spy();
     await t.readEntitySet("Items", { top: 100, maxPageSize: 20 });

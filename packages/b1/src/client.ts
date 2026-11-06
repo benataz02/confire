@@ -39,7 +39,8 @@ export class DirectTransport implements B1Transport {
   }
 
   crossJoin(spec: CrossJoinSpec): Promise<B1Response> {
-    return this.get(crossJoinPath(spec), pageHeader({ maxPageSize: spec.maxPageSize }));
+    // The same trap as readEntitySet: the doc-chain walks send `$top` alone and got 20 pairs back.
+    return this.get(crossJoinPath(spec), pageHeader({ maxPageSize: spec.maxPageSize, top: spec.top }));
   }
 
   /** The one method that passes a B1-supplied link on. The agent resolves every path under the
