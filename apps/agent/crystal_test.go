@@ -27,7 +27,7 @@ func TestMain(m *testing.M) {
 }
 
 func fakePrintChild() {
-	pass := os.Getenv("CONFIRE_SQL_PASS")
+	pass := os.Getenv("SQL_PASS")
 	leaked := pass == "" || strings.Contains(strings.Join(os.Args, " "), pass)
 	if len(os.Args) > 1 && os.Args[1] == "--check" {
 		if leaked {
@@ -95,7 +95,7 @@ func TestCrystalRenders(t *testing.T) {
 }
 
 func TestCrystalPasswordOnlyInEnvironment(t *testing.T) {
-	// The fake refuses unless CONFIRE_SQL_PASS is in its environment and nowhere on its command line.
+	// The fake refuses unless SQL_PASS is in its environment and nowhere on its command line.
 	if _, err := fakeCrystal(t, 5*time.Second).Render("QUT20009", 5, 23); err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +103,7 @@ func TestCrystalPasswordOnlyInEnvironment(t *testing.T) {
 	if got, err := checkCrystal(os.Args[0], &Config{CompanyDb: "SBODEMO", Crystal: &Crystal{Server: "sql01", User: "sa", Pass: "s3cret"}}); err != nil || got != "ok Crystal 13.0.31.4010" {
 		t.Fatalf("check: %q, %v", got, err)
 	}
+	t.Setenv("SQL_PASS", "a system-wide one") // the agent's own (empty) value must win over it
 	if _, err := checkCrystal(os.Args[0], &Config{CompanyDb: "SBODEMO", Crystal: &Crystal{Server: "sql01", User: "sa"}}); err == nil || !strings.Contains(err.Error(), "Login failed") {
 		t.Fatalf("check without a password: %v", err)
 	}

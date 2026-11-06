@@ -18,13 +18,15 @@ import (
 // runtime. It is the agent's child, like cloudflared: the SQL login reaches it through its
 // environment, never its command line, and it listens nowhere — one JSON line in, one out.
 
+// The names are plain (SQL_SERVER…), so a server may already set one system-wide: these come after
+// os.Environ(), and exec keeps the last value of a repeated key.
 func crystalEnv(cfg *Config) []string {
 	return append(os.Environ(),
-		"CONFIRE_SQL_SERVER="+cfg.Crystal.Server,
-		"CONFIRE_SQL_USER="+cfg.Crystal.User,
-		"CONFIRE_SQL_PASS="+cfg.Crystal.Pass,
+		"SQL_SERVER="+cfg.Crystal.Server,
+		"SQL_USER="+cfg.Crystal.User,
+		"SQL_PASS="+cfg.Crystal.Pass,
 		// B1's company is its SQL database, so the engine cannot print another company than B1 reads.
-		"CONFIRE_COMPANY_DB="+cfg.CompanyDb,
+		"COMPANY_DB="+cfg.CompanyDb,
 	)
 }
 

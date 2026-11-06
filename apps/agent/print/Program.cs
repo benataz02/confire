@@ -6,7 +6,7 @@
 //   out: {"pdf":"<base64>"} or {"error":"<message>"}
 //
 // `confire-print.exe --check` is the agent wizard's test. The SQL login comes from the environment
-// (CONFIRE_SQL_SERVER/USER/PASS), never the command line; the database is always CONFIRE_COMPANY_DB,
+// (SQL_SERVER/USER/PASS), never the command line; the database is always COMPANY_DB,
 // the company the agent serves, so another company's documents cannot be printed.
 //
 // Crystal is bound at runtime (LoadWithPartialName from the GAC, driven as `dynamic`), the approach
@@ -23,10 +23,10 @@ using System.Web.Script.Serialization;
 
 static class Program
 {
-    static readonly string Server = Environment.GetEnvironmentVariable("CONFIRE_SQL_SERVER");
-    static readonly string User = Environment.GetEnvironmentVariable("CONFIRE_SQL_USER");
-    static readonly string Pass = Environment.GetEnvironmentVariable("CONFIRE_SQL_PASS");
-    static readonly string Company = Environment.GetEnvironmentVariable("CONFIRE_COMPANY_DB");
+    static readonly string Server = Environment.GetEnvironmentVariable("SQL_SERVER");
+    static readonly string User = Environment.GetEnvironmentVariable("SQL_USER");
+    static readonly string Pass = Environment.GetEnvironmentVariable("SQL_PASS");
+    static readonly string Company = Environment.GetEnvironmentVariable("COMPANY_DB");
     static readonly TimeSpan LayoutTtl = TimeSpan.FromHours(2);
 
     static Assembly engine, shared;
@@ -39,8 +39,8 @@ static class Program
         if (args.Length > 0 || !Console.IsInputRedirected)
         {
             Console.WriteLine("confire-print.exe is Confire agent's Direct printing; the agent runs it.");
-            Console.WriteLine("To test it here: set CONFIRE_SQL_SERVER, CONFIRE_SQL_USER, CONFIRE_SQL_PASS and");
-            Console.WriteLine("CONFIRE_COMPANY_DB, then run `confire-print.exe --check`, or pipe one request:");
+            Console.WriteLine("To test it here: set SQL_SERVER, SQL_USER, SQL_PASS and");
+            Console.WriteLine("COMPANY_DB, then run `confire-print.exe --check`, or pipe one request:");
             Console.WriteLine("  '{\"layout\":\"QUT20009\",\"docEntry\":5,\"objectId\":23}' | .\\confire-print.exe");
             if (!Console.IsInputRedirected && args.Length == 0)
             {
@@ -101,7 +101,7 @@ static class Program
     static SqlConnection Sql()
     {
         if (string.IsNullOrEmpty(Server) || string.IsNullOrEmpty(User) || string.IsNullOrEmpty(Company))
-            throw new InvalidOperationException("CONFIRE_SQL_SERVER, CONFIRE_SQL_USER and CONFIRE_COMPANY_DB must be set");
+            throw new InvalidOperationException("SQL_SERVER, SQL_USER and COMPANY_DB must be set");
         var cs = new SqlConnectionStringBuilder { DataSource = Server, InitialCatalog = Company, UserID = User, Password = Pass ?? "" };
         var sql = new SqlConnection(cs.ConnectionString);
         sql.Open();

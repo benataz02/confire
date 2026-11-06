@@ -216,7 +216,7 @@ func TestHealthReportsEngines(t *testing.T)              // services.print == {"
 - Modify: `.gitignore` (`apps/agent/bin/confire-print.exe*`, `apps/agent/print/bin/`, `apps/agent/print/obj/`)
 
 **Interfaces:**
-- Produces: `confire-print.exe`, reading `CONFIRE_SQL_SERVER`, `CONFIRE_SQL_USER`, `CONFIRE_SQL_PASS`, `CONFIRE_COMPANY_DB` from its environment.
+- Produces: `confire-print.exe`, reading `SQL_SERVER`, `SQL_USER`, `SQL_PASS`, `COMPANY_DB` from its environment.
   - `confire-print.exe --check`: SQL login to the company database, `SELECT COUNT(*) FROM RDOC`, the Crystal engine assembly loaded; prints `ok Crystal <file version>` and exits 0, else prints the reason and exits 1.
   - No arguments: a loop, one JSON line in `{"layout":"QUT20009","docEntry":5,"objectId":23}`, one JSON line out `{"pdf":"<base64>"}` or `{"error":"<message>"}`; never exits on a bad request; stdout flushed per line; logs to stderr only.
 
@@ -264,7 +264,7 @@ func TestHealthReportsEngines(t *testing.T)              // services.print == {"
   - `func checkCrystal(exe string, cfg *Config) error`: runs `exe --check` with `crystalEnv`; non-zero exit → its output as the error.
 - Produces: `func printExe() (string, error)` (Windows: the installed copy beside the running exe, else the embedded `bin/confire-print.exe` written to `%TEMP%\confire-print-<version>.exe`; elsewhere: an error "direct printing runs on Windows only").
 
-- [ ] **Step 1: Write the failing tests** in `crystal_test.go`. The fake child is the test binary itself: `TestMain` acts as the child when `CONFIRE_FAKE_PRINT=1` (test sets it with `t.Setenv`, so `crystalEnv` passes it on). It answers each layout as follows. `"QUT20009"`: `{pdf: base64("<layout>:<docEntry>:<objectId>")}`, but `{error}` if `CONFIRE_SQL_PASS` is missing from its environment or appears in its `os.Args`. `"QUT29999"`: `{error:"boom"}`. `"QUT28888"`: hangs. `"QUT27777"`: `os.Exit(3)`. `"QUT26666"`: sleeps 100 ms, then answers like QUT20009.
+- [ ] **Step 1: Write the failing tests** in `crystal_test.go`. The fake child is the test binary itself: `TestMain` acts as the child when `CONFIRE_FAKE_PRINT=1` (test sets it with `t.Setenv`, so `crystalEnv` passes it on). It answers each layout as follows. `"QUT20009"`: `{pdf: base64("<layout>:<docEntry>:<objectId>")}`, but `{error}` if `SQL_PASS` is missing from its environment or appears in its `os.Args`. `"QUT29999"`: `{error:"boom"}`. `"QUT28888"`: hangs. `"QUT27777"`: `os.Exit(3)`. `"QUT26666"`: sleeps 100 ms, then answers like QUT20009.
 
 ```go
 func TestCrystalRenders(t *testing.T)                 // Render("QUT20009", 5, 23) → base64 of "QUT20009:5:23"
