@@ -250,4 +250,9 @@ export const en = {
   REPORT_NOT_IN_CONFIG: "This chat belongs to a configuration: build the report in a new chat",
   FILTER_NEEDS_DATE: "Filter on '{0}' needs a date (YYYY-MM-DD), not '{1}'",
   AGGREGATE_NO_SEARCH: "A total cannot take a free-text search: narrow it with filters instead",
+  // Document mail (document-mail.ts)
+  DOCUMENT_MAIL_NOT_CONNECTED: "No Microsoft 365 mailbox is connected. An admin connects one in Settings → Email.",
+  DOCUMENT_MAIL_RECONNECT: "Microsoft no longer accepts the connected mailbox's sign-in. An admin reconnects it in Settings → Email.",
+  DOCUMENT_MAIL_TOO_LARGE: "The PDF is {0} MB, and Microsoft takes attachments under 3 MB.",
+  DOCUMENT_MAIL_NOT_PRINTABLE: "{0} cannot be emailed to the client",
 };

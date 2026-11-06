@@ -1,6 +1,6 @@
 import type { EntityConstraints } from "@confire/ui/metadata.ts";
 import { DOCUMENT_STATUS } from "@confire/ui/documentStatus.ts";
-import type { EntityFeature } from "@confire/ui/types.ts";
+import type { EntityFeature, ListColumn } from "@confire/ui/types.ts";
 import type { TextFn } from "./labels.ts";
 
 // A client's SAP documents (spec §13.1). Unlike apps/app's declared features, these pages are built
@@ -33,12 +33,24 @@ const WIDTH: Record<string, number> = { DocNum: 110, DocDate: 120, DocDueDate: 1
 /** Newest first — DocEntry, not DocNum, which restarts per series. */
 const NEWEST = [{ field: "DocEntry", direction: "desc" as const }];
 const LINES = "DocumentLines";
+/** Named on the row by docs.rows/one, not SAP fields: SAP can neither sort nor filter on them. */
+const NAMED = { sortable: false, filterable: false } as const;
 
 export function docFeature(entity: DocEntity, c: EntityConstraints, t: TextFn): EntityFeature {
   const page = DOC_PAGES[entity];
   const label = t(page.labelKey);
   const scalars = Object.entries(c.fields).filter(([k, m]) => k !== "DocEntry" && m.Type !== "collection").map(([k]) => k);
   const lines = Object.keys(c.fields[LINES]?.Fields ?? {});
+  // A sales employee is a number in SAP: the page shows the name the server puts beside it.
+  const shown = (key: string) => key === "SalesPersonCode"
+    ? { key: "SalesPersonName", label: c.fields.SalesPersonCode?.Label ?? key }
+    : { key };
+  const columns: ListColumn[] = scalars.map((key) => ({
+    ...shown(key), ...(key === "SalesPersonCode" ? NAMED : {}), ...(WIDTH[key] ? { width: WIDTH[key] } : {}),
+  }));
+  // A quotation's project, when it is one of the company's own: after the number, a link to it.
+  if (entity === "Quotations")
+    columns.splice(1, 0, { key: "ConfigName", label: t("PORTAL_PROJECT"), ...NAMED, linkConfig: { route: "/projects", idField: "ConfigId" } });
   const statusMapping = Object.fromEntries(
     Object.entries(DOCUMENT_STATUS ?? {}).flatMap(([k, v]) => (v ? [[k, { ...v, text: t(DOC_STATUS_KEY[k] ?? k) }]] : [])),
   );
@@ -50,7 +62,7 @@ export function docFeature(entity: DocEntity, c: EntityConstraints, t: TextFn): 
     list: {
       tableId: `portal:docs:${entity}`,
       title: label,
-      columns: scalars.map((key) => ({ key, ...(WIDTH[key] ? { width: WIDTH[key] } : {}) })),
+      columns,
       filterFields: [{ key: "DocNum", exact: true }, { key: "DocDate" }, { key: "DocumentStatus" }],
       systemViews: [
         { key: "default", name: t("PORTAL_VIEW_ALL"), isDefault: true, state: { sortBy: NEWEST } },
@@ -67,7 +79,7 @@ export function docFeature(entity: DocEntity, c: EntityConstraints, t: TextFn): 
         ],
       },
       sections: [
-        { id: "general", label: t("PORTAL_GENERAL"), groups: [{ id: "document", label: t("PORTAL_DOCUMENT"), fields: scalars.map((key) => ({ key })) }] },
+        { id: "general", label: t("PORTAL_GENERAL"), groups: [{ id: "document", label: t("PORTAL_DOCUMENT"), fields: scalars.map(shown) }] },
         ...(lines.length ? [{ id: "lines", label: t("PORTAL_LINES"), table: { key: LINES, columns: lines.map((key) => ({ key })) } }] : []),
       ],
     },

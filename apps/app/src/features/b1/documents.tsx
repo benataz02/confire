@@ -156,6 +156,13 @@ export function documentFeature(entity: string, o: {
         { key: "DocDate", width: 120 },
         { key: "DocDueDate", width: 120 },
         { key: "NumAtCard" },
+        { key: "SalesPersonCode", width: 160, groupable: true },
+        // Not SAP's: entities.rows puts the quoting configuration on a quotation's row, so SAP can
+        // neither sort nor filter on it.
+        ...(entity === "Quotations" ? [{
+          key: "ConfigName", label: "Configuration", sortable: false, filterable: false,
+          linkConfig: { route: "/configs", idField: "ConfigId" },
+        }] : []),
         { key: "DocumentStatus", width: 120, groupable: true },
         { key: "DocTotal", width: 150, unitField: "DocCurrency" },
       ],
@@ -170,6 +177,8 @@ export function documentFeature(entity: string, o: {
       // Standard is the fallback when an admin takes their default away, and GlobalSearch's order.
       systemViews: [{ key: "default", name: "Standard", isDefault: true, state: { sortBy: NEWEST } }],
     },
+    // The grid, filter and form show the sales employee's name, not B1's number.
+    codeNames: { SalesPersonCode: { entitySet: "SalesPersons", value: "SalesEmployeeCode", label: "SalesEmployeeName" } },
     detail: {
       header: {
         titleField: "DocNum",

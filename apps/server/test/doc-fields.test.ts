@@ -11,7 +11,7 @@ const orders: B1EntitySchema = {
   name: "Orders", label: "Sales orders", keys: ["DocEntry"],
   fields: [
     f("DocEntry", "number"), f("DocNum", "number"), f("DocDate", "date"), f("DocumentStatus", "enum"), f("DocTotal", "number"),
-    f("DocCurrency"), f("DocDueDate", "date"), f("NumAtCard"), f("Comments"), f("CardCode"), f("GrossProfit", "number"),
+    f("DocCurrency"), f("DocDueDate", "date"), f("NumAtCard"), f("SalesPersonCode", "number"), f("Comments"), f("CardCode"), f("GrossProfit", "number"),
     f("U_CF_Key"), f("U_Window"),
     {
       ...f("DocumentLines", "collection"),
@@ -28,7 +28,7 @@ describe("portalSchema", () => {
   test("no setting: ALWAYS, then the defaults, in order; lines from DOC_DEFAULTS", () => {
     const s = portalSchema(orders, undefined);
     // No Comments: B1's Remarks often hold internal notes, so an admin opts it in.
-    expect(names(s)).toEqual(["DocEntry", "DocNum", "DocDate", "DocumentStatus", "DocTotal", "DocCurrency", "DocDueDate", "NumAtCard", "DocumentLines"]);
+    expect(names(s)).toEqual(["DocEntry", "DocNum", "DocDate", "DocumentStatus", "DocTotal", "DocCurrency", "DocDueDate", "NumAtCard", "SalesPersonCode", "DocumentLines"]);
     expect(lines(s)).toEqual(["ItemCode", "ItemDescription", "Quantity", "UnitPrice", "LineTotal"]);
     expect(s.keys).toEqual(["DocEntry"]);
     expect(s.label).toBe("Sales orders");
@@ -51,7 +51,7 @@ describe("portalSchema", () => {
 describe("pickable", () => {
   test("offers what an admin may add, nothing ALWAYS/NEVER/denied/collection", () => {
     const p = pickable(orders);
-    expect(p.header.map((x) => x.name)).toEqual(["DocDueDate", "NumAtCard", "Comments", "U_Window"]);
+    expect(p.header.map((x) => x.name)).toEqual(["DocDueDate", "NumAtCard", "SalesPersonCode", "Comments", "U_Window"]);
     expect(p.lines.map((x) => x.name)).toEqual(["LineNum", "ItemCode", "ItemDescription", "Quantity", "UnitPrice", "LineTotal", "BaseType", "BaseEntry"]);
   });
 });

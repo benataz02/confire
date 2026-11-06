@@ -99,7 +99,7 @@ const Note = ({ who, note }: { who: string; note: string | null }) => note
   ? <P><strong>{who}:</strong> “{note}”</P>
   : null;
 
-export type ClientEventKind = "accepted" | "returned" | "declined" | "quoted" | "comment" | "file";
+export type ClientEventKind = "accepted" | "returned" | "declined" | "quoted" | "comment" | "file" | "order" | "delivery" | "invoice";
 
 /** A project event a client hears about: the supplier acted on their request. */
 export type ClientProjectProps = {
@@ -113,6 +113,9 @@ export type ClientProjectProps = {
   /** `quoted`: the quotation's number and its value, formatted */
   quote: { docNum: number | null; value: string } | null;
   fileName: string | null;
+  /** `order`/`delivery`/`invoice`: the document's number. Its PDF is on the timeline, not attached:
+   *  the document mail from the supplier's own mailbox carries it (document-mail spec §5.7). */
+  docNum?: number | null;
   url: string;
   lang: MailLang;
 };
@@ -144,6 +147,18 @@ const CLIENT_COPY_ES: ClientCopy = {
     subject: `${p.actorName} ha añadido un archivo a ${p.projectName}`, title: "Nuevo archivo",
     lead: `${p.actorName}, de ${p.brand.name}, ha añadido ${p.fileName ?? "un archivo"} a ${p.projectName}.`,
   }),
+  order: (p) => ({
+    subject: `Pedido ${p.docNum ?? ""} para ${p.projectName}`, title: "Nuevo pedido",
+    lead: `${p.brand.name} le ha enviado el pedido ${p.docNum ?? ""} de ${p.projectName}. Lo encontrará, con su PDF, en el proyecto.`,
+  }),
+  delivery: (p) => ({
+    subject: `Entrega ${p.docNum ?? ""} para ${p.projectName}`, title: "Nueva entrega",
+    lead: `${p.brand.name} le ha enviado el albarán ${p.docNum ?? ""} de ${p.projectName}. Lo encontrará, con su PDF, en el proyecto.`,
+  }),
+  invoice: (p) => ({
+    subject: `Factura ${p.docNum ?? ""} para ${p.projectName}`, title: "Nueva factura",
+    lead: `${p.brand.name} le ha enviado la factura ${p.docNum ?? ""} de ${p.projectName}. La encontrará, con su PDF, en el proyecto.`,
+  }),
 };
 
 const CLIENT_COPY_EN: ClientCopy = {
@@ -170,6 +185,18 @@ const CLIENT_COPY_EN: ClientCopy = {
   file: (p) => ({
     subject: `${p.actorName} added a file to ${p.projectName}`, title: "New file",
     lead: `${p.actorName} at ${p.brand.name} added ${p.fileName ?? "a file"} to ${p.projectName}.`,
+  }),
+  order: (p) => ({
+    subject: `Order ${p.docNum ?? ""} for ${p.projectName}`, title: "New order",
+    lead: `${p.brand.name} sent you order ${p.docNum ?? ""} for ${p.projectName}. You'll find it, with its PDF, on the project.`,
+  }),
+  delivery: (p) => ({
+    subject: `Delivery ${p.docNum ?? ""} for ${p.projectName}`, title: "New delivery",
+    lead: `${p.brand.name} sent you delivery note ${p.docNum ?? ""} for ${p.projectName}. You'll find it, with its PDF, on the project.`,
+  }),
+  invoice: (p) => ({
+    subject: `Invoice ${p.docNum ?? ""} for ${p.projectName}`, title: "New invoice",
+    lead: `${p.brand.name} sent you invoice ${p.docNum ?? ""} for ${p.projectName}. You'll find it, with its PDF, on the project.`,
   }),
 };
 

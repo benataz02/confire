@@ -67,6 +67,7 @@ export function localizedB1Feature(entity: string, t: AdminText): EntityFeature 
     list: {
       ...f.list,
       title,
+      columns: f.list.columns.map((c) => c.key === "ConfigName" ? { ...c, label: t("ADMIN_COL_CONFIG") } : c),
       systemViews: f.list.systemViews?.map((v) => ({ ...v, name: VIEW[v.key] ? t(VIEW[v.key]!) : v.name })),
       filterFields: f.list.filterFields?.map((x) => x.key !== "mine" ? x : {
         ...x, label: t("ADMIN_COL_MINE"), options: [{ value: "yes", label: t("ADMIN_YES") }, { value: "no", label: t("ADMIN_NO") }],

@@ -237,4 +237,8 @@ export const eu: Partial<Record<keyof typeof en, string>> = {
   REPORT_NOT_IN_CONFIG: "Txat hau konfigurazio batena da: sortu txostena txat berri batean",
   FILTER_NEEDS_DATE: "'{0}'(r)en iragazkiak data bat behar du (UUUU-HH-EE), ez '{1}'",
   AGGREGATE_NO_SEARCH: "Guztizko batek ez du testu askeko bilaketarik onartzen: murriztu iragazkiekin",
+  DOCUMENT_MAIL_NOT_CONNECTED: "Ez dago Microsoft 365 postontzirik konektatuta. Administratzaile batek Ezarpenak → Posta atalean konektatzen du.",
+  DOCUMENT_MAIL_RECONNECT: "Microsoftek ez du gehiago onartzen konektatutako postontziaren saioa. Administratzaile batek berriz konektatzen du Ezarpenak → Posta atalean.",
+  DOCUMENT_MAIL_TOO_LARGE: "PDFak {0} MB ditu, eta Microsoftek 3 MB baino gutxiagoko eranskinak onartzen ditu.",
+  DOCUMENT_MAIL_NOT_PRINTABLE: "{0}: ezin zaio bezeroari posta bidez bidali",
 };

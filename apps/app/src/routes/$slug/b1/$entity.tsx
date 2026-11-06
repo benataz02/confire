@@ -14,6 +14,8 @@ import { useListView } from "@confire/ui/useListView.ts";
 import { useDetailView } from "@confire/ui/useDetailView.ts";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { toast } from "@confire/ui/toast.ts";
+import { withMail } from "@confire/ui/mailToast.ts";
+import { useNotifyClient } from "../../../components/NotifyClient.tsx";
 import { useUiI18n } from "@confire/ui/i18n.ts";
 import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import { CloseQuotations, CopyTo } from "../../../features/b1/documents.tsx";
@@ -139,6 +141,7 @@ function EntityCreate({ feature }: { feature: EntityFeature }) {
   // Fresh per "Create and new": the epoch is what makes a new, empty record.
   const seed = useMemo(() => feature.detail.createDefaults?.() ?? {}, [feature, d.createEpoch]);
   const constraints = useCodeNames(feature, d.constraints);
+  const notifyClient = useNotifyClient(feature.entity);
 
   if (d.loading) return <ObjectPageSkeleton />;
   if (d.error || !constraints) return <PageError error={d.error ?? new Error(i18n.getText("ADMIN_NO_METADATA"))} />;
@@ -146,7 +149,8 @@ function EntityCreate({ feature }: { feature: EntityFeature }) {
   return (
     <ObjectPage key={d.createEpoch} isNew entity={feature.entity} constraints={constraints} data={seed}
       sections={feature.detail.sections} header={feature.detail.header} noMessages={feature.detail.noMessages}
-      onSave={d.save} onLeave={() => open(route)}
+      createControls={notifyClient.control}
+      onSave={(diff, o) => d.save(diff, { createAction: o.createAction, notify: notifyClient.notify })} onLeave={() => open(route)}
       breadcrumbs={[{ text: b1Label(feature.entity, (k) => i18n.getText(k)), to: route }]} />
   );
 }
@@ -177,6 +181,7 @@ function EntityCopy({ feature }: { feature: EntityFeature }) {
   // A draft is the sources as they were on opening: a refetch would replace the form under the user.
   const draft = useQuery({ ...orpc.entities.copyDraft.queryOptions({ input }), staleTime: Infinity, refetchOnWindowFocus: false, retry: false });
   const copy = useMutation(orpc.entities.copy.mutationOptions());
+  const notifyClient = useNotifyClient(feature.entity);
   const sections = useMemo(
     () => feature.detail.sections.map((s) => (s.table ? { ...s, table: { ...s.table, fixedRows: true } } : s)),
     [feature],
@@ -188,6 +193,7 @@ function EntityCopy({ feature }: { feature: EntityFeature }) {
   return (
     <ObjectPage isNew entity={feature.entity} constraints={draft.data.constraints} data={draft.data.draft}
       sections={sections} header={feature.detail.header} noMessages={feature.detail.noMessages} createLabel={ui.getText("UI_CREATE")}
+      createControls={notifyClient.control}
       // Configured parts with no item yet: posting makes them items first and puts them on the quotation.
       notice={draft.data.newItems.length ? (
         <MessageStrip design="Information" hideCloseButton>
@@ -201,12 +207,13 @@ function EntityCopy({ feature }: { feature: EntityFeature }) {
         const lines = Array.isArray(DocumentLines)
           ? (DocumentLines as Row[]).map((l) => ({ baseEntry: Number(l.BaseEntry), baseLine: Number(l.BaseLine), quantity: Number(l.Quantity) }))
           : undefined;
-        const r = await copy.mutateAsync({ ...input, header, lines });
+        const r = await copy.mutateAsync({ ...input, header, lines, notify: notifyClient.notify });
         // The sources' lines are closed now; their status in any cached list or record is stale.
         void qc.invalidateQueries({ queryKey: orpc.entities.one.key() });
         void qc.invalidateQueries({ queryKey: orpc.entities.rows.key() });
         const num = String(r.docNum ?? r.docEntry);
-        toast(CREATED[r.entity] ? i18n.getText(CREATED[r.entity]!, num) : `${r.entity} ${num} created`);
+        toast(withMail(CREATED[r.entity] ? i18n.getText(CREATED[r.entity]!, num) : `${r.entity} ${num} created`, r.mail,
+          (k, ...a) => i18n.getText(k, ...a)));
         open(`/b1/${r.entity}`, r.docEntry);
       }}
       onLeave={back}

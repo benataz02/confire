@@ -2,6 +2,8 @@
 // cloudflare.ts have not. Tests never send mail, and never create a real tunnel or DNS name: a dev
 // .env that can pair a real agent (CF_API_TOKEN) would otherwise do both from every pairing test.
 // Nor do they call a model: the assistant's tests answer through a fake adapter (useTestAdapter).
+// Nor reach Microsoft: without the app's secret a document mail goes to documentOutbox (document-mail.ts).
 delete process.env.RESEND_API_KEY;
+delete process.env.MICROSOFT_CLIENT_SECRET;
 delete process.env.CF_API_TOKEN;
 delete process.env.ANTHROPIC_API_KEY;

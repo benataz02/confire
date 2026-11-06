@@ -187,7 +187,9 @@ DEMO_INBOX=
 # Server errors to Sentry (project confire-server → Settings → Client Keys). Unset = none sent
 SENTRY_DSN=https://...@....ingest.de.sentry.io/...
 
-# Optional: Google / Microsoft sign-in. Unset leaves that button dead (Better Auth logs a warning at boot)
+# Optional: Google / Microsoft sign-in. Unset leaves that button dead (Better Auth logs a warning at boot).
+# The Microsoft pair is also the app workspaces connect their Microsoft 365 mailbox through (Settings →
+# Email, document mail): without it, Settings → Email says no mailbox can be connected
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 MICROSOFT_CLIENT_ID=...
@@ -220,7 +222,7 @@ BACKUP_PING_URL=https://hc-ping.com/...
 chmod 600 .env
 ```
 
-Each OAuth client gets exactly one redirect URI, on the sign-in host. The portal signs in there too:
+Each OAuth client gets one sign-in redirect URI, on the sign-in host. The portal signs in there too:
 
 - **Google** (Cloud Console → Credentials → OAuth client, *Web application*):
   `https://app.confire.ai/api/auth/callback/google`.
@@ -230,10 +232,33 @@ Each OAuth client gets exactly one redirect URI, on the sign-in host. The portal
 
 For dev, add `http://localhost:5173/api/auth/callback/…` to the same clients.
 
+**Document mail** (`docs/superpowers/specs/2026-11-06-document-mail-design.md`): the same Microsoft app
+sends a workspace's quotations, orders, deliveries and invoices from its own Microsoft 365 mailbox.
+In the app registration:
+
+- **Redirect URIs** (Web): `https://app.confire.ai/api/mail/microsoft/callback`, and for dev
+  `http://localhost:5173/api/mail/microsoft/callback`.
+- **API permissions** → Microsoft Graph → *Delegated*: `offline_access`, `openid`, `User.Read`,
+  `Mail.Send`, `Mail.Send.Shared`. No application permissions, and nothing that reads mail. Sign-in
+  keeps asking for what it asks for today: the mail scopes are requested only by Settings → Email's
+  Connect.
+- **Publisher verification** (Branding & properties → link a verified Microsoft Partner Network ID).
+  Most customers' tenants only let users consent to verified apps, and most IT departments only
+  approve one.
+
+What a customer's IT approves: Confire, *on behalf of the signed-in mailbox*, may sign in, read that
+user's basic profile and send mail as them (and as the shared mailboxes they hold *Send As* on). It
+cannot read any mail. Settings → Email shows the admin-consent link to send them
+(`login.microsoftonline.com/organizations/adminconsent?client_id=…`). To cut a workspace off, its admin
+disconnects in Settings → Email and removes Confire under the account's My Apps; Microsoft cannot
+revoke one refresh token alone. Tokens are stored encrypted with `BETTER_AUTH_SECRET`, like the agent
+secret below.
+
 **Two secrets can never change:**
 
-- `BETTER_AUTH_SECRET` signs every session and also **encrypts each tenant's SAP agent secret in the
-  database** (`apps/server/src/crypto.ts`). If you lose it, every SAP agent must be paired again.
+- `BETTER_AUTH_SECRET` signs every session and also **encrypts each tenant's SAP agent secret and
+  Microsoft 365 mailbox token in the database** (`apps/server/src/crypto.ts`). If you lose it, every
+  SAP agent must be paired again and every mailbox reconnected.
 - `POSTGRES_PASSWORD` is read once, when the database volume is first created. Changing it later goes
   through [§14](#14-access-and-housekeeping).
 

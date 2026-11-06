@@ -16,16 +16,19 @@ import { PortalDocFields } from "../../components/settings/PortalDocFields.tsx";
 import { PortalOnboarding } from "../../components/settings/PortalOnboarding.tsx";
 import { PortalBranding } from "../../components/settings/PortalBranding.tsx";
 import { AssistantSettings } from "../../components/settings/AssistantSettings.tsx";
+import { EmailSettings } from "../../components/settings/EmailSettings.tsx";
 
-const TABS = ["agent", "portal", "assistant", "notifications"] as const;
+const TABS = ["agent", "portal", "assistant", "email", "notifications"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 // Notifications is every member's own switches (notifications spec §10). The other tabs are
 // admin-only: the route sends anyone else to Notifications, and their procedures are adminProcedure.
 export const Route = createFileRoute("/$slug/settings")({
   head: () => title(t("NAV_SETTINGS")),
-  validateSearch: (s: Record<string, unknown>): { tab?: SettingsTab } => ({
+  // `mail`: where Microsoft's connect flow landed (document-mail.ts), the Email tab's strip.
+  validateSearch: (s: Record<string, unknown>): { tab?: SettingsTab; mail?: string } => ({
     tab: TABS.includes(s.tab as SettingsTab) ? (s.tab as SettingsTab) : undefined,
+    ...(typeof s.mail === "string" ? { mail: s.mail } : {}),
   }),
   beforeLoad: ({ context, params, search }) => {
     const admin = context.me.role === "admin" || context.me.role === "owner";
@@ -65,6 +68,13 @@ function Settings() {
           </Tab>
           <Tab text={i18n.getText("ASSISTANT_TAB")} data-key="assistant" selected={tab === "assistant"}>
             {tab === "assistant" ? <div style={PAGE}><AssistantSettings /></div> : null}
+          </Tab>
+          <Tab text={i18n.getText("EMAIL_TAB")} data-key="email" selected={tab === "email"}>
+            {tab === "email" ? (
+              <div style={PAGE}>
+                <EmailSettings result={search.mail} onResultClose={() => void navigate({ search: { tab: "email" }, replace: true })} />
+              </div>
+            ) : null}
           </Tab>
         </>
       ) : null}

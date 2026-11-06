@@ -2,8 +2,8 @@ import { ORPCError } from "@orpc/server";
 import { and, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import {
   db, configProject, configProjectEvent, member, projectFile,
-  type ConfigProject, type ProjectEventKind, type ProjectEventPayload, type ProjectInputs, type ProjectStatus,
-  type RevisionDiff,
+  type ConfigProject, type DocumentSentPayload, type ProjectEventKind, type ProjectEventPayload, type ProjectInputs,
+  type ProjectStatus, type RevisionDiff,
 } from "@confire/db";
 import type { Val } from "@confire/config-engine";
 import { sameJson } from "./canon.ts";
@@ -160,6 +160,28 @@ export async function addFile(
   });
   notifyInBackground(tenantId, eventId);
   return { id, eventId };
+}
+
+/** A sales document sent from Confire (document-mail spec §5.5 step 3): the PDF as sent, as a file of
+ *  the project's, and its `document_sent` event, in one transaction — then the event's notification.
+ *  Written after the send, so it never claims a mail that did not leave. Any status: the project is
+ *  the timeline it lands on, not something the document changes. Staff only. */
+export async function addDocumentSent(
+  tenantId: string, projectId: string, actor: Actor,
+  file: { name: string; data: Buffer }, sent: Omit<DocumentSentPayload, "fileId">,
+): Promise<string> {
+  if (actor.side !== "internal") throw new ORPCError("FORBIDDEN");
+  const id = crypto.randomUUID();
+  const eventId = await db.transaction(async (tx) => {
+    const eventId = await append(tx, { tenantId, projectId, kind: "document_sent", actor, payload: { ...sent, fileId: id } });
+    await tx.insert(projectFile).values({
+      id, tenantId, projectId, eventId, name: file.name, mime: "application/pdf", size: file.data.length, data: file.data,
+      uploadedBy: actor.userId, visibility: "external",
+    });
+    return eventId;
+  });
+  notifyInBackground(tenantId, eventId);
+  return eventId;
 }
 
 /** A project's file as the actor may download it, or NOT_FOUND: the project fenced as for any

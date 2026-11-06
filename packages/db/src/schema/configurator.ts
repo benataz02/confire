@@ -158,7 +158,7 @@ export type ConfigProject = typeof configProject.$inferSelect;
 
 export const PROJECT_EVENT_KINDS = [
   "created", "submitted", "resubmitted", "withdrawn", "accepted", "returned", "declined", "revised",
-  "quoted", "quote_accepted", "quote_declined", "comment", "file", "assigned",
+  "quoted", "quote_accepted", "quote_declined", "comment", "file", "assigned", "document_sent",
 ] as const;
 export type ProjectEventKind = (typeof PROJECT_EVENT_KINDS)[number];
 export type ProjectInputs = { entries: Entries; batches: number[]; tables: TableRows };
@@ -181,7 +181,13 @@ export type ProjectEventPayload =
   /** `assigned`: the name is snapshotted, so the timeline needs no join */
   | { assigneeId: string; assigneeName: string }
   /** `created` from the assistant's panel, or over MCP by the user's own AI */
-  | { via: "assistant" | "mcp" };
+  | { via: "assistant" | "mcp" }
+  /** `document_sent` (document-mail spec §5.5): the PDF as sent is `fileId`; `to` the addresses the
+   *  mail went to, empty when it did not go, and `error` why not — staff only (the portal's copy drops it) */
+  | DocumentSentPayload;
+export type DocumentSentPayload = {
+  entity: string; docEntry: number; docNum: number | null; company: string | null; fileId: string; to: string[]; error?: string;
+};
 
 // The project's timeline (spec §6, §8), append-only. project-lifecycle.ts writes every status
 // event in the same transaction as the guarded status UPDATE; comments are written beside it.

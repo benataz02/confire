@@ -290,7 +290,8 @@ describe("notifications", () => {
     // Each side lists its own types, all on by default, and refuses the other side's.
     const staffSettings = await call(router.notifications.settings, undefined, s.as(s.rep.cookie));
     expect(staffSettings.map((t) => t.id)).toEqual(NOTIFICATION_TYPES.filter((t) => t.audience === "staff").map((t) => t.id));
-    expect(staffSettings.every((t) => t.bell && t.mail && t.group === "portal")).toBe(true);
+    expect(staffSettings.every((t) => t.bell && t.mail)).toBe(true);
+    expect([...new Set(staffSettings.map((t) => t.group))]).toEqual(["portal", "documents"]);
     expect(await codeOf(call(router.notifications.setPreference, { type: "project.quoted", channel: "mail", enabled: false }, s.as(s.rep.cookie)))).toBe("BAD_REQUEST");
     expect(await codeOf(call(portalRouter.notifications.setPreference, { type: "request.submitted", channel: "mail", enabled: false }, s.on(s.buyer.cookie)))).toBe("BAD_REQUEST");
     await call(portalRouter.notifications.setPreference, { type: "project.quoted", channel: "mail", enabled: false }, s.on(s.buyer.cookie));

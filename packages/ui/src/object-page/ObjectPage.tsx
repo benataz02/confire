@@ -40,6 +40,9 @@ type PageProps = Templates & {
   localViews?: boolean;
   /** one create button with this text, instead of the create-and-view/new/back split button */
   createLabel?: string;
+  /** drawn in the create footer before the create button: a choice that goes with the post (the
+   *  sales documents' "Notify the client") */
+  createControls?: ReactNode;
   navigation?: RecordNavigation;
   /** the parent pages, above the title */
   breadcrumbs?: Crumb[];
@@ -201,6 +204,7 @@ function Page({ record: r, ...p }: PageProps & { record: ObjectRecord }) {
         footerArea={r.isEditMode ? (
           <Bar design="FloatingFooter" endContent={
             <>
+              {creating ? p.createControls : null}
               {!creating ? (
                 // A new record is unsaved by definition: pressing Save is what shows what it still needs.
                 <Button design="Emphasized" disabled={r.saving || (!r.dirty && !r.isNew)} onClick={() => void r.save()}>

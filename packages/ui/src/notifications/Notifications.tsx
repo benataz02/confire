@@ -34,15 +34,22 @@ export function useUnreadCount(api: Pick<NotificationsApi, "unreadCount">): numb
 
 const STATE: Record<string, "Positive" | "Critical" | "Negative"> = {
   "project.declined": "Negative", "project.returned": "Critical", "project.quoted": "Positive",
-  "request.quote_accepted": "Positive", "request.quote_declined": "Critical",
+  "request.quote_accepted": "Positive", "request.quote_declined": "Critical", "document.mail_failed": "Negative",
+};
+
+/** A document's name, the shells' own words (the timeline's), for a notification about one. */
+const DOC: Record<string, string> = {
+  Quotations: "UI_DOC_QUOTATION", Orders: "UI_DOC_ORDER", DeliveryNotes: "UI_DOC_DELIVERY", Invoices: "UI_DOC_INVOICE",
 };
 
 /** The bell's text: the type's title over the row's snapshotted params, in the reader's language.
- *  Placeholders: {0} who acted, {1} the project, {2} the company, {3} the quotation number. */
-function titleOf(n: NotificationItem, getText: GetText) {
+ *  Placeholders: {0} who acted, {1} the project, {2} the company, {3} the document number, {4} the
+ *  document's name (`params.entity`, in the shells' words). */
+function titleOf(n: NotificationItem, getText: GetText, uiText: GetText) {
   const p = n.params;
   const s = (v: string | number | null | undefined) => (v == null ? "" : String(v));
-  return getText(`${textKey(n.type)}_TITLE`, s(p.actorName), s(p.projectName), s(p.companyName), s(p.docNum)).replace(/\s+/g, " ").trim();
+  const doc = typeof p.entity === "string" && DOC[p.entity] ? uiText(DOC[p.entity]!) : s(p.entity);
+  return getText(`${textKey(n.type)}_TITLE`, s(p.actorName), s(p.projectName), s(p.companyName), s(p.docNum), doc).replace(/\s+/g, " ").trim();
 }
 
 /** The bell's popover: newest first, an item opens its page (and is read), its close button deletes
@@ -116,7 +123,7 @@ export function NotificationsPopover({ api, opener, open, onClose, getText, onNa
             if (n) dismiss.mutate(n.id);
           }}>
           {rows.map((n) => (
-            <NotificationListItem key={n.id} data-id={n.id} titleText={titleOf(n, getText)} read={n.read} showClose
+            <NotificationListItem key={n.id} data-id={n.id} titleText={titleOf(n, getText, (k, ...a) => ui.getText(k, ...a))} read={n.read} showClose
               wrappingType="Normal" state={STATE[n.type] ?? "None"}
               footnotes={<>
                 <Label>{String(n.params.projectName ?? n.params.cardCode ?? "")}</Label>

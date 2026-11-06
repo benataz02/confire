@@ -4,6 +4,7 @@ import { coerceKey, parseKeyParam, type Key } from "@confire/b1";
 import { useUiI18n } from "./i18n.ts";
 import { useUiSource } from "./source.tsx";
 import { toast } from "./toast.ts";
+import { withMail } from "./mailToast.ts";
 import { useFieldConstraints, type EntityConstraints } from "./metadata.ts";
 import { useEntityNav } from "./EntityLink.tsx";
 import type { CreateAction } from "./object-page/ObjectPage.tsx";
@@ -80,14 +81,15 @@ export function useDetailView({ entity, routeKey, route, isNew = false, recordNa
   const seed = (k: Key, row: Row, etag: string | null) =>
     qc.setQueryData(orpc.entities.one.queryOptions({ input: { entity, key: k } }).queryKey, { row, etag });
 
-  const save = async (diff: Row, { createAction }: { createAction: CreateAction }) => {
+  /** `notify`: the sales documents' "Notify the client" (document-mail spec §5.3); absent is no. */
+  const save = async (diff: Row, { createAction, notify }: { createAction: CreateAction; notify?: boolean }) => {
     if (!constraints) throw new Error(i18n.getText("UI_READ_ONLY"));
     if (isNew) {
-      const r = await create.mutateAsync({ entity, data: diff });
+      const r = await create.mutateAsync({ entity, data: diff, ...(notify ? { notify } : {}) });
       const field = constraints.keys[0]!;
       const newKey = keyOf(constraints, String(r.row[field] ?? ""));
       seed(newKey, r.row, r.etag);
-      toast(i18n.getText("UI_CREATED", constraints.label));
+      toast(withMail(i18n.getText("UI_CREATED", constraints.label), r.mail, (k, ...a) => i18n.getText(k, ...a)));
       if (createAction === "view") open(route, newKey);
       else if (createAction === "new") setCreateEpoch((n) => n + 1);
       else open(route);

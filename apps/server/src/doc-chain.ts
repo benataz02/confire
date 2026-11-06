@@ -77,6 +77,43 @@ export function flattenChain(entity: ChainEntity, json: unknown): ChainDoc[] {
   return [...seen.values()];
 }
 
+export type DocRef = { entity: ChainEntity; docEntry: number };
+
+// Base document type → the entity it names, the walk back (the codes the forward walk above filters on).
+const BASE: Record<number, ChainEntity> = { 23: "Quotations", 17: "Orders", 15: "DeliveryNotes" };
+
+/**
+ * The quotations documents descend from, walking back through their lines' BaseType/BaseEntry —
+ * invoice → delivery → order → quotation at most. Unfenced: `readFirst` reads the starting documents
+ * instead of a plain read when the caller fences them (the portal's CardCode check, which then runs
+ * on a quotation too). The callers wrap it in viaB1.
+ * ponytail: at most 50 documents per hop (a copy's own cap, CopyZ) — raise it if one document ever
+ * gathers more base documents.
+ */
+export async function quotationsBehind(
+  b1: B1Transport, from: DocRef[], readFirst?: (d: DocRef) => Promise<Record<string, unknown>>,
+): Promise<number[]> {
+  const found = new Set<number>();
+  let frontier = from;
+  for (let hop = 0; hop < 4 && frontier.length; hop++) {
+    const next = new Map<string, DocRef>();
+    for (const d of frontier.slice(0, 50)) {
+      const fenced = hop === 0 && readFirst;
+      if (d.entity === "Quotations" && !fenced) { found.add(d.docEntry); continue; }
+      const row = fenced ? await readFirst(d)
+        : (await b1.readEntity(d.entity, d.docEntry, { select: ["DocumentLines"] })).data as Record<string, unknown>;
+      if (d.entity === "Quotations") { found.add(d.docEntry); continue; }
+      for (const l of (row.DocumentLines as Record<string, unknown>[] | undefined) ?? []) {
+        const base = BASE[Number(l.BaseType)];
+        const entry = Number(l.BaseEntry);
+        if (base && Number.isInteger(entry) && entry > 0) next.set(`${base}:${entry}`, { entity: base, docEntry: entry });
+      }
+    }
+    frontier = [...next.values()];
+  }
+  return [...found];
+}
+
 /**
  * The whole chain for one quotation, oldest hop first. Three sequential crossjoins: each hop
  * needs the previous hop's DocEntries to filter on, so they cannot be parallelised.

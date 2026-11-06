@@ -33,6 +33,12 @@ export const NOTIFICATION_TYPES = [
   { id: "project.quoted", audience: "client", group: "portal" },
   { id: "project.comment", audience: "client", group: "portal" },
   { id: "project.file", audience: "client", group: "portal" },
+  // A document of the project's, sent (document-mail spec §5.7). A quotation is `project.quoted`.
+  { id: "project.order", audience: "client", group: "portal" },
+  { id: "project.delivery", audience: "client", group: "portal" },
+  { id: "project.invoice", audience: "client", group: "portal" },
+  // To the poster only: the document mail did not go out.
+  { id: "document.mail_failed", audience: "staff", group: "documents" },
 ] as const satisfies readonly { id: string; audience: Audience; group: string }[];
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number]["id"];
 

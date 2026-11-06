@@ -19,7 +19,7 @@ export const NEVER = ["CardCode"];
 /** An entity with no setting shows these, the internal lists' own columns. Not Comments: B1's
  *  Remarks often hold internal notes, so an admin opts it in. */
 export const DOC_DEFAULTS: PortalDocFields = {
-  header: ["DocDueDate", "NumAtCard"],
+  header: ["DocDueDate", "NumAtCard", "SalesPersonCode"],
   lines: ["ItemCode", "ItemDescription", "Quantity", "UnitPrice", "LineTotal"],
 };
 

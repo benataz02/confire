@@ -513,6 +513,7 @@ export const configsRouter = {
       // Header fields only, and only the ones QUOTE_HEADER names — filtered in the handler so a
       // rejection can name them. Every number on the document is recomputed server-side.
       header: z.record(z.string(), z.unknown()).optional().describe("Quotation header fields to set (dates, currency, contact…)"),
+      notify: z.boolean().optional().describe("Email the quotation to the customer's SAP contact from the workspace's mailbox (Settings → Email); absent = no"),
     }))
     .handler(({ input, context }) => createQuote(context.tenantId, context.userId, input)),
 };

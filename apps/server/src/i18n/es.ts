@@ -237,4 +237,8 @@ export const es: Partial<Record<keyof typeof en, string>> = {
   REPORT_NOT_IN_CONFIG: "Este chat es de una configuración: crea el informe en un chat nuevo",
   FILTER_NEEDS_DATE: "El filtro sobre '{0}' necesita una fecha (AAAA-MM-DD), no '{1}'",
   AGGREGATE_NO_SEARCH: "Un total no admite una búsqueda de texto libre: acótalo con filtros",
+  DOCUMENT_MAIL_NOT_CONNECTED: "No hay ningún buzón de Microsoft 365 conectado. Un administrador lo conecta en Configuración → Correo.",
+  DOCUMENT_MAIL_RECONNECT: "Microsoft ya no acepta el inicio de sesión del buzón conectado. Un administrador lo vuelve a conectar en Configuración → Correo.",
+  DOCUMENT_MAIL_TOO_LARGE: "El PDF ocupa {0} MB, y Microsoft solo admite adjuntos de menos de 3 MB.",
+  DOCUMENT_MAIL_NOT_PRINTABLE: "{0} no se puede enviar al cliente por correo",
 };

@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Bar, Button, BusyIndicator, MessageStrip } from "@ui5/webcomponents-react";
 import { toast } from "@confire/ui/toast.ts";
+import { withMail } from "@confire/ui/mailToast.ts";
+import { useNotifyClient } from "../NotifyClient.tsx";
 import { useI18n } from "../../i18n.ts";
 import { orpc } from "../../orpc.ts";
 import { localizedB1Feature } from "../../features/b1/localize.ts";
@@ -50,6 +52,8 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
     ),
   };
   const create = useMutation(orpc.configs.createQuote.mutationOptions());
+  // Email the quotation to the customer from the workspace's mailbox (document-mail spec §5.3).
+  const notifyClient = useNotifyClient("Quotations");
 
   if (draft.isPending || meta.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
   if (draft.error) return <PageError error={draft.error} />;
@@ -89,6 +93,7 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
       lockedFields={d.portal ? LOCKED_REQUEST : LOCKED}
       localViews
       createLabel={d.replaces ? t("CONFIG_UPDATE_IN_SAP") : t("CONFIG_CREATE_IN_SAP")}
+      createControls={notifyClient.control}
       // A reopened request re-quotes its quotation (spec §7.3) — said before the post, not after.
       notice={d.replaces ? (
         <MessageStrip design="Information" hideCloseButton>
@@ -105,19 +110,20 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
       // The draft carries the commandId it was built from, so the server refuses to post a
       // selection that moved between preview and Create rather than quoting something else.
       onSave={async (header) => {
-        const r = await create.mutateAsync({ projectId, commandId: d.commandId, header });
+        const r = await create.mutateAsync({ projectId, commandId: d.commandId, header, notify: notifyClient.notify });
         void qc.invalidateQueries({ queryKey: orpc.configs.get.queryOptions({ input: { id: projectId } }).queryKey });
         void qc.invalidateQueries({ queryKey: orpc.requests.rows.key() });
         void qc.invalidateQueries({ queryKey: orpc.timeline.list.queryOptions({ input: { projectId } }).queryKey });
         // A request goes back to the request: its status and timeline are what moved.
         if (d.portal) {
-          toast(r.mode === "updated" ? t("CONFIG_TOAST_QUOTE_UPDATED") : t("CONFIG_TOAST_QUOTE_SENT"));
+          toast(withMail(r.mode === "updated" ? t("CONFIG_TOAST_QUOTE_UPDATED") : t("CONFIG_TOAST_QUOTE_SENT"), r.mail, t));
           void backToConfig();
           return;
         }
         // SAP answers the POST with the whole document, which is exactly what entities.one reads —
         // so seed it and the quotation opens without a second Service Layer round trip. Absent when
         // the dedup UDF found the document instead of creating it; then the page reads it itself.
+        if (r.mail) toast(withMail(t("CONFIG_TOAST_QUOTE_CREATED", String(r.docNum ?? r.docEntry)), r.mail, t));
         if (r.row) {
           qc.setQueryData(
             orpc.entities.one.queryOptions({ input: { entity: "Quotations", key: r.docEntry } }).queryKey,

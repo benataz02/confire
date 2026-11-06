@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import {
-  db, configModel, configProject, configProjectEvent, EXTERNAL_ROLES, member, portalCompany, user, type RevisionDiff,
+  db, configModel, configProject, configProjectEvent, EXTERNAL_ROLES, member, portalCompany, user,
+  type DocumentSentPayload, type RevisionDiff,
 } from "@confire/db";
 import { tenantCurrency } from "./b1.ts";
 import { modelLabels } from "./config-project.ts";
@@ -9,6 +10,7 @@ import type { SendResult } from "./mail/mailer.ts";
 import {
   clientOnboardedMail, clientProjectMail, staffRequestMail, type ClientEventKind, type StaffEventKind,
 } from "./mail/portal-mail.tsx";
+import { englishDocName, mailFailedMail } from "./mail/document-mail.tsx";
 import { deliver, staffOf, type NotificationType, type Person } from "./notifications.ts";
 import { tenantBrand } from "./portal/settings.ts";
 import { appTenantUrl, portalTenantUrl } from "./tenant.ts";
@@ -32,12 +34,21 @@ const CLIENT: Partial<Record<string, NotificationType>> = {
   accepted: "project.accepted", returned: "project.returned", declined: "project.declined", quoted: "project.quoted",
   comment: "project.comment", file: "project.file",
 };
+/** A sent document → what the client hears, by its type. A quotation's is `quoted`'s own. */
+const SENT: Partial<Record<string, NotificationType>> = {
+  Orders: "project.order", DeliveryNotes: "project.delivery", Invoices: "project.invoice",
+};
 
 const inFlight = new Set<Promise<unknown>>();
-/** Every notification started so far, finished — what a test waits on before reading devOutbox. */
-export const notificationsSettled = () => Promise.allSettled([...inFlight]);
+/** Every notification started so far, finished — and whatever they started in turn (a document
+ *  mail's run ends in its event's notification) — what a test waits on before reading devOutbox. */
+export async function notificationsSettled(): Promise<void> {
+  while (inFlight.size) await Promise.allSettled([...inFlight]);
+}
 
-function background(work: () => Promise<unknown>): void {
+/** Off the request path, never throwing, and awaited by notificationsSettled: notifications here, the
+ *  document mail's print-and-send (document-mail.ts). */
+export function background(work: () => Promise<unknown>): void {
   const p: Promise<unknown> = work().catch((e) => console.error("[notify]", e)).finally(() => inFlight.delete(p));
   inFlight.add(p);
 }
@@ -115,7 +126,9 @@ async function notifyEvent(tenantId: string, eventId: string, revisedId: string 
   // file kept internal — is for staff's eyes only and tells nobody.
   const type = e.kind === "assigned" ? "request.assigned"
     : e.visibility === "internal" ? undefined
-    : e.actorSide === "external" ? STAFF[e.kind] : CLIENT[e.kind];
+    : e.actorSide === "external" ? STAFF[e.kind]
+    : e.kind === "document_sent" ? SENT[(e.payload as DocumentSentPayload).entity]
+    : CLIENT[e.kind];
   if (!type) return;
 
   const [p] = await db
@@ -147,12 +160,15 @@ async function notifyEvent(tenantId: string, eventId: string, revisedId: string 
   let r: SendResult;
   if (type.startsWith("project.")) {
     const q = e.kind === "quoted" ? (e.payload as { docNum: number | null; value: number }) : null;
+    const sent = e.kind === "document_sent" ? (e.payload as DocumentSentPayload) : null;
     const currency = q ? await tenantCurrency(tenantId) : null;
     const path = `/projects/${e.projectId}`;
     // The client's mail is in its company's SAP language.
     const lang = mailLang(p.languageCode);
     const common = {
-      brand, kind: e.kind as ClientEventKind, projectName: p.name, note: e.note, fileName, lang,
+      // A sent document's mail is its type's: project.invoice → invoice.
+      brand, kind: (sent ? type.slice("project.".length) : e.kind) as ClientEventKind, projectName: p.name, note: e.note, fileName, lang,
+      docNum: sent?.docNum ?? null,
       actorName: e.actorName ?? (lang === "es" ? "Alguien" : "Someone"),
       revision: revisedId ? await revisionOf(revisedId, p.modelId, lang) : [],
       quote: q ? {
@@ -162,7 +178,7 @@ async function notifyEvent(tenantId: string, eventId: string, revisedId: string 
       url: portalTenantUrl(slug, path),
     };
     r = await deliver({
-      tenantId, type, to, params: q ? { ...params, docNum: q.docNum } : params, path, mailKey,
+      tenantId, type, to, params: q || sent ? { ...params, docNum: (q ?? sent)!.docNum } : params, path, mailKey,
       mail: (x) => clientProjectMail({ ...common, to: x.email }),
     });
   } else {
@@ -202,5 +218,27 @@ export function notifyOnboarded(o: {
       }),
     });
     if (r.error) console.error(`[mail] onboarded ${o.cardCode} failed: ${r.error}`);
+  });
+}
+
+/** The document mail did not go out (document-mail spec §5.5 step 5): the poster hears it — bell and
+ *  Confire's mail, by their own switches — if they are still on staff. Nothing retries. */
+export function notifyMailFailed(o: {
+  tenantId: string; posterId: string; entity: string; docEntry: number; docNum: number | null; cardCode: string; error: string;
+}): void {
+  background(async () => {
+    const to = await staffOf(o.tenantId, eq(member.userId, o.posterId));
+    if (!to.length) return;
+    const { slug } = await tenantBrand(o.tenantId);
+    const path = `/b1/${o.entity}/${o.docEntry}`;
+    const docNum = String(o.docNum ?? o.docEntry);
+    const r = await deliver({
+      tenantId: o.tenantId, type: "document.mail_failed", to, path, mailKey: `mail-failed/${o.tenantId}/${o.entity}/${o.docEntry}`,
+      params: { entity: o.entity, docNum, cardCode: o.cardCode, note: o.error },
+      mail: (x) => mailFailedMail({
+        to: x.email, docName: englishDocName(o.entity), docNum, cardCode: o.cardCode, error: o.error, url: appTenantUrl(slug, path),
+      }),
+    });
+    if (r.error) console.error(`[mail] mail-failed ${o.entity} ${o.docEntry} failed: ${r.error}`);
   });
 }

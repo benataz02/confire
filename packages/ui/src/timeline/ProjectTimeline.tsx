@@ -58,7 +58,14 @@ const KIND: Record<string, { title: (side: "internal" | "external") => string; i
   file: { title: () => "UI_EVT_FILE", icon: "attachment" },
   // Staff only: the event is internal, so the portal is never sent it.
   assigned: { title: () => "UI_EVT_ASSIGNED", icon: "employee" },
+  // A sales document Confire sent (document-mail spec §5.8); its title is built below.
+  document_sent: { title: () => "UI_EVT_DOC", icon: "email" },
 };
+
+/** `document_sent`'s payload. `error` reaches staff only: the server drops it for the portal. */
+type DocumentSent = { entity: string; docEntry: number; docNum: number | null; fileId: string; to: string[]; error?: string };
+/** Why it was not emailed, in words: the two codes, else Microsoft's (or the print's) own message. */
+const NOT_EMAILED: Record<string, string> = { NO_EMAIL: "UI_EVT_DOC_NO_EMAIL", NOT_CONNECTED: "UI_EVT_DOC_NOT_CONNECTED" };
 
 const show = (v: unknown, yes: string, no: string): string =>
   v === undefined || v === null || v === "" ? "—"
@@ -238,7 +245,11 @@ export function ProjectTimeline({
             const k = known ?? { title: () => e.kind, icon: "history" };
             const q = e.payload as { docNum?: number | null; mode?: string; value?: number } | null;
             const f = e.kind === "file" ? e.payload as { fileId: string; name: string; size: number } | null : null;
-            const title = e.kind === "quoted" && q
+            const sent = e.kind === "document_sent" ? e.payload as DocumentSent | null : null;
+            const sentName = sent ? `${ENTITY[sent.entity] ? i18n.getText(ENTITY[sent.entity]!.key) : sent.entity} ${sent.docNum ?? sent.docEntry}` : "";
+            const title = sent
+              ? (sent.to.length ? i18n.getText("UI_EVT_DOC_SENT", sentName, sent.to.join(", ")) : sentName)
+              : e.kind === "quoted" && q
               ? i18n.getText(q.mode === "updated" ? "UI_QUOTE_UPDATED" : "UI_QUOTE_SENT", q.docNum == null ? "" : String(q.docNum)).replace(/\s+/g, " ")
               : e.kind === "assigned" ? i18n.getText("UI_EVT_ASSIGNED", (e.payload as { assigneeName?: string } | null)?.assigneeName ?? "")
               : e.kind === "created" && (e.payload as { via?: string } | null)?.via === "assistant" ? i18n.getText("UI_EVT_CREATED_ASSISTANT")
@@ -246,7 +257,8 @@ export function ProjectTimeline({
               : known ? i18n.getText(k.title(side)) : k.title(side);
             const mine = e.actorSide === side;
             return (
-              <TimelineItem key={e.id} icon={k.icon} state={k.state ?? "None"} titleText={title}
+              <TimelineItem key={e.id} icon={sent ? ENTITY[sent.entity]?.icon ?? k.icon : k.icon}
+                state={sent?.to.length ? "Positive" : k.state ?? "None"} titleText={title}
                 name={e.actorName ?? undefined} subtitleText={when(new Date(e.at))} data-mine={mine || undefined}
                 style={tipVars(title, e.visibility === "internal" ? i18n.getText("UI_INTERNAL_TAG") : undefined)}>
                 {/* The body sits on its side as a block; a note's lines still read from the left. */}
@@ -254,6 +266,13 @@ export function ProjectTimeline({
                   {e.kind === "revised" ? <Revision payload={e.payload} labels={labels} /> : null}
                   {e.kind === "quoted" && q?.value !== undefined ? <Text>{money(q.value, currency)}</Text> : null}
                   {f ? <Link href={fileUrl(f.fileId)} icon="download">{`${f.name} (${fileSize(f.size)})`}</Link> : null}
+                  {/* The PDF as it was sent, not a fresh print. */}
+                  {sent ? <Link href={fileUrl(sent.fileId)} icon="pdf-attachment">{`${sentName}.pdf`}</Link> : null}
+                  {sent?.error ? (
+                    <ObjectStatus state="Critical" showDefaultIcon>
+                      {i18n.getText("UI_EVT_DOC_NOT_EMAILED", NOT_EMAILED[sent.error] ? i18n.getText(NOT_EMAILED[sent.error]!) : sent.error)}
+                    </ObjectStatus>
+                  ) : null}
                   {e.note ? <Text style={{ whiteSpace: "pre-wrap" }}>{e.note}</Text> : null}
                 </div>
               </TimelineItem>

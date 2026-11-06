@@ -6,3 +6,4 @@ export * from "./portal.ts";
 export * from "./notifications.ts";
 export * from "./assistant.ts";
 export * from "./report.ts";
+export * from "./document-mail.ts";

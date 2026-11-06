@@ -4,6 +4,7 @@ import { authUrl } from "./tenant.ts";
 import { serve } from "./serve.ts";
 import { fileRoutes } from "./files.ts";
 import { agentRoutes } from "./agent-pairing.ts";
+import { documentMailRoutes } from "./document-mail.ts";
 import { assistantFileRoutes } from "./assistant/files.ts";
 import { assistantRoutes } from "./assistant/route.ts";
 import { isMcpHost, mcpHost, oauthDiscoveryRoutes } from "./mcp.ts";
@@ -14,7 +15,7 @@ const app = serve({
   auth,
   router,
   title: "Confire staff API",
-  routes: fileRoutes("internal").route("/", agentRoutes()).route("/", assistantFileRoutes()).route("/", assistantRoutes()).route("/", oauthDiscoveryRoutes()),
+  routes: fileRoutes("internal").route("/", agentRoutes()).route("/", documentMailRoutes()).route("/", assistantFileRoutes()).route("/", assistantRoutes()).route("/", oauthDiscoveryRoutes()),
   spaDist: "../app/dist",
   port: 3000,
   origin: authUrl,

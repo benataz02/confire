@@ -22,6 +22,7 @@ import { canonicalJson } from "./canon.ts";
 import { quotationIn, tenantCompany, tenantConnector, tenantCurrency, viaB1 } from "./b1.ts";
 import { liveEngine } from "./config-project.ts";
 import { assertWritable, inputsOf, internalVisible, transition } from "./project-lifecycle.ts";
+import { afterPost, type MailAnswer } from "./document-mail.ts";
 import { t } from "./i18n/index.ts";
 
 export type ConfigProjectRow = typeof configProject.$inferSelect;
@@ -304,7 +305,7 @@ async function readQuotation(b1: B1Transport, docEntry: number) {
 export async function createQuote(
   tenantId: string,
   userId: string,
-  input: { projectId: string; commandId: string; header?: Record<string, unknown> },
+  input: { projectId: string; commandId: string; header?: Record<string, unknown>; notify?: boolean },
 ) {
   // Refuse rather than silently write less than the page asked for — the same contract
   // entities.create honours. Checked before anything reaches SAP.
@@ -318,8 +319,9 @@ export async function createQuote(
   const conn = await tenantConnector(tenantId);
   const here = quotationIn(project, conn.companyDb);
   // Already posted: the row IS the idempotency record for a retry that got its response.
+  // It sends nothing either: whichever call quoted it sent it then (document-mail spec §5.3).
   if (project.status === "quoted" && here)
-    return { docEntry: project.b1DocEntry!, docNum: null, reused: true, row: null, etag: null, mode: "created" as const };
+    return { docEntry: project.b1DocEntry!, docNum: null, reused: true, row: null, etag: null, mode: "created" as const, mail: null as MailAnswer };
   const actor = { userId, side: "internal" as const };
   await assertWritable(tenantId, project.id, actor);
   // The customer of a portal project is the company (spec §10) — the page cannot quote someone else.
@@ -416,5 +418,13 @@ export async function createQuote(
       quotedValue: totals.value.toFixed(4), quotedCost: totals.cost.toFixed(4),
     },
   });
-  return posted;
+  // This call performed the transition, so it sends — its two `reused` paths included: they are
+  // reached only when an earlier call failed before its transition, so nothing was sent then. A
+  // re-quote in place sends the revised quotation. Only created has the document in hand.
+  const mail = input.notify ? await afterPost({
+    tenantId, userId, b1, companyDb: conn.companyDb, entity: "Quotations",
+    doc: posted.row ?? { DocEntry: posted.docEntry }, // the update and dedup paths: afterPost reads it
+    projects: async () => [project.id],
+  }) : null;
+  return { ...posted, mail };
 }

@@ -39,3 +39,14 @@ test("no line fields, no Lines section", () => {
   const { DocumentLines: _, ...fields } = c.fields;
   expect(docFeature("Orders", { ...c, fields }, t).detail.sections.map((s) => s.id)).toEqual(["general"]);
 });
+
+test("a sales employee shows by name; a quotation's project follows its number, as a link", () => {
+  const fields = { ...c.fields, SalesPersonCode: { Type: "number", EdmType: "Edm.Int32", Label: "Sales Employee" } } as EntityConstraints["fields"];
+  const f = docFeature("Quotations", { ...c, fields }, t);
+  expect(f.list.columns.map((x) => x.key)).toEqual(["DocNum", "ConfigName", "DocDate", "NumAtCard", "SalesPersonName"]);
+  const sales = f.list.columns.find((x) => x.key === "SalesPersonName")!;
+  expect(sales).toMatchObject({ label: "Sales Employee", sortable: false, filterable: false });
+  expect(f.list.columns[1]).toMatchObject({ label: "PORTAL_PROJECT", linkConfig: { route: "/projects", idField: "ConfigId" } });
+  expect(f.detail.sections[0]!.groups![0]!.fields.map((x) => x.key)).toEqual(["DocNum", "DocDate", "NumAtCard", "SalesPersonName"]);
+  expect(docFeature("Orders", { ...c, fields }, t).list.columns.some((x) => x.key === "ConfigName")).toBe(false);
+});

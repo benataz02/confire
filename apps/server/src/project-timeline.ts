@@ -31,11 +31,19 @@ async function projectFor(tenantId: string, projectId: string, actor: Actor) {
 
 /** What a client may read of an event payload. The frozen inputs stay home — the client has the
  *  revision diff and the configuration itself; a snapshot of every stored cell, salesperson
- *  overrides included, is not theirs to read. */
-function externalPayload(p: ProjectEventPayload | null): ProjectEventPayload | null {
-  if (!p || !("inputs" in p)) return p;
-  const { inputs: _inputs, ...rest } = p;
-  return rest as ProjectEventPayload;
+ *  overrides included, is not theirs to read. Nor is why a document was not emailed: a sent
+ *  document's `error` (document-mail spec §5.8) is staff's. */
+export function externalPayload(p: ProjectEventPayload | null): ProjectEventPayload | null {
+  if (!p) return p;
+  if ("inputs" in p) {
+    const { inputs: _inputs, ...rest } = p;
+    return rest as ProjectEventPayload;
+  }
+  if ("fileId" in p && "to" in p) {
+    const { error: _error, ...rest } = p;
+    return rest;
+  }
+  return p;
 }
 
 /** The events, oldest first, with the actor's name, plus the labels to read a revision with —

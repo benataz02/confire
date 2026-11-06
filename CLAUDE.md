@@ -310,6 +310,25 @@ components (`react-email`, pinned: 6.11.3 requires a `@react-email/render` that 
 published), one typed props object each, drawn in `layout.tsx`'s frame with a `Brand`. Sends are
 fire-and-forget and never throw — a mail is never on a request's critical path.
 
+**Two senders.** Confire's mail above (Resend) is for notifications and account mail only. A tenant's
+**business documents** go from the tenant's own **Microsoft 365** mailbox (`document-mail.ts`,
+`docs/superpowers/specs/2026-11-06-document-mail-design.md`), so a customer's reply reaches the
+supplier: an admin connects it in Settings → Email (two plain routes, `/api/mail/microsoft/{connect,callback}`,
+Microsoft's delegated code flow with PKCE through the sign-in app's registration, state in Better
+Auth's `verification` table; one `document_mail` row per tenant, its refresh token `encryptSecret`ed and
+never answered). The create pages that post a sales document (the quote page, Quotations/Orders
+create, Copy to) draw a **Notify the client** box while a mailbox is connected, starting at the type's
+default; `configs.createQuote`/`entities.create`/`entities.copy` take `notify` (absent = no — the
+assistant and MCP never send) and answer `mail` (`{ to }` / `{ skipped }`), the recipients read during
+the request (`recipientsOf`: the document's active contact person, else the BP's `EmailAddress`).
+After the response (`afterPost`, tracked by `notify.ts`' `background`): `printDocument` → one Graph
+`sendMail` (the PDF attached, under 3 MB, as the type's *Send from* or the account; `letterHtml`, never
+`sendMails`) → per project the document belongs to (createQuote's own; a copy's by walking its sources
+back to quotations, `quotationsBehind` in `doc-chain.ts`) a `document_sent` event plus the PDF as a
+`project_file` (`addDocumentSent`) — written after the send, and whether or not it went (`to` empty,
+`error` staff-only). A failure is the poster's `document.mail_failed`; nothing retries (sendMail has
+no idempotency key). Without `MICROSOFT_CLIENT_SECRET` the send goes to the console and `documentOutbox`.
+
 **Notifications are a bell and a mail, each switched per event by every user**
 (`docs/superpowers/specs/2026-10-22-notifications-design.md`; no admin decides for anyone).
 `notifications.ts` holds the catalog (`NOTIFICATION_TYPES`: id, audience `staff`/`client`, group) and
@@ -318,7 +337,9 @@ is the only writer of `notification` (bell rows carrying their own `params` and 
 switch-off, so a new type needs no backfill). `deliver()` drops each person's switched-off channels,
 then inserts the bell rows and sends the mails, each independent of the other. **Who is eligible is
 `notify.ts`**, the project-event producer, fired after commit by `project-lifecycle.ts` (a
-transition, comment, file, or `assign` — staff's Reassign) and by onboarding submit: the client side
+transition, comment, file, `assign` — staff's Reassign — or a sent document, whose type is its entity's:
+`project.order`/`.delivery`/`.invoice`, a quotation's being `project.quoted`) and by onboarding submit
+and a document mail's failure (`notifyMailFailed`, to the poster): the client side
 is the project's creator while still seated at its company; the staff side is the assignee while
 still on staff, else every staff member (each kept or not by their own switch), so a request is never
 silent; never the actor; an internal event tells nobody, `assigned` aside. Client mail wears the
@@ -327,8 +348,9 @@ read at send time; a mail failure lands on the event's `mailError`. Both routers
 `notifications.*` procedures over (the path's tenant, the session's user), and each SPA polls
 `unreadCount` every 30 s for its ShellBar bell (`@confire/ui/notifications`). **Tests never send:**
 `bunfig.toml` preloads `scripts/test-preload.ts`, which drops `RESEND_API_KEY` (and `CF_API_TOKEN`, or
-the pairing tests create real tunnels); tests read
-`devOutbox` and await `notificationsSettled()`.
+the pairing tests create real tunnels, and `MICROSOFT_CLIENT_SECRET`, or document mail reaches Graph);
+tests read `devOutbox`/`documentOutbox` and await `notificationsSettled()`, which waits out work that
+started more work (a document mail's run ends in its event's notification).
 
 Email + password sign-in requires a verified address (`requireEmailVerification`): sign-up returns
 no session, and an unverified sign-in is refused with `EMAIL_NOT_VERIFIED` after mailing a fresh

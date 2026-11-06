@@ -11,6 +11,7 @@ import { notificationsRouter } from "./routers/notifications.ts";
 import { homeRouter } from "./routers/home.ts";
 import { reportsRouter } from "./routers/reports.ts";
 import { assistantRouter } from "./routers/assistant.ts";
+import { documentMailRouter } from "./routers/document-mail.ts";
 import { sessionProcedure, membershipOf } from "./base.ts";
 import { tenantCurrency } from "../b1.ts";
 import { rememberActiveOrganization } from "../auth.ts";
@@ -48,6 +49,7 @@ export const router = {
   home: homeRouter,
   assistant: assistantRouter,
   reports: reportsRouter,
+  documentMail: documentMailRouter,
 };
 
 export type AppRouter = typeof router;

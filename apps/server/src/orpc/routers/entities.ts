@@ -11,6 +11,9 @@ import { assertReadable, profileOf, PRINTABLE } from "../../entity-profiles.ts";
 import { buildCopy, draftConstraints, flowsFrom } from "../../doc-copy.ts";
 import { CopyInputZ, CopyZ, EntityZ, KeyZ, planCopy, postWrite, prepareWrite } from "../../entity-write.ts";
 import { printDocument } from "../../print.ts";
+import { quotationsBehind } from "../../doc-chain.ts";
+import { afterPost, configsOfQuotations, projectsOfQuotations } from "../../document-mail.ts";
+import type { DocumentMailType } from "@confire/db";
 import { bad, readOne, readRows } from "../../entity-read.ts";
 import { DEFAULT_PAGE } from "../../lookups.ts";
 import { t } from "../../i18n/index.ts";
@@ -72,14 +75,23 @@ export const entitiesRouter = {
     }))
     .handler(async ({ input, context }) => {
       assertReadable(input.entity, context.role);
-      const b1 = await b1Of(context.tenantId);
+      const { b1, companyDb } = await tenantConnector(context.tenantId);
       const schema = await viaB1(() => entitySchema(context.tenantId, b1, input.entity)).catch(bad);
       // A list's "Assigned to me": `mine` is the caller's sales employee, read only when asked for.
       const query = input.query.filter.some((c) => c.field === "mine")
         ? withMine(input.query, await salesPersonOf(context.tenantId, context.userId))
         : input.query;
-      return readRows(b1, schema, input.entity, { ...input, query, pageSize: DEFAULT_PAGE },
+      const page = await readRows(b1, schema, input.entity, { ...input, query, pageSize: DEFAULT_PAGE },
         { tenantId: context.tenantId, key: "internal" });
+      // A quotation's configuration is Confire's, not SAP's: `ConfigName`/`ConfigId` ride on the row.
+      // ponytail: quotations only — an order or invoice would walk its chain per row
+      // (quotationsBehind); add it when a later document's list needs it.
+      if (input.entity !== "Quotations" || !page.rows.length) return page;
+      const configs = await configsOfQuotations(context.tenantId, companyDb, page.rows.map((r) => Number(r.DocEntry)));
+      return { ...page, rows: page.rows.map((r) => {
+        const c = configs.get(Number(r.DocEntry));
+        return c ? { ...r, ConfigName: c.name, ConfigId: c.id } : r;
+      }) };
     }),
 
   /** One row, with its ETag — which is what makes a curated edit safe. */
@@ -137,13 +149,22 @@ export const entitiesRouter = {
       return { row, etag };
     }),
 
-  /** Curated create. `prefer: representation` means the created document comes back in one call. */
+  /** Curated create. `prefer: representation` means the created document comes back in one call.
+   *  `notify`: email the document to the customer (document-mail spec §5.3) — a sales document only;
+   *  absent is no. A created document belongs to no project. */
   create: userProcedure
-    .input(z.object({ entity: EntityZ, data: z.record(z.string(), z.unknown()) }))
+    .input(z.object({ entity: EntityZ, data: z.record(z.string(), z.unknown()), notify: z.boolean().optional() }))
     .handler(async ({ input, context }) => {
-      const ctx = await writeCtx(context.tenantId);
-      const { row, etag } = await postWrite(ctx, await prepareWrite(ctx, "profile", { op: "create", ...input }));
-      return { row, etag };
+      if (input.notify && !PRINTABLE.has(input.entity))
+        throw new ORPCError("BAD_REQUEST", { message: t("DOCUMENT_MAIL_NOT_PRINTABLE", input.entity) });
+      const { b1, companyDb } = await tenantConnector(context.tenantId);
+      const ctx = { tenantId: context.tenantId, b1 };
+      const { row, etag } = await postWrite(ctx, await prepareWrite(ctx, "profile", { op: "create", entity: input.entity, data: input.data }));
+      const mail = input.notify ? await afterPost({
+        tenantId: context.tenantId, userId: context.userId, b1, companyDb, entity: input.entity as DocumentMailType, doc: row,
+        projects: async () => [],
+      }) : null;
+      return { row, etag, mail };
     }),
 
   /** The copy's draft page: the target document `copy` would post, unposted, and the form it is
@@ -174,11 +195,19 @@ export const entitiesRouter = {
    *  Several sources of one business partner merge into one target. The draft page's changes ride
    *  along: the header allowlist, and `lines` — the kept lines with their quantities. */
   copy: userProcedure
-    .input(CopyInputZ)
-    .handler(async ({ input, context }) => {
-      const ctx = await writeCtx(context.tenantId);
+    .input(CopyInputZ.extend({ notify: z.boolean().optional() }))
+    .handler(async ({ input: { notify, ...input }, context }) => {
+      const { b1, companyDb } = await tenantConnector(context.tenantId);
+      const ctx = { tenantId: context.tenantId, b1 };
       const { entity, row } = await postWrite(ctx, await prepareWrite(ctx, "profile", { op: "copy", input }));
-      return { entity, docEntry: Number(row.DocEntry), docNum: row.DocNum ?? null, row };
+      // Every copy target is a sales document. Its projects: those whose quotations its sources
+      // descend from, in this company (document-mail spec §5.6).
+      const mail = notify ? await afterPost({
+        tenantId: context.tenantId, userId: context.userId, b1, companyDb, entity: entity as DocumentMailType, doc: row,
+        projects: async () => projectsOfQuotations(context.tenantId, companyDb, await viaB1(() =>
+          quotationsBehind(b1, input.docEntries.map((docEntry) => ({ entity: input.sourceEntity as DocumentMailType, docEntry }))))),
+      }) : null;
+      return { entity, docEntry: Number(row.DocEntry), docNum: row.DocNum ?? null, row, mail };
     }),
 
   /** Close a quotation (spec §7.3): `POST Quotations(n)/Close`. Quotations only — the one document

@@ -1,4 +1,5 @@
 [test]
 # Tests never send mail (spec P7): the preload drops the Resend keys before any module reads them,
-# so the mailer falls back to the console and tests read devOutbox.
+# so the mailer falls back to the console and tests read devOutbox — and the Microsoft secret, so a
+# document mail goes to documentOutbox instead of Graph.
 preload = ["./scripts/test-preload.ts"]
