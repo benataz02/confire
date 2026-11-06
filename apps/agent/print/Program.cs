@@ -34,6 +34,21 @@ static class Program
     static int Main(string[] args)
     {
         if (args.Length == 1 && args[0] == "--check") return Check();
+        // The agent always pipes stdin; a double-click or a bare run would otherwise sit on a blank
+        // window waiting for a request line.
+        if (args.Length > 0 || !Console.IsInputRedirected)
+        {
+            Console.WriteLine("confire-print.exe is Confire agent's Direct printing; the agent runs it.");
+            Console.WriteLine("To test it here: set CONFIRE_SQL_SERVER, CONFIRE_SQL_USER, CONFIRE_SQL_PASS and");
+            Console.WriteLine("CONFIRE_COMPANY_DB, then run `confire-print.exe --check`, or pipe one request:");
+            Console.WriteLine("  '{\"layout\":\"QUT20009\",\"docEntry\":5,\"objectId\":23}' | .\\confire-print.exe");
+            if (!Console.IsInputRedirected && args.Length == 0)
+            {
+                Console.Write("\nPress Enter to close.");
+                Console.ReadLine();
+            }
+            return 2;
+        }
         var json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
         var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
         // Anything else that writes to the console (Crystal, a library) must not break the protocol.
