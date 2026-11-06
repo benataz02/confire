@@ -19,7 +19,7 @@ export function mergeEntries(
   return [
     ...(events ?? []).map((e) => ({ at: new Date(e.at).getTime(), kind: "event" as const, e })),
     ...(documents?.quotations ?? []).flatMap((q) => [q.quotation, ...q.chain].map((d) => {
-      const day = new Date(d.docDate).getTime();
+      const day = parseIsoDate(d.docDate)?.getTime() ?? 0; // local midnight, as the page shows it
       return {
         at: day ? day + (opts?.docsAfterDay ? DAY - 1 : 0) : 0, // an unparsable date stays 0, first
         kind: "doc" as const, d, superseded: !q.current && d.entity === "Quotations",

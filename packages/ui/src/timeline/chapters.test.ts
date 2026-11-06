@@ -30,9 +30,9 @@ test("forward only: rework, withdraw and a declined quote never repeat a chapter
   expect(chapters[2]!.entries.map(kindOf)).toEqual(["quoted", "quote_declined", "comment", "quoted"]);
 });
 
-const sameDay = () => [
-  ev("submitted", "2026-11-04T09:00:00Z"), ev("accepted", "2026-11-04T10:00:00Z"), ev("quoted", "2026-11-04T11:00:00Z"),
-];
+// Local times: a document's date is a local day (parseIsoDate), so "the same day" is the viewer's.
+const local = (h: number) => new Date(2026, 10, 4, h).toISOString();
+const sameDay = () => [ev("submitted", local(9)), ev("accepted", local(10)), ev("quoted", local(11))];
 
 test("same-day documents sort after the day's events", () => {
   const chapters = chaptersOf(mergeEntries(sameDay(), docs(doc("Quotations", "2026-11-04")), { docsAfterDay: true }));

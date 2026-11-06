@@ -7,7 +7,7 @@ import "@ui5/webcomponents-fiori/dist/illustrations/NoActivities.js";
 import { addCustomCSS } from "@ui5/webcomponents-base/dist/Theming.js";
 import { useUiI18n } from "../i18n.ts";
 import { money } from "../money.ts";
-import { formatLocale } from "../format.ts";
+import { formatLocale, parseIsoDate } from "../format.ts";
 import { documentStatusText } from "../documentStatus.ts";
 import { PrintActions } from "../PrintActions.tsx";
 import { FILE_MAX_MB, fileSize, fileUrl } from "../files.ts";
@@ -181,7 +181,7 @@ export function ProjectTimeline({
   // not the end-of-day sort key mergeEntries gave it (that would read as the next day east of UTC).
   const chapterTitle = (c: Chapter) => {
     const name = c.step === 0 && chapters?.draft ? i18n.getText("UI_CHAPTER_DRAFT") : chapters?.labels[c.step] ?? "";
-    const days = c.entries.map((x) => (x.kind === "doc" ? new Date(x.d.docDate).getTime() : x.at)).filter(Boolean);
+    const days = c.entries.map((x) => (x.kind === "doc" ? parseIsoDate(x.d.docDate)?.getTime() ?? 0 : x.at)).filter(Boolean);
     if (!days.length) return name;
     const day = (t: number) => new Date(t).toLocaleDateString(formatLocale(), { day: "numeric", month: "short" });
     const [from, to] = [day(Math.min(...days)), day(Math.max(...days))];
@@ -221,7 +221,7 @@ export function ProjectTimeline({
       return (
         <TimelineItem key={`${x.d.entity}:${x.d.docEntry}`} icon={meta?.icon ?? "document"} style={tipVars(docName)}
           titleText={i18n.getText(x.superseded ? "UI_DOC_TITLE_SUPERSEDED" : "UI_DOC_TITLE", docName, String(x.d.docNum))}
-          subtitleText={x.d.docDate ? new Date(x.d.docDate).toLocaleDateString(formatLocale()) : undefined}>
+          subtitleText={parseIsoDate(x.d.docDate)?.toLocaleDateString(formatLocale())}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
             <Text>{money(x.d.docTotal, currency)}</Text>
             <ObjectStatus state={x.d.docStatus === "bost_Open" ? "Information" : "None"}>
