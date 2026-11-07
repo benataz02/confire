@@ -6,14 +6,14 @@ import { Breadcrumbs, BreadcrumbsItem } from "@ui5/webcomponents-react";
 export type Crumb = { text: string; to: string; search?: Record<string, unknown> };
 
 /**
- * An Object Page's trail, for `ObjectPageTitle`'s `breadcrumbs` slot: the pages above as links, then
+ * A page's trail, for `ObjectPageTitle`'s or `DynamicPageTitle`'s `breadcrumbs` slot: the pages above as links, then
  * `current` — the record's name or code — as plain text. Each link is a real href, so a modified
  * click opens a tab; a plain click stays in the router, where the page's unsaved-changes blocker
  * still sees it. The last item is the current page: Breadcrumbs' Standard design draws it bold
  * and without a separator.
  */
 export function PageBreadcrumbs({ slot, items, current }: {
-  /** filled in by ObjectPageTitle's slot handling — forward it or the trail is never slotted */
+  /** filled in by the title's slot handling — forward it or the trail is never slotted */
   slot?: string;
   items: Crumb[];
   current: string;

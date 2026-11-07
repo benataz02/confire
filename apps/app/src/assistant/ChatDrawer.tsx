@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Icon, Menu, MenuItem } from "@ui5/webcomponents-react";
 import { confirm } from "@confire/ui/confirm.ts";
@@ -9,13 +9,13 @@ import { refusalText } from "./ChatView.tsx";
 import { RenameField } from "./RenameField.tsx";
 import type { Thread } from "./useAssistant.ts";
 
-// The panel's chats behind ☰ (Joule spec §5.3): New chat, then the user's chats in two groups (Pinned,
-// Chats), each row's ••• for Pin, Rename and Delete. In the card it slides over the chat's left edge;
+// The panel's chats behind ☰ (Joule spec §5.3): the user's chats in two groups (Pinned, Chats) — New
+// chat is the panel header's — each row's ••• for Pin, Rename and Delete. In the card it slides over the chat's left edge;
 // maximized it is a sidebar beside it.
 
 export type ChatRow = Awaited<ReturnType<typeof client.assistant.threads>>[number];
 
-/** The user's chats and what can be done to one: shared by the drawer's rows and the header's •••. */
+/** The user's chats and what can be done to one. */
 export function useChats() {
   const i18n = useI18n();
   const t = (k: string) => i18n.getText(k);
@@ -52,10 +52,10 @@ export function useChats() {
 }
 export type Chats = ReturnType<typeof useChats>;
 
-/** A row's or the header's menu: Pin/Unpin, Rename, Delete (and what the caller adds). It acts once it
- *  has closed: it hands focus back to its opener as it closes, which would take it from a rename field. */
-export function ChatMenu({ opener, pinned, onAction, children }: {
-  opener: HTMLElement | null; pinned: boolean; onAction(a: string | null): void; children?: ReactNode;
+/** A row's menu: Pin/Unpin, Rename, Delete. It acts once it has closed: it hands focus back to its
+ *  opener as it closes, which would take it from a rename field. */
+function ChatMenu({ opener, pinned, onAction }: {
+  opener: HTMLElement | null; pinned: boolean; onAction(a: string | null): void;
 }) {
   const i18n = useI18n();
   const t = (k: string) => i18n.getText(k);
@@ -67,7 +67,6 @@ export function ChatMenu({ opener, pinned, onAction, children }: {
       <MenuItem data-action="pin" icon={pinned ? "pushpin-off" : "pushpin-on"} text={t(pinned ? "ASSISTANT_UNPIN" : "ASSISTANT_PIN")} />
       <MenuItem data-action="rename" icon="edit" text={t("ASSISTANT_RENAME")} />
       <MenuItem data-action="delete" icon="delete" text={t("ASSISTANT_DELETE")} />
-      {children}
     </Menu>
   );
 }
@@ -80,9 +79,9 @@ const PLAIN: CSSProperties = {
 };
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-export function ChatDrawer({ open, mode, openId, chats, onPick, onNew, onHide, onRemoved }: {
+export function ChatDrawer({ open, mode, openId, chats, onPick, onHide, onRemoved }: {
   open: boolean; mode: "card" | "sidebar"; openId: string | null; chats: Chats;
-  onPick(r: ChatRow): void; onNew(): void; onHide(): void; onRemoved(r: ChatRow): void;
+  onPick(r: ChatRow): void; onHide(): void; onRemoved(r: ChatRow): void;
 }) {
   const i18n = useI18n();
   const t = (k: string) => i18n.getText(k);
@@ -145,10 +144,6 @@ export function ChatDrawer({ open, mode, openId, chats, onPick, onNew, onHide, o
           accessibilityAttributes={{ expanded: open }} onClick={onHide} />
         <span style={{ fontWeight: "bold", fontSize: "1rem" }}>{t("ASSISTANT_TITLE")}</span>
       </div>
-      <Button icon="add" onClick={onNew} style={{
-        "--sapButton_Background": "transparent", "--sapButton_BorderColor": "var(--cf-a-accent)",
-        "--sapButton_TextColor": "var(--cf-a-accent)", "--sapButton_BorderCornerRadius": "0.5rem",
-      } as CSSProperties}>{t("ASSISTANT_NEW_CHAT")}</Button>
       {group("pinned", t("ASSISTANT_PINNED"), chats.rows.filter((r) => r.pinned))}
       {group("chats", t("ASSISTANT_CHATS"), chats.rows.filter((r) => !r.pinned))}
       <ChatMenu opener={menu?.el ?? null} pinned={!!menu?.row.pinned} onAction={(a) => void onAction(a)} />

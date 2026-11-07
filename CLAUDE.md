@@ -225,9 +225,11 @@ event together, a download is always an attachment, and the one row served witho
 tenant's branding logo (`projectId` null), which mail links to absolutely. Staff work requests in Portal →
 Requests (`orpc/routers/requests.ts`) and on the existing process page. The timeline is
 `project-timeline.ts`: events from Postgres, SAP document chains as a separate live read. A client
-project opens, in both apps, on its progress and chaptered timeline (`@confire/ui/project/ProjectOverview.tsx`,
-`docs/superpowers/specs/2026-11-06-client-project-page-design.md`), its form at `…/configuration` (portal
-`/projects/<id>/configuration`, staff `/configs/<id>/configuration`); internal configurations are unchanged.
+project opens, in both apps, on its progress and chaptered timeline (`@confire/ui/project/ProjectOverview.tsx`, a
+DynamicPage, `docs/superpowers/specs/2026-11-06-client-project-page-design.md`), its form at `…/configuration` (portal
+`/projects/<id>/configuration`, staff `/configs/<id>/configuration`, the title's first action); internal configurations
+are unchanged. The timeline is one entry per document (`mergeEntries`, `timeline/chapters.ts`): a quotation is its
+`quoted` event, a mailed document folds its `document_sent` in, and `revised` is not drawn.
 
 **Portal documents** (spec §13.1): a client's own quotations, orders, deliveries and invoices.
 `portal/doc-fields.ts` is the one field rule — `ALWAYS` (DocNum, status, total…), `NEVER` (CardCode),
@@ -321,7 +323,8 @@ Microsoft's delegated code flow with PKCE through the sign-in app's registration
 Auth's `verification` table; one `document_mail` row per tenant, its refresh token `encryptSecret`ed and
 never answered). The create pages that post a sales document (the quote page, Quotations/Orders
 create, Copy to) draw a **Notify the client** box while a mailbox is connected, starting at the type's
-default; `configs.createQuote`/`entities.create`/`entities.copy` take `notify` (absent = no — the
+default — never the quote page of a client's request, whose client hears by Confire's own mail (the
+`quoted` notification) and answers in the portal, so `createQuote` ignores `notify` there; `configs.createQuote`/`entities.create`/`entities.copy` take `notify` (absent = no — the
 assistant and MCP never send) and answer `mail` (`{ to }` / `{ skipped }`), the recipients read during
 the request (`recipientsOf`: the document's active contact person, else the BP's `EmailAddress`).
 After the response (`afterPost`, tracked by `notify.ts`' `background`): `printDocument` → one Graph

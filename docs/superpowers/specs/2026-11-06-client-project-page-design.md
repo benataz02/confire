@@ -53,13 +53,22 @@ today's page, unchanged, at `/<slug>/configs/<id>`.
 
 ## The project page (both apps)
 
-Top to bottom (mockup C):
+Top to bottom (mockup C). Revised 2026-11-07: a **DynamicPage**, not an ObjectPage — Fiori's object
+page is an object in sections, and this page is one thing, the conversation. The configuration card,
+the messages button and "What comes next" are gone (the card's action moved to the title; the last
+block repeated the bar); a failed title or entry action is an Error MessageBox, as `PrintActions`' is.
 
-1. **Title**: breadcrumbs, the project's name, the product (model) name, the status tag and the
-   quote-response tag as today, the **messages button** first in the actions (the codebase rule:
-   every Object Page has one; here it carries this page's own call failures), then the side's title
-   actions (below).
-2. **Progress bar**, in the title area. Six steps, each an icon in a circle over its label and date:
+1. **Title**: breadcrumbs, the project's name, the product (model) name (staff: the client and the
+   assignee instead), the status tag and the
+   quote-response tag as today, then the **configuration action** first in the title's actions, its
+   weight following whose work the configuration is:
+   - Portal: draft → Emphasized **Continue configuring**; `changes` → Emphasized **Make the changes**;
+     otherwise a plain **Open configuration**.
+   - Staff: always Emphasized, **Review inquiry** while in `review`, else **Edit** (the `edit` icon).
+
+   Then the side's title actions (below).
+2. **Progress bar**, the header: it snaps away on scroll and its pin keeps it (the title, name and tags
+   included, stays the same collapsed). Six steps, each an icon in a circle over its label and date:
 
    | Step | Icon (the SAP icons `ProjectTimeline` already uses) |
    |---|---|
@@ -91,18 +100,20 @@ Top to bottom (mockup C):
    | `declined` | Negative | Negative |
 
    Staff never see a client's draft (`internalVisible`), so `finish` is portal-only in practice.
-3. **Configuration line**: a card, one row: icon, "Configuration", a summary (the batch quantities,
-   then up to three filled values of the first visible fields, as the form shows them), and a link
-   whose weight follows whose work the configuration is:
-   - Portal: draft → Emphasized **Continue configuring**; `changes` → Emphasized **Make the changes**;
-     otherwise a plain **Open**.
-   - Staff: `submitted`/`in_review` (`review`) → Emphasized **Review the request**; otherwise **Open**.
-4. **Timeline in chapters**: the shared `ProjectTimeline` with chapters on (below), for the reader's
-   side as today (staff keep the internal-only toggle and see internal notes). The comment box stays
-   at the end.
-5. **What comes next**: after the comment box, the steps not reached yet, faded, no entries. The
-   first carries one sentence on what happens next (per side); the rest are their names. Hidden when
-   `next` is `done` or `declined`.
+3. **Timeline in chapters**: the shared `ProjectTimeline` with chapters on (below), for the reader's
+   side as today (staff keep the internal-only toggle, a lock button, and see internal notes). The comment box
+   (`TimelineComposer`) is the page's floating footer (2026-11-07), in view however far one scrolls, as wide as
+   the timeline's column: the shared chat box (`@confire/ui/Composer.tsx`, the assistant's too, 2026-11-07),
+   ChatGPT's — one pill row (attach and the lock, the box, a round send) until the text wraps, then the text
+   spans the pill and the buttons drop to a row under it; Enter posts, Shift+Enter breaks the line.
+   The status tags sit beside the name in the title, centred on it as on the configuration page. One entry per document (`mergeEntries`): a quotation is its
+   `quoted` event — the employee's, with the value, the PDF as mailed, Open and Preview — never a
+   second SAP row; an order, delivery or invoice is its SAP row with no document status, and when
+   Confire mailed it, the mail's `document_sent` folds in (who sent it, the PDF). A mail that left
+   shows an envelope with its recipients ("Emailed to …"), as one that did not says why. A `revised`
+   event is not shown (the configuration page has the inputs; the assistant and the mails still read
+   it). While the conversation is one person per side and nobody was reassigned (`oneToOne`), no
+   entry repeats a name: the side it sits on says who wrote it.
 
 No footer bar on the project page.
 
@@ -112,7 +123,7 @@ Portal (client):
 
 | Action | Shown when | Where |
 |---|---|---|
-| Continue configuring / Make the changes / Open | always | configuration line |
+| Continue configuring / Make the changes / Open configuration | always | title actions, first |
 | Accept quote, Decline (optional note, `promptNote`, as today) | buyer, `quoted`, unanswered | the Quoted chapter's latest `quoted` entry |
 | Withdraw | buyer, `submitted` | the Sent chapter's latest `submitted`/`resubmitted` entry |
 | Delete (confirm, as today) | buyer, `draft` | title actions |
@@ -127,8 +138,8 @@ Staff:
 
 | Action | Where |
 |---|---|
-| Review the request / Open | configuration line |
-| Reassign, Attach (as today's header) | project page title actions |
+| Review inquiry / Edit | project page title actions, first |
+| Reassign | project page title actions (Attach is the timeline composer's) |
 | Open quotation (when one exists here, as today) | project page title actions |
 | Accept, Send back, Decline, Create/Update quote (`ProcessFooter`) | **configuration page footer, unchanged** — staff decide while looking at the configuration, its costs and candidates |
 | Sync, Copy, the cost rail toggle, Retry | configuration page, unchanged |
@@ -140,8 +151,7 @@ The assignee shows in the staff project page's title as it does today.
 A chapter is a journey step. Every timeline entry (event or SAP document) belongs to exactly one,
 decided by walking the entries **oldest first** with a running chapter that **only moves forward**:
 
-- Milestones move it to their step: `submitted` → Sent, `accepted` → Review, `quoted` and an SAP
-  **Quotations** document → Quoted, **Orders** → Ordered, **DeliveryNotes** → Delivered,
+- Milestones move it to their step: `submitted` → Sent, `accepted` → Review, `quoted` → Quoted, **Orders** → Ordered, **DeliveryNotes** → Delivered,
   **Invoices** → Invoiced. A milestone for a step behind the running one changes nothing.
 - Everything else (comments, files, `returned`, `resubmitted`, `revised`, `withdrawn`, `declined`,
   `quote_accepted`, `quote_declined`, `document_sent`, `created`, staff's `assigned`) stays in the
@@ -182,9 +192,9 @@ live; the configuration page would have nothing left to act on.
 
 **Staff: the request's extras (my call).** The subheader (client, assignee) and the strip with the
 client's answer to the quote stay on the configuration page *and* show on the project page — staff
-need both while quoting. **Reassign and Attach move to the project page only**: Attach without a
-visible timeline would upload into a feed the reader cannot see. Each page's messages button carries
-the failures of the calls made on that page.
+need both while quoting. **Reassign moves to the project page only.** (Attach did too, until
+2026-11-07: now it is the timeline composer's alone, since a file without the visible timeline would
+land in a feed the reader cannot see.)
 
 URLs: portal `/<slug>/projects/<id>/configuration`, staff `/<slug>/configs/<id>/configuration`.
 - Portal: a new project (`projects/new`) lands on the configuration page: a draft's work is configuring.

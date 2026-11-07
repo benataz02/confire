@@ -1,0 +1,80 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "tiny-text",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/481031-1793970933/content/layout.html"
+        ],
+        "createdAt": "2026-11-06T13:16:54.971Z",
+        "reason": "Claude: throwaway brainstorm mockup drawn as scaled-down miniatures; the real page uses UI5 Horizon type sizes"
+      },
+      {
+        "rule": "low-contrast",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/481031-1793970933/content/layout.html"
+        ],
+        "createdAt": "2026-11-06T13:16:55.002Z",
+        "reason": "Claude: throwaway brainstorm mockup with approximate colours; the real page uses Horizon theme variables"
+      },
+      {
+        "rule": "undersized-ui-text",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/481031-1793970933/content/layout.html"
+        ],
+        "createdAt": "2026-11-06T13:17:05.835Z",
+        "reason": "Claude: throwaway brainstorm mockup drawn as scaled-down miniatures; the real page uses UI5 Horizon type sizes"
+      },
+      {
+        "rule": "tiny-text",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/48228-1793986588/content/joule-states.html"
+        ],
+        "createdAt": "2026-11-06T17:37:45.389Z",
+        "reason": "Claude: throwaway brainstorm thumbnails, miniature screens drawn at reduced scale on purpose"
+      },
+      {
+        "rule": "low-contrast",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/48228-1793986588/content/joule-states.html"
+        ],
+        "createdAt": "2026-11-06T17:37:45.419Z",
+        "reason": "Claude: throwaway brainstorm thumbnails copying Joule's dim timestamp/disclaimer text"
+      },
+      {
+        "rule": "undersized-ui-text",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/48228-1793986588/content/joule-states.html"
+        ],
+        "createdAt": "2026-11-06T17:37:58.278Z",
+        "reason": "Claude: throwaway brainstorm thumbnails, miniature screens drawn at reduced scale on purpose"
+      },
+      {
+        "rule": "low-contrast",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/48228-1793986588/content/joule-themes.html"
+        ],
+        "createdAt": "2026-11-06T17:40:41.978Z",
+        "reason": "Claude: throwaway mockup copying Joule's measured placeholder/timestamp colours"
+      },
+      {
+        "rule": "tiny-text",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/48228-1793986588/content/joule-themes.html"
+        ],
+        "createdAt": "2026-11-06T17:40:42.005Z",
+        "reason": "Claude: throwaway mockup copying Joule's measured 11px disclaimer"
+      }
+    ]
+  }
+}

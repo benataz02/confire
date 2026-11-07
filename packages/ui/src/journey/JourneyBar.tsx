@@ -8,7 +8,7 @@ import { ringOf, type JourneyNext, type Ring, type Side } from "./ring.ts";
 // (portal/journey.ts); `side` is the reader's, and the current node's ring says whose move it is
 // (ringOf). The icons are named, so each app must have registered them (both load AllIcons).
 
-export const JOURNEY_ICONS = ["paper-plane", "inspection", "sales-quote", "sales-order", "shipping-status", "receipt"] as const;
+const JOURNEY_ICONS = ["paper-plane", "inspection", "sales-quote", "sales-order", "shipping-status", "receipt"] as const;
 
 const RING: Record<Ring, { color: string; text: string }> = {
   Critical: { color: "var(--sapCriticalColor)", text: "var(--sapCriticalTextColor)" },
@@ -48,7 +48,7 @@ function node(state: "done" | "cur" | "todo", ring: string): CSSProperties {
     return { ...base, background: "var(--sapList_Background)", color: ring,
       boxShadow: `0 0 0 .1875rem ${ring}, 0 0 0 .5625rem color-mix(in srgb, ${ring} 14%, transparent)` };
   }
-  return { ...base, background: "var(--sapNeutralBackgroundColor)", border: `1px solid ${LINE}`, color: "var(--sapContent_NonInteractiveIconColor)" };
+  return { ...base, background: "var(--sapNeutralBackground)", border: `1px solid ${LINE}`, color: "var(--sapContent_NonInteractiveIconColor)" };
 }
 
 export function JourneyBar({ step, next, side, labels, dates, nextText, ariaLabel, onStep }: {
@@ -76,7 +76,8 @@ export function JourneyBar({ step, next, side, labels, dates, nextText, ariaLabe
   const ring = RING[ringOf(next, side)];
   return (
     <div ref={root} role="group" aria-label={ariaLabel}
-      style={{ display: "grid", gridTemplateColumns: `repeat(${labels.length}, minmax(0, 1fr))` }}>
+      // Its labels are plain spans: the font is the theme's, whatever page it sits in.
+      style={{ display: "grid", gridTemplateColumns: `repeat(${labels.length}, minmax(0, 1fr))`, fontFamily: "var(--sapFontFamily)" }}>
       <style href="cf-journey-bar" precedence="default">{CSS}</style>
       {labels.map((label, i) => {
         const done = i < step, cur = i === step;

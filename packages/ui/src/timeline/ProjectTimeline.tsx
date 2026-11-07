@@ -1,22 +1,22 @@
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import {
-  Button, CheckBox, FileUploader, IllustratedMessage, Link, MessageStrip, ObjectStatus, Text, TextArea, Timeline,
-  TimelineGroupItem, TimelineItem,
+  Button, FileUploader, Icon, IllustratedMessage, Link, MessageStrip, ObjectStatus, Text, Timeline,
+  TimelineGroupItem, TimelineItem, ToggleButton,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoActivities.js";
 import { addCustomCSS } from "@ui5/webcomponents-base/dist/Theming.js";
 import { useUiI18n } from "../i18n.ts";
 import { money } from "../money.ts";
 import { formatLocale, parseIsoDate } from "../format.ts";
-import { documentStatusText } from "../documentStatus.ts";
 import { PrintActions } from "../PrintActions.tsx";
 import { FILE_MAX_MB, fileSize, fileUrl } from "../files.ts";
-import { chaptersOf, mergeEntries, type Chapter, type Entry } from "./chapters.ts";
+import { Composer, ROUND_BUTTON, type ComposerLook } from "../Composer.tsx";
+import { chaptersOf, mergeEntries, oneToOne, type Chapter, type Entry } from "./chapters.ts";
 
 // A project's timeline (spec §8), for both apps: one merged, time-ordered feed of the project's
-// events and the SAP documents its quotations became, with a comment box. Props-driven — each app
-// passes its own data and its own comment and upload calls; the fence is the server's (the portal is
-// sent external events only), nothing here hides anything.
+// events and the SAP documents its quotations became, one entry per document (mergeEntries), and its
+// comment box (TimelineComposer). Props-driven — each app passes its own data and its own comment and
+// upload calls; the fence is the server's (the portal is sent external events only), nothing here hides a secret.
 
 export type TimelineEvent = {
   id: string;
@@ -51,7 +51,6 @@ const KIND: Record<string, { title: (side: "internal" | "external") => string; i
   accepted: { title: () => "UI_STATUS_IN_REVIEW", icon: "accept", state: "Information" },
   returned: { title: () => "UI_STATUS_CHANGES", icon: "edit", state: "Critical" },
   declined: { title: () => "UI_STATUS_DECLINED", icon: "decline", state: "Negative" },
-  revised: { title: () => "UI_EVT_REVISED", icon: "edit-outside" },
   quoted: { title: () => "UI_EVT_QUOTED", icon: "sales-quote", state: "Positive" },
   quote_accepted: { title: (s) => (s === "external" ? "UI_EVT_ACCEPTED_YOU" : "UI_EVT_ACCEPTED"), icon: "approvals", state: "Positive" },
   quote_declined: { title: (s) => (s === "external" ? "UI_EVT_DECLINED_YOU" : "UI_EVT_DECLINED_QUOTE"), icon: "cancel", state: "Critical" },
@@ -67,12 +66,6 @@ const KIND: Record<string, { title: (side: "internal" | "external") => string; i
 type DocumentSent = { entity: string; docEntry: number; docNum: number | null; fileId: string; to: string[]; error?: string };
 /** Why it was not emailed, in words: the two codes, else Microsoft's (or the print's) own message. */
 const NOT_EMAILED: Record<string, string> = { NO_EMAIL: "UI_EVT_DOC_NO_EMAIL", NOT_CONNECTED: "UI_EVT_DOC_NOT_CONNECTED" };
-
-const show = (v: unknown, yes: string, no: string): string =>
-  v === undefined || v === null || v === "" ? "—"
-  : Array.isArray(v) ? v.join(", ")
-  : typeof v === "boolean" ? (v ? yes : no)
-  : String(v);
 
 const when = (d: Date) => d.toLocaleString(formatLocale(), { dateStyle: "medium", timeStyle: "short" });
 
@@ -111,50 +104,18 @@ const tipVars = (tip: string, internal?: string) => ({
   "--cf-tip": JSON.stringify(tip), ...(internal ? { "--cf-internal": JSON.stringify(internal) } : {}),
 }) as CSSProperties;
 
-/** A revision as readable lines: the model's labels, old → new. */
-function Revision({ payload, labels }: { payload: unknown; labels: Record<string, string> }) {
-  const i18n = useUiI18n();
-  const yes = i18n.getText("UI_YES");
-  const no = i18n.getText("UI_NO");
-  const cell = (v: unknown) => show(v, yes, no);
-  const p = payload as {
-    entries?: Record<string, [unknown, unknown]>; batches?: [number[], number[]]; tables?: Record<string, [number, number]>;
-  } | null;
-  if (!p) return null;
-  const lines = [
-    ...Object.entries(p.entries ?? {}).map(([k, [a, b]]) => `${labels[k] ?? k}: ${cell(a)} → ${cell(b)}`),
-    ...(p.batches ? [i18n.getText("UI_BATCH_QTY", cell(p.batches[0]), cell(p.batches[1]))] : []),
-    ...Object.entries(p.tables ?? {}).map(([k, [a, b]]) =>
-      `${labels[k] ?? k}: ${a === b
-        ? i18n.getText(b === 1 ? "UI_ROW_CHANGED" : "UI_ROWS_CHANGED", String(b))
-        : i18n.getText("UI_ROWS_TO", String(a), String(b))}`),
-  ];
-  return (
-    <ul style={{ margin: 0, paddingInlineStart: "1.25rem" }}>
-      {lines.map((l) => <li key={l}><Text>{l}</Text></li>)}
-    </ul>
-  );
-}
-
 export function ProjectTimeline({
-  events, labels, loading, error, documents, documentsError, side, currency, canComment, onComment, onUpload,
-  onOpenDocument, canPreview, chapters, entryActions,
+  events, loading, error, documents, documentsError, side, currency, onOpenDocument, canPreview, chapters, entryActions,
 }: {
   events: TimelineEvent[] | undefined;
-  labels: Record<string, string>;
   loading?: boolean;
   error?: Error | null;
   /** live SAP: absent while loading, and its error costs these rows only */
   documents?: TimelineDocuments;
   documentsError?: Error | null;
-  /** who is reading — the internal side gets the internal-only toggle and sees internal notes */
+  /** who is reading — the internal side sees internal notes */
   side: "internal" | "external";
   currency?: string;
-  canComment: boolean;
-  onComment: (note: string, internalOnly: boolean) => Promise<unknown>;
-  /** attach a file (≤ 10 MB, any type); omit for a reader who may not upload (a portal viewer).
-   *  Staff's internal-only toggle applies to it as to a comment. */
-  onUpload?: (file: File, internalOnly: boolean) => Promise<unknown>;
   /** opens a document's object page; omit and documents render without a link */
   onOpenDocument?: (entity: string, docEntry: number) => void;
   /** a Preview of each document's SAP print layout, through the app's source — only for a reader the
@@ -166,16 +127,12 @@ export function ProjectTimeline({
   entryActions?: (e: TimelineEvent) => ReactNode;
 }) {
   const i18n = useUiI18n();
-  const [note, setNote] = useState("");
-  const [internalOnly, setInternalOnly] = useState(false);
-  const [posting, setPosting] = useState(false);
-  const [postError, setPostError] = useState<string | null>(null);
 
   // Oldest first, like a chat: the newest sits right above the comment box.
-  const grouped = !!chapters;
-  const entries = useMemo(
-    () => mergeEntries(events, documents, grouped ? { docsAfterDay: true } : undefined), [events, documents, grouped]);
+  const entries = useMemo(() => mergeEntries(events, documents), [events, documents]);
   const groups = chapters ? chaptersOf(entries) : null;
+  // Two people talking: the side an entry sits on says who wrote it.
+  const named = !oneToOne(events);
 
   // "Quoted · 5 Nov – 7 Nov": the chapter's first and last day. A document counts by its posting date,
   // not the end-of-day sort key mergeEntries gave it (that would read as the next day east of UTC).
@@ -188,88 +145,59 @@ export function ProjectTimeline({
     return i18n.getText("UI_CHAPTER_TITLE", name, from === to ? from : `${from} – ${to}`);
   };
 
-  // Remounts the uploader after each pick, so choosing the same file again still fires a change.
-  const [picks, setPicks] = useState(0);
-
-  const busy = async (work: () => Promise<unknown>, after: () => void) => {
-    setPosting(true);
-    setPostError(null);
-    try {
-      await work();
-      after();
-      setInternalOnly(false);
-    } catch (e) {
-      setPostError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPosting(false);
-    }
-  };
-  const post = () => note.trim()
-    ? busy(() => onComment(note.trim(), side === "internal" && internalOnly), () => setNote(""))
-    : Promise.resolve();
-  const attach = (file: File | undefined) => {
-    setPicks((n) => n + 1);
-    if (!file || !onUpload) return;
-    if (file.size > FILE_MAX_MB * 1024 * 1024) return setPostError(i18n.getText("UI_FILE_MAX", String(FILE_MAX_MB)));
-    void busy(() => onUpload(file, side === "internal" && internalOnly), () => {});
-  };
+  const docName = (entity: string, num: number) => `${ENTITY[entity] ? i18n.getText(ENTITY[entity]!.key) : entity} ${num}`;
 
   const renderEntry = (x: Entry) => {
-    if (x.kind === "doc") {
-      const meta = ENTITY[x.d.entity];
-      const docName = meta ? i18n.getText(meta.key) : x.d.entity;
-      return (
-        <TimelineItem key={`${x.d.entity}:${x.d.docEntry}`} icon={meta?.icon ?? "document"} style={tipVars(docName)}
-          titleText={i18n.getText(x.superseded ? "UI_DOC_TITLE_SUPERSEDED" : "UI_DOC_TITLE", docName, String(x.d.docNum))}
-          subtitleText={parseIsoDate(x.d.docDate)?.toLocaleDateString(formatLocale())}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-            <Text>{money(x.d.docTotal, currency)}</Text>
-            <ObjectStatus state={x.d.docStatus === "bost_Open" ? "Information" : "None"}>
-              {documentStatusText(x.d.docStatus, x.d.docStatus, i18n.getText.bind(i18n))}
-            </ObjectStatus>
-            {onOpenDocument ? (
-              <Link onClick={() => onOpenDocument(x.d.entity, x.d.docEntry)}>{i18n.getText("UI_OPEN")}</Link>
-            ) : null}
-            {canPreview ? <PrintActions entity={x.d.entity} docEntry={x.d.docEntry} /> : null}
-          </div>
-        </TimelineItem>
-      );
-    }
-    const e = x.e;
-    const known = KIND[e.kind];
-    const k = known ?? { title: () => e.kind, icon: "history" };
-    const q = e.payload as { docNum?: number | null; mode?: string; value?: number } | null;
-    const f = e.kind === "file" ? e.payload as { fileId: string; name: string; size: number } | null : null;
-    const sent = e.kind === "document_sent" ? e.payload as DocumentSent | null : null;
-    const sentName = sent ? `${ENTITY[sent.entity] ? i18n.getText(ENTITY[sent.entity]!.key) : sent.entity} ${sent.docNum ?? sent.docEntry}` : "";
-    const title = sent
-      ? (sent.to.length ? i18n.getText("UI_EVT_DOC_SENT", sentName, sent.to.join(", ")) : sentName)
-      : e.kind === "quoted" && q
-      ? i18n.getText(q.mode === "updated" ? "UI_QUOTE_UPDATED" : "UI_QUOTE_SENT", q.docNum == null ? "" : String(q.docNum)).replace(/\s+/g, " ")
-      : e.kind === "assigned" ? i18n.getText("UI_EVT_ASSIGNED", (e.payload as { assigneeName?: string } | null)?.assigneeName ?? "")
-      : e.kind === "created" && (e.payload as { via?: string } | null)?.via === "assistant" ? i18n.getText("UI_EVT_CREATED_ASSISTANT")
-      : e.kind === "created" && (e.payload as { via?: string } | null)?.via === "mcp" ? i18n.getText("UI_EVT_CREATED_MCP")
+    // Who it is from: the event, or the mail that sent a SAP document; a document nobody sent from here has no author.
+    const e = x.kind === "event" ? x.e : x.sent;
+    const sentEvent = x.sent ?? (e?.kind === "document_sent" ? e : undefined);
+    const sent = sentEvent?.payload as DocumentSent | null | undefined;
+    const doc = x.kind === "doc" ? x.d : x.doc;
+    const q = e?.kind === "quoted" ? e.payload as { docNum?: number | null; mode?: string; value?: number } | null : null;
+    const f = e?.kind === "file" ? e.payload as { fileId: string; name: string; size: number } | null : null;
+    const known = e ? KIND[e.kind] : undefined;
+    const k = known ?? { title: () => e?.kind ?? "", icon: "history" };
+    const name = x.kind === "doc" ? docName(x.d.entity, x.d.docNum) : sent ? docName(sent.entity, sent.docNum ?? sent.docEntry) : "";
+    const entity = x.kind === "doc" ? x.d.entity : sent?.entity;
+    const title = q ? i18n.getText(q.mode === "updated" ? "UI_QUOTE_UPDATED" : "UI_QUOTE_SENT", q.docNum == null ? "" : String(q.docNum)).replace(/\s+/g, " ")
+      : x.kind === "doc" || sent ? name
+      : e?.kind === "assigned" ? i18n.getText("UI_EVT_ASSIGNED", (e.payload as { assigneeName?: string } | null)?.assigneeName ?? "")
+      : e?.kind === "created" && (e.payload as { via?: string } | null)?.via === "assistant" ? i18n.getText("UI_EVT_CREATED_ASSISTANT")
+      : e?.kind === "created" && (e.payload as { via?: string } | null)?.via === "mcp" ? i18n.getText("UI_EVT_CREATED_MCP")
       : known ? i18n.getText(k.title(side)) : k.title(side);
-    const mine = e.actorSide === side;
+    const mine = e?.actorSide === side;
     return (
-      <TimelineItem key={e.id} icon={sent ? ENTITY[sent.entity]?.icon ?? k.icon : k.icon}
-        state={sent?.to.length ? "Positive" : k.state ?? "None"} titleText={title}
-        name={e.actorName ?? undefined} subtitleText={when(new Date(e.at))} data-mine={mine || undefined}
-        style={tipVars(title, e.visibility === "internal" ? i18n.getText("UI_INTERNAL_TAG") : undefined)}>
+      <TimelineItem key={x.kind === "doc" ? `${x.d.entity}:${x.d.docEntry}` : x.e.id} icon={(entity && ENTITY[entity]?.icon) || k.icon}
+        state={sent?.to.length ? "Positive" : x.kind === "doc" ? "None" : k.state ?? "None"} titleText={title}
+        name={named ? e?.actorName ?? undefined : undefined} data-mine={mine || undefined}
+        subtitleText={e ? when(new Date(e.at)) : parseIsoDate(doc!.docDate)?.toLocaleDateString(formatLocale())}
+        style={tipVars(title, e?.visibility === "internal" ? i18n.getText("UI_INTERNAL_TAG") : undefined)}>
         {/* The body sits on its side as a block; a note's lines still read from the left. */}
         <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", textAlign: "start", alignItems: mine ? "flex-end" : "flex-start" }}>
-          {e.kind === "revised" ? <Revision payload={e.payload} labels={labels} /> : null}
-          {e.kind === "quoted" && q?.value !== undefined ? <Text>{money(q.value, currency)}</Text> : null}
+          {q?.value !== undefined ? <Text>{money(q.value, currency)}</Text> : null}
+          {x.kind === "doc" ? <Text>{money(x.d.docTotal, currency)}</Text> : null}
           {f ? <Link href={fileUrl(f.fileId)} icon="download">{`${f.name} (${fileSize(f.size)})`}</Link> : null}
           {/* The PDF as it was sent, not a fresh print. */}
-          {sent ? <Link href={fileUrl(sent.fileId)} icon="pdf-attachment">{`${sentName}.pdf`}</Link> : null}
+          {sent ? <Link href={fileUrl(sent.fileId)} icon="pdf-attachment">{`${name}.pdf`}</Link> : null}
+          {/* A mail that left: the recipients by the envelope, as "Not emailed" says why one did not. */}
+          {sent?.to.length ? (
+            <ObjectStatus state="Positive" icon={<Icon name="email" />}>{i18n.getText("UI_EVT_DOC_EMAILED", sent.to.join(", "))}</ObjectStatus>
+          ) : null}
           {sent?.error ? (
             <ObjectStatus state="Critical" showDefaultIcon>
               {i18n.getText("UI_EVT_DOC_NOT_EMAILED", NOT_EMAILED[sent.error] ? i18n.getText(NOT_EMAILED[sent.error]!) : sent.error)}
             </ObjectStatus>
           ) : null}
-          {e.note ? <Text style={{ whiteSpace: "pre-wrap" }}>{e.note}</Text> : null}
-          {entryActions?.(e)}
+          {e?.note ? <Text style={{ whiteSpace: "pre-wrap" }}>{e.note}</Text> : null}
+          {doc && (onOpenDocument || canPreview) ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+              {onOpenDocument ? (
+                <Button design="Transparent" icon="document-text" onClick={() => onOpenDocument(doc.entity, doc.docEntry)}>{i18n.getText("UI_OPEN")}</Button>
+              ) : null}
+              {canPreview ? <PrintActions entity={doc.entity} docEntry={doc.docEntry} /> : null}
+            </div>
+          ) : null}
+          {x.kind === "event" ? entryActions?.(x.e) : null}
         </div>
       </TimelineItem>
     );
@@ -298,33 +226,83 @@ export function ProjectTimeline({
             : entries.map(renderEntry)}
         </Timeline>
       )}
-      {canComment || onUpload ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-          <TextArea value={note} rows={2} growing growingMaxRows={8} maxlength={4000} disabled={posting}
-            placeholder={i18n.getText(side === "internal" ? "UI_COMMENT_STAFF" : "UI_COMMENT_CLIENT")}
-            accessibleName={i18n.getText("UI_COMMENT")} onInput={(e) => setNote(e.target.value ?? "")} />
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            {side === "internal" ? (
-              // Off by default: a comment or file on a client's request is for the client unless said otherwise.
-              <CheckBox text={i18n.getText("UI_INTERNAL_TOGGLE")} checked={internalOnly} disabled={posting}
-                onChange={(e) => setInternalOnly(e.target.checked)} />
-            ) : null}
-            {onUpload ? (
-              <FileUploader key={picks} hideInput maxFileSize={FILE_MAX_MB} disabled={posting} style={{ marginInlineStart: "auto" }}
-                accessibleName={i18n.getText("UI_ATTACH_NAME")}
-                onFileSizeExceed={() => { setPicks((n) => n + 1); setPostError(i18n.getText("UI_FILE_MAX", String(FILE_MAX_MB))); }}
-                onChange={(e) => attach(e.detail.files?.[0])}>
-                <Button design="Transparent" icon="attachment" disabled={posting}>{i18n.getText("UI_ATTACH")}</Button>
-              </FileUploader>
-            ) : null}
-            <Button design="Default" icon="paper-plane" disabled={posting || !note.trim()}
-              style={onUpload ? undefined : { marginInlineStart: "auto" }} onClick={() => void post()}>{i18n.getText("UI_POST")}</Button>
-          </div>
-          {postError ? <MessageStrip design="Negative" hideCloseButton>{postError}</MessageStrip> : null}
-        </div>
-      ) : null}
     </div>
   );
 }
 
 export type ProjectTimelineProps = Parameters<typeof ProjectTimeline>[0];
+
+/** A project's comment box: a note, staff's internal-only toggle, and a file. ProjectOverview keeps it in
+ *  the page's floating footer, so it stays in view however far the timeline scrolls. */
+export function TimelineComposer({ side, onComment, onUpload, look }: {
+  /** who is writing — the internal side gets the internal-only toggle */
+  side: "internal" | "external";
+  onComment: (note: string, internalOnly: boolean) => Promise<unknown>;
+  /** attach a file (≤ 10 MB, any type); omit for a reader who may not upload (a portal viewer).
+   *  Staff's internal-only toggle applies to it as to a comment. */
+  onUpload?: (file: File, internalOnly: boolean) => Promise<unknown>;
+  /** the pill's colours; the theme's field look if absent */
+  look?: ComposerLook;
+}) {
+  const i18n = useUiI18n();
+  const [note, setNote] = useState("");
+  const [internalOnly, setInternalOnly] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const [postError, setPostError] = useState<string | null>(null);
+  // Remounts the uploader after each pick, so choosing the same file again still fires a change.
+  const [picks, setPicks] = useState(0);
+
+  const busy = async (work: () => Promise<unknown>, after: () => void) => {
+    setPosting(true);
+    setPostError(null);
+    try {
+      await work();
+      after();
+      setInternalOnly(false);
+    } catch (e) {
+      setPostError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPosting(false);
+    }
+  };
+  const post = () => note.trim()
+    ? busy(() => onComment(note.trim(), side === "internal" && internalOnly), () => setNote(""))
+    : Promise.resolve();
+  const attach = (file: File | undefined) => {
+    setPicks((n) => n + 1);
+    if (!file || !onUpload) return;
+    if (file.size > FILE_MAX_MB * 1024 * 1024) return setPostError(i18n.getText("UI_FILE_MAX", String(FILE_MAX_MB)));
+    void busy(() => onUpload(file, side === "internal" && internalOnly), () => {});
+  };
+
+  // Leading: attach, then staff's internal-only switch; trailing: the round send.
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+      <Composer value={note} onInput={setNote} onSend={() => void post()} maxlength={4000} disabled={posting} look={look}
+        placeholder={i18n.getText(side === "internal" ? "UI_COMMENT_STAFF" : "UI_COMMENT_CLIENT")} accessibleName={i18n.getText("UI_COMMENT")}
+        leading={<>
+          {onUpload ? (
+            // No margin: the uploader wears an Input's .25rem, which made the row taller than the field.
+            <FileUploader key={picks} hideInput maxFileSize={FILE_MAX_MB} disabled={posting} style={{ margin: 0 }}
+              accessibleName={i18n.getText("UI_ATTACH_NAME")}
+              onFileSizeExceed={() => { setPicks((n) => n + 1); setPostError(i18n.getText("UI_FILE_MAX", String(FILE_MAX_MB))); }}
+              onChange={(e) => attach(e.detail.files?.[0])}>
+              <Button design="Transparent" icon="attachment" tooltip={i18n.getText("UI_ATTACH")} disabled={posting} />
+            </FileUploader>
+          ) : null}
+          {side === "internal" ? (
+            // Off by default: a comment or file on a client's request is for the client unless said otherwise.
+            <ToggleButton design="Transparent" icon="locked" pressed={internalOnly} disabled={posting}
+              tooltip={i18n.getText("UI_INTERNAL_TOGGLE")} onClick={() => setInternalOnly((v) => !v)} />
+          ) : null}
+        </>}
+        trailing={
+          <Button design="Emphasized" icon="paper-plane" tooltip={i18n.getText("UI_POST")} accessibleName={i18n.getText("UI_POST")}
+            disabled={posting || !note.trim()} style={ROUND_BUTTON} onClick={() => void post()} />
+        } />
+      {postError ? <MessageStrip design="Negative" hideCloseButton>{postError}</MessageStrip> : null}
+    </div>
+  );
+}
+
+export type TimelineComposerProps = Parameters<typeof TimelineComposer>[0];

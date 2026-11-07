@@ -4,13 +4,14 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import type { UIMessage } from "@tanstack/ai-react";
 import { TextPart } from "@tanstack/ai-react/ui";
 import {
-  BusyIndicator, Button, FlexBox, Icon, Label, Link, MessageStrip, Tag, TextArea, ToggleButton, Token, Tokenizer,
+  BusyIndicator, Button, FlexBox, Icon, Label, Link, MessageStrip, Tag, ToggleButton, Token, Tokenizer,
   type TextAreaDomRef,
 } from "@ui5/webcomponents-react";
 import { Button as AiButton, ButtonState } from "@ui5/webcomponents-ai-react";
 import { useLanguage } from "@confire/ui/i18n.ts";
 import { FILE_MAX_MB } from "@confire/ui/files.ts";
 import { formatLocale } from "@confire/ui/format.ts";
+import { Composer, ROUND_BUTTON } from "@confire/ui/Composer.tsx";
 import { ORPCError } from "@orpc/client";
 import { useI18n } from "../i18n.ts";
 import { client, orpc } from "../orpc.ts";
@@ -144,35 +145,6 @@ const ASSISTANT_BUTTONS = {
   "--sapButton_Emphasized_Hover_BorderColor": "var(--cf-a-send)",
 } as CSSProperties;
 
-/** The textarea's own field look, switched off through its public parameters: the composer's pill
- *  draws the border and the focus instead. */
-const BARE_FIELD = {
-  width: "100%",
-  margin: 0,
-  "--sapField_Background": "transparent",
-  "--sapField_Hover_Background": "transparent",
-  "--sapField_Focus_Background": "transparent",
-  "--sapField_ReadOnly_Background": "transparent",
-  "--sapField_BackgroundStyle": "none",
-  "--sapField_Hover_BackgroundStyle": "none",
-  "--sapField_ReadOnly_BackgroundStyle": "none",
-  "--sapField_BorderWidth": "0",
-  "--sapField_Shadow": "none",
-  "--sapField_Hover_Shadow": "none",
-  "--sapContent_FocusWidth": "0",
-} as CSSProperties;
-/** The composer is a row — attach, the field, send — with the textarea as tall as its
- *  buttons at one row (36 px cozy, 26 compact): UI5 draws it 2 px taller (line + 8/7 px padding + a 1 px
- *  wrapper edge each side). Its padding variables also size the mirror `growing` measures, so they are
- *  the one knob — private (`--_ui5_`), so recheck on a UI5 bump; at worst it is 2 px off again. The
- *  margin is UI5's block margin, which buttons do not have. */
-const ROW_FIELD = {
-  flex: 1,
-  margin: 0,
-  "--_ui5_textarea_padding_top": "var(--_ui5-compact-size, .125rem) var(--_ui5-cozy-size, .4375rem)",
-  "--_ui5_textarea_padding_bottom": "var(--_ui5-compact-size, .0625rem) var(--_ui5-cozy-size, .375rem)",
-} as CSSProperties;
-
 /** A wide chat's reading column, centred by padding so the scrollbar stays at the edge. */
 const READING = "max(1rem, (100% - 48rem) / 2)";
 
@@ -203,8 +175,6 @@ export function ChatView({ thread, route, kind, head, welcome, wide = false, onT
   const [dropError, setDropError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [focused, setFocused] = useState(false);
-  const [hovered, setHovered] = useState(false);
   const [begun, setBegun] = useState(false);
   const [threadProjectId, setThreadProjectId] = useState(thread.projectId);
   // What the chat works on: the page's configuration, else its own — the tools reach it from any page.
@@ -497,14 +467,6 @@ export function ChatView({ thread, route, kind, head, welcome, wide = false, onT
         disabled={disabled || busy} onClick={() => picker.current?.click()} />
     </>
   );
-  // Enter sends, Shift+Enter breaks the line: a pasted email keeps its lines.
-  const field = (
-    <TextArea ref={input} growing growingMaxRows={8} rows={1} value={text} style={{ ...BARE_FIELD, ...ROW_FIELD }}
-      disabled={disabled} readonly={busy} placeholder={t(kind === "report" ? "REPORT_PLACEHOLDER" : "ASSISTANT_PLACEHOLDER")} accessibleName={t(kind === "report" ? "REPORT_PLACEHOLDER" : "ASSISTANT_PLACEHOLDER")}
-      onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-      onInput={(e) => setText(e.target.value)}
-      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(text); } }} />
-  );
   // Fiori's AI button: send turns into stop while the answer streams. A drop may come without text.
   // Round, as Joule's, in UI5's own size (the AI button sizes its inner button itself); with nothing to
   // send it is Joule's pale send colour rather than UI5's faded one.
@@ -512,7 +474,7 @@ export function ChatView({ thread, route, kind, head, welcome, wide = false, onT
   const sendButton = (
     <AiButton design="Emphasized" state={chat.isLoading ? "generating" : "send"} disabled={nothing}
       style={{
-        "--sapButton_BorderCornerRadius": "50%", "--sapContent_DisabledOpacity": "1",
+        ...ROUND_BUTTON, "--sapContent_DisabledOpacity": "1",
         "--sapButton_Emphasized_Background": nothing ? "var(--cf-a-send-empty)" : "var(--cf-a-send)",
         "--sapButton_Emphasized_BorderColor": nothing ? "var(--cf-a-send-empty)" : "var(--cf-a-send)",
       } as CSSProperties}
@@ -536,29 +498,28 @@ export function ChatView({ thread, route, kind, head, welcome, wide = false, onT
       }}>
     </ToggleButton>
   ) : null;
-  // The composer: Joule's pill around one row, the files above it.
+  // The composer: Joule's pill, the files above it. Enter sends, Shift+Enter breaks the line: a pasted
+  // email keeps its lines.
   const composer = (
     <>
       {tokens}
-      <FlexBox alignItems="End" gap="0.25rem" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
-        style={{
-          minHeight: "2.25rem", padding: "0 0.25rem", borderRadius: "1.25rem", border: "1px solid var(--cf-a-accent)",
-          background: "var(--cf-a-page)", boxShadow: hovered ? "var(--cf-a-hover-shadow)" : "none",
-          outline: focused ? "0.125rem solid var(--cf-a-focus)" : "none",
-        }}>
-        {attach}{autoToggle}{field}
-        {text ? <Button design="Transparent" icon="decline" tooltip={t("ASSISTANT_CLEAR")} accessibleName={t("ASSISTANT_CLEAR")}
-          onClick={() => { setText(""); input.current?.focus(); }} /> : null}
-        {sendButton}
-      </FlexBox>
+      <Composer inputRef={input} value={text} onInput={setText} onSend={() => send(text)} disabled={disabled} readonly={busy}
+        placeholder={t(kind === "report" ? "REPORT_PLACEHOLDER" : "ASSISTANT_PLACEHOLDER")}
+        look={{ background: "var(--cf-a-page)", border: "var(--cf-a-accent)", focus: "var(--cf-a-focus)", hoverShadow: "var(--cf-a-hover-shadow)" }}
+        leading={<>{attach}{autoToggle}</>}
+        trailing={<>
+          {text ? <Button design="Transparent" icon="decline" tooltip={t("ASSISTANT_CLEAR")} accessibleName={t("ASSISTANT_CLEAR")}
+            onClick={() => { setText(""); input.current?.focus(); }} /> : null}
+          {sendButton}
+        </>} />
     </>
   );
 
-  // Quoting starts from a drop, which the welcome says.
+  // Quoting starts from a drop, which the welcome says. In the chat, under the welcome, as Joule's.
   const prompts = kind === "configure" ? ["ASSISTANT_PROMPT_MISSING", "ASSISTANT_PROMPT_UNAVAILABLE"]
     : kind === "report" ? [] : ["ASSISTANT_PROMPT_WAITING", "ASSISTANT_PROMPT_MONTH"];
   const quick = empty && !off && prompts.length ? (
-    <FlexBox wrap="Wrap" gap="0.5rem" justifyContent="Center">
+    <FlexBox wrap="Wrap" gap="0.5rem" justifyContent="Center" style={{ marginTop: "1.5rem" }}>
       {prompts.map((k) => <AiAction key={k} text={t(k)} disabled={disabled} onClick={() => send(t(k))} />)}
     </FlexBox>
   ) : null;
@@ -584,7 +545,7 @@ export function ChatView({ thread, route, kind, head, welcome, wide = false, onT
             style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBlock: "1rem", paddingInline: inline }}
             onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 40; }}>
             {notices}
-            {empty && welcome ? <div style={{ marginBlock: "auto", textAlign: "center" }}>{welcome}</div> : null}
+            {empty && (welcome || quick) ? <div style={{ marginBlock: "auto", textAlign: "center" }}>{welcome}{quick}</div> : null}
             {turns.map(({ key, m, first }, at) => {
               const parts = renderMessage(m, at).filter(Boolean);
               const attached = m.role === "user" ? attachedOf(m) : [];
@@ -631,7 +592,6 @@ export function ChatView({ thread, route, kind, head, welcome, wide = false, onT
             {dropStrip}
             {readFiles ? <div>{readFiles}</div> : null}
             {composer}
-            {quick}
             {/* Joule's faint disclaimer colour is too faint to read: the muted one instead. */}
             <div style={{ textAlign: "center", fontSize: "0.6875rem", color: empty ? "var(--cf-a-head-text)" : "var(--cf-a-muted)" }}>
               {t("ASSISTANT_DISCLAIMER")}

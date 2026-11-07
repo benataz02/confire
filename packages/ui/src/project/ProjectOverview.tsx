@@ -1,120 +1,106 @@
-import { useMemo, useRef, type ReactNode } from "react";
-import {
-  Button, Card, Icon, Label, Link, ObjectPage, ObjectPageHeader, ObjectPageSection, ObjectPageTitle, Text, Title, Toolbar,
-  ToolbarItem, type ObjectPageDomRef,
-} from "@ui5/webcomponents-react";
-import { useUiI18n } from "../i18n.ts";
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { DynamicPage, DynamicPageHeader, DynamicPageTitle, Label, Title, Toolbar, type DynamicPageDomRef } from "@ui5/webcomponents-react";
 import { formatLocale } from "../format.ts";
-import { PageMessages, type PageMessage } from "../PageMessages.tsx";
-import { JourneyBar, JOURNEY_ICONS } from "../journey/JourneyBar.tsx";
+import { JourneyBar } from "../journey/JourneyBar.tsx";
 import type { JourneyNext, Side } from "../journey/ring.ts";
-import { ProjectTimeline, type ProjectTimelineProps } from "../timeline/ProjectTimeline.tsx";
+import { ProjectTimeline, TimelineComposer, type ProjectTimelineProps, type TimelineComposerProps } from "../timeline/ProjectTimeline.tsx";
 import { chaptersOf, mergeEntries, stepDates } from "../timeline/chapters.ts";
 
-// A client project's page, in both apps (client-project-page spec, "The project page", mockup C): the
-// title with the progress bar, the configuration as one line, the timeline in chapters, then the steps
-// still to come. Props-driven like ProjectTimeline: each app's route passes its data, texts and calls.
+// A client project's page, in both apps (client-project-page spec, "The project page"): the title and
+// its actions, the progress bar as the header, the timeline in chapters as the content and its comment
+// box as the floating footer. A DynamicPage, not an ObjectPage: Fiori's object page is an object in
+// sections, and this page is one thing — the conversation. Props-driven like ProjectTimeline: each
+// app's route passes its data, texts and calls.
 
-const TIMELINE = "timeline";
-
-export function ProjectOverview({
-  side, title, subtitle, breadcrumbs, tags, subHeader, actions, messages, openMessagesOn, journey, config, upcoming, timeline,
-}: {
+export function ProjectOverview({ side, title, subtitle, breadcrumbs, tags, actions, journey, timeline }: {
   side: Side;
-  /** the project's name, and the model's */
+  /** the project's name, and the line under it (the portal: the model; staff: client and assignee) */
   title: string; subtitle: string;
-  breadcrumbs: ReactNode; tags: ReactNode;
-  /** over the bar: staff's client and assignee, the quote-answer strip */
-  subHeader?: ReactNode;
-  /** ToolbarButtons, after the messages button */
+  /** a PageBreadcrumbs: a slot, so an element that forwards `slot` */
+  breadcrumbs: ReactElement; tags: ReactNode;
+  /** ToolbarButtons; the configuration's comes first */
   actions: ReactNode;
-  messages: PageMessage[];
-  /** PageMessages' `openOn` */
-  openMessagesOn?: number;
   journey: { step: number; next: JourneyNext; labels: string[]; nextText: string; ariaLabel: string };
-  /** `label` is the line's name ("Configuration"); `text` its open action's */
-  config: { label: string; summary: string[]; text: string; emphasized: boolean; onOpen: () => void };
-  /** the first not-reached step's sentence; the names come from journey.labels */
-  upcoming: { sentence: string | null };
-  timeline: Omit<ProjectTimelineProps, "chapters">;
+  timeline: Omit<ProjectTimelineProps, "chapters"> & Omit<TimelineComposerProps, "side">;
 }) {
-  const i18n = useUiI18n();
-  const page = useRef<ObjectPageDomRef>(null);
+  const page = useRef<DynamicPageDomRef>(null);
+  const { onComment, onUpload, ...feed } = timeline;
+
+  // The footer floats over the content, which ends in a spacer of UI5's to scroll the last entry clear of
+  // it — 4rem, a Bar's height. The comment box is taller and grows as one types, so the spacer follows it:
+  // its height, the footer's own .5rem under it, and .5rem of air.
+  // ponytail: UI5's private variable; re-check on a UI5 upgrade, drop if the footer ever sizes its spacer.
+  const footer = useRef<HTMLDivElement>(null);
+  const [footerHeight, setFooterHeight] = useState(0);
+  useLayoutEffect(() => {
+    const el = footer.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setFooterHeight(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // A done step's date: its chapter's milestone (stepDates), drawn as "29 Oct".
-  const dates = useMemo(() => stepDates(chaptersOf(mergeEntries(timeline.events, timeline.documents, { docsAfterDay: true })))
+  const dates = useMemo(() => stepDates(chaptersOf(mergeEntries(feed.events, feed.documents)))
     .map((t) => (t === undefined ? undefined : new Date(t).toLocaleDateString(formatLocale(), { day: "numeric", month: "short" }))),
-  [timeline.events, timeline.documents]);
+  [feed.events, feed.documents]);
 
-  // Focus first, as the portal's goSection does: wcr sets the scroller's scroll-padding (the sticky title
-  // and the pinned header) only while focus is inside the content, and the bar sits outside it, so
-  // without it the target scrolls under the header. The section is what takes the focus (a plain div
-  // wcr makes focusable): a UI5 host's focus() is async and lands in its shadow, after the scroll.
-  const scrollTo = (selector: string) => {
-    page.current?.querySelector<HTMLElement>(`[id="ObjectPageSection-${TIMELINE}"]`)?.focus({ preventScroll: true });
-    page.current?.querySelector<HTMLElement>(selector)?.scrollIntoView({ block: "start" });
+  // The title stays over the top of the scrolling content, and the header with it only while pinned
+  // (unpinned, it scrolls away and snaps), so a chapter starts under them: its scroll margin is their height.
+  const toChapter = (i: number) => {
+    const p = page.current;
+    const chapter = p?.querySelector<HTMLElement>(`[data-chapter="${i}"]`);
+    if (!p || !chapter) return;
+    const sticky = p.headerPinned ? ":scope > [ui5-dynamic-page-title], :scope > [ui5-dynamic-page-header]" : ":scope > [ui5-dynamic-page-title]";
+    chapter.style.scrollMarginTop = `${[...p.querySelectorAll(sticky)].reduce((h, el) => h + el.getBoundingClientRect().height, 0)}px`;
+    chapter.scrollIntoView({ block: "start" });
   };
 
-  const ahead = journey.next === "done" || journey.next === "declined"
-    ? [] : journey.labels.map((label, i) => ({ label, i })).filter(({ i }) => i > journey.step);
-
+  // The name in UI5's object-header size, its tags beside it and centred on it as the configuration page's
+  // ObjectPageTitle has them. In the heading slot, not the title's content: that stretches to the actions'
+  // row and sits its content lower and further off. Wrapped, the Title loses the slot's styling of a bare
+  // one, so its font, colour and top padding are set here.
+  // ponytail: UI5's private padding variable (fallback its 2.24 value); re-check on a UI5 upgrade.
+  const heading = (fontSize: string) => (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.5rem",
+      paddingTop: "var(--_ui5_dynamic_page_title_heading_padding_top, .3125rem)" }}>
+      <Title style={{ fontSize, fontFamily: "var(--sapObjectHeader_Title_FontFamily)", color: "var(--sapObjectHeader_Title_TextColor)" }}>
+        {title}
+      </Title>
+      <span style={{ display: "flex" }}>{tags}</span>
+    </div>
+  );
+  const subheading = <Label>{subtitle}</Label>;
   return (
-    // Pinned: the bar is how one jumps between chapters, so the header never snaps away under the scroll,
-    // nor on a title click. A jump clears it through the scroll padding (scrollTo).
-    <ObjectPage hidePinButton headerPinned preserveHeaderStateOnClick ref={page}
+    // The bar snaps away on scroll; its pin keeps it. The comment box stays in view.
+    <DynamicPage ref={page} showFooter
+      style={{ "--_ui5_dynamic_page_footer_spacer": `calc(${footerHeight}px + 1rem)` } as CSSProperties}
+      footerArea={
+        // The pill floats itself, in a floating footer's colours, as wide as the timeline's column so its
+        // edges are the column's. Not a Bar: its height is fixed and it clips what it holds.
+        <div ref={footer} style={{ maxWidth: "60rem", marginInline: "auto" }}>
+          <TimelineComposer side={side} onComment={onComment} onUpload={onUpload}
+            look={{ background: "var(--sapPageFooter_Background)", border: "var(--sapPageFooter_BorderColor)", shadow: "var(--sapContent_Shadow1)" }} />
+        </div>
+      }
       titleArea={
-        <ObjectPageTitle header={<Title>{title}</Title>} subHeader={<Text>{subtitle}</Text>} breadcrumbs={breadcrumbs}
-          actionsBar={
-            <Toolbar design="Transparent">
-              <ToolbarItem overflowPriority="NeverOverflow">
-                <PageMessages messages={messages} openOn={openMessagesOn} onSection={() => scrollTo(`[id="ObjectPageSection-${TIMELINE}"]`)} />
-              </ToolbarItem>
-              {actions}
-            </Toolbar>
-          }>
-          {tags}
-        </ObjectPageTitle>
+        // Expanded and snapped (UI5 draws the snapped slots instead, and empty ones lose the name); on a
+        // phone, snapped, the name alone.
+        <DynamicPageTitle heading={heading("var(--sapObjectHeader_Title_FontSize)")}
+          snappedHeading={heading("var(--sapObjectHeader_Title_SnappedFontSize)")}
+          snappedTitleOnMobile={<Title>{title}</Title>} subheading={subheading} snappedSubheading={subheading}
+          breadcrumbs={breadcrumbs} actionsBar={<Toolbar design="Transparent">{actions}</Toolbar>} />
       }
       headerArea={
-        <ObjectPageHeader>
-          <div style={{ display: "flex", flexDirection: "column", gap: "1rem", width: "100%", maxWidth: "60rem" }}>
-            {subHeader}
+        <DynamicPageHeader>
+          {/* The timeline's column, so the bar sits over it. */}
+          <div style={{ width: "100%", maxWidth: "60rem", marginInline: "auto" }}>
             <JourneyBar step={journey.step} next={journey.next} side={side} labels={journey.labels} dates={dates}
-              nextText={journey.nextText} ariaLabel={journey.ariaLabel}
-              onStep={(i) => scrollTo(`[data-chapter="${i}"]`)} />
+              nextText={journey.nextText} ariaLabel={journey.ariaLabel} onStep={toChapter} />
           </div>
-        </ObjectPageHeader>
+        </DynamicPageHeader>
       }>
-      <ObjectPageSection id={TIMELINE} titleText={i18n.getText("UI_TIMELINE")} hideTitleText>
-        <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", width: "100%", maxWidth: "60rem", marginInline: "auto" }}>
-          <Card>
-            <div style={{ display: "flex", alignItems: "center", gap: "1rem", padding: "0.75rem 1rem" }}>
-              <Icon name="document-text" style={{ width: "1.25rem", height: "1.25rem", color: "var(--sapContent_IconColor)", flex: "none" }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <Text style={{ fontFamily: "var(--sapFontBoldFamily)" }}>{config.label}</Text>
-                {/* The space outside the Label: inside, its leading space collapses ("Configuration· 500"). */}
-                {config.summary.length ? <>{" "}<Label>{`· ${config.summary.join(" · ")}`}</Label></> : null}
-              </div>
-              {config.emphasized
-                ? <Button design="Emphasized" onClick={config.onOpen}>{config.text}</Button>
-                : <Link endIcon="navigation-right-arrow" onClick={config.onOpen}>{config.text}</Link>}
-            </div>
-          </Card>
-          <ProjectTimeline {...timeline} chapters={{ labels: journey.labels, draft: journey.next === "finish" }} />
-          {/* What comes next: the steps not reached yet, faded, the first saying what happens. */}
-          {ahead.length ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", opacity: "var(--sapContent_DisabledOpacity)" }}>
-              {ahead.map(({ label, i }, n) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                  <Icon name={JOURNEY_ICONS[i]!} style={{ width: "1.25rem", height: "1.25rem", color: "var(--sapContent_NonInteractiveIconColor)", flex: "none" }} />
-                  <Title level="H5">{label}</Title>
-                  {n === 0 && upcoming.sentence ? <Label wrappingType="Normal">{upcoming.sentence}</Label> : null}
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </ObjectPageSection>
-    </ObjectPage>
+      <ProjectTimeline {...feed} chapters={{ labels: journey.labels, draft: journey.next === "finish" }} />
+    </DynamicPage>
   );
 }

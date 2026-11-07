@@ -53,7 +53,8 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
     ),
   };
   const create = useMutation(orpc.configs.createQuote.mutationOptions());
-  // Email the quotation to the customer from the workspace's mailbox (document-mail spec §5.3).
+  // Email the quotation to the customer from the workspace's mailbox (document-mail spec §5.3) — an
+  // internal configuration's only: a client's request is told by Confire's mail and answered in the portal.
   const notifyClient = useNotifyClient("Quotations");
 
   if (draft.isPending || meta.isPending) return <BusyIndicator active delay={0} style={{ width: "100%", marginTop: "4rem" }} />;
@@ -94,7 +95,7 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
       lockedFields={d.portal ? LOCKED_REQUEST : LOCKED}
       localViews
       createLabel={d.replaces ? t("CONFIG_UPDATE_IN_SAP") : t("CONFIG_CREATE_IN_SAP")}
-      createControls={notifyClient.control}
+      createControls={d.portal ? undefined : notifyClient.control}
       // A reopened request re-quotes its quotation (spec §7.3) — said before the post, not after.
       notice={d.replaces ? (
         <MessageStrip design="Information" hideCloseButton>
@@ -112,13 +113,13 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
       // The draft carries the commandId it was built from, so the server refuses to post a
       // selection that moved between preview and Create rather than quoting something else.
       onSave={async (header) => {
-        const r = await create.mutateAsync({ projectId, commandId: d.commandId, header, notify: notifyClient.notify });
+        const r = await create.mutateAsync({ projectId, commandId: d.commandId, header, notify: d.portal ? undefined : notifyClient.notify });
         void qc.invalidateQueries({ queryKey: orpc.configs.get.queryOptions({ input: { id: projectId } }).queryKey });
         void qc.invalidateQueries({ queryKey: orpc.requests.rows.key() });
         void qc.invalidateQueries({ queryKey: orpc.timeline.list.queryOptions({ input: { projectId } }).queryKey });
         // A request goes back to the request: its status and timeline are what moved.
         if (d.portal) {
-          toast(withMail(r.mode === "updated" ? t("CONFIG_TOAST_QUOTE_UPDATED") : t("CONFIG_TOAST_QUOTE_SENT"), r.mail, t));
+          toast(r.mode === "updated" ? t("CONFIG_TOAST_QUOTE_UPDATED") : t("CONFIG_TOAST_QUOTE_SENT"));
           void navigate({ to: "/$slug/configs/$id", params: { id: projectId } });
           return;
         }

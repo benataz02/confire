@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BusyIndicator, Button, Icon, MenuItem, MessageStrip } from "@ui5/webcomponents-react";
+import { BusyIndicator, Button, Icon, MessageStrip } from "@ui5/webcomponents-react";
 import { getTheme } from "@ui5/webcomponents-base/dist/config/Theme.js";
 import { attachThemeLoaded, detachThemeLoaded } from "@ui5/webcomponents-base/dist/Theming.js";
 import { firstName } from "@confire/ui/format.ts";
@@ -9,8 +9,7 @@ import { useI18n } from "../i18n.ts";
 import { client, meQuery, orpc } from "../orpc.ts";
 import { useAssistantShell } from "./AssistantProvider.tsx";
 import { useAssistantThread, type Thread } from "./useAssistant.ts";
-import { ChatDrawer, ChatMenu, useChats, type ChatRow } from "./ChatDrawer.tsx";
-import { RenameField } from "./RenameField.tsx";
+import { ChatDrawer, useChats, type ChatRow } from "./ChatDrawer.tsx";
 import { useOpenForm } from "./cards/registry.tsx";
 import { REPORT_ROUTE, threadInput } from "./routeContext.ts";
 import { paletteFor, paletteVars, type Palette } from "./palette.ts";
@@ -76,8 +75,6 @@ export function AssistantPanel() {
   const config = useQuery({ ...orpc.configs.get.queryOptions({ input: { id: projectId ?? "" } }), enabled: !!projectId });
   const kind = projectId ? "configure" : thread.data?.reportId ? "report" : kindOf(route);
   const [drawer, setDrawer] = useState(false);
-  const [menu, setMenu] = useState<HTMLElement | null>(null);
-  const [renaming, setRenaming] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
   // The box (geometry.ts). Local state is enough: the panel never unmounts once mounted, so a drag
@@ -188,14 +185,6 @@ export function AssistantPanel() {
   // Open configuration, unless its form is what the page shows (a client's request's form is its own page).
   const formRoute = config.data?.request ? "/$slug/configs/$id_/configuration" : "/$slug/configs/$id";
   const offerForm = kind === "configure" && !!projectId && !(route.projectId === projectId && route.routeId === formRoute);
-  const onMenu = async (a: string | null) => {
-    setMenu(null);
-    if (a === "open" && projectId) void openForm(projectId);
-    if (!row) return;
-    if (a === "pin") void chats.pin(row);
-    if (a === "rename") setRenaming(true);
-    if (a === "delete" && await chats.remove(row)) removed(row);
-  };
 
   const icon = (name: string, label: string, onClick: (e: { currentTarget: unknown }) => void, extra?: object) => (
     <Button design="Transparent" icon={name} tooltip={label} accessibleName={label} onClick={onClick} {...extra} />
@@ -206,14 +195,12 @@ export function AssistantPanel() {
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag}>
         {/* Maximized, an open sidebar has its own ☰. */}
         {!maximized || !sidebar ? icon("menu2", t("ASSISTANT_CHATS"), () => setChatsOpen((o) => !o), { accessibilityAttributes: { expanded: chatsOpen } }) : null}
-        {renaming && row
-          ? <RenameField value={chats.label(row)} label={t("ASSISTANT_RENAME")} onDone={(v) => { setRenaming(false); chats.rename(row, v); }} />
-          : (
-            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "1rem", fontWeight: "bold" }}>
-              {empty || !row ? t("ASSISTANT_TITLE") : chats.label(row)}
-            </span>
-          )}
-        {!empty && row ? icon("overflow", t("ASSISTANT_CHAT_ACTIONS"), (e) => setMenu(e.currentTarget as HTMLElement), { accessibilityAttributes: { hasPopup: "menu" } }) : null}
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "1rem", fontWeight: "bold" }}>
+          {empty || !row ? t("ASSISTANT_TITLE") : chats.label(row)}
+        </span>
+        {/* Pin, rename and delete are the drawer rows' •••. */}
+        {offerForm ? icon("sales-quote", t("ASSISTANT_OPEN_CONFIG"), () => void openForm(projectId!)) : null}
+        {icon("write-new", t("ASSISTANT_NEW_CHAT"), () => void newChat())}
         {icon(maximized ? "exit-full-screen" : "full-screen", t(maximized ? "ASSISTANT_RESTORE" : "ASSISTANT_MAXIMIZE"), () => resize(!maximized))}
         {icon("decline", t("ASSISTANT_CLOSE"), shell.close)}
       </div>
@@ -245,11 +232,13 @@ export function AssistantPanel() {
         ...paletteVars(palette),
         position: "fixed", zIndex: 4, left: box.left, top: box.top, width: box.width, height: box.height, borderRadius: box.radius,
         transition: animating ? "all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94)" : "none",
-        display: shell.open ? "flex" : "none", overflow: "hidden",
+        display: shell.open ? "flex" : "none", overflow: "hidden", boxSizing: "border-box",
         background: "var(--cf-a-page)", color: "var(--cf-a-text)", boxShadow: maximized ? "none" : "var(--cf-a-shadow)",
+        // The card is the page's white on white: a light edge sets it apart. Maximized, it is the window.
+        border: maximized ? "none" : "1px solid var(--sapGroup_ContentBorderColor)",
       }}>
       <ChatDrawer open={chatsOpen} mode={maximized ? "sidebar" : "card"} openId={thread.data?.id ?? null} chats={chats}
-        onPick={pick} onNew={() => void newChat()} onHide={() => setChatsOpen(false)} onRemoved={removed} />
+        onPick={pick} onHide={() => setChatsOpen(false)} onRemoved={removed} />
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         {thread.data ? <ChatView key={thread.data.id} thread={thread.data} route={route} kind={kind} head={head} welcome={welcome} wide={maximized}
           onTool={onTool} prefill={prefill} />
@@ -261,9 +250,6 @@ export function AssistantPanel() {
             </>
           )}
       </div>
-      <ChatMenu opener={menu} pinned={!!row?.pinned} onAction={(a) => void onMenu(a)}>
-        {offerForm ? <MenuItem data-action="open" icon="sales-quote" text={t("ASSISTANT_OPEN_CONFIG")} /> : null}
-      </ChatMenu>
     </aside>
   );
 }

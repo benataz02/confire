@@ -307,14 +307,13 @@ function OverviewCard({ o }: { o: Record<string, number> }) {
 }
 
 /** A configuration's last few events, read-only. */
-function HistoryCard({ projectId, out, here }: { projectId: string; out: { events: TimelineEvent[]; labels: Record<string, string> }; here: boolean }) {
+function HistoryCard({ projectId, out, here }: { projectId: string; out: { events: TimelineEvent[] }; here: boolean }) {
   const i18n = useI18n();
   const open = useLinks();
   const currency = useCurrency();
   return (
     <Card>
-      <ProjectTimeline events={(out?.events ?? []).slice(-5)} labels={out?.labels ?? {}} side="internal" currency={currency}
-        canComment={false} onComment={async () => undefined} />
+      <ProjectTimeline events={(out?.events ?? []).slice(-5)} side="internal" currency={currency} />
       {here ? null : (
         <div style={{ padding: "0.5rem 1rem 0.75rem" }}>
           <Link onClick={() => open({ to: `/configs/${projectId}` })}>{i18n.getText("ASSISTANT_CARD_OPEN_CONFIG")}</Link>

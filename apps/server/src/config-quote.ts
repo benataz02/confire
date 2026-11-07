@@ -421,7 +421,10 @@ export async function createQuote(
   // This call performed the transition, so it sends — its two `reused` paths included: they are
   // reached only when an earlier call failed before its transition, so nothing was sent then. A
   // re-quote in place sends the revised quotation. Only created has the document in hand.
-  const mail = input.notify ? await afterPost({
+  // A client's request never goes from the tenant's mailbox: the client hears by Confire's own mail
+  // (the `quoted` event's notification) and answers in the portal. The workspace's Outlook is for an
+  // internal configuration, whose conversation with the customer happens outside Confire.
+  const mail = input.notify && project.portalCardCode === null ? await afterPost({
     tenantId, userId, b1, companyDb: conn.companyDb, entity: "Quotations",
     doc: posted.row ?? { DocEntry: posted.docEntry }, // the update and dedup paths: afterPost reads it
     projects: async () => [project.id],

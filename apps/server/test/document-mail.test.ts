@@ -93,7 +93,7 @@ async function setup({ email = "ap@kunde.example" as string | null } = {}) {
     await notificationsSettled();
     return who === "admin" ? call(router.notifications.list, undefined, staff) : call(portalRouter.notifications.list, undefined, client);
   };
-  return { ...t, admin, buyer, company, staff, connect, quoted, copy, timeline, bell };
+  return { ...t, admin, buyer, company, model: model!, staff, connect, quoted, copy, timeline, bell };
 }
 
 const mark = async () => {
@@ -154,16 +154,34 @@ describe("document mail", () => {
     expect(notice[0]!.text).toContain(`/projects/${id}`);
   });
 
-  test("a quotation sent with its post: one quoted notice, no second one for the document", async () => {
+  test("a client's request quoted with notify on: Confire's quoted notice only, never the tenant's mailbox", async () => {
     const s = await setup();
     await s.connect();
     const m = await mark();
     const { id, posted } = await s.quoted(true);
+    expect(posted.mail).toBeNull();
+    await notificationsSettled();
+    expect(since(documentOutbox, m.docs)).toHaveLength(0);
+    expect((await s.timeline(id, "staff")).some((e) => e.kind === "document_sent")).toBe(false);
+    expect((await s.bell("buyer")).map((n) => n.type)).toEqual(["project.quoted", "project.accepted"]);
+  });
+
+  test("an internal configuration's quotation goes from the tenant's mailbox", async () => {
+    const s = await setup();
+    await s.connect();
+    const m = await mark();
+    const { id } = await call(router.configs.create, {
+      modelId: s.model.id, name: "Kabel 2", customer: { cardCode: s.company.cardCode, cardName: "Kunde" },
+    }, s.staff);
+    const { candidates } = await call(router.configs.calculate, { id, set: { material: "steel" } }, s.staff);
+    await call(router.configs.select, {
+      projectId: id, selection: candidates.rows[0]!.perBatch.map((b) => ({ candidateIdx: 0, batchQty: b.batchQty })),
+    }, s.staff);
+    const d = await call(router.configs.quoteDraft, { projectId: id }, s.staff);
+    const posted = await call(router.configs.createQuote, { projectId: id, commandId: d.commandId, notify: true }, s.staff);
     expect(posted.mail).toEqual({ to: ["ap@kunde.example"] });
     await notificationsSettled();
     expect(since(documentOutbox, m.docs).map((x) => x.subject)).toEqual([`${s.slug} — Oferta ${posted.docNum}`]);
-    expect((await s.timeline(id, "staff")).filter((e) => e.kind === "document_sent")).toHaveLength(1);
-    expect((await s.bell("buyer")).map((n) => n.type)).toEqual(["project.quoted", "project.accepted"]);
   });
 
   test("no email in SAP: said at once, and the project side still runs — the reason for staff only", async () => {
