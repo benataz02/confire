@@ -9,6 +9,7 @@ import { sameState } from "@confire/ui/views.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { useI18n } from "../../i18n.ts";
 import { client, orpc } from "../../orpc.ts";
+import { b1Label } from "../../features/b1/localize.ts";
 
 // Settings → Portal → Document fields (spec §13.1, D19): which SAP fields clients see on their
 // quotations, orders, deliveries and invoices. The options are the server's `pickable` list — the
@@ -20,12 +21,6 @@ type Entity = keyof Get["options"];
 type Part = "header" | "lines";
 type DocFields = Partial<Record<Entity, { header: string[]; lines: string[] }>>;
 
-const ENTITY_KEY: Record<Entity, string> = {
-  Quotations: "NAV_QUOTATIONS",
-  Orders: "NAV_ORDERS",
-  DeliveryNotes: "NAV_DELIVERIES",
-  Invoices: "ADMIN_INVOICES",
-};
 const PART_KEY: Record<Part, string> = { header: "ADMIN_PART_HEADER", lines: "ADMIN_PART_LINES" };
 
 export function PortalDocFields() {
@@ -62,7 +57,8 @@ function DocFieldsForm({ current }: { current: Get }) {
   const dirty = !sameState(draft, current.docFields);
 
   const count = (entity: Entity, part: Part) => (draft[entity] ? String(draft[entity]![part].length) : i18n.getText("ADMIN_DEFAULT"));
-  const entities = (Object.keys(ENTITY_KEY) as Entity[]).map((entity) => ({ entity, label: i18n.getText(ENTITY_KEY[entity]!) }));
+  // The server's DOC_ENTITIES, in its order.
+  const entities = (Object.keys(current.options) as Entity[]).map((entity) => ({ entity, label: b1Label(entity, (k) => i18n.getText(k)) }));
 
   return (
     <FlexBox direction="Column" style={{ padding: "1rem", gap: "1rem" }}>

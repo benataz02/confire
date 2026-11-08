@@ -12,13 +12,15 @@ import { initials } from "@confire/ui/format.ts";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { NotificationsPopover, useUnreadCount } from "@confire/ui/notifications/Notifications.tsx";
 import { B1_FEATURES } from "../features/b1/index.ts";
+import { b1Label } from "../features/b1/localize.ts";
 import { GlobalSearch, type SearchHit } from "./GlobalSearch.tsx";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import { THEMES, useAppearance } from "@confire/ui/appearance.ts";
 import { LANGUAGES, useLanguage } from "@confire/ui/i18n.ts";
 import { useI18n } from "../i18n.ts";
-import { AssistantProvider, useAssistantShell } from "../assistant/AssistantProvider.tsx";
+import { AssistantProvider } from "../assistant/AssistantProvider.tsx";
+import { useAssistantShell } from "../assistant/shell.ts";
 import { assistantToggle } from "../assistant/toggle.ts";
 
 const CflDialog = lazy(() => import("@confire/ui/cfl/CflDialog.tsx"));
@@ -26,19 +28,6 @@ const CflDialog = lazy(() => import("@confire/ui/cfl/CflDialog.tsx"));
 /** The user's own B1 sales employee — the server's SALES_PERSON_KEY (ui-views.ts), which the SAP
  *  lists' "Assigned to me" filters SalesPersonCode on. */
 const SALES_PERSON_KEY = "b1:salesPerson";
-
-const B1_NAV_KEY: Record<string, string> = {
-  Quotations: "NAV_QUOTATIONS",
-  Orders: "NAV_ORDERS",
-  DeliveryNotes: "NAV_DELIVERIES",
-  BusinessPartners: "NAV_BP",
-  Items: "NAV_ITEMS",
-};
-/** A declared B1 entity's list, as the side nav names it. */
-export const b1Label = (entity: string, t: (key: string) => string) => {
-  const key = B1_NAV_KEY[entity];
-  return key ? t(key) : entity;
-};
 
 const THEME_KEY: Record<string, string> = {
   sap_horizon: "SHELL_THEME_MORNING_HORIZON",

@@ -80,6 +80,7 @@ function domainIssue(p: Param, t: Translate): string | undefined {
   if (p.domain.kind !== "options") return undefined;
   const ref = p.domain.ref;
   if (ref.source !== "manual" && !ref.table) return t("MODEL_CHOOSE_MASTERDATA");
+  if (ref.source !== "manual" && ref.where && !ref.where.values.length) return t("MODEL_ROWS_VALUES_ERR");
   return undefined;
 }
 

@@ -9,6 +9,7 @@ const labelOf = (model: ModelDef | undefined, key: string) =>
   model?.parameters.find((p) => p.key === key)?.label ?? key;
 
 type Lock = { text: string; detail: string };
+const SAP_STEP = new Set(["ordered", "delivered", "invoiced"]);
 /** Why a client's request is read-only, in its status's own words (spec §7). A quoted request reads
  *  the client's answer, so `accepted` stands in for quoted once they gave it. Statuses missing here
  *  are never read-only on this page. */
@@ -66,8 +67,9 @@ export function configMessages(a: {
   const configure = { section: GENERAL_SECTION, group: t("CONFIG_SECTION_CONFIGURE") };
   const candidates = { section: "candidates", group: t("CONFIG_SECTION_CANDIDATES") };
 
+  // Past the quote in SAP (ordered, delivered, invoiced), a request reads as an internal one does.
   const lock = !a.locked ? undefined
-    : !a.locked.request ? requestLock(t, "quoted")
+    : !a.locked.request || SAP_STEP.has(a.locked.status) ? requestLock(t, "quoted")
     : requestLock(t, a.locked.quoteResponse === "accepted" ? "accepted" : a.locked.status === "quoted" ? "awaiting" : a.locked.status);
   if (lock) out.push({ id: "locked", type: "Information", ...lock, ...configure });
 

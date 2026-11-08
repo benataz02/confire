@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ModelDefZ, LookupRefZ, derivedColumns, displayColumns, derivedKey } from "../src/model";
+import { ModelDefZ, LookupRefZ, derivedColumns, displayColumns, derivedKey, refRows } from "../src/model";
 import { model } from "./fixture";
 
 describe("ModelDefZ", () => {
@@ -86,5 +86,19 @@ describe("LookupRef columns", () => {
       display: [],
     };
     expect(ModelDefZ.parse(m).history).toEqual({ table: "past", mappings: [], display: [] });
+  });
+});
+
+describe("refRows", () => {
+  const ops = { columns: ["Code", "Group"], rows: [["OP10", "CUT"], ["OP20", "WELD"], ["OP30", 10], ["OP40", null]] };
+  test("no where: every row", () => {
+    expect(refRows({ source: "table", table: "ops" }, ops)).toBe(ops.rows);
+  });
+  test("keeps the rows whose column holds a listed value, compared as text", () => {
+    const ref = { source: "table" as const, table: "ops", where: { col: "Group", values: ["CUT", "10"] } };
+    expect(refRows(ref, ops).map((r) => r[0])).toEqual(["OP10", "OP30"]);
+  });
+  test("a column the table lacks keeps nothing", () => {
+    expect(refRows({ source: "query", table: "ops", where: { col: "Nope", values: ["CUT"] } }, ops)).toEqual([]);
   });
 });

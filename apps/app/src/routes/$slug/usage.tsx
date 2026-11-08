@@ -6,7 +6,7 @@ import {
   AnalyticalCardHeader, BusyIndicator, Card, CardHeader, FlexBox, IllustratedMessage, MessageStrip, NumericSideIndicator, Text, Title,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
-import { ColumnChart, DonutChart } from "@ui5/webcomponents-react-charts";
+import { BarChart, ColumnChart, DonutChart } from "@ui5/webcomponents-react-charts";
 import { Grid, type GridState } from "@confire/ui/list-report/Grid.tsx";
 import { money } from "@confire/ui/money.ts";
 import { formatLocale } from "@confire/ui/format.ts";
@@ -15,8 +15,8 @@ import { orpc } from "../../orpc.ts";
 import { useI18n } from "../../i18n.ts";
 import { sortRows } from "../../reports/widgets.ts";
 
-// AI usage (admin): what the assistant cost this month, by day, kind and person, against the
-// monthly limit. Drawn as a report is — KPI cards, charts in cards, the people in a Grid — over
+// AI usage (admin): what the assistant cost this month, by day, step, skill, tool and person, against
+// the monthly limit. Drawn as a report is — KPI cards, charts in cards, the people in a Grid — over
 // `assistant.usageReport`, which reads `ai_usage` (assistant/usage.ts). Costs are USD: the meter's.
 
 export const Route = createFileRoute("/$slug/usage")({ head: () => title(t("NAV_AI_USAGE")), component: Usage });
@@ -25,7 +25,8 @@ const CHART_HEIGHT = "16rem";
 const grid = (min: string): CSSProperties => ({ display: "grid", gridTemplateColumns: `repeat(auto-fit, minmax(${min}, 1fr))`, gap: "1rem" });
 const PAGE: CSSProperties = { padding: "1rem 1.5rem 2rem", fontFamily: "var(--sapFontFamily)" };
 const CHART = { noAnimation: true, chartConfig: { resizeDebounce: 0 }, style: { height: CHART_HEIGHT } };
-const KIND_KEY: Record<string, string> = { chat: "USAGE_KIND_CHAT", intake: "USAGE_KIND_INTAKE", extract: "USAGE_KIND_EXTRACT" };
+const STEP_KEY: Record<string, string> = { reply: "USAGE_STEP_REPLY", tools: "USAGE_STEP_TOOLS", intake: "USAGE_KIND_INTAKE", extract: "USAGE_KIND_EXTRACT" };
+const SKILL_KEY: Record<string, string> = { configure: "USAGE_SKILL_CONFIGURE", report: "USAGE_SKILL_REPORT" };
 const usd = (v: number) => money(v, "USD");
 
 /** A KPI card. The side indicators are the card's content, not the header's children: the header lays
@@ -56,7 +57,6 @@ function Usage() {
     { key: "name", label: i18n.getText("USAGE_COL_USER") },
     { key: "calls", label: i18n.getText("USAGE_CALLS"), type: "number", width: 110 },
     { key: "chats", label: i18n.getText("USAGE_CHATS"), type: "number", width: 110 },
-    { key: "assisted", label: i18n.getText("USAGE_ASSISTED"), type: "number", width: 150 },
     { key: "input", label: i18n.getText("USAGE_COL_INPUT"), type: "number", width: 130 },
     { key: "output", label: i18n.getText("USAGE_COL_OUTPUT"), type: "number", width: 130 },
     { key: "cacheRead", label: i18n.getText("USAGE_COL_CACHE_READ"), type: "number", width: 130, hidden: true },
@@ -78,8 +78,20 @@ function Usage() {
   const { totals } = u;
   const share = u.limit > 0 ? totals.cost / u.limit : 0;
   const prompt = totals.input + totals.cacheRead + totals.cacheWrite;
-  const kinds = u.kinds.map((k) => ({ ...k, label: KIND_KEY[k.kind] ? t(KIND_KEY[k.kind]!) : k.kind }));
+  const named = (keys: Record<string, string>, v: string) => (keys[v] ? t(keys[v]!) : v);
+  const steps = u.steps.map((s) => ({ ...s, label: named(STEP_KEY, s.step) }));
+  const skills = u.skills.map((s) => ({ ...s, label: s.skill ? named(SKILL_KEY, s.skill) : t("USAGE_SKILL_NONE") }));
   const empty = <IllustratedMessage name="NoData" design="Spot" titleText={t("USAGE_EMPTY")} style={{ height: CHART_HEIGHT }} />;
+  const donut = (title: string, dataset: { label: string; cost: number }[]) => (
+    <Card accessibleName={title} header={<CardHeader titleText={title} subtitleText={t("USAGE_THIS_MONTH")} />}>
+      <div style={{ padding: "0 0.5rem 0.5rem" }}>
+        {dataset.length ? (
+          <DonutChart {...CHART} dataset={dataset} dimension={{ accessor: "label" }}
+            measure={{ accessor: "cost", formatter: usd, hideDataLabel: true }} />
+        ) : empty}
+      </div>
+    </Card>
+  );
 
   return (
     <FlexBox direction="Column" gap="1rem" style={PAGE}>
@@ -94,8 +106,8 @@ function Usage() {
           side={[[t("USAGE_LIMIT"), usd(u.limit)], [t("USAGE_LAST_MONTH"), usd(u.months.at(-2)?.cost ?? 0)]]} />
         <Kpi titleText={t("USAGE_CALLS")} subtitleText={t("USAGE_THIS_MONTH")} value={num.format(totals.calls)}
           side={[[t("USAGE_CHATS"), num.format(totals.chats)], [t("USAGE_USERS"), num.format(u.users.length)]]} />
-        <Kpi titleText={t("USAGE_ASSISTED")} subtitleText={t("USAGE_THIS_MONTH")} value={num.format(totals.assisted)}
-          side={[[t("USAGE_PER_CONFIG"), totals.assisted ? usd(totals.cost / totals.assisted) : "—"]]} />
+        <Kpi titleText={t("USAGE_PER_CHAT")} subtitleText={t("USAGE_THIS_MONTH")} value={totals.chats ? usd(totals.cost / totals.chats) : "—"}
+          side={[[t("USAGE_CALLS_PER_CHAT"), totals.chats ? num.format(totals.calls / totals.chats) : "—"]]} />
         {/* Cached prompt tokens cost a tenth of fresh ones: the share read from the cache is the lever. */}
         <Kpi titleText={t("USAGE_CACHE_HIT")} subtitleText={t("USAGE_CACHE_HIT_SUB")} value={prompt ? pct.format(totals.cacheRead / prompt) : "—"}
           side={[[t("USAGE_COL_INPUT"), num.format(prompt)], [t("USAGE_COL_OUTPUT"), num.format(totals.output)]]} />
@@ -123,15 +135,19 @@ function Usage() {
               measures={[{ accessor: "cost", label: t("USAGE_COST"), formatter: usd, hideDataLabel: true }]} />
           </div>
         </Card>
-        <Card accessibleName={t("USAGE_BY_KIND")} header={<CardHeader titleText={t("USAGE_BY_KIND")} subtitleText={t("USAGE_THIS_MONTH")} />}>
-          <div style={{ padding: "0 0.5rem 0.5rem" }}>
-            {kinds.length ? (
-              <DonutChart {...CHART} dataset={kinds} dimension={{ accessor: "label" }}
-                measure={{ accessor: "cost", formatter: usd, hideDataLabel: true }} />
-            ) : empty}
-          </div>
-        </Card>
+        {donut(t("USAGE_BY_STEP"), steps)}
+        {donut(t("USAGE_BY_SKILL"), skills)}
       </div>
+      <Card accessibleName={t("USAGE_BY_TOOL")} header={<CardHeader titleText={t("USAGE_BY_TOOL")} subtitleText={t("USAGE_BY_TOOL_SUB")} />}>
+        <div style={{ padding: "0 0.5rem 0.5rem" }}>
+          {u.tools.length ? (
+            // A bar per tool, by its name: the step labels are verbs, and two tools share one.
+            <BarChart {...CHART} style={{ height: `${Math.max(16, u.tools.length * 2)}rem` }} dataset={u.tools} noLegend
+              dimensions={[{ accessor: "tool" }]}
+              measures={[{ accessor: "cost", label: t("USAGE_COST"), formatter: usd, hideDataLabel: true }]} />
+          ) : empty}
+        </div>
+      </Card>
 
       <Grid title={t("USAGE_BY_USER")} columns={columns} state={state} onStateChange={(p) => setState((s) => ({ ...s, ...p }))}
         rows={rows} loadAll={async () => rows} keyOf={(r) => String(r.userId)} cellTemplates={cellTemplates}

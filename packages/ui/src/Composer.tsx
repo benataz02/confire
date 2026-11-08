@@ -2,16 +2,13 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, 
 import { TextArea, type TextAreaDomRef } from "@ui5/webcomponents-react";
 
 // The chat box both apps write in — the assistant's and a client project's comments — as ChatGPT's:
-// one pill row (leading buttons, the field, trailing buttons) while the text fits on it; once it does
-// not, the text takes the pill's whole width and the buttons drop to a row under it, and it goes back
+// one row (leading buttons, the field, trailing buttons) while the text fits on it; once it does not,
+// the text takes the box's whole width and the buttons drop to a row under it, and it goes back
 // when the text fits again. The field grows a row per line to 8, then scrolls. Enter sends,
 // Shift+Enter breaks the line. Its look is UI5's theme unless the caller passes its own (`look`).
 
-/** A round button (send): its radius, and its segment's — the AI button's inner one is a split button's. */
-export const ROUND_BUTTON = { "--sapButton_BorderCornerRadius": "50%", "--sapButton_Segment_BorderCornerRadius": "50%" } as CSSProperties;
-
-/** The textarea's own field look, switched off through its public parameters: the pill draws the
- *  border and the focus instead. */
+/** The textarea's own field look, switched off through its public parameters: the box draws the
+ *  border and the focus instead. Its padding stays UI5's. */
 const BARE_FIELD = {
   width: "100%",
   margin: 0,
@@ -26,12 +23,6 @@ const BARE_FIELD = {
   "--sapField_Shadow": "none",
   "--sapField_Hover_Shadow": "none",
   "--sapContent_FocusWidth": "0",
-  // One row is the buttons' height (36 px cozy, 26 compact): UI5 draws it 2 px taller (line + 8/7 px
-  // padding + a 1 px wrapper edge each side). Its padding variables also size the mirror `growing`
-  // measures, so they are the one knob.
-  // ponytail: UI5's private variables (`--_ui5_`); recheck on a UI5 bump — at worst it is 2 px off again.
-  "--_ui5_textarea_padding_top": "var(--_ui5-compact-size, .125rem) var(--_ui5-cozy-size, .4375rem)",
-  "--_ui5_textarea_padding_bottom": "var(--_ui5-compact-size, .0625rem) var(--_ui5-cozy-size, .375rem)",
 } as CSSProperties;
 
 let canvas: CanvasRenderingContext2D | null = null;
@@ -53,14 +44,14 @@ export function Composer({
   onSend: () => void;
   placeholder: string; accessibleName?: string;
   disabled?: boolean; readonly?: boolean; maxlength?: number;
-  /** before the field (attach, toggles); under it, at the left, while the text spans the pill */
+  /** before the field (attach, toggles); under it, at the left, while the text spans the box */
   leading?: ReactNode;
-  /** after the field (send last); under it, at the right, while the text spans the pill */
+  /** after the field (send last); under it, at the right, while the text spans the box */
   trailing?: ReactNode;
   look?: ComposerLook;
   inputRef?: Ref<TextAreaDomRef>;
 }) {
-  const pill = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   const field = useRef<TextAreaDomRef | null>(null);
   const lead = useRef<HTMLDivElement>(null);
   const trail = useRef<HTMLDivElement>(null);
@@ -71,7 +62,7 @@ export function Composer({
   // Would the text fit on one row beside the buttons? Asked of the one-row slot's width whichever
   // layout is drawn, so switching layouts never changes the answer (no flip-flop at the edge).
   const measure = () => {
-    const p = pill.current, f = field.current, inner = f?.shadowRoot?.querySelector("textarea");
+    const p = box.current, f = field.current, inner = f?.shadowRoot?.querySelector("textarea");
     if (!p || !f || !inner) return;
     if (value.includes("\n")) return setWide(true);
     const ps = getComputedStyle(p), is = getComputedStyle(inner);
@@ -87,7 +78,7 @@ export function Composer({
   useLayoutEffect(measure);
   useLayoutEffect(() => {
     const ro = new ResizeObserver(() => latest.current());
-    if (pill.current) ro.observe(pill.current);
+    if (box.current) ro.observe(box.current);
     if (field.current) ro.observe(field.current);
     return () => ro.disconnect();
   }, []);
@@ -97,14 +88,15 @@ export function Composer({
     if (typeof inputRef === "function") inputRef(el);
     else if (inputRef) inputRef.current = el;
   };
-  const row: CSSProperties = { display: "flex", alignItems: "flex-end", gap: "0.25rem" };
+  const row: CSSProperties = { display: "flex", alignItems: "center", gap: "0.25rem" };
   return (
-    <div ref={pill} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
+    <div ref={box} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
       style={{
-        display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", alignItems: "end", columnGap: "0.25rem", rowGap: "0.125rem",
+        display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", alignItems: "center", gap: "0.25rem",
         gridTemplateAreas: wide ? '"primary primary primary" "leading . trailing"' : '"leading primary trailing"',
-        // 3 px round 36 px buttons and a 1 px edge: a 44 px pill, its radius half that.
-        padding: "0.1875rem", borderRadius: "1.375rem",
+        // A toolbar's .25rem around the buttons; the corners a UI5 element's, which is a button's radius
+        // plus that .25rem in Horizon, so the buttons' corners sit concentric in the box's.
+        padding: "0.25rem", borderRadius: "var(--sapElement_BorderCornerRadius)",
         border: `1px solid ${look.border ?? "var(--sapGroup_ContentBorderColor)"}`,
         background: look.background ?? "var(--sapField_Background)",
         boxShadow: (hovered && look.hoverShadow) || look.shadow || "none",

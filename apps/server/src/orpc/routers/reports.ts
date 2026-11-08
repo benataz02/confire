@@ -1,6 +1,5 @@
 import { ORPCError } from "@orpc/server";
 import { openapi } from "@orpc/openapi";
-import * as Sentry from "@sentry/bun";
 import { z } from "zod";
 import { FilterValueZ, ReportDefZ, type FilterValue, type ReportDef } from "@confire/db";
 import { userProcedure } from "../base.ts";
@@ -8,7 +7,7 @@ import { tenantCompany, viaB1 } from "../../b1.ts";
 import { ownThread, withThread } from "../../assistant/threads.ts";
 import { summarize } from "../../reports/aggregate.ts";
 import { ReportInvalid, runReport } from "../../reports/run.ts";
-import { adoptReport, deleteReport, getReport, savedReports, setReport, storeResult, storeRun, type StoredReport } from "../../reports/store.ts";
+import { adoptReport, deleteReport, getReport, savedReports, setReport, storeResult, storeRun } from "../../reports/store.ts";
 import type { KpiResult, ReportResult } from "../../reports/types.ts";
 import { t } from "../../i18n/index.ts";
 
@@ -22,30 +21,6 @@ async function run(ctx: { tenantId: string; role: string }, def: ReportDef, valu
     if (e instanceof ReportInvalid) throw new ORPCError("BAD_REQUEST", { message: e.message });
     throw e;
   }));
-}
-
-/** A tile refreshes once its result is older than this; opening a report always runs it live. */
-const STALE_MS = 60 * 60_000;
-const refreshing = new Set<string>();
-
-/** Re-run stale saved reports off the request path (masterdata-sync's `ensureFresh` pattern): the
- *  home never waits on SAP, and the next visit has fresh figures. As the caller — the owner — with
- *  the role the request just proved. ponytail: one process's Set; two server processes may both run one. */
-function refreshStale(ctx: { tenantId: string; role: string }, reports: StoredReport[]): void {
-  const stale = reports.filter((r) => r.definition && !refreshing.has(r.id) && (!r.lastRunAt || Date.now() - r.lastRunAt.getTime() > STALE_MS));
-  if (!stale.length) return;
-  for (const r of stale) refreshing.add(r.id);
-  void (async () => {
-    for (const r of stale) {
-      try {
-        await storeResult(r.id, await runReport(ctx, r.definition!), r.definition!);
-      } catch (e) {
-        if (!(e instanceof ReportInvalid)) Sentry.captureException(e);
-      } finally {
-        refreshing.delete(r.id);
-      }
-    }
-  })();
 }
 
 const Id = z.object({ id: z.uuid() });
@@ -98,10 +73,10 @@ export const reportsRouter = {
   }),
 
   /** The home's Reports group: each saved report's headline (its first KPI) from its last run — no
-   *  SAP call here — hidden when that run read another company than the agent serves now. */
+   *  SAP call here, nor behind it: a report reads SAP only when its page opens or Refreshes, which
+   *  stores the run the tile shows — hidden when that run read another company than the agent serves now. */
   tiles: userProcedure.handler(async ({ context }) => {
     const reports = await savedReports(context.tenantId, context.userId);
-    refreshStale(context, reports);
     const company = await tenantCompany(context.tenantId);
     return reports.map((r) => {
       const kpi = r.lastResult?.widgets.find((w): w is KpiResult => w.kind === "kpi");

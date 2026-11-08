@@ -1,4 +1,4 @@
-import { bomItemCodes, refKeyCols, referencedTables } from "@confire/config-engine";
+import { bomItemCodes, refKeyCols, refRows, referencedTables } from "@confire/config-engine";
 import type {
   Entries, LookupRef, ModelDef, ODataQuery, Option, QuerySource, ResolvedLookups, ResolvedTable,
   TableRows, Val,
@@ -54,6 +54,8 @@ export type RowQuery = {
   /** restrict to rows whose `col` holds one of `values` — the off-page binding and price reads */
   col?: string;
   values?: Val[];
+  /** a ref's own row filter (LookupRef.where), ANDed with the rest — the value help of a filtered domain */
+  where?: { col: string; values: Val[] };
   /** case-insensitive substring over `searchCols` — the value help's search box */
   search?: string;
   searchCols?: string[];
@@ -114,12 +116,12 @@ export function queryRowsFor(model: ModelDef, rows: MasterdataRow[]): Masterdata
 export const queryRowOf = (rows: MasterdataRow[], name: string): MasterdataQueryRow | undefined =>
   rows.find((r): r is MasterdataQueryRow => r.name === name && r.kind === "query" && !!r.query);
 
-function project(t: ResolvedTable, name: string, valueCol: string, labelCol?: string): Option[] {
+function project(ref: LookupRef, t: ResolvedTable, name: string, valueCol: string, labelCol?: string): Option[] {
   const vi = t.columns.indexOf(valueCol);
   if (vi < 0) throw new Error(text("TABLE_NO_COLUMN", name, valueCol));
   const li = labelCol === undefined ? vi : t.columns.indexOf(labelCol);
   if (li < 0) throw new Error(text("TABLE_NO_COLUMN", name, String(labelCol)));
-  return t.rows.map((r) => ({ value: r[vi] ?? null, label: String(r[li] ?? r[vi] ?? "") }));
+  return refRows(ref, t).map((r) => ({ value: r[vi] ?? null, label: String(r[li] ?? r[vi] ?? "") }));
 }
 
 export function optionsFromRef(ref: LookupRef, tables: Record<string, ResolvedTable>): Option[] {
@@ -127,7 +129,7 @@ export function optionsFromRef(ref: LookupRef, tables: Record<string, ResolvedTa
   const t = tables[ref.table];
   if (!t) throw new Error(text("LOOKUP_TABLE_UNKNOWN", ref.table));
   const { valueCol, labelCol } = refKeyCols(ref, t.columns);
-  return project(t, ref.table, valueCol, labelCol);
+  return project(ref, t, ref.table, valueCol, labelCol);
 }
 
 // Response field names, in first-seen order — the query's columns by convention. Non-identifier
@@ -164,6 +166,7 @@ export function queryPageSource(
   input: {
     table: string; search?: string; searchCols?: string[]; cursor?: number;
     match?: { col: string; value: string | number };
+    where?: { col: string; values: Val[] };
   },
 ): { row: MasterdataQueryRow; q: RowQuery } {
   const row = queryRowOf(rows, input.table);
@@ -174,7 +177,7 @@ export function queryPageSource(
   // purpose (no $select, so the nested price collection survives), and its fields are whatever
   // B1 returned.
   const unknownCol = declared.length
-    ? [...searchCols, ...(input.match ? [input.match.col] : [])].find((c) => !declared.includes(c))
+    ? [...searchCols, ...(input.match ? [input.match.col] : []), ...(input.where ? [input.where.col] : [])].find((c) => !declared.includes(c))
     : undefined;
   if (unknownCol) throw new Error(text("SEARCH_COLUMN_UNDECLARED", unknownCol, row.name));
   if (input.cursor !== undefined && (!Number.isInteger(input.cursor) || input.cursor < 0))
@@ -185,6 +188,7 @@ export function queryPageSource(
       skip: input.cursor ?? 0, top: DEFAULT_PAGE, search: input.search, searchCols,
       // The value help's existence probe: an exact key, which a substring search cannot express.
       ...(input.match ? { col: input.match.col, values: [input.match.value] } : {}),
+      ...(input.where ? { where: input.where } : {}),
     },
   };
 }
@@ -325,6 +329,10 @@ function projectDomains(
     if (p.domain?.kind !== "options") continue;
     const ref = p.domain.ref;
     if (only && (ref.source === "manual" || !only.has(ref.table))) continue;
+    // ponytail: a `where` filters the table's resolved rows. Over a partial query table (> ENUM_MAX)
+    // that is its first rows plus the bound picks, so the field stays picked through the value help
+    // (which filters in SQL), never enumerated, however few rows the filter keeps. Upgrade: read
+    // `cache(id, { where, top: ENUM_MAX + 1 })` per filtered ref and mark partial per domain.
     domains[p.key] = optionsFromRef(ref, tables);
   }
   return domains;

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { db, configModel, documentMail, projectFile } from "@confire/db";
+import { db, configModel, configProject, documentMail, projectFile } from "@confire/db";
 import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
 import { encryptSecret } from "../src/crypto.ts";
@@ -146,9 +146,14 @@ describe("document mail", () => {
     expect(file!.data.toString()).toStartWith("%PDF-1.4\nInvoices:");
     expect((await s.timeline(id, "client")).find((e) => e.kind === "document_sent")?.payload).toMatchObject({ fileId, to: ["ap@kunde.example"] });
 
-    // 3. The client's bell and Confire's mail, by their own switches: no attachment, a link to the
-    // project, in the company's stored language (unset here, so English) — not the letter's.
-    expect((await s.bell("buyer"))[0]).toMatchObject({ type: "project.invoice", path: `/projects/${id}`, params: { docNum: invoice.docNum } });
+    // 3. The client's bell and Confire's mail for the step the invoice is (the project is invoiced now),
+    // by their own switches: no attachment, a link to the project, in the company's stored language
+    // (unset here, so English) — not the letter's. Once: the mail itself tells nobody.
+    expect((await s.bell("buyer")).slice(0, 2)).toMatchObject([
+      { type: "project.invoice", path: `/projects/${id}`, params: { docNum: invoice.docNum } },
+      { type: "project.order", params: { docNum: order.docNum } },
+    ]);
+    expect((await db.select({ status: configProject.status }).from(configProject).where(eq(configProject.id, id)))[0]!.status).toBe("invoiced");
     const notice = since(devOutbox, m.mails).filter((x) => x.to === s.buyer.email);
     expect(notice.map((x) => x.subject)).toEqual([`Invoice ${invoice.docNum} for Kabel 1`]);
     expect(notice[0]!.text).toContain(`/projects/${id}`);
@@ -182,6 +187,17 @@ describe("document mail", () => {
     expect(posted.mail).toEqual({ to: ["ap@kunde.example"] });
     await notificationsSettled();
     expect(since(documentOutbox, m.docs).map((x) => x.subject)).toEqual([`${s.slug} — Oferta ${posted.docNum}`]);
+
+    // An order off its quotation moves it on as it would a client's request: the status, and the
+    // step's event naming the order and who made it — mailed or not.
+    const order = await s.copy("Quotations", "Orders", posted.docEntry);
+    const ordered = (await s.timeline(id, "staff")).find((e) => e.kind === "ordered");
+    expect(ordered).toMatchObject({ actorSide: "internal", payload: { entity: "Orders", docEntry: order.docEntry, docNum: order.docNum } });
+    expect(ordered!.actorName).not.toBeNull();
+    const [row] = await db.select().from(configProject).where(eq(configProject.id, id));
+    expect(row!.status).toBe("ordered");
+    // Past draft, it is locked like a quoted one.
+    expect(await call(router.configs.calculate, { id, set: { material: "copper" } }, s.staff).catch((e) => e.code)).toBe("CONFLICT");
   });
 
   test("no email in SAP: said at once, and the project side still runs — the reason for staff only", async () => {
@@ -200,7 +216,7 @@ describe("document mail", () => {
     expect((await s.bell("admin")).some((n) => n.type === "document.mail_failed")).toBe(false);
   });
 
-  test("a failing print writes no event and tells the poster", async () => {
+  test("a failing print writes no document event and tells the poster", async () => {
     const s = await setup();
     const { id, posted } = await s.quoted();
     await s.connect();
@@ -213,7 +229,8 @@ describe("document mail", () => {
       await notificationsSettled();
       expect(since(documentOutbox, m.docs)).toHaveLength(0);
       expect((await s.timeline(id, "staff")).some((e) => e.kind === "document_sent")).toBe(false);
-      expect((await s.bell("buyer")).some((n) => n.type === "project.order")).toBe(false);
+      // The order itself still moved the project on, and the client heard of that once.
+      expect((await s.bell("buyer")).filter((n) => n.type === "project.order")).toHaveLength(1);
       const [failed] = await s.bell("admin");
       expect(failed).toMatchObject({
         type: "document.mail_failed", path: `/b1/Orders/${order.docEntry}`,

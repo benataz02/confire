@@ -3,13 +3,13 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar, BusyIndicator, Button, Form, FormGroup, FormItem, Input, Label, MessageStrip, ObjectPage, ObjectPageSection,
-  ObjectPageTitle, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Text, Title, Toolbar, ToolbarButton,
+  ObjectPageTitle, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Text, Title, Toolbar, ToolbarButton,
   ToolbarItem,
 } from "@ui5/webcomponents-react";
 import { BatchField, configuratorSections, ConsistencyStatus } from "@confire/ui/configurator/ConfiguratorForm.tsx";
 import { GENERAL_SECTION } from "@confire/ui/configurator/formHelpers.ts";
 import { overlayForm, usePatchQueue, type InputPatch } from "@confire/ui/configurator/patch.ts";
-import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
+import { ProjectStatusTag } from "@confire/ui/timeline/ProjectStatus.tsx";
 import { confirm } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { formatLocale, parseIsoDate } from "@confire/ui/format.ts";
@@ -19,7 +19,6 @@ import { PageMessages, useRefusals, type PageMessage } from "@confire/ui/PageMes
 import { PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import { money } from "@confire/ui/money.ts";
 import { client, meQuery, orpc, type Me } from "../../../orpc.ts";
-import { PROJECT_STATUS_KEY } from "../../../features/labels.ts";
 import { useI18n } from "../../../i18n.ts";
 
 // A project's configuration (spec §9; client-project-page spec, "The configuration page"): the form and
@@ -109,7 +108,6 @@ function ProjectPage({ id }: { id: string }) {
   if (!p || !status) return null;
 
   const form = overlayForm(p.form, pending);
-  const st = PROJECT_STATUS[status];
   const calculating = queue.sending;
   const gaps = p.missing.map((m) => m.message);
   const ready = gaps.length === 0 && !p.form.conflicts.length && !p.calcError && p.project.calculatedAt !== null;
@@ -152,6 +150,8 @@ function ProjectPage({ id }: { id: string }) {
     quoted: p.project.quoteResponse === "accepted"
       ? i18n.getText("PORTAL_NOTE_QUOTED_ACCEPTED", supplier)
       : i18n.getText("PORTAL_NOTE_QUOTED"),
+    // Past the quote, SAP's steps: the journey and the timeline say it.
+    ordered: null, delivered: null, invoiced: null, claim: null,
   };
 
   // Finalizing actions live in the footer (Fiori), one Emphasized at most.
@@ -206,12 +206,7 @@ function ProjectPage({ id }: { id: string }) {
               ) : null}
             </Toolbar>
           }>
-          <Tag design={st.state === "None" ? "Neutral" : st.state} style={{ alignSelf: "center" }}>{i18n.getText(PROJECT_STATUS_KEY[status])}</Tag>
-          {p.project.quoteResponse ? (
-            <Tag design={p.project.quoteResponse === "accepted" ? "Positive" : "Critical"} style={{ alignSelf: "center" }}>
-              {i18n.getText(p.project.quoteResponse === "accepted" ? "PORTAL_ACCEPTED_BY_YOU" : "PORTAL_DECLINED_BY_YOU")}
-            </Tag>
-          ) : null}
+          <ProjectStatusTag status={status} style={{ alignSelf: "center" }} />
         </ObjectPageTitle>
       }
       footerArea={footer ?? undefined}>

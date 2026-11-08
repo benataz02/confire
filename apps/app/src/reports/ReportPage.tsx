@@ -7,7 +7,7 @@ import { toast } from "@confire/ui/toast.ts";
 import type { FilterValue } from "@confire/ui/types.ts";
 import { useI18n } from "../i18n.ts";
 import { client, orpc } from "../orpc.ts";
-import { useAssistantShell } from "../assistant/AssistantProvider.tsx";
+import { useAssistantShell } from "../assistant/shell.ts";
 import { refusalText } from "../assistant/ChatView.tsx";
 import type { Thread } from "../assistant/useAssistant.ts";
 import { ReportView } from "./ReportView.tsx";
@@ -107,7 +107,8 @@ export function ReportPage({ id }: { id: string }) {
   return (
     <div style={{ height: "100%", overflowY: "auto", background: "var(--sapBackgroundColor)" }}>
       <ReportView report={report.data} result={live ?? report.data.lastResult} busy={busy} failed={failed} actions={actions}
-        onChip={(label) => shell.openChat(t("REPORT_CHANGE_CHIP", label))} onRefresh={() => void runLive()}
+        // The assumption chips help edit: shown only while editing, i.e. with the chat open.
+        onChip={shell.open ? (label) => shell.openChat(t("REPORT_CHANGE_CHIP", label)) : undefined} onRefresh={() => void runLive()}
         onSave={(saved) => void act(() => client.reports.save({ id, saved }))}
         onFilter={(values) => { filters.current = values; void runLive(); }} />
     </div>

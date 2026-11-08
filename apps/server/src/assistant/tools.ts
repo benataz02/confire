@@ -179,7 +179,7 @@ function rerunTools(ctx: ToolCtx): Record<string, AnyServerTool> {
     }).server(async () => {
       const d = drop();
       const parts = await fileParts(ctx.tenantId, d.refs, { threadId: ctx.thread.id, ...(ctx.thread.projectId ? { projectId: ctx.thread.projectId } : {}) });
-      return run(() => readRequest(ctx, { parts, text: d.text, meter: { ...ctx.meter, kind: "intake" } }));
+      return run(() => readRequest(ctx, { parts, text: d.text, meter: { ...ctx.meter, kind: "intake", tools: ["read_request"] } }));
     }) as AnyServerTool,
     extract_values: toolDefinition({
       name: "extract_values",
@@ -188,7 +188,7 @@ function rerunTools(ctx: ToolCtx): Record<string, AnyServerTool> {
     }).server(async () => {
       if (!ctx.thread.projectId) throw new Error("There is no configuration in this chat yet.");
       const projectId = ctx.thread.projectId;
-      return run(() => extractInto({ ...ctx, threadId: ctx.thread.id }, projectId, drop()));
+      return run(() => extractInto({ ...ctx, threadId: ctx.thread.id, tool: "extract_values" }, projectId, drop()));
     }) as AnyServerTool,
   };
 }

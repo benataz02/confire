@@ -7,22 +7,15 @@ import { orpc } from "../../../orpc.ts";
 import { viewsQuery } from "@confire/ui/views.ts";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
 import { useListView } from "@confire/ui/useListView.ts";
-import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
+import { projectStatusOptions } from "@confire/ui/timeline/projectStatus.ts";
+import { ProjectStatusCell } from "@confire/ui/timeline/ProjectStatus.tsx";
+import { useUiI18n } from "@confire/ui/i18n.ts";
 import type { ListFeature, ListQuery, Row } from "@confire/ui/types.ts";
 
 type TextFn = (key: string, ...args: Array<string | number>) => string;
 
-const STATUS_KEY: Record<keyof typeof PROJECT_STATUS, string> = {
-  draft: "ADMIN_STATUS_DRAFT",
-  submitted: "ADMIN_STATUS_SUBMITTED",
-  in_review: "ADMIN_STATUS_IN_REVIEW",
-  returned: "ADMIN_CHANGES_REQUESTED",
-  declined: "ADMIN_STATUS_DECLINED",
-  quoted: "ADMIN_STATUS_QUOTED",
-};
-
-function requestsFeature(t: TextFn): ListFeature {
-  const statusOptions = (Object.keys(STATUS_KEY) as (keyof typeof STATUS_KEY)[]).map((value) => ({ value, label: t(STATUS_KEY[value]) }));
+/** `ui` reads the `@confire/ui` bundle, which holds the status words. */
+function requestsFeature(t: TextFn, ui: TextFn): ListFeature {
   return {
     tableId: "requests",
     title: t("NAV_REQUESTS"),
@@ -31,11 +24,11 @@ function requestsFeature(t: TextFn): ListFeature {
       { key: "cardName", label: t("ADMIN_COL_CUSTOMER"), groupable: true },
       { key: "cardCode", label: t("ADMIN_COL_BP"), width: 150, hidden: true, linkConfig: { route: "/b1/BusinessPartners" } },
       { key: "modelName", label: t("ADMIN_COL_MODEL"), groupable: true },
-      { key: "status", label: t("ADMIN_STATUS"), type: "enum", options: statusOptions, width: 170, groupable: true },
+      { key: "status", label: t("ADMIN_STATUS"), type: "enum", options: projectStatusOptions(ui), width: 170, groupable: true },
       { key: "assignee", label: t("ADMIN_COL_ASSIGNEE"), groupable: true },
       // The server computes it per caller: the seeded "Assigned to me" view filters on it.
       { key: "mine", label: t("ADMIN_COL_MINE"), type: "enum", options: [{ value: "yes", label: t("ADMIN_YES") }, { value: "no", label: t("ADMIN_NO") }], hidden: true },
-      { key: "quoteResponse", label: t("ADMIN_COL_QUOTE_RESPONSE"), type: "enum", options: [{ value: "accepted", label: t("ADMIN_ACCEPTED") }, { value: "declined", label: t("ADMIN_STATUS_DECLINED") }], width: 150 },
+      { key: "quoteResponse", label: t("ADMIN_COL_QUOTE_RESPONSE"), type: "enum", options: [{ value: "accepted", label: t("ADMIN_ACCEPTED") }, { value: "declined", label: t("ADMIN_DECLINED") }], width: 150 },
       { key: "updatedAt", label: t("ADMIN_LAST_CHANGED"), type: "date", width: 150 },
     ],
     // All / Open / Assigned to me are the workspace's seeded shared views (server ui-views.ts).
@@ -45,14 +38,10 @@ function requestsFeature(t: TextFn): ListFeature {
 
 function requestCells(t: TextFn) {
   return {
-    status: (row: Row) => {
-      const s = PROJECT_STATUS[row.status as keyof typeof PROJECT_STATUS];
-      const key = STATUS_KEY[row.status as keyof typeof STATUS_KEY];
-      return s && key ? <ObjectStatus inverted state={s.state}>{t(key)}</ObjectStatus> : <Text>{String(row.status ?? "")}</Text>;
-    },
+    status: (row: Row) => <ProjectStatusCell status={row.status} />,
     quoteResponse: (row: Row) =>
       row.quoteResponse === "accepted" ? <ObjectStatus state="Positive">{t("ADMIN_ACCEPTED")}</ObjectStatus>
-      : row.quoteResponse === "declined" ? <ObjectStatus state="Critical">{t("ADMIN_STATUS_DECLINED")}</ObjectStatus>
+      : row.quoteResponse === "declined" ? <ObjectStatus state="Critical">{t("ADMIN_DECLINED")}</ObjectStatus>
       : <Text />,
   };
 }
@@ -69,8 +58,9 @@ export const Route = createFileRoute("/$slug/requests/")({
 
 function Requests() {
   const i18n = useI18n();
+  const ui = useUiI18n();
   const t = (key: string, ...args: Array<string | number>) => i18n.getText(key, ...args);
-  const feature = useMemo(() => requestsFeature(t), [i18n]);
+  const feature = useMemo(() => requestsFeature(t, (k) => ui.getText(k)), [i18n, ui]);
   const cells = useMemo(() => requestCells(t), [i18n]);
   const [query, setQuery] = useState<ListQuery | null>(null);
   const data = useListView(

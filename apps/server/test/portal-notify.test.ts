@@ -166,6 +166,15 @@ describe("notifications", () => {
     expect(to(s.buyer.email)[0]!.text).toContain(`/projects/${id}`);
     expect(await s.bell(s.buyer)).toMatchObject([{ type: "project.accepted", path: `/projects/${id}`, params: { note: "On it" } }]);
     expect(await s.bell(s.colleague)).toHaveLength(0);
+    // The timeline says who was mailed: staff read every address, a client only its own side's.
+    const mailedOf = (r: { events: { kind: string; mailedTo?: string[] | null }[] }, kind: string) =>
+      r.events.find((e) => e.kind === kind)?.mailedTo;
+    const staffView = await call(router.timeline.list, { projectId: id }, s.as(s.admin.cookie));
+    const clientView = await call(portalRouter.timeline.list, { projectId: id }, s.on(s.buyer.cookie));
+    expect(mailedOf(staffView, "accepted")).toEqual([s.buyer.email]);
+    expect(mailedOf(clientView, "accepted")).toEqual([s.buyer.email]);
+    expect(mailedOf(staffView, "submitted")?.toSorted()).toEqual([s.owner.email, s.admin.email, s.rep.email].toSorted());
+    expect(mailedOf(clientView, "submitted")).toBeNull();
 
     // An internal note tells nobody; a comment for the client tells its creator.
     m = await mark();
@@ -418,8 +427,8 @@ describe("settings and home", () => {
       p("returned", { status: "returned" }, 1),
       p("answer", { status: "quoted", quotedAt: new Date(), quotedValue: "6950" }, 2),
       p("accepted", { status: "quoted", quoteResponse: "accepted", quoteRespondedAt: new Date() }, 3),
-      p("ordered", { status: "quoted", sapStep: "ordered", sapStepAt: "2026-11-01" }, 4),
-      p("invoiced", { status: "quoted", sapStep: "invoiced", sapStepAt: "2026-11-02" }),
+      p("ordered", { status: "ordered", sapStepAt: "2026-11-01" }, 4),
+      p("invoiced", { status: "invoiced", sapStepAt: "2026-11-02" }),
       p("declined", { status: "declined" }),
       p("elsewhere", { portalCardCode: "OTHER" }),
     ]).returning()).map((r) => [r.name, r.id]));
@@ -451,7 +460,7 @@ describe("settings and home", () => {
     expect((await call(portalRouter.home.overview, undefined, s.on(s.viewer.cookie))).inquiries).toEqual([]);
   });
 
-  test("home.progress: stores the furthest SAP step, forward only, in the agent's company only", async () => {
+  test("home.progress: moves the status to the furthest SAP step, with its event and the client's bell, forward only, in the agent's company only", async () => {
     const s = await setup();
     const [m] = await db.select().from(configModel).where(eq(configModel.tenantId, s.tenantId));
     const quoted = (b1DocEntry: number, b1Company: string) => ({
@@ -467,13 +476,19 @@ describe("settings and home", () => {
     try {
       expect(await call(portalRouter.home.progress, undefined, s.on(s.viewer.cookie))).toEqual({ changed: 1 });
       const rows = await db.select().from(configProject).where(inArray(configProject.id, [here!.id, there!.id]));
-      expect(rows.find((r) => r.id === here!.id)).toMatchObject({ sapStep: "ordered", sapStepAt: "2026-11-01" });
-      expect(rows.find((r) => r.id === there!.id)!.sapStep).toBeNull(); // quoted in another company
+      expect(rows.find((r) => r.id === here!.id)).toMatchObject({ status: "ordered", sapStepAt: "2026-11-01" });
+      expect(rows.find((r) => r.id === there!.id)!.status).toBe("quoted"); // quoted in another company
+      // Its event names the order, nobody made it here (a read found it), and the client hears of it once.
+      const events = await db.select().from(configProjectEvent)
+        .where(and(eq(configProjectEvent.projectId, here!.id), eq(configProjectEvent.kind, "ordered")));
+      expect(events).toMatchObject([{ actorUserId: null, actorSide: "internal",
+        payload: { entity: "Orders", docEntry: 610, docNum: 610, docDate: "2026-11-01", company: agent.company.db } }]);
+      expect(await s.bell(s.buyer)).toMatchObject([{ type: "project.order" }]);
 
       expect(await call(portalRouter.home.progress, undefined, s.on(s.viewer.cookie))).toEqual({ changed: 0 });
 
       // Invoiced is final: never walked again.
-      await db.update(configProject).set({ sapStep: "invoiced" }).where(eq(configProject.id, here!.id));
+      await db.update(configProject).set({ status: "invoiced" }).where(eq(configProject.id, here!.id));
       const before = agent.calls.filter((c) => c.route === "/cross-join").length;
       await call(portalRouter.home.progress, undefined, s.on(s.viewer.cookie));
       expect(agent.calls.filter((c) => c.route === "/cross-join").length).toBe(before);
@@ -482,48 +497,51 @@ describe("settings and home", () => {
     }
   });
 
-  test("projects.progress / requests.progress: one project's SAP step, on each side, fenced", async () => {
+  test("projects.progress / configs.progress: one project's SAP step, on each side, internal configurations too, fenced", async () => {
     const s = await setup();
     const [m] = await db.select().from(configModel).where(eq(configModel.tenantId, s.tenantId));
     const quoted = (b1DocEntry: number, v: Partial<typeof configProject.$inferInsert> = {}) => ({
       tenantId: s.tenantId, modelId: m!.id, name: `Q${b1DocEntry}`, createdBy: s.buyer.userId, portalCardCode: s.company.cardCode,
       status: "quoted" as const, b1DocEntry, b1Company: agent.company.db, quotedAt: new Date(), ...v,
     });
-    const [a, b, elsewhere, otherDb] = await db.insert(configProject).values([
+    const [a, b, elsewhere, otherDb, internal] = await db.insert(configProject).values([
       quoted(521), quoted(522), quoted(523, { portalCardCode: "OTHER" }), quoted(524, { b1Company: "OTHER" }),
+      quoted(525, { portalCardCode: null }),
     ]).returning();
     const line = (BaseEntry: number) => ({ BaseType: 23, BaseEntry });
-    agent.store.Orders = [521, 522, 523, 524].map((q, i) =>
+    agent.store.Orders = [521, 522, 523, 524, 525].map((q, i) =>
       ({ DocEntry: 620 + i, DocNum: 620 + i, DocDate: "2026-11-03", CardCode: s.company.cardCode, DocumentLines: [line(q)] }));
-    const stepOf = async (id: string) => (await db.select().from(configProject).where(eq(configProject.id, id)))[0]!.sapStep;
+    const stepOf = async (id: string) => (await db.select().from(configProject).where(eq(configProject.id, id)))[0]!.status;
     try {
       // The client's page moves its own project only — the other one waits for its own page.
       expect(await call(portalRouter.projects.progress, { id: a!.id }, s.on(s.viewer.cookie))).toEqual({ changed: true });
       expect(await stepOf(a!.id)).toBe("ordered");
-      expect(await stepOf(b!.id)).toBeNull();
+      expect(await stepOf(b!.id)).toBe("quoted");
       expect(await call(portalRouter.projects.progress, { id: a!.id }, s.on(s.viewer.cookie))).toEqual({ changed: false });
 
-      // Staff's page, the same walk.
-      expect(await call(router.requests.progress, { id: b!.id }, s.as(s.admin.cookie))).toEqual({ changed: true });
+      // Staff's page, the same walk — and an internal configuration's, the same steps.
+      expect(await call(router.configs.progress, { id: b!.id }, s.as(s.admin.cookie))).toEqual({ changed: true });
       expect(await stepOf(b!.id)).toBe("ordered");
+      expect(await call(router.configs.progress, { id: internal!.id }, s.as(s.admin.cookie))).toEqual({ changed: true });
+      expect(await stepOf(internal!.id)).toBe("ordered");
 
       // Another client's project is refused; a quotation in another SAP company is never walked.
       expect(await codeOf(call(portalRouter.projects.progress, { id: elsewhere!.id }, s.on(s.viewer.cookie)))).toBe("NOT_FOUND");
-      expect(await stepOf(elsewhere!.id)).toBeNull();
-      expect(await call(router.requests.progress, { id: otherDb!.id }, s.as(s.admin.cookie))).toEqual({ changed: false });
-      expect(await stepOf(otherDb!.id)).toBeNull();
+      expect(await stepOf(elsewhere!.id)).toBe("quoted");
+      expect(await call(router.configs.progress, { id: otherDb!.id }, s.as(s.admin.cookie))).toEqual({ changed: false });
+      expect(await stepOf(otherDb!.id)).toBe("quoted");
     } finally {
       delete agent.store.Orders;
     }
   });
 
-  test("a re-quote clears the stored SAP step: the new quotation is the customer's to answer", async () => {
+  test("a re-quote clears the SAP step's date: the new quotation is the customer's to answer", async () => {
     const s = await setup();
     const [m] = await db.select().from(configModel).where(eq(configModel.tenantId, s.tenantId));
-    // Q1 was ordered in SAP, the customer still declined it here (back to in_review), and staff re-quote.
+    // A date left from Q1, the customer declined it here (back to in_review), and staff re-quote.
     const [p] = await db.insert(configProject).values({
       tenantId: s.tenantId, modelId: m!.id, name: "Requoted", createdBy: s.buyer.userId, portalCardCode: s.company.cardCode,
-      status: "in_review", b1DocEntry: 501, b1Company: agent.company.db, sapStep: "ordered", sapStepAt: "2026-11-01",
+      status: "in_review", b1DocEntry: 501, b1Company: agent.company.db, sapStepAt: "2026-11-01",
     }).returning();
     await transition({
       tenantId: s.tenantId, projectId: p!.id, action: "quote", actor: { userId: s.admin.userId, side: "internal" },
@@ -531,7 +549,7 @@ describe("settings and home", () => {
     });
     await notificationsSettled();
     const [row] = await db.select().from(configProject).where(eq(configProject.id, p!.id));
-    expect(row).toMatchObject({ status: "quoted", sapStep: null, sapStepAt: null });
+    expect(row).toMatchObject({ status: "quoted", sapStepAt: null });
     const o = await call(portalRouter.home.overview, undefined, s.on(s.buyer.cookie));
     expect(o.inquiries.find((r) => r.id === p!.id)).toMatchObject({ step: 2, next: "answer" });
   });

@@ -166,7 +166,7 @@ export const cfl = {
     const shown = new Set([labelCol, ...displayColumns(ref, cols)]);
     return {
       title: table,
-      source: { kind: "masterdata", modelId: scope.modelId, table },
+      source: { kind: "masterdata", modelId: scope.modelId, table, ...(ref.source !== "manual" && ref.where ? { where: ref.where } : {}) },
       keyField: valueCol,
       ...(labelCol && !showValue ? { displayColumns: [labelCol] } : {}),
       columns: (cols.length ? cols : [valueCol]).map((c) => ({

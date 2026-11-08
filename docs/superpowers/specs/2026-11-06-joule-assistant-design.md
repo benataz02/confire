@@ -182,15 +182,15 @@ opens a fresh thread for it, as the server does today.
 
 *(My call:)* picking a report's chat goes to its report page, because a report's chat edits what that
 page shows. Picking a configuration's chat stays where the user is: the thread outranks the page
-(today's rule), and the header's `•••` offers *Open configuration* (today's AI page button).
+(today's rule), and *Open configuration* is one of the chat's next actions under the last answer.
 
 **One rule for leaving the panel's size:** whenever the chat takes the user to a page, the panel
 returns to card size so the page is visible. That covers a chat's first report, a report's chat
 picked in the drawer, *Create* on a read request (today `onStarted` navigates to the configuration's
 form), and *Open configuration*.
 
-The header `•••` menu: Pin/Unpin, Rename, Delete, and *Open configuration* on a configuration's chat
-when its form is not on screen. Starting a configuration's chat over (today the `+` with a confirm,
+The header `•••` menu: Pin/Unpin, Rename, Delete. *Open configuration* is a next action (beside the
+quick replies) on a configuration's chat when its form is not on screen. Starting a configuration's chat over (today the `+` with a confirm,
 `newThread({ projectId })`) becomes Delete *(my call)*: the next open makes a fresh thread.
 
 ### 5.5 Maximized

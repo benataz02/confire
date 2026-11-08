@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { formState, propagate, type ModelDef, type ResolvedLookups } from "@confire/config-engine";
 import {
-  toPortalForm, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalRows,
+  declaresWhere, toPortalForm, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalRows,
 } from "../src/portal/projection.ts";
 
 // The portal fence (spec §7.1), both directions. Pure: no database, no agent.
@@ -114,6 +114,15 @@ describe("toPortalForm / toPortalLookups", () => {
   test("a value-help page follows the same column rule", () => {
     const page = toPortalPage(model, "grades", { columns: ["code", "name", "cost"], rows: [["C", "Gamma", 9]], hidden: ["cost"] });
     expect(page).toEqual({ columns: ["code", "name"], rows: [["C", "Gamma"]] });
+  });
+
+  test("a client's value help may filter only as a ref of the model does", () => {
+    const where = { col: "cost", values: [9] };
+    const filtered = structuredClone(model);
+    const p = filtered.parameters.find((x) => x.domain?.kind === "options" && x.domain.ref.source !== "manual")!;
+    if (p.domain?.kind === "options" && p.domain.ref.source !== "manual") p.domain.ref.where = where;
+    expect(declaresWhere(filtered, "grades", where)).toBe(true);
+    expect(declaresWhere(model, "grades", where)).toBe(false); // a free filter on a hidden column
   });
 });
 

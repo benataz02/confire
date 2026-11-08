@@ -77,6 +77,11 @@ export const aiUsage = pgTable(
     projectId: uuid("project_id"),
     model: text("model").notNull(),
     kind: text("kind").$type<AiUsageKind>().notNull(),
+    /** The chat's loaded skill when the call ran (`configure`, `report`); null = none. */
+    skill: text("skill"),
+    /** What the call was for: the tools whose results it read, or the tool that made it (intake's
+     *  read_request). Empty = the user's message. */
+    tools: text("tools").array().notNull().default(sql`'{}'::text[]`),
     /** uncached input tokens; the cache parts are their own columns */
     inputTokens: integer("input_tokens").notNull(),
     outputTokens: integer("output_tokens").notNull(),

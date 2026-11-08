@@ -361,7 +361,8 @@ export type ExtractResult = {
   notes: string[];
 };
 
-type Ctx = { headers: Headers; tenantId: string; userId: string; threadId: string | null };
+/** `tool`: the chat's tool that runs it, so its call is billed to that tool; absent from the panel. */
+type Ctx = { headers: Headers; tenantId: string; userId: string; threadId: string | null; tool?: string };
 
 /**
  * Read files into a configuration: refused before any model call when it cannot be written (quoted,
@@ -382,7 +383,8 @@ export async function extractInto(ctx: Ctx, projectId: string, input: { refs: Fi
   const parts = await fileParts(ctx.tenantId, input.refs, fence);
   if (!parts.length && !input.text.trim()) throw new ORPCError("BAD_REQUEST", { message: text("EXTRACT_NOTHING") });
 
-  const m: Meter = { tenantId: ctx.tenantId, userId: ctx.userId, threadId: ctx.threadId, projectId, kind: "extract" };
+  // Extraction is the configure skill's work, however it was started.
+  const m: Meter = { tenantId: ctx.tenantId, userId: ctx.userId, threadId: ctx.threadId, projectId, kind: "extract", skill: "configure", tools: ctx.tool ? [ctx.tool] : [] };
   const x = await readExtraction({ def: before.live.model.definition, form: before.view.form, tables: before.live.lookups.tables, parts, text: input.text, meter: m });
 
   const { live, view } = await configView(ctx.tenantId, where);

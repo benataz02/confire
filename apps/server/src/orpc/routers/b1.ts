@@ -28,7 +28,10 @@ import { t } from "../../i18n/index.ts";
 
 const MAX_FOUND = 30;
 
-const ctxOf = async (tenantId: string): Promise<WriteCtx> => ({ tenantId, b1: (await tenantConnector(tenantId)).b1 });
+const ctxOf = async (tenantId: string, userId: string): Promise<WriteCtx> => {
+  const { b1, companyDb } = await tenantConnector(tenantId);
+  return { tenantId, b1, companyDb, userId };
+};
 const schemaOf = (c: WriteCtx, entity: string) => viaB1(() => entitySchema(c.tenantId, c.b1, entity)).catch(bad);
 
 // --- schema, compact -------------------------------------------------------------------------------
@@ -68,13 +71,23 @@ function checkQueryNames(schema: B1EntitySchema, q: ListQuery, agg?: AggSpec): v
   if (unique.length) throw unknownNames(schema.name, unique);
 }
 
-/** b1.read's rows per call when the select names scalar fields only. Never 0 (`odata.maxpagesize=0` is
- *  every row): an unbounded answer would overflow the model's context and the month's budget.
- *  ponytail: one fixed cap; per-entity widths only if 500 narrow rows ever prove too many tokens. */
+/** The most rows b1.read's `top` may ask for when the select names scalar fields only (an aggregate's
+ *  groups, too). Never 0 (`odata.maxpagesize=0` is every row): an unbounded answer would overflow the
+ *  model's context and the month's budget. The default is LIST_CAP: a report's chat that got 500 rows
+ *  by default, just to look at the data, wrote 167k tokens to the cache for nothing. */
 const NARROW_CAP = 500;
 const QueryZ = ListQueryZ.partial();
 const normal = (q: z.infer<typeof QueryZ> | undefined): ListQuery =>
   ({ ...q, select: q?.select ?? [], filter: q?.filter ?? [], orderby: q?.orderby ?? [] });
+
+/** A list as the model reads it: each field named once, each row its values in that order. A narrow
+ *  row's repeated keys and B1's per-row `@odata.etag` were two thirds of its tokens; an aggregate's
+ *  `@odata.id` is always null. A list's etag is
+ *  never a write's: b1_write takes the one a keyed read answers, and preparing it reads again. */
+export function table(rows: Record<string, unknown>[]) {
+  const columns = [...new Set(rows.flatMap((r) => Object.keys(r)))].filter((k) => !k.startsWith("@odata."));
+  return { columns, rows: rows.map((r) => columns.map((c) => r[c] ?? null)) };
+}
 
 // --- proposals -----------------------------------------------------------------------------------
 
@@ -160,7 +173,7 @@ export const b1Router = {
     }))
     .handler(async ({ input, context }) => {
       if (!input.query && !input.category) return { categories: CATEGORY_NAMES, entities: [], total: 0 };
-      const c = await ctxOf(context.tenantId);
+      const c = await ctxOf(context.tenantId, context.userId);
       const list = (await viaB1(() => entityList(c.tenantId, c.b1)).catch(bad)).filter((e) => readableBy(context.role)(e.name));
       const q = input.query?.toLowerCase();
       const hits = list
@@ -188,7 +201,7 @@ export const b1Router = {
     }))
     .input(z.object({ entity: EntityZ.describe("SAP's entity set name, e.g. Orders"), collection: z.string().optional().describe("A collection of it, e.g. DocumentLines") }))
     .handler(async ({ input, context }) => {
-      const c = await ctxOf(context.tenantId);
+      const c = await ctxOf(context.tenantId, context.userId);
       const schema = await schemaOf(c, input.entity);
       const profile = profileOf(input.entity);
       const required = new Set(profile?.requiredOnCreate ?? []);
@@ -213,18 +226,19 @@ export const b1Router = {
   read: userProcedure
     .meta(openapi({
       summary: "Read SAP records",
-      description: `Read SAP Business One records live, by SAP's own names: Quotations, Orders, DeliveryNotes, Invoices (key DocEntry; DocNum is the number people say), BusinessPartners (CardCode), Items (ItemCode), or any other set b1_find finds. With \`key\`: that one record, whole, with its \`etag\`. Else a list: \`query.select\` names fields (empty = every scalar field; a collection such as DocumentLines only when named), \`query.filter\` narrows (eq, ne, gt, ge, lt, le, contains, startswith, in), \`query.orderby\` sorts, \`query.search\` is free text over string fields. Enum values are SAP's member names (bost_Open, cCustomer). One call answers up to ${NARROW_CAP} rows when \`query.select\` names only scalar fields, else ${LIST_CAP}: to read many records, name the few fields you need. \`total\` says how many match and \`nextCursor\` reads the next page. A wrong field name is refused with the closest real ones. \`aggregate\` asks SAP for totals instead of rows — \`groupBy\` fields and \`measures\` (\`sum\`, \`count\`, \`countDistinct\`, \`avg\`, \`min\`, \`max\`, each named by \`as\`); \`query.filter\` applies first. Use it for any total: never add rows up yourself.`,
+      description: `Read SAP Business One records live, by SAP's own names: Quotations, Orders, DeliveryNotes, Invoices (key DocEntry; DocNum is the number people say), BusinessPartners (CardCode), Items (ItemCode), or any other set b1_find finds. With \`key\`: that one record, whole, with its \`etag\`. Else a list: \`query.select\` names fields (empty = every scalar field; a collection such as DocumentLines only when named), \`query.filter\` narrows (eq, ne, gt, ge, lt, le, contains, startswith, in), \`query.orderby\` sorts, \`query.search\` is free text over string fields. Enum values are SAP's member names (bost_Open, cCustomer). A list answers \`columns\` and \`rows\`, each row its values in the columns' order. \`top\` rows per call, ${LIST_CAP} unless you say: up to ${NARROW_CAP} when \`query.select\` names only scalar fields, else ${LIST_CAP} — to read many records, name the few fields you need; to see how values are spelled, a few (\`top: 5\`) are enough. \`total\` says how many match and \`nextCursor\` reads the next page. A wrong field name is refused with the closest real ones. \`aggregate\` asks SAP for totals instead of rows — \`groupBy\` fields and \`measures\` (\`sum\`, \`count\`, \`countDistinct\`, \`avg\`, \`min\`, \`max\`, each named by \`as\`), up to ${NARROW_CAP} groups; \`query.filter\` applies first. Use it for any total — never add rows up yourself — and to see which values a field takes (group by it, count): never read rows for that.`,
     }))
     .input(z.object({
       entity: EntityZ.describe("SAP's entity set name"),
       key: KeyZ.optional().describe("One record's key: a number (DocEntry), a code (CardCode, ItemCode), or an object for a composite key"),
       query: QueryZ.optional().describe("A list's fields, filters, sort and search"),
       cursor: z.string().optional().describe("The previous answer's nextCursor"),
+      top: z.number().int().min(1).max(NARROW_CAP).optional().describe(`Rows to answer (default ${LIST_CAP}; an aggregate's groups, default ${NARROW_CAP})`),
       aggregate: AggSpecZ.optional().describe("Totals computed by SAP instead of rows"),
     }))
     .handler(async ({ input, context }) => {
       assertReadable(input.entity, context.role);
-      const c = await ctxOf(context.tenantId);
+      const c = await ctxOf(context.tenantId, context.userId);
       const schema = await schemaOf(c, input.entity);
       if (input.key !== undefined) return readOne(c.b1, schema, input.entity, input.key);
       const query = normal(input.query);
@@ -232,20 +246,21 @@ export const b1Router = {
       if (input.aggregate) {
         // A total over a search would be a total over every record: `$apply` takes filters only.
         if (query.search?.trim()) throw new ORPCError("BAD_REQUEST", { message: t("AGGREGATE_NO_SEARCH") });
-        const page = await readRows(c.b1, schema, input.entity, { query, pageSize: NARROW_CAP, cursor: input.cursor, aggregate: input.aggregate },
+        const top = Math.min(input.top ?? NARROW_CAP, NARROW_CAP);
+        const page = await readRows(c.b1, schema, input.entity, { query, pageSize: top, cursor: input.cursor, aggregate: input.aggregate },
           { tenantId: context.tenantId, key: "b1-tool" });
-        return { rows: page.rows.slice(0, NARROW_CAP), keys: [], total: page.total, nextCursor: page.nextCursor };
+        return { ...table(page.rows.slice(0, top)), keys: [], total: page.total, nextCursor: page.nextCursor };
       }
       const collections = new Set(schema.fields.filter((f) => f.kind === "collection").map((f) => f.name));
       const wholeRows = query.select.some((n) => collections.has(n));
       // A narrow row is a few tokens, a whole one a few thousand: the cap follows the row's width, and
-      // the page size is the cap, so the model gets its rows in one request instead of 20 at a time.
-      const cap = query.select.length && !wholeRows ? NARROW_CAP : LIST_CAP;
-      const page = await readRows(c.b1, schema, input.entity, { query, pageSize: cap, cursor: input.cursor, count: !input.cursor, wholeRows },
+      // the page size is `top`, so the rows the model asked for come in one request.
+      const top = Math.min(input.top ?? LIST_CAP, query.select.length && !wholeRows ? NARROW_CAP : LIST_CAP);
+      const page = await readRows(c.b1, schema, input.entity, { query, pageSize: top, cursor: input.cursor, count: !input.cursor, wholeRows },
         { tenantId: context.tenantId, key: "b1-tool" });
       const keep = new Set([...schema.keys, ...query.select]);
-      const rows = page.rows.slice(0, cap).map((r) => (wholeRows ? Object.fromEntries(Object.entries(r).filter(([k]) => keep.has(k))) : r));
-      return { rows, keys: page.keys, total: page.total, nextCursor: page.nextCursor };
+      const rows = page.rows.slice(0, top).map((r) => (wholeRows ? Object.fromEntries(Object.entries(r).filter(([k]) => keep.has(k))) : r));
+      return { ...table(rows), keys: page.keys, total: page.total, nextCursor: page.nextCursor };
     }),
 
   write: userProcedure
@@ -260,7 +275,7 @@ export const b1Router = {
       data: z.record(z.string(), z.unknown()).describe("Field → value, SAP's names"),
     }))
     .handler(async ({ input, context }) => {
-      const c = await ctxOf(context.tenantId);
+      const c = await ctxOf(context.tenantId, context.userId);
       const p = await prepareWrite(c, "schema", input.key === undefined
         ? { op: "create", entity: input.entity, data: input.data }
         : { op: "update", entity: input.entity, key: input.key, etag: input.etag, data: input.data }, { readBefore: true });
@@ -274,7 +289,7 @@ export const b1Router = {
     }))
     .input(CopyInputZ)
     .handler(async ({ input, context }) => {
-      const c = await ctxOf(context.tenantId);
+      const c = await ctxOf(context.tenantId, context.userId);
       return postOrPropose(context, c, await prepareWrite(c, "schema", { op: "copy", input }));
     }),
 
@@ -289,7 +304,7 @@ export const b1Router = {
     .input(z.object({ proposal: ProposalZ }))
     .handler(async ({ input, context }) => {
       const { proposal: pr } = input;
-      const c = await ctxOf(context.tenantId);
+      const c = await ctxOf(context.tenantId, context.userId);
       let p: Prepared;
       if (pr.op === "copy") {
         const parsed = CopyInputZ.safeParse(pr.payload);

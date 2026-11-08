@@ -78,7 +78,7 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
     }
     const { valueCol, labelCol } = refKeyCols(ref, cols);
     if (!valueCol) issues.push({ path: `parameters[${i}].domain`, message: `table '${ref.table}' declares no columns` });
-    for (const c of [...(valueCol ? [valueCol] : []), ...(labelCol ? [labelCol] : []), ...(ref.columns ?? [])]) {
+    for (const c of [...(valueCol ? [valueCol] : []), ...(labelCol ? [labelCol] : []), ...(ref.columns ?? []), ...(ref.where ? [ref.where.col] : [])]) {
       if (!cols.includes(c)) issues.push({ path: `parameters[${i}].domain`, message: `table '${ref.table}' has no column '${c}'` });
     }
     for (const col of derivedColumns(ref, cols)) {
@@ -293,7 +293,7 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
         else {
           const { valueCol, labelCol } = refKeyCols(ref, srcCols);
           if (!valueCol) issues.push({ path, message: `The masterdata '${ref.table}' has no columns to pick from.` });
-          for (const col of [...(valueCol ? [valueCol] : []), ...(labelCol ? [labelCol] : [])])
+          for (const col of [...(valueCol ? [valueCol] : []), ...(labelCol ? [labelCol] : []), ...(ref.where ? [ref.where.col] : [])])
             if (!srcCols.includes(col)) issues.push({ path, message: `The masterdata '${ref.table}' has no column '${col}'.` });
           // the picked row's other columns, in row scope as <column>_<source column> — the same
           // rule a parameter's options domain gets, and bound by the same declaration order.

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, eq, getTableColumns, sql, type SQL } from "drizzle-orm";
 import { db, configMasterdata, configModel, configProject, type ConfigCandidate, type ConfigProject } from "@confire/db";
 import {
-  computeOutputs, DslError, enumerate, missingInputs, propagate, syncTables,
+  computeOutputs, DslError, ValZ, enumerate, missingInputs, propagate, syncTables,
   type Entries, type ModelDef, type Notice, type Propagation, type ResolvedLookups, type TableRows,
 } from "@confire/config-engine";
 import {
@@ -127,6 +127,8 @@ export const QueryPageZ = z.object({
   cursor: z.number().int().min(0).optional(),
   /** exact key: the value help's existence probe and label lookup */
   match: z.object({ col: z.string(), value: z.union([z.string(), z.number()]) }).optional(),
+  /** the field's own row filter (LookupRef.where): it only narrows, so the client may send it */
+  where: z.object({ col: z.string(), values: z.array(ValZ).min(1) }).optional(),
 });
 
 /** One page of a query table the value help asked for. The caller has already proved the model

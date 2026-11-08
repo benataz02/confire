@@ -18,6 +18,9 @@ const namedSource = {
   labelCol: z.string().optional(),
   /** extra columns shown in pickers; absent = all extra. Derived keys always use every extra column. */
   columns: z.array(z.string()).optional(),
+  /** keep only the rows whose `col` holds one of `values` — one masterdata (all operations), each
+   *  parameter its own rows of it. Compared as text, as the cache's SQL compares them. */
+  where: z.object({ col: z.string(), values: z.array(ValZ).min(1) }).optional(),
 };
 
 export const LookupRefZ = z.discriminatedUnion("source", [
@@ -338,6 +341,14 @@ export type Entries = Record<string, Val>;
 export function refKeyCols(ref: LookupRef, all: string[] | undefined): { valueCol: string; labelCol?: string } {
   if (ref.source === "manual") return { valueCol: "" };
   return { valueCol: ref.valueCol || (all?.[0] ?? ""), labelCol: ref.labelCol ?? all?.[1] };
+}
+
+/** The rows of `t` a ref offers: all of them, or those its `where` keeps. */
+export function refRows(ref: LookupRef, t: Pick<ResolvedTable, "columns" | "rows">): Val[][] {
+  if (ref.source === "manual" || !ref.where) return t.rows;
+  const ci = t.columns.indexOf(ref.where.col);
+  const keep = new Set(ref.where.values.map(String));
+  return ci < 0 ? [] : t.rows.filter((r) => r[ci] !== null && r[ci] !== undefined && keep.has(String(r[ci])));
 }
 
 /** Source columns bound as `<param>_<col>`, the key column included (it is the code an author

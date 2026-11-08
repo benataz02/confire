@@ -1,35 +1,12 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { AssistantPanel } from "./AssistantPanel.tsx";
+import { AssistantShellContext as Ctx } from "./shell.ts";
 
 // The panel is shell state, not page state (assistant spec §4.2): open or not, the page's unsaved
 // edit, and each configuration's open questions live here, around the whole app shell, so a thread
 // survives navigation. Once opened the panel stays mounted (hidden when closed): closing it must not
 // cut off an answer still streaming. It is the one place a chat is drawn (Joule spec §5.1), so one
-// thread is never live in two places.
-
-type AssistantShell = {
-  open: boolean;
-  toggle(): void;
-  close(): void;
-  /** Mount and open the panel on the page's own chat, `text` (if any) put in its box: a report's Edit and chips. */
-  openChat(text?: string): void;
-  /** The last openChat: the panel goes back to the page's chat and fills its box each time `at` changes. */
-  asked: { text?: string; at: number } | null;
-  /** the configuration page has an edit still on its way to the server */
-  dirty: boolean;
-  setDirty(b: boolean): void;
-  /** per configuration: the fields with a question open in the panel (the page marks them) */
-  questionKeys: Record<string, string[]>;
-  setQuestionKeys(projectId: string, keys: string[]): void;
-};
-
-const Ctx = createContext<AssistantShell | null>(null);
-
-export function useAssistantShell(): AssistantShell {
-  const c = useContext(Ctx);
-  if (!c) throw new Error("useAssistantShell outside AssistantProvider");
-  return c;
-}
+// thread is never live in two places. The context itself is `shell.ts` (why there: its comment).
 
 export function AssistantProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);

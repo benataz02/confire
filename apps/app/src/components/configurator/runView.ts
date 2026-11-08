@@ -12,29 +12,6 @@ export const fmt = (n: number): string => n.toLocaleString(formatLocale(), { max
 /** `(key, ...params)` — the caller's `i18n.getText`, so this stays pure and testable. */
 export type TextFn = (key: string, ...params: string[]) => string;
 
-const STATUS_TEXT: Record<string, string> = {
-  draft: "CONFIG_STATUS_DRAFT",
-  submitted: "CONFIG_STATUS_SUBMITTED",
-  in_review: "CONFIG_STATUS_IN_REVIEW",
-  returned: "CONFIG_STATUS_RETURNED",
-  declined: "CONFIG_STATUS_DECLINED",
-  quoted: "CONFIG_STATUS_QUOTED",
-};
-
-/** The list's two statuses, colour included. A request's wider set is `projectStatusText`. */
-export function statusUi(t: TextFn) {
-  return {
-    draft: { state: "None" as const, text: t(STATUS_TEXT.draft!) },
-    quoted: { state: "Positive" as const, text: t(STATUS_TEXT.quoted!) },
-  };
-}
-
-/** Tag text for a project status. An unknown status stays as stored — it is a code, not a sentence. */
-export function projectStatusText(t: TextFn, status: string): string {
-  const key = STATUS_TEXT[status];
-  return key ? t(key) : status;
-}
-
 export const candidateLabel = (t: TextFn, keys: string[], assignment: Entries): string =>
   keys.length ? keys.map((k) => String(assignment[k] ?? "—")).join(" · ") : t("CONFIG_CANDIDATE");
 
@@ -79,4 +56,26 @@ export const sortRows = (rows: Row[], sortBy: GridState["sortBy"]): Row[] =>
 /** One decimal. An em dash where there is no share to show. */
 export function percent(value: number | null): string {
   return value === null ? "—" : `${(value * 100).toFixed(1)}%`;
+}
+
+// @confire/db's SAP_STEPS: the app does not depend on the db package.
+const SAP_STEPS = ["ordered", "delivered", "invoiced"];
+
+/** The title's Open button, per document it opens. */
+export const OPEN_DOCUMENT: Record<string, string> = {
+  Quotations: "CONFIG_OPEN_QUOTE", Orders: "CONFIG_OPEN_ORDER", DeliveryNotes: "CONFIG_OPEN_DELIVERY", Invoices: "CONFIG_OPEN_INVOICE",
+};
+
+/** What the title's Open button opens: the project's latest SAP document — the newest SAP step's
+ *  (each `ordered`/`delivered`/`invoiced` event records the document that moved the status there;
+ *  events come oldest first), else the quotation (a status migration 0021 set has no event). Null
+ *  past "Quoted" while the events load, so the label never flips. A step's document lives in its
+ *  quotation's company (advanceSapSteps walks only those): the caller's check on the quotation covers it. */
+export function latestDocument(
+  p: { status: string; b1DocEntry: number },
+  events: { kind: string; payload: unknown }[] | undefined,
+): { entity: string; docEntry: number } | null {
+  if (!events && SAP_STEPS.includes(p.status)) return null;
+  const step = events?.findLast((e) => SAP_STEPS.includes(e.kind))?.payload as { entity: string; docEntry: number } | undefined;
+  return step ? { entity: step.entity, docEntry: step.docEntry } : { entity: "Quotations", docEntry: p.b1DocEntry };
 }

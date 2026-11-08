@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { FilterCond, FilterValue, ViewState } from "@confire/db";
 import type { EntityConstraints } from "./metadata.ts";
+import type { LookupRef } from "@confire/config-engine";
 import type { Templates } from "./object-page/ObjectPageSection.tsx";
 
 // The config shapes a feature declares and the two shells read — LIST-REPORT-OBJECT-PAGE.md §9 and
@@ -88,7 +89,7 @@ export type FilterField = {
  *  or a masterdata query table paged through configs.queryPage. */
 export type CflSource =
   | { kind: "entity"; entitySet: string }
-  | { kind: "masterdata"; modelId: string; table: string };
+  | { kind: "masterdata"; modelId: string; table: string; where?: Extract<LookupRef, { source: "query" }>["where"] };
 
 /** Value-help doc §2. `keyField ?? columns[0].key` is the key everywhere. */
 export type CflDialogConfig = {

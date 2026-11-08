@@ -22,6 +22,9 @@ export const sapConnection = pgTable("sap_connection", {
   /** The engine `/print` uses (print spec §5.1): the SAP API Gateway, or Direct — Crystal run by
    *  the agent's confire-print.exe — only once the agent reports it set up (`sap.setPrintEngine`). */
   printEngine: text("print_engine", { enum: ["gateway", "crystal"] }).notNull().default("gateway"),
+  /** The home's open-document counts, one read shared by the whole workspace (open-counts.ts): by
+   *  entity set, with the company that answered and when — a count of another company is no count. */
+  openCounts: jsonb("open_counts").$type<{ company: string | null; at: string; counts: Record<string, number> }>(),
   status: text("status", { enum: ["ok", "error"] }).notNull().default("ok"),
   lastOkAt: timestamp("last_ok_at", { withTimezone: true }),
   lastError: text("last_error"),

@@ -10,7 +10,7 @@ import { money } from "../money.ts";
 import { formatLocale, parseIsoDate } from "../format.ts";
 import { PrintActions } from "../PrintActions.tsx";
 import { FILE_MAX_MB, fileSize, fileUrl } from "../files.ts";
-import { Composer, ROUND_BUTTON, type ComposerLook } from "../Composer.tsx";
+import { Composer, type ComposerLook } from "../Composer.tsx";
 import { chaptersOf, mergeEntries, oneToOne, type Chapter, type Entry } from "./chapters.ts";
 
 // A project's timeline (spec §8), for both apps: one merged, time-ordered feed of the project's
@@ -27,6 +27,8 @@ export type TimelineEvent = {
   visibility: "external" | "internal";
   note: string | null;
   payload: unknown;
+  /** who its notification mail went to; the portal gets it only for staff's events */
+  mailedTo?: string[] | null;
 };
 
 export type TimelineDoc = {
@@ -60,7 +62,14 @@ const KIND: Record<string, { title: (side: "internal" | "external") => string; i
   assigned: { title: () => "UI_EVT_ASSIGNED", icon: "employee" },
   // A sales document Confire sent (document-mail spec §5.8); its title is built below.
   document_sent: { title: () => "UI_EVT_DOC", icon: "email" },
+  // SAP took the project a step on; titled as its document, below.
+  ordered: { title: () => "UI_DOC_ORDER", icon: "sales-order" },
+  delivered: { title: () => "UI_DOC_DELIVERY", icon: "shipping-status" },
+  invoiced: { title: () => "UI_DOC_INVOICE", icon: "receipt" },
 };
+/** A step event's payload: the SAP document that moved the status. */
+type Step = { entity: string; docEntry: number; docNum: number | null; docDate: string };
+const STEP_KINDS = new Set(["ordered", "delivered", "invoiced"]);
 
 /** `document_sent`'s payload. `error` reaches staff only: the server drops it for the portal. */
 type DocumentSent = { entity: string; docEntry: number; docNum: number | null; fileId: string; to: string[]; error?: string };
@@ -155,33 +164,43 @@ export function ProjectTimeline({
     const doc = x.kind === "doc" ? x.d : x.doc;
     const q = e?.kind === "quoted" ? e.payload as { docNum?: number | null; mode?: string; value?: number } | null : null;
     const f = e?.kind === "file" ? e.payload as { fileId: string; name: string; size: number } | null : null;
+    const step = e && STEP_KINDS.has(e.kind) ? e.payload as Step | null : null;
     const known = e ? KIND[e.kind] : undefined;
     const k = known ?? { title: () => e?.kind ?? "", icon: "history" };
-    const name = x.kind === "doc" ? docName(x.d.entity, x.d.docNum) : sent ? docName(sent.entity, sent.docNum ?? sent.docEntry) : "";
-    const entity = x.kind === "doc" ? x.d.entity : sent?.entity;
+    const name = x.kind === "doc" ? docName(x.d.entity, x.d.docNum) : sent ? docName(sent.entity, sent.docNum ?? sent.docEntry)
+      : step ? docName(step.entity, step.docNum ?? step.docEntry) : "";
+    const entity = x.kind === "doc" ? x.d.entity : sent?.entity ?? step?.entity;
     const title = q ? i18n.getText(q.mode === "updated" ? "UI_QUOTE_UPDATED" : "UI_QUOTE_SENT", q.docNum == null ? "" : String(q.docNum)).replace(/\s+/g, " ")
-      : x.kind === "doc" || sent ? name
+      : x.kind === "doc" || sent || step ? name
       : e?.kind === "assigned" ? i18n.getText("UI_EVT_ASSIGNED", (e.payload as { assigneeName?: string } | null)?.assigneeName ?? "")
       : e?.kind === "created" && (e.payload as { via?: string } | null)?.via === "assistant" ? i18n.getText("UI_EVT_CREATED_ASSISTANT")
       : e?.kind === "created" && (e.payload as { via?: string } | null)?.via === "mcp" ? i18n.getText("UI_EVT_CREATED_MCP")
       : known ? i18n.getText(k.title(side)) : k.title(side);
     const mine = e?.actorSide === side;
+    // Every address this entry reached: the document's own mail (from the tenant's mailbox) and the
+    // event's notification (Confire's) — one envelope, the recipients in its tooltip.
+    const mailed = [...new Set([...(sent?.to ?? []), ...(e?.mailedTo ?? [])])];
+    const envelope = mailed.length
+      ? <Icon name="email" design="Positive" showTooltip accessibleName={i18n.getText("UI_EVT_DOC_EMAILED", mailed.join(", "))} />
+      : null;
     return (
       <TimelineItem key={x.kind === "doc" ? `${x.d.entity}:${x.d.docEntry}` : x.e.id} icon={(entity && ENTITY[entity]?.icon) || k.icon}
         state={sent?.to.length ? "Positive" : x.kind === "doc" ? "None" : k.state ?? "None"} titleText={title}
         name={named ? e?.actorName ?? undefined : undefined} data-mine={mine || undefined}
-        subtitleText={e ? when(new Date(e.at)) : parseIsoDate(doc!.docDate)?.toLocaleDateString(formatLocale())}
+        subtitleText={e && !step ? when(new Date(e.at)) : parseIsoDate(doc?.docDate ?? step!.docDate)?.toLocaleDateString(formatLocale())}
         style={tipVars(title, e?.visibility === "internal" ? i18n.getText("UI_INTERNAL_TAG") : undefined)}>
         {/* The body sits on its side as a block; a note's lines still read from the left. */}
         <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", textAlign: "start", alignItems: mine ? "flex-end" : "flex-start" }}>
           {q?.value !== undefined ? <Text>{money(q.value, currency)}</Text> : null}
-          {x.kind === "doc" ? <Text>{money(x.d.docTotal, currency)}</Text> : null}
+          {x.kind === "doc" || (step && doc) ? <Text>{money(doc!.docTotal, currency)}</Text> : null}
           {f ? <Link href={fileUrl(f.fileId)} icon="download">{`${f.name} (${fileSize(f.size)})`}</Link> : null}
-          {/* The PDF as it was sent, not a fresh print. */}
-          {sent ? <Link href={fileUrl(sent.fileId)} icon="pdf-attachment">{`${name}.pdf`}</Link> : null}
-          {/* A mail that left: the recipients by the envelope, as "Not emailed" says why one did not. */}
-          {sent?.to.length ? (
-            <ObjectStatus state="Positive" icon={<Icon name="email" />}>{i18n.getText("UI_EVT_DOC_EMAILED", sent.to.join(", "))}</ObjectStatus>
+          {/* The PDF as it was sent, not a fresh print, the envelope beside it, as "Not emailed" below
+              says why one did not. */}
+          {sent ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <Link href={fileUrl(sent.fileId)} icon="pdf-attachment">{`${name}.pdf`}</Link>
+              {envelope}
+            </div>
           ) : null}
           {sent?.error ? (
             <ObjectStatus state="Critical" showDefaultIcon>
@@ -189,6 +208,7 @@ export function ProjectTimeline({
             </ObjectStatus>
           ) : null}
           {e?.note ? <Text style={{ whiteSpace: "pre-wrap" }}>{e.note}</Text> : null}
+          {sent ? null : envelope}
           {doc && (onOpenDocument || canPreview) ? (
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
               {onOpenDocument ? (
@@ -241,7 +261,7 @@ export function TimelineComposer({ side, onComment, onUpload, look }: {
   /** attach a file (≤ 10 MB, any type); omit for a reader who may not upload (a portal viewer).
    *  Staff's internal-only toggle applies to it as to a comment. */
   onUpload?: (file: File, internalOnly: boolean) => Promise<unknown>;
-  /** the pill's colours; the theme's field look if absent */
+  /** the box's colours; the theme's field look if absent */
   look?: ComposerLook;
 }) {
   const i18n = useUiI18n();
@@ -275,7 +295,7 @@ export function TimelineComposer({ side, onComment, onUpload, look }: {
     void busy(() => onUpload(file, side === "internal" && internalOnly), () => {});
   };
 
-  // Leading: attach, then staff's internal-only switch; trailing: the round send.
+  // Leading: attach, then staff's internal-only switch; trailing: send.
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
       <Composer value={note} onInput={setNote} onSend={() => void post()} maxlength={4000} disabled={posting} look={look}
@@ -298,7 +318,7 @@ export function TimelineComposer({ side, onComment, onUpload, look }: {
         </>}
         trailing={
           <Button design="Emphasized" icon="paper-plane" tooltip={i18n.getText("UI_POST")} accessibleName={i18n.getText("UI_POST")}
-            disabled={posting || !note.trim()} style={ROUND_BUTTON} onClick={() => void post()} />
+            disabled={posting || !note.trim()} onClick={() => void post()} />
         } />
       {postError ? <MessageStrip design="Negative" hideCloseButton>{postError}</MessageStrip> : null}
     </div>

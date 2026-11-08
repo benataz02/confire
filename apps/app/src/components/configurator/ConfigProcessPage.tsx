@@ -4,7 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IllustratedMessage, Input, Label,
-  Link, ObjectPage, ObjectPageSection, ObjectPageTitle, Panel, Popover, ResponsivePopover, Tag, Text, Title,
+  Link, ObjectPage, ObjectPageSection, ObjectPageTitle, Panel, Popover, ResponsivePopover, Text, Title,
   ToggleButton, Toolbar,
   ToolbarButton, ToolbarItem,
 } from "@ui5/webcomponents-react";
@@ -13,23 +13,24 @@ import { historyKey, itemsTableOf, type Val } from "@confire/config-engine";
 import { orpc, useCurrency } from "../../orpc.ts";
 import { money as formatMoney } from "@confire/ui/money.ts";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
-import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
+import { ProjectStatusTag } from "@confire/ui/timeline/ProjectStatus.tsx";
+import { staffWritable } from "@confire/ui/timeline/projectStatus.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { configuratorSections } from "@confire/ui/configurator/ConfiguratorForm.tsx";
 import { GENERAL_SECTION } from "@confire/ui/configurator/formHelpers.ts";
 import { useI18n } from "../../i18n.ts";
-import { projectStatusText } from "./runView.ts";
 import { PriceAnalysis } from "./PriceAnalysis.tsx";
 import { CostBody } from "./InsightsRail.tsx";
 import { SimilarConfigs } from "./SimilarConfigs.tsx";
 import { configMessages } from "./configMessages.ts";
+import { latestDocument, OPEN_DOCUMENT } from "./runView.ts";
 import { GeneralForm } from "./GeneralForm.tsx";
 import { ProcessFooter } from "./ProcessFooter.tsx";
 import { useConfigProcess } from "./useConfigProcess.ts";
 import { PageMessages, useRefusals } from "@confire/ui/PageMessages.tsx";
 import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
 import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
-import { useAssistantShell } from "../../assistant/AssistantProvider.tsx";
+import { useAssistantShell } from "../../assistant/shell.ts";
 import { fieldMarks, sourceTip, type Sources } from "../../assistant/marks.ts";
 import type { Source } from "../../assistant/cards/registry.tsx";
 
@@ -65,6 +66,10 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   });
   const { q, view, project, form, selection, queue } = proc;
   const getKey = orpc.configs.get.queryKey({ input: { id } });
+  // SAP, off the page's path: an order, delivery or invoice made in SAP moves the status on, then the
+  // page redraws with it (the request overview does the same).
+  const progress = useQuery({ ...orpc.configs.progress.queryOptions({ input: { id } }), enabled: !isNew, retry: false });
+  useEffect(() => { if (progress.data?.changed) void qc.invalidateQueries({ queryKey: getKey }); }, [progress.data]);
   // What opens the messages by itself: an edit the server refused, a calculation that failed, a
   // create that did not go through. Never an edit on its way, never a warning.
   const refused = useRefusals(
@@ -98,6 +103,11 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   // A DocEntry means something only in the SAP company it was posted in: elsewhere there is no
   // quotation to open, and quoting creates one (the server decides the same way).
   const quotationHere = !!project && project.b1DocEntry !== null && project.b1Company === view?.sapCompany;
+  // The title opens the latest document SAP made of it, which the SAP steps' events name.
+  const timeline = useQuery({ ...orpc.timeline.list.queryOptions({ input: { projectId: id } }), enabled: quotationHere });
+  const doc = quotationHere
+    ? latestDocument({ status: project.status, b1DocEntry: project.b1DocEntry! }, timeline.data?.events)
+    : null;
   // What the General form shows and writes. A new configuration holds its fields here until name
   // and model are both set (create needs both); that creates it, and it opens at its own URL.
   const [fresh, setFresh] = useState<Head>({ name: "", modelId: "", customer: null });
@@ -117,10 +127,10 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const batches = project?.batches ?? [];
   const tables = project?.tables ?? {};
   const entries = project?.entries ?? {};
-  // The server's lock (assertWritable fences every write): a configuration is editable until quoted,
-  // a client's request only while it is in review (spec §7). The page goes read-only rather than
-  // letting every edit walk into that error.
-  const locked = request ? project?.status !== "in_review" : project?.status === "quoted";
+  // The server's lock (assertWritable fences every write): a configuration is editable while it is a
+  // draft, a client's request only while it is in review (spec §7). The page goes read-only rather
+  // than letting every edit walk into that error.
+  const locked = !!project && !staffWritable(project);
   // Anything a model switch would throw away, the pending edit included, so the field locks on the
   // first change rather than when its answer lands.
   const modelLocked = Object.keys(entries).length > 0 || Object.values(tables).some((rows) => rows.length > 0) || queue.busy;
@@ -183,7 +193,6 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const marked = markOpen ? sources[markOpen.key] : undefined;
   const markSource = marked?.source as Source | undefined;
 
-  const st = PROJECT_STATUS[project.status] ?? PROJECT_STATUS.draft;
   const candidates = view.candidates;
   // The configurator waits for General: the server lists what it still needs.
   const headReady = !view.missing.some((m) => GENERAL.has(m.code));
@@ -369,11 +378,11 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
                     : r.tables === 1 ? t("CONFIG_TOAST_SYNCED_ONE", String(r.count))
                     : t("CONFIG_TOAST_SYNCED_MANY", String(r.count), String(r.tables))),
                 })} />
-              {quotationHere ? (
-                <ToolbarButton icon="document-text" design="Transparent" text={t("CONFIG_OPEN_QUOTE")}
+              {doc ? (
+                <ToolbarButton icon="document-text" design="Transparent" text={t(OPEN_DOCUMENT[doc.entity]!)}
                   onClick={() => navigate({
                     to: "/$slug/b1/$entity/$key",
-                    params: { entity: "Quotations", key: String(project.b1DocEntry) },
+                    params: { entity: doc.entity, key: String(doc.docEntry) },
                   })} />
               ) : null}
             </Toolbar>
@@ -398,15 +407,7 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
                 }} />}
             </Toolbar>
           }>
-          <Tag design={st.state === "None" ? "Neutral" : st.state} style={{ alignSelf: "center" }}>
-            {projectStatusText(t, project.status)}
-          </Tag>
-          {/* The client's answer to the quotation (D20). A decline reopens the request in review. */}
-          {request && project.quoteResponse ? (
-            <Tag design={project.quoteResponse === "accepted" ? "Positive" : "Critical"} style={{ alignSelf: "center" }}>
-              {project.quoteResponse === "accepted" ? t("CONFIG_ACCEPTED_CLIENT") : t("CONFIG_DECLINED_CLIENT")}
-            </Tag>
-          ) : null}
+          <ProjectStatusTag status={project.status} style={{ alignSelf: "center" }} />
         </ObjectPageTitle>
       }
       footerArea={footerUp ? footer : undefined}

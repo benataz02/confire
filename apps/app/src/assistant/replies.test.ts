@@ -8,7 +8,7 @@ const view = (p: Partial<{ missing: unknown[]; rows: unknown[]; picks: unknown[]
   missing: (p.missing ?? []) as ReplyView["missing"],
   candidates: { rows: (p.rows ?? []) as ReplyView["candidates"]["rows"] },
   selection: { picks: (p.picks ?? []) as ReplyView["selection"]["picks"] },
-  project: { status: (p.status ?? "draft") as ReplyView["project"]["status"] },
+  project: { status: (p.status ?? "draft") as ReplyView["project"]["status"], portalCardCode: null },
 });
 
 test("what is missing is the question card's while it asks; past it, a reply asks the model", () => {

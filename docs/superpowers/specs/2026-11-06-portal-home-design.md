@@ -64,7 +64,7 @@ Layout A of the mockup, top to bottom:
    results inside the documents read *(my call)*.
 
 **Which inquiries are open**: every company project (`portalCardCode`) that is not finished.
-Finished = SAP shows it **invoiced**, or the supplier **declined** it (`status = declined`). A draft is
+Finished = SAP shows it **invoiced** (`status = invoiced`), or the supplier **declined** it (`status = declined`). A draft is
 open. A quote the customer declined is not finished, because `quoteDecline` sends the project back
 to `in_review` for a new quote.
 
@@ -83,10 +83,15 @@ group, the latest change first. *(Order within groups: my call.)*
 | `returned` | ✓ sent, ● review (critical) | Make the changes | Critical |
 | `quoted`, no response | ✓ sent, review, ● quoted (critical) | Answer the quote | Critical |
 | `quoted`, accepted, no order | ✓ …quoted, ● ordered | Waiting for the order | Information |
-| SAP: ordered | ✓ …ordered, ● delivered | Delivery next | Information |
-| SAP: delivered | ✓ …delivered, ● invoiced | Invoice next | Information |
-| SAP: invoiced (pinned only) | all ✓ | Done | Positive |
+| `ordered` | ✓ …ordered, ● delivered | Delivery next | Information |
+| `delivered` | ✓ …delivered, ● invoiced | Invoice next | Information |
+| `invoiced` (pinned only) | all ✓ | Done | Positive |
 | `declined` (pinned only) | stopped at review, negative | Declined | Negative |
+
+2026-11-08: the stored `sapStep` folded into `status` — one field. SAP moves `quoted` on to `ordered`,
+`delivered`, `invoiced` (`advanceStep`, with an event and the client's bell), for internal configurations
+too, so `journeyOf` reads the status and the answer alone. `claim` is a name no transition reaches yet,
+placed past the end with the supplier to act (*<supplier> reviews*).
 
 An invoice raised straight from the order, with no delivery, counts as invoiced, and the delivery
 step is drawn done. A viewer (`portal_viewer`) sees the same tags but cannot act on them: the

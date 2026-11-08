@@ -11,15 +11,15 @@ import { Button as AiButton, ButtonState } from "@ui5/webcomponents-ai-react";
 import { useLanguage } from "@confire/ui/i18n.ts";
 import { FILE_MAX_MB } from "@confire/ui/files.ts";
 import { formatLocale } from "@confire/ui/format.ts";
-import { Composer, ROUND_BUTTON } from "@confire/ui/Composer.tsx";
+import { Composer } from "@confire/ui/Composer.tsx";
 import { ORPCError } from "@orpc/client";
 import { useI18n } from "../i18n.ts";
 import { client, orpc } from "../orpc.ts";
-import { useAssistantShell } from "./AssistantProvider.tsx";
+import { useAssistantShell } from "./shell.ts";
 import { nextReplies } from "./replies.ts";
 import { REPORT_ROUTE, routeContext, type RouteContext } from "./routeContext.ts";
 import { useAssistantChat, useAssistantInvalidate, type Refusal, type Thread } from "./useAssistant.ts";
-import { progressText, renderTool, type CardCtx } from "./cards/registry.tsx";
+import { progressText, renderTool, useOpenForm, type CardCtx } from "./cards/registry.tsx";
 import { blocks, type ToolCall } from "./steps.ts";
 import { Steps, type StepResult } from "./Steps.tsx";
 import { ACCEPT, extractDrop, fileIcon, fileOfPart, refuseFile, uploadDrop } from "./intake.ts";
@@ -29,6 +29,7 @@ import { stampText, timeOf } from "./stamp.ts";
 import { QuestionCard } from "./cards/QuestionCard.tsx";
 import { CandidatesCard } from "./cards/CandidatesCard.tsx";
 import type { ExtractResult } from "./cards/ExtractionCard.tsx";
+import { staffWritable } from "@confire/ui/timeline/projectStatus.ts";
 
 /** The user's auto-mode switch, a ui_user_state key: the server's assistant/auto.ts AUTO_WRITE_KEY. */
 const AUTO_WRITE_KEY = "assistant:autoWrite";
@@ -345,6 +346,11 @@ export function ChatView({ thread, route, kind, head, welcome, wide = false, onT
   const questions = live ? openQuestions(live, extracts, kept) : [];
   const replies = !busy && !failed && last?.role === "assistant" && !asked
     ? nextReplies({ kind, view: view.data, asking: questions.length > 0 }, (k) => t(k)) : [];
+  // Open configuration is a next action, unless its form is what the page shows (a client's request's
+  // form is its own page).
+  const openForm = useOpenForm();
+  const formRoute = view.data?.request ? "/$slug/configs/$id_/configuration" : "/$slug/configs/$id";
+  const offerForm = kind === "configure" && !!projectId && !(route.projectId === projectId && route.routeId === formRoute);
   const questionKeys = questions.map((q) => q.key);
   const { setQuestionKeys } = shell;
   const projectKey = projectId;
@@ -447,7 +453,11 @@ export function ChatView({ thread, route, kind, head, welcome, wide = false, onT
     </>
   );
   const dropStrip = dropError ? <MessageStrip design="Negative" onClose={() => setDropError(null)}>{dropError}</MessageStrip> : null;
-  const readFiles = unread.length && !disabled
+  // Offered only while extract can write (assertWritable's internal side): a configuration past draft,
+  // or a request not in review, would only answer with its lock.
+  const project = view.data?.project;
+  const writable = !!project && staffWritable(project);
+  const readFiles = unread.length && !disabled && writable
     ? <AiAction text={t("ASSISTANT_READ_FILES", String(unread.length))} disabled={busy} onClick={() => begin(() => void readUnread())} />
     : null;
 
@@ -468,13 +478,13 @@ export function ChatView({ thread, route, kind, head, welcome, wide = false, onT
     </>
   );
   // Fiori's AI button: send turns into stop while the answer streams. A drop may come without text.
-  // Round, as Joule's, in UI5's own size (the AI button sizes its inner button itself); with nothing to
-  // send it is Joule's pale send colour rather than UI5's faded one.
+  // UI5's own shape and size, in Joule's colour; with nothing to send it is Joule's pale send colour
+  // rather than UI5's faded one.
   const nothing = !chat.isLoading && (disabled || busy || (!text.trim() && !files.length));
   const sendButton = (
     <AiButton design="Emphasized" state={chat.isLoading ? "generating" : "send"} disabled={nothing}
       style={{
-        ...ROUND_BUTTON, "--sapContent_DisabledOpacity": "1",
+        "--sapContent_DisabledOpacity": "1",
         "--sapButton_Emphasized_Background": nothing ? "var(--cf-a-send-empty)" : "var(--cf-a-send)",
         "--sapButton_Emphasized_BorderColor": nothing ? "var(--cf-a-send-empty)" : "var(--cf-a-send)",
       } as CSSProperties}
@@ -498,7 +508,7 @@ export function ChatView({ thread, route, kind, head, welcome, wide = false, onT
       }}>
     </ToggleButton>
   ) : null;
-  // The composer: Joule's pill, the files above it. Enter sends, Shift+Enter breaks the line: a pasted
+  // The composer: Joule's colours, the files above it. Enter sends, Shift+Enter breaks the line: a pasted
   // email keeps its lines.
   const composer = (
     <>
@@ -584,6 +594,7 @@ export function ChatView({ thread, route, kind, head, welcome, wide = false, onT
             {live && !live.missing.length && live.candidates.rows.length ? <CandidatesCard projectId={projectId!} view={live} /> : null}
             {replies.length ? (
               <FlexBox wrap="Wrap" gap="0.5rem">
+                {offerForm ? <AiAction text={t("ASSISTANT_OPEN_CONFIG")} onClick={() => void openForm(projectId!)} /> : null}
                 {replies.map((r) => <AiAction key={r} text={r} onClick={() => send(r)} />)}
               </FlexBox>
             ) : null}

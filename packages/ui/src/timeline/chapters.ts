@@ -5,16 +5,21 @@ import { parseIsoDate } from "../format.ts";
 // tested without a browser. A chapter is a journey step; entries are walked oldest first under a running
 // step that only moves forward, so rework, a withdraw or a declined quote never repeats a chapter.
 
-/** One line of the feed. A quotation is its `quoted` event, with the SAP document when the fenced read
- *  found it (`doc`, for Open and Preview); a later SAP document is its own entry. Either carries the
- *  `document_sent` that mailed it (`sent`), so a document is one entry, from the person who sent it. */
+/** One line of the feed. A quotation is its `quoted` event, and an order, delivery or invoice that moved
+ *  the status is its step event (`ordered`…), each with the SAP document when the fenced read found it
+ *  (`doc`, for Open and Preview); any other SAP document is its own entry. Each carries the
+ *  `document_sent` that mailed it (`sent`), so a document is one entry. */
 export type Entry =
   | { at: number; kind: "event"; e: TimelineEvent; sent?: TimelineEvent; doc?: TimelineDoc }
   | { at: number; kind: "doc"; d: TimelineDoc; sent?: TimelineEvent };
 
 const DAY = 86_400_000;
 
-const ref = (e: TimelineEvent) => (e.payload ?? {}) as { entity?: string; docEntry?: number };
+const ref = (e: TimelineEvent) => (e.payload ?? {}) as { entity?: string; docEntry?: number; docDate?: string };
+
+/** The step events, by the journey step each is a milestone of (sent·review·quoted·ordered·delivered·invoiced). */
+const STEP_EVENT: Record<string, number> = { ordered: 3, delivered: 4, invoiced: 5 };
+const dayEnd = (iso: string | undefined) => { const day = parseIsoDate(iso ?? "")?.getTime(); return day ? day + DAY - 1 : 0; };
 
 /** The project's events and its SAP documents as one feed, oldest first, one entry per document: the SAP
  *  row of a quotation would repeat its `quoted` event, and a mailed document folds its `document_sent` in
@@ -25,11 +30,11 @@ export function mergeEntries(events: TimelineEvent[] | undefined, documents: Tim
   const quotations = new Map((documents?.quotations ?? []).map((q) => [q.quotation.docEntry, q.quotation]));
   // By entity and DocEntry: an order two of the project's quotations went into is one entry.
   const docs = new Map<string, Entry & { kind: "doc" }>();
-  for (const d of (documents?.quotations ?? []).flatMap((q) => q.chain)) {
-    const day = parseIsoDate(d.docDate)?.getTime() ?? 0; // local midnight, as the page shows it
-    docs.set(`${d.entity}:${d.docEntry}`, { at: day ? day + DAY - 1 : 0, kind: "doc", d }); // unparsable: first
-  }
+  for (const d of (documents?.quotations ?? []).flatMap((q) => q.chain))
+    docs.set(`${d.entity}:${d.docEntry}`, { at: dayEnd(d.docDate), kind: "doc", d }); // local day's end; unparsable: first
   const quoted = new Map<number | undefined, Entry & { kind: "event" }>();
+  // A step event stands in for its SAP document's entry: what a `document_sent` folds into.
+  const steps = new Map<string, Entry & { kind: "event" }>();
   const out: Entry[] = [];
   for (const e of [...(events ?? [])].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())) {
     const at = new Date(e.at).getTime();
@@ -40,12 +45,23 @@ export function mergeEntries(events: TimelineEvent[] | undefined, documents: Tim
       out.push(x);
       continue;
     }
+    if (STEP_EVENT[e.kind] !== undefined) {
+      // On the document's day (or its send's time), not when Confire learned of it: a SAP read may be days late.
+      const key = `${ref(e).entity}:${ref(e).docEntry}`;
+      const d = docs.get(key);
+      docs.delete(key);
+      const x = { at: d?.at ?? dayEnd(ref(e).docDate), kind: "event" as const, e, doc: d?.d, sent: d?.sent };
+      steps.set(key, x);
+      out.push(x);
+      continue;
+    }
     if (e.kind === "document_sent") {
       const { entity, docEntry } = ref(e);
-      const host = entity === "Quotations" ? quoted.get(docEntry) : docs.get(`${entity}:${docEntry}`);
+      const key = `${entity}:${docEntry}`;
+      const host = entity === "Quotations" ? quoted.get(docEntry) : steps.get(key) ?? docs.get(key);
       if (host && !host.sent) {
         host.sent = e;
-        if (host.kind === "doc") host.at = at; // a send has a time; the posting date does not
+        if (entity !== "Quotations") host.at = at; // a send has a time; the posting date does not
         continue;
       }
     }
@@ -63,7 +79,7 @@ export function oneToOne(events: TimelineEvent[] | undefined): boolean {
 
 export type Chapter = { step: number; entries: Entry[] }; // step 0..5 = sent·review·quoted·ordered·delivered·invoiced
 
-const EVENT_STEP: Record<string, number> = { submitted: 0, accepted: 1, quoted: 2 };
+const EVENT_STEP: Record<string, number> = { submitted: 0, accepted: 1, quoted: 2, ...STEP_EVENT };
 const DOC_STEP: Record<string, number> = { Orders: 3, DeliveryNotes: 4, Invoices: 5 };
 
 /** The step an entry is a milestone of; undefined for everything that stays in the running chapter. */
@@ -89,7 +105,8 @@ export function stepDates(chapters: Chapter[]): (number | undefined)[] {
   const out: (number | undefined)[] = Array(6).fill(undefined);
   for (const c of chapters) {
     const x = c.entries.find((e) => milestoneOf(e) === c.step) ?? c.entries[0]!;
-    out[c.step] = x.kind === "doc" ? parseIsoDate(x.d.docDate)?.getTime() : x.at;
+    const docDate = x.kind === "doc" ? x.d.docDate : STEP_EVENT[x.e.kind] !== undefined ? ref(x.e).docDate : undefined;
+    out[c.step] = docDate !== undefined ? parseIsoDate(docDate)?.getTime() : x.at;
   }
   return out;
 }

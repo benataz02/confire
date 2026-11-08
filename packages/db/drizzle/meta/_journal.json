@@ -134,6 +134,34 @@
       "when": 1793976377732,
       "tag": "0018_adorable_tag",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794067495759,
+      "tag": "0019_ordinary_bloodstrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794130824509,
+      "tag": "0020_premium_turbo",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794132510679,
+      "tag": "0021_free_silver_surfer",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794166186108,
+      "tag": "0022_volatile_mentallo",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray, or } from "drizzle-orm";
 import { db, configProject } from "@confire/db";
 import { escapeLiteral, rowsOf } from "@confire/b1";
 import { portalMemberProcedure } from "./base.ts";
@@ -8,7 +8,7 @@ import { tenantConnector, viaB1 } from "../../b1.ts";
 import { ALWAYS, type DocEntity } from "../doc-fields.ts";
 import { advanceSapSteps } from "../../project-timeline.ts";
 import { getUserState, setUserState } from "../../ui-views.ts";
-import { figuresOf, isFinished, journeyOf, rankOf, type Next } from "../journey.ts";
+import { figuresOf, FINISHED, isFinished, journeyOf, rankOf, type Next } from "../journey.ts";
 
 // The portal home (spec 2026-11-06-portal-home): Postgres and live SAP in separate calls on purpose,
 // so an agent that is down costs the SAP parts — the journey's refresh and the documents — never the
@@ -47,10 +47,10 @@ export const homeRouter = {
    *  its journey, in the page's order, and the banner's figures over the open ones. */
   overview: portalMemberProcedure.handler(async ({ context }) => {
     const pins = await pinsOf(context.tenantId, context.user.id);
-    const open = and(ne(configProject.status, "declined"), sql`${configProject.sapStep} is distinct from 'invoiced'`);
+    const open = notInArray(configProject.status, FINISHED);
     const rows = await db.select({
       id: configProject.id, name: configProject.name, status: configProject.status, quoteResponse: configProject.quoteResponse,
-      sapStep: configProject.sapStep, sapStepAt: configProject.sapStepAt, createdAt: configProject.createdAt,
+      sapStepAt: configProject.sapStepAt, createdAt: configProject.createdAt,
       updatedAt: configProject.updatedAt, quotedAt: configProject.quotedAt, quoteRespondedAt: configProject.quoteRespondedAt,
       quotedValue: configProject.quotedValue,
     }).from(configProject)

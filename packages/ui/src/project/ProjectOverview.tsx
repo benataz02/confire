@@ -1,8 +1,10 @@
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
-import { DynamicPage, DynamicPageHeader, DynamicPageTitle, Label, Title, Toolbar, type DynamicPageDomRef } from "@ui5/webcomponents-react";
+import { DynamicPage, DynamicPageHeader, DynamicPageTitle, Label, Title, Toolbar, type DynamicPageDomRef, type DynamicPageHeaderDomRef } from "@ui5/webcomponents-react";
+import type { ProjectStatus } from "@confire/db";
 import { formatLocale } from "../format.ts";
 import { JourneyBar } from "../journey/JourneyBar.tsx";
 import type { JourneyNext, Side } from "../journey/ring.ts";
+import { ProjectStatusTag } from "../timeline/ProjectStatus.tsx";
 import { ProjectTimeline, TimelineComposer, type ProjectTimelineProps, type TimelineComposerProps } from "../timeline/ProjectTimeline.tsx";
 import { chaptersOf, mergeEntries, stepDates } from "../timeline/chapters.ts";
 
@@ -12,12 +14,14 @@ import { chaptersOf, mergeEntries, stepDates } from "../timeline/chapters.ts";
 // sections, and this page is one thing — the conversation. Props-driven like ProjectTimeline: each
 // app's route passes its data, texts and calls.
 
-export function ProjectOverview({ side, title, subtitle, breadcrumbs, tags, actions, journey, timeline }: {
+export function ProjectOverview({ side, title, subtitle, breadcrumbs, status, actions, journey, timeline }: {
   side: Side;
   /** the project's name, and the line under it (the portal: the model; staff: client and assignee) */
   title: string; subtitle: string;
   /** a PageBreadcrumbs: a slot, so an element that forwards `slot` */
-  breadcrumbs: ReactElement; tags: ReactNode;
+  breadcrumbs: ReactElement;
+  /** One tag, the status alone: the quote's answer is the progress bar's next step and a timeline entry. */
+  status: ProjectStatus;
   /** ToolbarButtons; the configuration's comes first */
   actions: ReactNode;
   journey: { step: number; next: JourneyNext; labels: string[]; nextText: string; ariaLabel: string };
@@ -32,11 +36,19 @@ export function ProjectOverview({ side, title, subtitle, breadcrumbs, tags, acti
   // ponytail: UI5's private variable; re-check on a UI5 upgrade, drop if the footer ever sizes its spacer.
   const footer = useRef<HTMLDivElement>(null);
   const [footerHeight, setFooterHeight] = useState(0);
+  // A short timeline still scrolls a little, but not past the header, where UI5 snaps it (scrollTop >
+  // header + 10): the header stopped half hidden. The scroll range is the content's height less the
+  // content area's, so content at least the area plus the header (+12 px) always reaches the snap point.
+  // Pinned, nothing snaps, and the content needs no more than the area.
+  const header = useRef<DynamicPageHeaderDomRef>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const [pinned, setPinned] = useState(false);
   useLayoutEffect(() => {
-    const el = footer.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setFooterHeight(el.offsetHeight));
-    ro.observe(el);
+    const f = footer.current, h = header.current;
+    if (!f || !h) return;
+    const ro = new ResizeObserver(() => { setFooterHeight(f.offsetHeight); setHeaderHeight(h.offsetHeight); });
+    ro.observe(f);
+    ro.observe(h);
     return () => ro.disconnect();
   }, []);
 
@@ -56,7 +68,7 @@ export function ProjectOverview({ side, title, subtitle, breadcrumbs, tags, acti
     chapter.scrollIntoView({ block: "start" });
   };
 
-  // The name in UI5's object-header size, its tags beside it and centred on it as the configuration page's
+  // The name in UI5's object-header size, its tag beside it and centred on it as the configuration page's
   // ObjectPageTitle has them. In the heading slot, not the title's content: that stretches to the actions'
   // row and sits its content lower and further off. Wrapped, the Title loses the slot's styling of a bare
   // one, so its font, colour and top padding are set here.
@@ -67,16 +79,16 @@ export function ProjectOverview({ side, title, subtitle, breadcrumbs, tags, acti
       <Title style={{ fontSize, fontFamily: "var(--sapObjectHeader_Title_FontFamily)", color: "var(--sapObjectHeader_Title_TextColor)" }}>
         {title}
       </Title>
-      <span style={{ display: "flex" }}>{tags}</span>
+      <ProjectStatusTag status={status} />
     </div>
   );
   const subheading = <Label>{subtitle}</Label>;
   return (
     // The bar snaps away on scroll; its pin keeps it. The comment box stays in view.
-    <DynamicPage ref={page} showFooter
+    <DynamicPage ref={page} showFooter onPinButtonToggle={(e) => setPinned(e.target.headerPinned)}
       style={{ "--_ui5_dynamic_page_footer_spacer": `calc(${footerHeight}px + 1rem)` } as CSSProperties}
       footerArea={
-        // The pill floats itself, in a floating footer's colours, as wide as the timeline's column so its
+        // The box floats itself, in a floating footer's colours, as wide as the timeline's column so its
         // edges are the column's. Not a Bar: its height is fixed and it clips what it holds.
         <div ref={footer} style={{ maxWidth: "60rem", marginInline: "auto" }}>
           <TimelineComposer side={side} onComment={onComment} onUpload={onUpload}
@@ -92,7 +104,7 @@ export function ProjectOverview({ side, title, subtitle, breadcrumbs, tags, acti
           breadcrumbs={breadcrumbs} actionsBar={<Toolbar design="Transparent">{actions}</Toolbar>} />
       }
       headerArea={
-        <DynamicPageHeader>
+        <DynamicPageHeader ref={header}>
           {/* The timeline's column, so the bar sits over it. */}
           <div style={{ width: "100%", maxWidth: "60rem", marginInline: "auto" }}>
             <JourneyBar step={journey.step} next={journey.next} side={side} labels={journey.labels} dates={dates}
@@ -100,7 +112,9 @@ export function ProjectOverview({ side, title, subtitle, breadcrumbs, tags, acti
           </div>
         </DynamicPageHeader>
       }>
-      <ProjectTimeline {...feed} chapters={{ labels: journey.labels, draft: journey.next === "finish" }} />
+      <div style={{ minHeight: pinned ? undefined : `calc(100% + ${headerHeight + 12}px)` }}>
+        <ProjectTimeline {...feed} chapters={{ labels: journey.labels, draft: journey.next === "finish" }} />
+      </div>
     </DynamicPage>
   );
 }

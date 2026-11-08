@@ -151,6 +151,31 @@ function SourceRefEditor({ ref_, tables, onChange }: {
           })}
         </MultiComboBox>
       </FormItem>
+      {/* One masterdata, each parameter its own rows of it (LookupRef.where). */}
+      <FormItem labelContent={label(t("MODEL_ROWS_WHERE"))}>
+        <Select style={W} value={ref_.where?.col ?? NONE} accessibleName={t("MODEL_ROWS_WHERE")}
+          onChange={(e) => {
+            const col = optValue(e);
+            const { where: _, ...rest } = ref_;
+            onChange(col === NONE ? rest : { ...rest, where: { col, values: ref_.where?.values ?? [] } });
+          }}>
+          <Option value={NONE}>{t("MODEL_ROWS_ALL")}</Option>
+          {cols.map((c) => {
+            const cap = columnCaption(c, source?.labels);
+            return <Option key={c} value={c} additionalText={cap.additionalText}>{cap.text}</Option>;
+          })}
+        </Select>
+      </FormItem>
+      {ref_.where ? (
+        <FormItem labelContent={label(t("MODEL_ROWS_VALUES"), true)}>
+          {/* Typed rather than picked: a query table's preview is only its first rows. Compared as
+              text, so a number column takes "10" as well as 10. */}
+          <ManualList type="string" accessibleName={t("MODEL_ROWS_VALUES")}
+            error={ref_.where.values.length ? undefined : t("MODEL_ROWS_VALUES_ERR")}
+            ref_={{ source: "manual", options: ref_.where.values.map((value) => ({ value })) }}
+            onChange={(r) => onChange({ ...ref_, where: { col: ref_.where!.col, values: r.options.map((o) => o.value) } })} />
+        </FormItem>
+      ) : null}
     </>
   );
 }

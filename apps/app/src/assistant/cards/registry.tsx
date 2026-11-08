@@ -8,7 +8,7 @@ import { formatLocale, formatValue } from "@confire/ui/format.ts";
 import { useUiI18n } from "@confire/ui/i18n.ts";
 import { money } from "@confire/ui/money.ts";
 import { ProjectTimeline, type TimelineEvent } from "@confire/ui/timeline/ProjectTimeline.tsx";
-import { PROJECT_STATUS, projectStatusLabel } from "@confire/ui/timeline/projectStatus.ts";
+import { PROJECT_STATUS, projectStatusLabel, staffWritable } from "@confire/ui/timeline/projectStatus.ts";
 import { useI18n } from "../../i18n.ts";
 import { orpc, useCurrency } from "../../orpc.ts";
 import type { ConfigView } from "../../components/configurator/useConfigProcess.ts";
@@ -243,7 +243,7 @@ function ConfigCard({ view, ctx }: { view: ConfigView; ctx: Ctx }) {
       actions={
         <>
           {here ? null : <Button onClick={() => open({ to: `/configs/${p.id}/configuration` })}>{t("ASSISTANT_CARD_OPEN")}</Button>}
-          {picked && p.status !== "quoted"
+          {picked && staffWritable(p)
             ? <Button design="Emphasized" onClick={() => open({ to: `/configs/${p.id}/quote` })}>{t("ASSISTANT_CARD_REVIEW")}</Button>
             : null}
         </>

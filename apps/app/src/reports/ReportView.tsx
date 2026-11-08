@@ -42,7 +42,8 @@ export function ReportView({ report, result, busy, failed, actions, onChip, onRe
   report: Report; result: Result | null; busy: boolean; failed: string | null;
   /** the page's own actions (rename, delete), after Save */
   actions?: ReactNode;
-  onChip: (label: string) => void; onRefresh: () => void; onSave: (saved: boolean) => void;
+  /** the assumption chips' click; none = no chips (not editing) */
+  onChip?: (label: string) => void; onRefresh: () => void; onSave: (saved: boolean) => void;
   /** the filter bar's Go: run again with these values, by field */
   onFilter: (values: Record<string, FilterValue>) => void;
 }) {
@@ -98,7 +99,7 @@ export function ReportView({ report, result, busy, failed, actions, onChip, onRe
         </Toolbar>
       </FlexBox>
 
-      {def.assumptions.length ? (
+      {onChip && def.assumptions.length ? (
         <FlexBox wrap="Wrap" gap="0.5rem">
           {def.assumptions.map((a) => (
             <Tag key={a.label} interactive design="Information" onClick={() => onChip(a.label)}>{`${a.label}: ${a.value}`}</Tag>

@@ -3,10 +3,11 @@ import type { ChatMiddleware, TokenUsage } from "@tanstack/ai";
 import { and, eq, gte, sql, type AnyColumn } from "drizzle-orm";
 import { db, aiUsage, assistantSettings, user, type AiUsageKind } from "@confire/db";
 import { ASSISTANT_MODEL, available, INTAKE_MODEL } from "./model.ts";
+import { LOAD_SKILL } from "./skills.ts";
 import { t as text } from "../i18n/index.ts";
 
 // The meter, the monthly limit, the switch and the rate limit (assistant spec §4.7, §4.8). One row per
-// model call; the limit is what it protects, the count of assisted configurations what gets reported.
+// model call, tagged with the chat's skill and the tools it was for; the limit is what it protects.
 
 /** $ per million tokens; `cacheWrite` is the 5-minute write, `cacheWrite1h` the 1-hour one. Checked
  *  2026-11-02 against the Claude API skill's pricing (Sonnet 5.5 cache reads are $0.20, not 0.1x). */
@@ -41,19 +42,44 @@ export function costOf(model: string, t: Tokens): number {
   return (t.input * r.input + (t.cacheWrite - long) * r.cacheWrite + long * r.cacheWrite1h + t.cacheRead * r.cacheRead + t.output * r.output) / 1e6;
 }
 
-/** Who a run is billed to. Mutable: a run that creates a configuration sets `projectId` midway. */
-export type Meter = { tenantId: string; userId: string; threadId: string | null; projectId: string | null; kind: AiUsageKind };
+/** Who a run is billed to, and what for. Mutable: a run that creates a configuration sets `projectId`
+ *  midway, a `load_skill` sets `skill` — and a tool's own call (intake) copies both as they are then.
+ *  `tools` fixes what a call was for (the tool that made it); unset, each call reads the tools that
+ *  answered since the one before. */
+export type Meter = {
+  tenantId: string; userId: string; threadId: string | null; projectId: string | null; kind: AiUsageKind;
+  skill?: string | null; tools?: string[];
+};
+
+/** The skill a `load_skill` call names. */
+const skillOf = (args: string): string | null => {
+  try { return (JSON.parse(args) as { name?: string }).name ?? null; } catch { return null; }
+};
 
 /** One `ai_usage` row per model call: onUsage fires for each agent-loop call and for a structured
- *  output's own call. Awaited, so a run's rows are written when its stream ends. */
+ *  output's own call. Awaited, so a run's rows are written when its stream ends. A call fires
+ *  onUsage before its own tools run, so the tools answered since the last call are what it read. */
 export function meter(m: Meter): ChatMiddleware {
+  let answered: string[] = [];
   return {
     name: "meter",
+    // A skill loaded in an earlier turn is still in the history, so it is still this chat's.
+    onStart: (ctx) => {
+      for (const msg of ctx.messages)
+        for (const c of msg.toolCalls ?? []) if (c.function.name === LOAD_SKILL) m.skill = skillOf(c.function.arguments) ?? m.skill;
+    },
+    onAfterToolCall: (_ctx, info) => {
+      answered.push(info.toolName);
+      if (info.toolName === LOAD_SKILL && info.ok) m.skill = skillOf(info.toolCall.function.arguments) ?? m.skill;
+    },
     onUsage: async (ctx, usage) => {
       const t = tokensOf(usage);
       const model = PRICES[ctx.model] ? ctx.model : ASSISTANT_MODEL;
+      const tools = m.tools ?? [...new Set(answered)];
+      answered = [];
       await db.insert(aiUsage).values({
         tenantId: m.tenantId, userId: m.userId, threadId: m.threadId, projectId: m.projectId, kind: m.kind, model,
+        skill: m.skill ?? null, tools,
         inputTokens: t.input, outputTokens: t.output, cacheReadTokens: t.cacheRead, cacheWriteTokens: t.cacheWrite,
         cost: costOf(model, t).toFixed(6),
       });
@@ -83,7 +109,6 @@ const SUMS = {
   cost: sum(aiUsage.cost),
   calls: sql<number>`count(*)`.mapWith(Number),
   chats: sql<number>`count(distinct ${aiUsage.threadId})`.mapWith(Number),
-  assisted: sql<number>`count(distinct ${aiUsage.projectId})`.mapWith(Number),
   input: sum(aiUsage.inputTokens), output: sum(aiUsage.outputTokens),
   cacheRead: sum(aiUsage.cacheReadTokens), cacheWrite: sum(aiUsage.cacheWriteTokens),
 };
@@ -101,18 +126,35 @@ async function series(tenantId: string, step: "day" | "month") {
   return rows;
 }
 
-/** The usage dashboard: this month's totals and who and what they went to, its days, the last six months. */
+/** What a call was for: a reply to the user's message, a step over tool results, or a tool's own
+ *  model call (`intake`, `extract`). */
+const STEP = sql<string>`case when ${aiUsage.kind} <> 'chat' then ${aiUsage.kind} when cardinality(${aiUsage.tools}) = 0 then 'reply' else 'tools' end`;
+
+/** This month's cost per tool: a call that read several tools' results is split evenly among them. */
+async function byTool(tenantId: string) {
+  const { rows } = await db.execute<{ tool: string; cost: number; calls: number }>(sql`
+    select t.tool, sum(u.cost / cardinality(u.tools))::float8 as cost, count(*)::int as calls
+    from ai_usage u cross join unnest(u.tools) as t(tool)
+    where u.tenant_id = ${tenantId} and u.at >= ${THIS_MONTH}
+    group by t.tool order by cost desc`);
+  return rows;
+}
+
+/** The usage dashboard: this month's totals and what they went to (step, skill, tool, user), its
+ *  days, the last six months. */
 export async function usageReport(tenantId: string) {
   const month = and(eq(aiUsage.tenantId, tenantId), gte(aiUsage.at, THIS_MONTH));
-  const [[totals], kinds, users, days, months] = await Promise.all([
+  const [[totals], steps, skills, tools, users, days, months] = await Promise.all([
     db.select(SUMS).from(aiUsage).where(month),
-    db.select({ kind: aiUsage.kind, ...SUMS }).from(aiUsage).where(month).groupBy(aiUsage.kind),
+    db.select({ step: STEP, ...SUMS }).from(aiUsage).where(month).groupBy(STEP),
+    db.select({ skill: aiUsage.skill, ...SUMS }).from(aiUsage).where(month).groupBy(aiUsage.skill),
+    byTool(tenantId),
     db.select({ userId: aiUsage.userId, name: user.name, ...SUMS }).from(aiUsage).leftJoin(user, eq(user.id, aiUsage.userId))
       .where(month).groupBy(aiUsage.userId, user.name).orderBy(sql`sum(${aiUsage.cost}) desc`),
     series(tenantId, "day"),
     series(tenantId, "month"),
   ]);
-  return { limit: MONTHLY_LIMIT_USD, model: ASSISTANT_MODEL, totals: totals!, kinds, users, days, months };
+  return { limit: MONTHLY_LIMIT_USD, model: ASSISTANT_MODEL, totals: totals!, steps, skills, tools, users, days, months };
 }
 
 export const assistantOn = async (tenantId: string): Promise<boolean> => {

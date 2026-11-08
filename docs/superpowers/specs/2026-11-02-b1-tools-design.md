@@ -119,7 +119,7 @@ procedures without `tools.ts`' wrappers. The chat adds no `cap`/`prepare`/`slim`
 |---|---|---|
 | `b1.find` | `query?`, `category?` | Matching entity sets: name, label (when the SL has labels), categories, `writable` (curated), `copyTo` (flows). Max 30. No SAP call beyond `entityList`. |
 | `b1.schema` | `entity`, `collection?` | Compact: keys, then each field's name, type, label, enum member names, `required`/`writable` for curated entities, and each collection's name (its fields with `collection`). From `entity_meta`. |
-| `b1.read` | `entity`, `key?` or `query?` (`ListQuery`), `cursor?` | With `key`: one row + ETag (`readOne`). Else: up to `LIST_CAP` rows, `total`, sealed `nextCursor` (`readRows`, fence key `b1-tool`). |
+| `b1.read` | `entity`, `key?` or `query?` (`ListQuery`), `cursor?`, `top?`, `aggregate?` | With `key`: one row + ETag (`readOne`). Else: `top` rows (default `LIST_CAP`; up to 500 for a scalar-only select or an aggregate's groups) as `columns` + `rows` (value arrays, no per-row `@odata.etag`), `total`, sealed `nextCursor` (`readRows`, fence key `b1-tool`). |
 | `b1.write` | `entity`, `key?` + `etag?` (update) or none (create), `data` | `{ written, row, link }` or `{ proposal }` (§5.2). |
 | `b1.copy` | `sourceEntity`, `docEntries`, `targetEntity`, `header?`, `lines?` | Same as `entities.copy`'s input; answers like `b1.write`. |
 | `b1.apply` | `proposal` | Posts a proposal. **Never a tool** (§5.2). |

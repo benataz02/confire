@@ -123,6 +123,8 @@ async function selectRows(
     where.push(inArray(textAt(q.col), q.values.map((v) => String(v))));
   }
 
+  if (q.where?.values.length) where.push(inArray(textAt(q.where.col), q.where.values.map((v) => String(v))));
+
   const term = q.search?.trim();
   const cols = (q.searchCols ?? []).filter(Boolean);
   if (term && cols.length) {

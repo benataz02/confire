@@ -1,0 +1,1 @@
+ALTER TABLE "config_project_event" ADD COLUMN "mailed_to" text[];

@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
-import { db, portalCompany } from "@confire/db";
+import { and, eq, inArray } from "drizzle-orm";
+import { configProject, db, portalCompany, type SapStep } from "@confire/db";
 import { B1Error, coerceKey, type B1EntitySchema, type B1Field, type B1Transport, type Key } from "@confire/b1";
 import { entitySchema } from "./entity-meta.ts";
 import { missingRequired, pickEditable, profileOf, type EntityProfile } from "./entity-profiles.ts";
@@ -9,6 +9,9 @@ import { buildCopy, COPY_SELECT, CopyHeaderZ, duplicateItem, findFlow, onItems, 
 import { viaB1 } from "./b1.ts";
 import { bad } from "./entity-read.ts";
 import { t } from "./i18n/index.ts";
+import { quotationsBehind, type ChainEntity } from "./doc-chain.ts";
+import { advanceStep } from "./project-lifecycle.ts";
+import { background } from "./notify.ts";
 
 // The B1 write bodies, once (b1-tools spec §5.0): create, update and copy for the pages' procedures
 // (entities.*) and the tools' (b1.*). Each write is two steps — `prepareWrite` checks everything and
@@ -23,7 +26,8 @@ import { t } from "./i18n/index.ts";
 // every entity later changes (spec §5.4).
 
 export type FieldRule = "profile" | "schema";
-export type WriteCtx = { tenantId: string; b1: B1Transport };
+/** `companyDb`: the company the connector carries; `userId`: who posts — what a copy's step names. */
+export type WriteCtx = { tenantId: string; b1: B1Transport; companyDb: string | null; userId: string };
 
 export const EntityZ = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "must be an entity set name");
 export const KeyZ = z.union([z.string(), z.number(), z.record(z.string(), z.union([z.string(), z.number()]))]);
@@ -237,6 +241,7 @@ export async function postWrite(ctx: WriteCtx, p: Prepared): Promise<Posted> {
     if (p.op === "copy" && p.parts.length) await makeParts(ctx, p.parts, p.make);
     const res = await viaB1(() => ctx.b1.createEntity(p.entity, p.payload, { prefer: "representation" }));
     const row = res.data as Record<string, unknown>;
+    if (p.op === "copy") background(() => stepAfterCopy(ctx, p.input, p.entity, row));
     return { entity: p.entity, key: keyOfRow(p.keys, row), row, etag: res.etag ?? null };
   }
   await viaB1(() => ctx.b1.updateEntity(p.entity, p.key, p.payload, { etag: p.etag }));
@@ -251,6 +256,29 @@ export async function postWrite(ctx: WriteCtx, p: Prepared): Promise<Posted> {
       .where(and(eq(portalCompany.tenantId, ctx.tenantId), eq(portalCompany.cardCode, row.CardCode)));
   }
   return { entity: p.entity, key: p.key, row, etag: fresh.etag ?? null };
+}
+
+const STEP_OF: Partial<Record<string, SapStep>> = { Orders: "ordered", DeliveryNotes: "delivered", Invoices: "invoiced" };
+
+/** A copy is SAP's next step for the projects whose current quotation its sources descend from — an
+ *  order off a quoted configuration makes it `ordered` — internal and client alike, the document just
+ *  posted the step's (advanceStep: forward only, with its event). Off the request path, so it never
+ *  fails a post that went through; the next SAP read (advanceSapSteps) would find it too. */
+async function stepAfterCopy(ctx: WriteCtx, input: CopyInput, entity: string, row: Record<string, unknown>) {
+  const step = STEP_OF[entity];
+  if (!step || !ctx.companyDb) return;
+  const quotations = await viaB1(() => quotationsBehind(ctx.b1,
+    input.docEntries.map((docEntry) => ({ entity: input.sourceEntity as ChainEntity, docEntry }))));
+  if (!quotations.length) return;
+  const projects = await db.select({ id: configProject.id }).from(configProject).where(and(
+    eq(configProject.tenantId, ctx.tenantId), inArray(configProject.b1DocEntry, quotations), eq(configProject.b1Company, ctx.companyDb),
+  ));
+  const doc = {
+    entity, docEntry: Number(row.DocEntry), docNum: typeof row.DocNum === "number" ? row.DocNum : null,
+    // B1 dates a new document today unless told otherwise; a reply without it gets the same.
+    docDate: String(row.DocDate ?? "").slice(0, 10) || new Date().toISOString().slice(0, 10), company: ctx.companyDb,
+  };
+  for (const p of projects) await advanceStep(ctx.tenantId, p.id, step, doc, ctx.userId);
 }
 
 /** A collection's fields, for b1.schema. */

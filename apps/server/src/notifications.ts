@@ -33,7 +33,7 @@ export const NOTIFICATION_TYPES = [
   { id: "project.quoted", audience: "client", group: "portal" },
   { id: "project.comment", audience: "client", group: "portal" },
   { id: "project.file", audience: "client", group: "portal" },
-  // A document of the project's, sent (document-mail spec §5.7). A quotation is `project.quoted`.
+  // SAP took the project a step on: an order, a delivery, an invoice (advanceStep). A quotation is `project.quoted`.
   { id: "project.order", audience: "client", group: "portal" },
   { id: "project.delivery", audience: "client", group: "portal" },
   { id: "project.invoice", audience: "client", group: "portal" },
@@ -58,8 +58,8 @@ export async function deliver(n: {
   tenantId: string; type: NotificationType; to: Person[];
   params: NotificationParams; path: string;
   mail: (to: Person) => Mail; mailKey: string;
-}): Promise<SendResult> {
-  if (!n.to.length) return { error: null };
+}): Promise<SendResult & { mailed: string[] }> {
+  if (!n.to.length) return { error: null, mailed: [] };
   const off = await db.select({ userId: notificationOptout.userId, channel: notificationOptout.channel })
     .from(notificationOptout)
     .where(and(
@@ -73,7 +73,8 @@ export async function deliver(n: {
       .values(bell.map((p) => ({ tenantId: n.tenantId, userId: p.userId, type: n.type, params: n.params, path: n.path })))
       .catch((e: unknown) => console.error(`[notify] bell ${n.type} failed`, e));
   }
-  return sendMails(n.to.filter((p) => wants(p, "mail")).map(n.mail), n.mailKey);
+  const mails = n.to.filter((p) => wants(p, "mail")).map(n.mail);
+  return { ...await sendMails(mails, n.mailKey), mailed: mails.map((m) => m.to) };
 }
 
 // --- the bell and the settings page, for both routers ---------------------------------------------

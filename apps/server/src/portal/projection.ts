@@ -1,7 +1,7 @@
 import {
   refKeyCols,
   type FormState, type LookupRef, type ModelDef, type Param, type ResolvedLookups, type ResolvedTable,
-  type TableDef, type TableRows,
+  type TableDef, type TableRows, type Val,
 } from "@confire/config-engine";
 import type { ConfigCandidate, PortalPrice } from "@confire/db";
 
@@ -122,12 +122,19 @@ export function toPortalPrices(candidates: ConfigCandidate[], batches: number[])
 
 /** A table query page as the portal may see it (the value help): the same column rule as the
  *  canonical tables, against every ref of the model that names the table. */
+const refsOf = (model: ModelDef, table: string): LookupRef[] => [
+  ...model.parameters.flatMap((p) => (p.domain?.kind === "options" ? [p.domain.ref] : [])),
+  ...(model.tables ?? []).flatMap((t) => t.columns.flatMap((c) => (c.cell.kind === "options" ? [c.cell.ref] : []))),
+].filter((r) => r.source !== "manual" && r.table === table);
+
 export function toPortalPage<T extends ResolvedTable>(model: ModelDef, table: string, page: T): ResolvedTable {
-  const refs: LookupRef[] = [
-    ...model.parameters.flatMap((p) => (p.domain?.kind === "options" ? [p.domain.ref] : [])),
-    ...(model.tables ?? []).flatMap((t) => t.columns.flatMap((c) => (c.cell.kind === "options" ? [c.cell.ref] : []))),
-  ].filter((r) => r.source !== "manual" && r.table === table);
-  return portalTableData(page, refs);
+  return portalTableData(page, refsOf(model, table));
+}
+
+/** Whether a ref of the model over `table` filters its rows by exactly `where`. */
+export function declaresWhere(model: ModelDef, table: string, where: { col: string; values: Val[] }): boolean {
+  const want = JSON.stringify(where);
+  return refsOf(model, table).some((r) => r.source !== "manual" && JSON.stringify(r.where) === want);
 }
 
 // --- what a client may write (spec §7.1) ------------------------------------------------------

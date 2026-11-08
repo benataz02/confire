@@ -3,6 +3,8 @@ import { and, count, eq, sql } from "drizzle-orm";
 import { db, configMasterdata, configModel, configProject, invitation } from "@confire/db";
 import { userProcedure } from "../base.ts";
 import { openInvitation, portalInvitationOf } from "../../portal/members.ts";
+import { viaB1 } from "../../b1.ts";
+import { openCounts } from "../../open-counts.ts";
 
 // The workspace home: the caller's own figures (its Quick actions), and one to-do count per tile.
 // Postgres only — a home page that waited on the agent would be down whenever the agent is.
@@ -40,4 +42,8 @@ export const homeRouter = {
     ]);
     return { ...p!, models: models!.n, syncErrors: md!.syncErrors, openInvitations: inv!.n };
   }),
+
+  /** The SAP document tiles' open counts, by entity set: the one home read that goes to SAP, kept apart
+   *  so the figures above never wait on it. One SQL query, shared by the workspace (open-counts.ts). */
+  openCounts: userProcedure.handler(({ context }) => viaB1(() => openCounts(context.tenantId))),
 };

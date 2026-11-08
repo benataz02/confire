@@ -30,7 +30,7 @@ import { salesPersonOf, withMine } from "../../ui-views.ts";
 // them — userProcedure refuses an external role. What may be written is still curated(), below.
 
 const b1Of = async (tenantId: string) => (await tenantConnector(tenantId)).b1;
-const writeCtx = async (tenantId: string) => ({ tenantId, b1: await b1Of(tenantId) });
+const writeCtx = async (tenantId: string, userId: string) => ({ tenantId, userId, ...(await tenantConnector(tenantId)) });
 
 export const entitiesRouter = {
   /** One entity's field constraints (Beas' /api/metadata/{Entity}), the write rule folded in as
@@ -144,7 +144,7 @@ export const entitiesRouter = {
       data: z.record(z.string(), z.unknown()),
     }))
     .handler(async ({ input, context }) => {
-      const ctx = await writeCtx(context.tenantId);
+      const ctx = await writeCtx(context.tenantId, context.userId);
       const { row, etag } = await postWrite(ctx, await prepareWrite(ctx, "profile", { op: "update", ...input }));
       return { row, etag };
     }),
@@ -158,7 +158,7 @@ export const entitiesRouter = {
       if (input.notify && !PRINTABLE.has(input.entity))
         throw new ORPCError("BAD_REQUEST", { message: t("DOCUMENT_MAIL_NOT_PRINTABLE", input.entity) });
       const { b1, companyDb } = await tenantConnector(context.tenantId);
-      const ctx = { tenantId: context.tenantId, b1 };
+      const ctx = { tenantId: context.tenantId, b1, companyDb, userId: context.userId };
       const { row, etag } = await postWrite(ctx, await prepareWrite(ctx, "profile", { op: "create", entity: input.entity, data: input.data }));
       const mail = input.notify ? await afterPost({
         tenantId: context.tenantId, userId: context.userId, b1, companyDb, entity: input.entity as DocumentMailType, doc: row,
@@ -198,7 +198,7 @@ export const entitiesRouter = {
     .input(CopyInputZ.extend({ notify: z.boolean().optional() }))
     .handler(async ({ input: { notify, ...input }, context }) => {
       const { b1, companyDb } = await tenantConnector(context.tenantId);
-      const ctx = { tenantId: context.tenantId, b1 };
+      const ctx = { tenantId: context.tenantId, b1, companyDb, userId: context.userId };
       const { entity, row } = await postWrite(ctx, await prepareWrite(ctx, "profile", { op: "copy", input }));
       // Every copy target is a sales document. Its projects: those whose quotations its sources
       // descend from, in this company (document-mail spec §5.6).

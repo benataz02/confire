@@ -4,6 +4,7 @@ import {
   derivedColumns,
   derivedKey,
   refKeyCols,
+  refRows,
   PRICE_COL,
   QTY_COL,
   type ItemsTable,
@@ -49,7 +50,7 @@ export function columnOptions(col: TableColumn, tables: Record<string, ResolvedT
   const vi = t.columns.indexOf(valueCol);
   if (vi < 0) return [];
   const li = labelCol ? t.columns.indexOf(labelCol) : -1;
-  return t.rows.map((r) => ({ value: r[vi] ?? null, label: String((li >= 0 ? r[li] : r[vi]) ?? "") }));
+  return refRows(ref, t).map((r) => ({ value: r[vi] ?? null, label: String((li >= 0 ? r[li] : r[vi]) ?? "") }));
 }
 
 /** The picked row's other columns, bound as `<column>_<source column>` — the same rule a

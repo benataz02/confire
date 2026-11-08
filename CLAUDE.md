@@ -218,8 +218,12 @@ external rules are what a client may write.
 **`project-lifecycle.ts` is the only writer of `status` and `config_project_event`**, imported by
 both processes: `transition()` locks the row and writes the status and its events in one
 transaction (it opens its own, then notifies after commit); `assertWritable(…, actor)` +
-`writableBy(side)` say who may edit in which status; an internal read never sees a client's draft
-(`internalVisible`). **Files** (D14) are `project_file` bytea rows behind plain Hono routes,
+`writableBy(side)` say who may edit in which status (an internal configuration only as a draft); an
+internal read never sees a client's draft (`internalVisible`). **One status, one lifecycle**: a request
+has the portal's steps before `quoted`, and from `quoted` on internal configurations and requests alike
+follow SAP — `advanceStep` moves the status to `ordered`/`delivered`/`invoiced` (forward only) with
+that step's event, at once on a copy (`postWrite`'s `stepAfterCopy`, any path: page, chat, MCP) and on
+a page's SAP read (`advanceSapSteps` behind `configs.progress`, `projects.progress`, `home.progress`). **Files** (D14) are `project_file` bytea rows behind plain Hono routes,
 `files.ts`, mounted by both processes past the 2 MB RPC cap: `addFile` writes the row and its `file`
 event together, a download is always an attachment, and the one row served without a session is the
 tenant's branding logo (`projectId` null), which mail links to absolutely. Staff work requests in Portal →
@@ -343,8 +347,8 @@ is the only writer of `notification` (bell rows carrying their own `params` and 
 switch-off, so a new type needs no backfill). `deliver()` drops each person's switched-off channels,
 then inserts the bell rows and sends the mails, each independent of the other. **Who is eligible is
 `notify.ts`**, the project-event producer, fired after commit by `project-lifecycle.ts` (a
-transition, comment, file, `assign` — staff's Reassign — or a sent document, whose type is its entity's:
-`project.order`/`.delivery`/`.invoice`, a quotation's being `project.quoted`) and by onboarding submit
+transition, comment, file, `assign` — staff's Reassign — or a SAP step, `ordered`/`delivered`/`invoiced` being
+`project.order`/`.delivery`/`.invoice`; a sent document tells nobody, its step already did) and by onboarding submit
 and a document mail's failure (`notifyMailFailed`, to the poster): the client side
 is the project's creator while still seated at its company; the staff side is the assignee while
 still on staff, else every staff member (each kept or not by their own switch), so a request is never
@@ -419,7 +423,8 @@ only: the portal has no assistant.
   `quoteDraft`, posting stays the quote page's.
 - **SAP tools** (`orpc/routers/b1.ts`, `docs/superpowers/specs/2026-11-02-b1-tools-design.md`):
   `b1_find`/`b1_schema`/`b1_read`/`b1_write`/`b1_copy` are the `b1` router's procedures as they are,
-  written once for the chat and for MCP later — so their caps (20 rows), strict field names (a wrong
+  written once for the chat and for MCP later — so their caps (`top`, 20 rows unless asked, up to 500
+  narrow ones; a list answered as `columns` + value `rows`, no per-row etag), strict field names (a wrong
   one refused with the closest real ones, before `compileList`) and proposals live in the handlers, and
   `tools.ts` adds nothing to them. `b1_read`'s `aggregate` (`groupBy` + `measures`, `AggSpecZ`) is
   computed by SAP: `compileAggregate` (`entity-list.ts`) writes `$apply=filter(…)/groupby(…)` — the
@@ -466,14 +471,14 @@ only: the portal has no assistant.
   auto mode posted would otherwise be posted again on a retry). The lease (`takeLease`) has a holder
   (`lease_id`): each model call renews it, and only the holder releases it.
 - **Metered and capped**: `usage.ts` writes one `ai_usage` row per model call (`meter` middleware, cost
-  from `PRICES`) and `assertAssistant` refuses when the workspace's switch (`assistant_settings`) is off
+  from `PRICES`; tagged with the chat's loaded `skill` and the `tools` whose results it read, or the tool that made it) and `assertAssistant` refuses when the workspace's switch (`assistant_settings`) is off
   (`ASSISTANT_OFF`, an admin's fix), the server has no `ANTHROPIC_API_KEY` (`ASSISTANT_UNAVAILABLE`, the
   operator's fix — the panel and Settings say which), or this month's cost reached
   `ASSISTANT_MONTHLY_LIMIT_USD` (default 25). `rateLimit` is 20 calls a
   minute per user. Env read with `||`, not `??`: compose passes an unset variable as `""`. Inside a
   chat run the limit is read again before each further model call (`budget`, `onShouldContinue`):
   over it, the loop stops after the tools it ran. Admins read the meter on the AI usage page (`/usage`, the side nav's AI group;
-  `assistant.usageReport`: this month by day, task and user, the last six months against the limit). A declined answer (`stop_reason: "refusal"`) is a
+  `assistant.usageReport`: this month by day, step — reply, tool results, intake, extraction — skill, tool and user, the last six months against the limit). A declined answer (`stop_reason: "refusal"`) is a
   `confire.refusal` CUSTOM event the panel shows (`REFUSAL_EVENT`).
 - **MCP** (`mcp.ts`, spec §4.10): the user's own Claude/ChatGPT on `https://mcp.<DOMAIN>` (`mcpUrl`, dev
   `http://mcp.localhost`), one address for every workspace. It is its own host: `index.ts` sends it to
@@ -512,7 +517,7 @@ only: the portal has no assistant.
   chip puts "change this" in its box (`openChat`), the panel's `report_set` re-reads the page, and a
   general chat's first `report_set` navigates there mid-answer, the same ChatView streaming on. It runs
   live on open, and *Save to home* makes it a tile: `reports.tiles` shows the last run's first KPI (hidden after a company
-  switch) and re-runs stale ones off the request path. A report over Confire's Configurations taints
+  switch); nothing re-runs it but its page (open, Refresh). A report over Confire's Configurations taints
   the chat (auto mode). Not an MCP tool.
 - **The panel** (`AssistantPanel.tsx`, `docs/superpowers/specs/2026-11-06-joule-assistant-design.md`) is
   Joule's card, shell state (`AssistantProvider` around `AppShell`), and the ShellBar's toggle is the
@@ -521,7 +526,7 @@ only: the portal has no assistant.
   change. It shows one chat (`threadInput`): one picked in its ☰ drawer (`ChatDrawer.tsx`: New chat,
   Pinned and Chats, each row's ••• to pin, rename, delete), else the page's own (a configuration's, a
   report's via `reports.get`), else the latest general one. A report's chat picked goes to its page; a
-  configuration's stays put, with *Open configuration* in the header's •••. Its box is `cardBox`
+  configuration's stays put, with *Open configuration* among the next actions under the answer. Its box is `cardBox`
   (`geometry.ts`): 416 px under the ShellBar at the right, wherever it was dragged by its header
   (clamped into the window, over the ShellBar too), or maximized to the whole window with the drawer as
   a sidebar and Joule's 0.5 s transition (none with reduced motion); any navigation by the chat brings
@@ -640,6 +645,9 @@ never parses `NavigationProperty`. The *services underneath* it are what got por
   cap so an unbounded fetch can never hide behind an innocent-looking line.
 - `readNext` is the one method passing a B1-supplied link on; the agent resolves every path under
   the service's base and refuses one outside it.
+- `sqlQuery(code)` runs a stored `SQLQueries` entry. The home's open-document counts are one (`open-counts.ts`):
+  created on first use under a code hashed from its text, with one `$count` per set when SAP refuses it, and
+  cached on `sap_connection.open_counts` for the workspace for 10 min. The tiles read it once per sign-in.
 - `action(set, key, name)` is a bound document action (`Quotations(5)/Close`); the agent allowlists
   the names again on its side. `updateEntity(…, { replaceCollections })` sends
   `B1S-ReplaceCollectionsOnPatch` so a PATCHed `DocumentLines` replaces the stored lines.
@@ -768,7 +776,9 @@ generates a page.
   `ObjectPageSection`s for the caller's one scrolling `ObjectPage` — and `ConfigTable`: both draw a server
   form state — the preview's is built locally — and report each change; `patch.ts`, the patch merge and
   the one-in-flight queue both SPAs send through), `money.ts`,
-  `timeline/` (`ProjectTimeline`, `PROJECT_STATUS`) and `confirm.ts`'s `promptNote`.
+  `timeline/` (`ProjectTimeline`; `PROJECT_STATUS`, a project's one status map — internal
+  configurations and client requests alike — drawn by `ProjectStatus.tsx` in every list and page of
+  both apps, its words in the `@confire/ui` bundle) and `confirm.ts`'s `promptNote`.
 - **Features are declared.** `apps/app/src/features/b1/` (documents, business partners, items; `B1_FEATURES`
   is the registry — the `/b1/$entity` routes accept nothing else, and the side nav and search list
   it). A feature is plain object literals: list columns, filter fields, system views, header, section

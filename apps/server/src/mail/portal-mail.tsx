@@ -113,8 +113,8 @@ export type ClientProjectProps = {
   /** `quoted`: the quotation's number and its value, formatted */
   quote: { docNum: number | null; value: string } | null;
   fileName: string | null;
-  /** `order`/`delivery`/`invoice`: the document's number. Its PDF is on the timeline, not attached:
-   *  the document mail from the supplier's own mailbox carries it (document-mail spec §5.7). */
+  /** `order`/`delivery`/`invoice`: the number of the SAP document that took the project a step on.
+   *  Nothing is attached: a document mailed goes from the supplier's own mailbox (document-mail spec §5.7). */
   docNum?: number | null;
   url: string;
   lang: MailLang;
@@ -149,15 +149,15 @@ const CLIENT_COPY_ES: ClientCopy = {
   }),
   order: (p) => ({
     subject: `Pedido ${p.docNum ?? ""} para ${p.projectName}`, title: "Nuevo pedido",
-    lead: `${p.brand.name} le ha enviado el pedido ${p.docNum ?? ""} de ${p.projectName}. Lo encontrará, con su PDF, en el proyecto.`,
+    lead: `${p.brand.name} ha registrado el pedido ${p.docNum ?? ""} de ${p.projectName}. Lo encontrará en el proyecto.`,
   }),
   delivery: (p) => ({
     subject: `Entrega ${p.docNum ?? ""} para ${p.projectName}`, title: "Nueva entrega",
-    lead: `${p.brand.name} le ha enviado el albarán ${p.docNum ?? ""} de ${p.projectName}. Lo encontrará, con su PDF, en el proyecto.`,
+    lead: `${p.brand.name} ha emitido el albarán ${p.docNum ?? ""} de ${p.projectName}. Lo encontrará en el proyecto.`,
   }),
   invoice: (p) => ({
     subject: `Factura ${p.docNum ?? ""} para ${p.projectName}`, title: "Nueva factura",
-    lead: `${p.brand.name} le ha enviado la factura ${p.docNum ?? ""} de ${p.projectName}. La encontrará, con su PDF, en el proyecto.`,
+    lead: `${p.brand.name} ha emitido la factura ${p.docNum ?? ""} de ${p.projectName}. La encontrará en el proyecto.`,
   }),
 };
 
@@ -188,15 +188,15 @@ const CLIENT_COPY_EN: ClientCopy = {
   }),
   order: (p) => ({
     subject: `Order ${p.docNum ?? ""} for ${p.projectName}`, title: "New order",
-    lead: `${p.brand.name} sent you order ${p.docNum ?? ""} for ${p.projectName}. You'll find it, with its PDF, on the project.`,
+    lead: `${p.brand.name} placed order ${p.docNum ?? ""} for ${p.projectName}. You'll find it on the project.`,
   }),
   delivery: (p) => ({
     subject: `Delivery ${p.docNum ?? ""} for ${p.projectName}`, title: "New delivery",
-    lead: `${p.brand.name} sent you delivery note ${p.docNum ?? ""} for ${p.projectName}. You'll find it, with its PDF, on the project.`,
+    lead: `${p.brand.name} issued delivery note ${p.docNum ?? ""} for ${p.projectName}. You'll find it on the project.`,
   }),
   invoice: (p) => ({
     subject: `Invoice ${p.docNum ?? ""} for ${p.projectName}`, title: "New invoice",
-    lead: `${p.brand.name} sent you invoice ${p.docNum ?? ""} for ${p.projectName}. You'll find it, with its PDF, on the project.`,
+    lead: `${p.brand.name} issued invoice ${p.docNum ?? ""} for ${p.projectName}. You'll find it on the project.`,
   }),
 };
 

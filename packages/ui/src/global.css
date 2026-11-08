@@ -91,6 +91,33 @@ body {
 .confire-fill-table [data-component-name="AnalyticalTableContainer"]::after {
   display: none;
 }
+/* AutoWithEmptyRows leaves room for the horizontal scrollbar only if it measured one (an overlay
+   measures 0, so the styled one below never counts) and the columns already overflowed when it
+   counted rows. Otherwise the scrollbar lands under rows that fill the frame, and the frame's
+   `overflow: hidden` cut it off. Allowed to shrink, the table ends at the frame and its last
+   visible row gives up those few pixels instead. */
+.confire-fill-table [data-component-name="AnalyticalTableContainerWithScrollbar"] {
+  min-height: 0;
+}
+
+/* Under overlay scrollbars (Grid marks `html`) the table's horizontal one is drawn as a styled
+   scrollbar, which Chromium never overlays: the theme's look, as UI5's own scrollbars had. Chromium
+   skips `::-webkit-scrollbar` while `scrollbar-color` is set, and UI5 sets it on html: `auto` lifts
+   that. Firefox has no such escape and keeps its overlay. */
+.confire-overlay-scrollbars [data-component-name="AnalyticalTableContainer"] {
+  scrollbar-color: auto;
+}
+.confire-overlay-scrollbars [data-component-name="AnalyticalTableContainer"]::-webkit-scrollbar {
+  height: var(--sapScrollBar_Dimension);
+  background: var(--sapScrollBar_TrackColor);
+}
+.confire-overlay-scrollbars [data-component-name="AnalyticalTableContainer"]::-webkit-scrollbar-thumb {
+  background: var(--sapScrollBar_FaceColor);
+  border-radius: var(--sapElement_BorderCornerRadius);
+}
+.confire-overlay-scrollbars [data-component-name="AnalyticalTableContainer"]::-webkit-scrollbar-thumb:hover {
+  background: var(--sapScrollBar_Hover_FaceColor);
+}
 
 /* Grid's `statusRows`: a closed line reads muted. */
 .confire-row-closed [data-column-id-cell] {
@@ -236,3 +263,28 @@ ui5-shellbar-search.confire-shellbar-search {
 .confire-price-chart .recharts-bar:nth-last-child(1 of .recharts-bar) path { clip-path: inset(0 1px round 0 999px 999px 0) }
 .confire-price-chart .recharts-bar:nth-child(1 of .recharts-bar):nth-last-child(1 of .recharts-bar) path { clip-path: inset(0 1px round 999px) }
 .confire-price-chart .recharts-legend-item svg { border-radius: 3px }
+
+/* Every dialog opens with a short fade (and a slight grow), its block layer fading with it. Not just
+   for looks: a dialog mounted already open (Modals.showMessageBox, confirm.ts) is centred by UI5's
+   _center() before its shadow DOM has a size, so for its first frames its top-left corner sits at the
+   viewport's centre before it jumps into place — measured, ~2 frames. The first quarter of the fade
+   keeps it invisible through that. UI5's own mask (`ui5-popup-opening`, 50 ms at opacity .1) did not
+   hide it. Keyframes name only `from`, so the end values stay the theme's (the block layer's opacity).
+   ponytail: masks the jump rather than fixing UI5's centring; a much slower first render shows it again. */
+@keyframes confire-dialog-in {
+  0%, 25% { opacity: 0; transform: scale(0.96); }
+}
+@keyframes confire-fade-in {
+  from { opacity: 0; }
+}
+[ui5-dialog]:popover-open {
+  animation: confire-dialog-in 0.2s ease-out;
+}
+[ui5-dialog]:popover-open::backdrop {
+  animation: confire-fade-in 0.2s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  [ui5-dialog]:popover-open {
+    animation-name: confire-fade-in;
+  }
+}

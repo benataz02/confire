@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ObjectStatus, Text } from "@ui5/webcomponents-react";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
 import { useListView } from "@confire/ui/useListView.ts";
-import { PROJECT_STATUS, PROJECT_STATUS_OPTIONS } from "@confire/ui/timeline/projectStatus.ts";
+import { projectStatusOptions } from "@confire/ui/timeline/projectStatus.ts";
+import { ProjectStatusCell } from "@confire/ui/timeline/ProjectStatus.tsx";
+import { useUiI18n } from "@confire/ui/i18n.ts";
 import type { ListFeature, ListQuery, Row } from "@confire/ui/types.ts";
-import { PROJECT_STATUS_KEY, type TextFn } from "../../../features/labels.ts";
+import type { TextFn } from "../../../features/labels.ts";
 import { useI18n } from "../../../i18n.ts";
 import { viewsQuery } from "@confire/ui/views.ts";
 import { meQuery, orpc } from "../../../orpc.ts";
@@ -26,7 +27,8 @@ const NEXT = ["finish", "review", "changes", "answer", "awaitOrder", "delivery",
 /** Not yet quoted or declined; "Created by me" is the same, the user's own. */
 const OPEN = ["draft", "submitted", "in_review", "returned"];
 
-const projectsFeature = (t: TextFn, supplier: string): ListFeature => ({
+/** `ui` reads the `@confire/ui` bundle, which holds the status words. */
+const projectsFeature = (t: TextFn, ui: TextFn, supplier: string): ListFeature => ({
   tableId: "portal:projects",
   title: t("PORTAL_PROJECTS"),
   columns: [
@@ -34,7 +36,7 @@ const projectsFeature = (t: TextFn, supplier: string): ListFeature => ({
     { key: "modelName", label: t("PORTAL_PRODUCT"), groupable: true },
     {
       key: "status", label: t("PORTAL_STATUS"), type: "enum", width: 180, groupable: true,
-      options: PROJECT_STATUS_OPTIONS.map((o) => ({ ...o, label: t(PROJECT_STATUS_KEY[o.value as keyof typeof PROJECT_STATUS]) })),
+      options: projectStatusOptions(ui),
     },
     { key: "createdBy", label: t("PORTAL_CREATED_BY"), groupable: true },
     { key: "updatedAt", label: t("PORTAL_LAST_CHANGED"), type: "date", width: 150 },
@@ -59,6 +61,7 @@ const projectsFeature = (t: TextFn, supplier: string): ListFeature => ({
 function Projects() {
   const i18n = useI18n();
   const t = i18n.getText.bind(i18n);
+  const ui = useUiI18n();
   const me = useQuery(meQuery).data;
   const role = me?.company?.role;
   const [query, setQuery] = useState<ListQuery | null>(null);
@@ -75,12 +78,6 @@ function Projects() {
     { route: "/projects", keyOf: (r) => r.id, ...(role === "viewer" ? {} : { create: "/projects/new" }) },
   );
   return (
-    <ListReport feature={projectsFeature(t, me?.tenant.name ?? "")} data={data} onQuery={setQuery} keyOf={(r) => String(r.id)} cellTemplates={{
-      status: (row: Row) => {
-        const key = row.status as keyof typeof PROJECT_STATUS;
-        const s = PROJECT_STATUS[key];
-        return s ? <ObjectStatus inverted state={s.state}>{t(PROJECT_STATUS_KEY[key])}</ObjectStatus> : <Text>{String(row.status ?? "")}</Text>;
-      },
-    }} />
+    <ListReport feature={projectsFeature(t, ui.getText.bind(ui), me?.tenant.name ?? "")} data={data} onQuery={setQuery} keyOf={(r) => String(r.id)} cellTemplates={{ status: (row: Row) => <ProjectStatusCell status={row.status} /> }} />
   );
 }

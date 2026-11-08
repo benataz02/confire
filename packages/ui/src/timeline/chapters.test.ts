@@ -110,3 +110,22 @@ test("stepDates: a chapter without its milestone falls back to its first entry",
   const events = seq("created", "comment");
   expect(stepDates(chaptersOf(mergeEntries(events, undefined)))[0]).toBe(events[0]!.at.getTime());
 });
+
+test("a step event is its SAP document's one entry, on the document's day, with the mail that sent it", () => {
+  const order = doc("Orders", "2026-11-04");
+  const step = (kind: string, d: TimelineDoc, iso: string) =>
+    ({ ...ev(kind, iso), payload: { entity: d.entity, docEntry: d.docEntry, docNum: d.docNum, docDate: d.docDate } });
+  // Found by a SAP read two days late; the order's mail went out before Confire noticed.
+  const sent = { ...ev("document_sent", local(15)), payload: { entity: "Orders", docEntry: order.docEntry } };
+  const late = step("ordered", order, new Date(2026, 10, 6, 9).toISOString());
+  const entries = mergeEntries([...sameDay(), sent, late], docs(doc("Quotations", "2026-11-04"), order));
+  const x = entries.find((e) => e.kind === "event" && e.e.kind === "ordered")!;
+  expect(x).toMatchObject({ kind: "event", doc: order, sent });
+  expect(entries.filter((e) => e.kind === "doc" && e.d.entity === "Orders")).toHaveLength(0);
+  expect(new Date(x.at).getDate()).toBe(4); // the send's time, not the read's
+  const chapters = chaptersOf(entries);
+  expect(chapters.map((c) => c.step)).toEqual([0, 1, 2, 3]);
+  expect(stepDates(chapters)[3]).toBe(new Date(2026, 10, 4).getTime());
+  // SAP unreachable: the event still draws, on its document's day.
+  expect(mergeEntries([late], undefined)[0]).toMatchObject({ kind: "event", doc: undefined });
+});

@@ -11,7 +11,7 @@ import type { EntityFeature, ListQuery, Row } from "@confire/ui/types.ts";
 import { orpc } from "../orpc.ts";
 import { useI18n } from "../i18n.ts";
 import { B1_FEATURES } from "../features/b1/index.ts";
-import { b1Label } from "./AppShell.tsx";
+import { b1Label } from "../features/b1/localize.ts";
 import { parseRecent, recentKey, type Recent } from "./searchRecent.ts";
 
 /** One thing the search opens: `to` is a path inside the workspace, as the side nav's `data-to`. */

@@ -4,7 +4,7 @@ import { db, assistantFile, assistantSettings, assistantThread, configModel, con
 import type { ModelMessage } from "@tanstack/ai";
 import { router } from "../src/orpc/router.ts";
 import { tenantConnector } from "../src/b1.ts";
-import type { Proposal } from "../src/orpc/routers/b1.ts";
+import { table, type Proposal } from "../src/orpc/routers/b1.ts";
 import { entitySchema } from "../src/entity-meta.ts";
 import { closestNames, postWrite, prepareWrite } from "../src/entity-write.ts";
 import { CHAT_TOOLS } from "../src/assistant/pages.ts";
@@ -49,6 +49,15 @@ const EDMX = `<?xml version="1.0" encoding="utf-8"?>
 const order = () => ({
   DocEntry: 5, DocNum: 905, CardCode: "C1", CardName: "ACME", Comments: "old", DocTotal: 10, DocumentStatus: "bost_Open",
   "@odata.etag": 'W/"1"', DocumentLines: [{ LineNum: 0, ItemCode: "A", Quantity: 2, Price: 5 }],
+});
+
+test("table: each field once, rows as values, a missing value null, no etag", () => {
+  expect(table([{ "@odata.etag": 'W/"1"', DocEntry: 1, DocNum: 9 }, { DocEntry: 2, CardCode: "C1" }])).toEqual({
+    columns: ["DocEntry", "DocNum", "CardCode"],
+    rows: [[1, 9, null], [2, null, "C1"]],
+  });
+  expect(table([{ "@odata.id": null, CardCode: "C1", n: 2 }])).toEqual({ columns: ["CardCode", "n"], rows: [["C1", 2]] });
+  expect(table([])).toEqual({ columns: [], rows: [] });
 });
 
 test("closest names: another case first, then names it is part of", () => {
@@ -148,18 +157,26 @@ describe.skipIf(!process.env.DATABASE_URL)("b1 tools", () => {
     const sent = agent.calls.filter((c) => c.route === "/entity-set").at(-1)!.body as { query: { select?: string[] } };
     // An empty select must not name every scalar: that $select exceeds the Service Layer query-string limit.
     expect(sent.query.select).toBeUndefined();
-    expect(page.rows[0]).not.toHaveProperty("DocumentLines");
-    expect(page.rows[0]).toMatchObject({ DocEntry: 1, DocNum: 905 });
-    // Named scalar fields: narrow rows, all 25 in one request.
+    // Columns once, rows as values; no per-row etag (a write takes a keyed read's).
+    expect(page.columns).not.toContain("DocumentLines");
+    expect(page.columns).not.toContain("@odata.etag");
+    const first = Object.fromEntries(page.columns.map((c, i) => [c, page.rows[0]![i]]));
+    expect(first).toMatchObject({ DocEntry: 1, DocNum: 905 });
+    // Named scalar fields: 20 unless `top` asks, then every row asked for in one request.
+    const narrow = (top?: number) => call(router.b1.read, { entity: "Orders", query: { select: ["DocNum"] }, ...(top ? { top } : {}) }, w.staff);
+    expect((await narrow()).rows).toHaveLength(20);
+    expect((await narrow(5)).rows).toHaveLength(5);
     const before = agent.calls.length;
-    expect((await read({ select: ["DocNum"] })).rows).toHaveLength(25);
+    expect((await narrow(500)).rows).toHaveLength(25);
     expect(agent.calls.length - before).toBe(1);
 
-    // A collection named: whole rows read (B1 refuses some collections in $select), then projected.
-    const lines = await read({ select: ["DocNum", "DocumentLines"] });
+    // A collection named: whole rows read (B1 refuses some collections in $select), then projected,
+    // and never more than LIST_CAP of them whatever `top` says.
+    const lines = await call(router.b1.read, { entity: "Orders", query: { select: ["DocNum", "DocumentLines"] }, top: 500 }, w.staff);
     const sentLines = agent.calls.filter((c) => c.route === "/entity-set").at(-1)!.body as { query: { select?: string[] } };
     expect(sentLines.query.select).toBeUndefined();
-    expect(Object.keys(lines.rows[0]!).sort()).toEqual(["DocEntry", "DocNum", "DocumentLines"]);
+    expect([...lines.columns].sort()).toEqual(["DocEntry", "DocNum", "DocumentLines"]);
+    expect(lines.rows).toHaveLength(20);
     expect((await call(router.b1.read, { entity: "Orders", key: 3 }, w.staff)).row).toMatchObject({ DocEntry: 3 });
   });
 
@@ -168,7 +185,7 @@ describe.skipIf(!process.env.DATABASE_URL)("b1 tools", () => {
     agent.store["Orders#apply"] = [{ CardCode: "C1", a0: 10 }, { CardCode: "C2", a0: 7 }];
     const out = await call(router.b1.read, { entity: "Orders", query: { filter: [{ field: "CardCode", op: "ne", value: "X" }] },
       aggregate: { groupBy: ["CardCode"], measures: [{ field: "DocTotal", agg: "sum", as: "a0" }] } }, w.staff);
-    expect(out.rows).toEqual([{ CardCode: "C1", a0: 10 }, { CardCode: "C2", a0: 7 }]);
+    expect(out).toMatchObject({ columns: ["CardCode", "a0"], rows: [["C1", 10], ["C2", 7]] });
     expect((agent.calls.at(-1)!.body as { query: { apply?: string } }).query.apply).toBe("filter(CardCode ne 'X')/groupby((CardCode),aggregate(DocTotal with sum as a0))");
     expect(await message(call(router.b1.read, { entity: "Orders", aggregate: { groupBy: ["Cardcode"], measures: [{ agg: "count", as: "n" }] } }, w.staff)))
       .toContain("Cardcode (did you mean CardCode?)");
@@ -182,9 +199,9 @@ describe.skipIf(!process.env.DATABASE_URL)("b1 tools", () => {
   test("b1.read follows nextLink: 600 rows are two pages", async () => {
     const w = await world();
     agent.store.Orders = Array.from({ length: 600 }, (_, i) => ({ ...order(), DocEntry: i + 1 }));
-    const p1 = await call(router.b1.read, { entity: "Orders", query: { select: ["DocNum"] } }, w.staff);
+    const p1 = await call(router.b1.read, { entity: "Orders", query: { select: ["DocNum"] }, top: 500 }, w.staff);
     expect(p1.rows).toHaveLength(500);
-    const p2 = await call(router.b1.read, { entity: "Orders", query: { select: ["DocNum"] }, cursor: p1.nextCursor }, w.staff);
+    const p2 = await call(router.b1.read, { entity: "Orders", query: { select: ["DocNum"] }, top: 500, cursor: p1.nextCursor }, w.staff);
     expect(p2.rows).toHaveLength(100);
     expect(p2.nextCursor).toBeUndefined();
   });

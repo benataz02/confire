@@ -202,6 +202,12 @@ describe("lookup ref validation", () => {
     expect(issues.some((i) => i.message.includes("no column 'alsoNope'"))).toBe(true);
   });
 
+  it("flags a row filter on a column the masterdata lacks", () => {
+    const bad = checkModel(withRef({ source: "table", table: "prices", where: { col: "nope", values: ["x"] } }), PRICES);
+    expect(bad.some((i) => i.message.includes("no column 'nope'"))).toBe(true);
+    expect(checkModel(withRef({ source: "table", table: "prices", where: { col: "code", values: ["x"] } }), PRICES)).toEqual([]);
+  });
+
   it("puts derived keys in scope and flags collisions", () => {
     const ok = checkModel(
       withRef({ source: "table", table: "prices", valueCol: "code" }, { computed: [{ key: "p2", expr: "pick_price * 2" }] }),

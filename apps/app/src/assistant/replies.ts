@@ -1,4 +1,5 @@
 import type { ConfigView } from "../components/configurator/useConfigProcess.ts";
+import { staffWritable } from "@confire/ui/timeline/projectStatus.ts";
 
 // Quick replies under the last answer (Joule: at most a few, short): worked out from the page's own
 // state, so they cost no model call and never suggest what the configuration contradicts. What is
@@ -10,7 +11,7 @@ import type { ConfigView } from "../components/configurator/useConfigProcess.ts"
 export type ReplyView = Pick<ConfigView, "missing"> & {
   candidates: Pick<ConfigView["candidates"], "rows">;
   selection: Pick<ConfigView["selection"], "picks">;
-  project: Pick<ConfigView["project"], "status">;
+  project: Pick<ConfigView["project"], "status" | "portalCardCode">;
 };
 
 const MAX = 4;
@@ -22,7 +23,7 @@ export function nextReplies(a: { kind: "configure" | "general" | "model" | "repo
   const keys = [
     v?.missing.length && !a.asking ? "ASSISTANT_REPLY_MISSING" : null,
     v?.candidates.rows.length && !v.selection.picks.length ? "ASSISTANT_REPLY_CANDIDATES" : null,
-    v?.selection.picks.length && v.project.status !== "quoted" ? "ASSISTANT_REPLY_QUOTE" : null,
+    v?.selection.picks.length && staffWritable(v.project) ? "ASSISTANT_REPLY_QUOTE" : null,
     "ASSISTANT_REPLY_SIMILAR",
   ].filter((k): k is string => !!k);
   return keys.slice(0, MAX).map(t);

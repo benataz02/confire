@@ -111,6 +111,29 @@ describe("bindEntryValues", () => {
   });
 });
 
+describe("a ref's row filter", () => {
+  test("one masterdata, each parameter its own rows of it", async () => {
+    const ref = (values: string[]) => ({ source: "query" as const, table: "items", valueCol: "ItemCode", where: { col: "ItemCode", values } });
+    const two: ModelDef = {
+      ...model, bom: [],
+      parameters: [
+        { key: "cut", label: "Cut", type: "string", ui: "select", domain: { kind: "options", ref: ref(["A", "C"]) } },
+        { key: "weld", label: "Weld", type: "string", ui: "select", domain: { kind: "options", ref: ref(["B"]) } },
+      ],
+    };
+    const lookups = await resolveLookups(two, rows, cacheOf({ i: [{ ItemCode: "A" }, { ItemCode: "B" }, { ItemCode: "C" }] }));
+    expect(lookups.domains.cut!.map((o) => o.value)).toEqual(["A", "C"]);
+    expect(lookups.domains.weld!.map((o) => o.value)).toEqual(["B"]);
+    expect(lookups.tables.items!.rows).toHaveLength(3); // the table stays whole: derived columns read it
+  });
+
+  test("the value help takes it, on a declared column only", () => {
+    const where = { col: "ItemCode", values: ["A"] };
+    expect(queryPageSource(rows, { table: "items", where }).q.where).toEqual(where);
+    expect(() => queryPageSource(rows, { table: "items", where: { col: "Nope", values: ["A"] } })).toThrow();
+  });
+});
+
 describe("queryPageSource", () => {
   test("resolves the named row and refuses anything else", () => {
     const src = queryPageSource(rows, { table: "items" });

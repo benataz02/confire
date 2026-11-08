@@ -75,11 +75,14 @@ export function CopyTo({ entity, flows, rows, disabled }: {
   const [open, setOpen] = useState(false);
   if (!flows.length) return null;
   const partners = new Set(rows.map((r) => r.CardCode)).size;
+  // B1 copies nothing out of a closed document; a list view without the status column reads open.
+  const closed = rows.some((r) => r.DocumentStatus === "bost_Close");
   return (
     <>
       <Button ref={opener} icon="copy" endIcon="slim-arrow-down" design="Transparent"
-        disabled={disabled || partners !== 1}
-        tooltip={partners > 1 ? i18n.getText("ADMIN_COPY_ONE_PARTNER") : undefined}
+        disabled={disabled || closed || partners !== 1}
+        tooltip={closed ? i18n.getText("ADMIN_COPY_ONLY_OPEN")
+          : partners > 1 ? i18n.getText("ADMIN_COPY_ONE_PARTNER") : undefined}
         accessibilityAttributes={{ hasPopup: "menu", expanded: open }}
         onClick={() => setOpen(true)}>
         {i18n.getText("ADMIN_COPY_TO")}
@@ -102,7 +105,7 @@ export function CopyTo({ entity, flows, rows, disabled }: {
 }
 
 /** Print, Copy to and (quotations) Close on the Object Page. */
-function DocumentActions({ entity, ctx, hasPage }: { entity: string; ctx: HeaderActionContext; hasPage: (entity: string) => boolean }) {
+function DocumentActions({ entity, ctx }: { entity: string; ctx: HeaderActionContext }) {
   if (ctx.isNew) return null;
   const docEntry = Number(ctx.formData.DocEntry);
   return (
@@ -110,7 +113,7 @@ function DocumentActions({ entity, ctx, hasPage }: { entity: string; ctx: Header
       {ctx.constraints?.printable ? (
         <PrintActions entity={entity} docEntry={docEntry} disabled={ctx.isEditMode} />
       ) : null}
-      <CopyTo entity={entity} flows={(ctx.constraints?.flows ?? []).filter((f) => hasPage(f.target))} rows={[ctx.formData]} disabled={ctx.isEditMode} />
+      <CopyTo entity={entity} flows={ctx.constraints?.flows ?? []} rows={[ctx.formData]} disabled={ctx.isEditMode} />
       {entity === "Quotations" ? <CloseQuotations rows={[ctx.formData]} disabled={ctx.isEditMode} /> : null}
     </>
   );
@@ -138,8 +141,6 @@ export function documentFeature(entity: string, o: {
   /** singular, lower case: "New <one>" */
   one: string;
   icon: string;
-  /** whether an entity has a page here: Copy to offers only those targets, its draft being one */
-  hasPage: (entity: string) => boolean;
 }): EntityFeature {
   return {
     entity,
@@ -188,7 +189,7 @@ export function documentFeature(entity: string, o: {
           { field: "DocumentStatus", type: "status", statusMapping: DOCUMENT_STATUS },
           { field: "DocTotal", type: "numeric", unitField: "DocCurrency" },
         ],
-        actions: (ctx) => <DocumentActions entity={entity} ctx={ctx} hasPage={o.hasPage} />,
+        actions: (ctx) => <DocumentActions entity={entity} ctx={ctx} />,
       },
       sections: [
         {

@@ -9,7 +9,7 @@ import { FORM_LAYOUT } from "@confire/ui/formLayout.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { useI18n } from "../../i18n.ts";
 import { orpc } from "../../orpc.ts";
-import { b1Label } from "../AppShell.tsx";
+import { b1Label } from "../../features/b1/localize.ts";
 
 // Settings → Email (document-mail spec §5.2): the workspace's Microsoft 365 mailbox, which the create
 // pages' "Notify the client" sends quotations, orders, deliveries and invoices from — so a customer's

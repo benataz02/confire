@@ -5,18 +5,17 @@ import type { EntityFeature } from "@confire/ui/types.ts";
 
 // The declared set of B1 entities. This IS the B1 surface of the app: the /b1 routes accept only
 // these, and the side nav and the shellbar search list them. Adding an entity (or a Beas one — the
-// transport is the same) is one more feature here.
-
-// Read at render, once the registry below exists: Copy to offers only the documents declared here.
-const hasPage = (entity: string) => entity in B1_FEATURES;
+// transport is the same) is one more feature here. Every copy target (doc-copy.ts' DOCUMENT_FLOWS)
+// and every document a project's timeline links is one of these documents, so Copy to and Open never
+// lead to a page that is not here.
 
 // Problems stay on the fields. The title's messages button is for pages whose problems are not a
 // field (the model builder, the configurator).
 const DOCUMENTS = [
-  documentFeature("Quotations", { label: "Sales quotations", one: "sales quotation", icon: "sales-quote", hasPage }),
-  documentFeature("Orders", { label: "Sales orders", one: "sales order", icon: "sales-order", hasPage }),
-  documentFeature("DeliveryNotes", { label: "Deliveries", one: "delivery", icon: "shipping-status", hasPage }),
-  //documentFeature("Invoices", { label: "A/R invoices", one: "A/R invoice", icon: "monitor-payments", hasPage }),
+  documentFeature("Quotations", { label: "Sales quotations", one: "sales quotation", icon: "sales-quote" }),
+  documentFeature("Orders", { label: "Sales orders", one: "sales order", icon: "sales-order" }),
+  documentFeature("DeliveryNotes", { label: "Deliveries", one: "delivery", icon: "shipping-status" }),
+  documentFeature("Invoices", { label: "A/R invoices", one: "A/R invoice", icon: "monitor-payments" }),
 ];
 /** The marketing documents (a DocumentStatus to be open), as opposed to master data. */
 export const B1_DOCUMENTS = new Set(DOCUMENTS.map((f) => f.entity));

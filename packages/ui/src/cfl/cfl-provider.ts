@@ -48,6 +48,7 @@ export async function fetchPage(client: UiSource["client"], source: CflSource, r
     ...(req.search?.trim() ? { search: req.search.trim(), searchCols: req.searchFields } : {}),
     ...(typeof req.cursor === "number" ? { cursor: req.cursor } : {}),
     ...(eq ? { match: { col: eq.field, value: eq.value as string | number } } : {}),
+    ...(source.where ? { where: source.where } : {}),
   };
   const page = await client.configs.queryPage(input);
   return { rows: toRows(page.columns, page.rows), next: page.nextSkip, columns: page.columns };
@@ -56,4 +57,4 @@ export async function fetchPage(client: UiSource["client"], source: CflSource, r
 /** A stable cache identity for a source — the user-state key of its dialog (`cfl:<source>`) and the
  *  head of every query key a value help mints. */
 export const sourceKey = (s: CflSource): string =>
-  s.kind === "entity" ? s.entitySet : `${s.modelId}:${s.table}`;
+  s.kind === "entity" ? s.entitySet : `${s.modelId}:${s.table}${s.where ? `:${JSON.stringify(s.where)}` : ""}`;

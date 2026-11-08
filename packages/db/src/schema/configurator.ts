@@ -70,9 +70,13 @@ export const configMasterdata = pgTable(
 );
 export type ConfigMasterdata = typeof configMasterdata.$inferSelect;
 
-/** Internal configurations use only draft and quoted; the rest is the portal lifecycle (spec §7).
- *  project-lifecycle.ts is the only writer. */
-export const PROJECT_STATUSES = ["draft", "submitted", "in_review", "returned", "declined", "quoted"] as const;
+/** One status for every project, internal configuration or client request, in lifecycle order. A
+ *  client's request has the portal's steps before `quoted` (spec §7), an internal configuration goes
+ *  draft → quoted; from `quoted` on both follow SAP (SAP_STEPS). project-lifecycle.ts is the only
+ *  writer. `claim` is a name only so far — nothing transitions to it. */
+export const PROJECT_STATUSES = [
+  "draft", "submitted", "in_review", "returned", "declined", "quoted", "ordered", "delivered", "invoiced", "claim",
+] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 export type ProjectCustomer = { cardCode: string; cardName: string };
 /** Where a value came from: a quote read off a named file, or the user's own words in the chat. */
@@ -80,7 +84,8 @@ export type ValueSource = { file: string; page: number | null; quote: string } |
 /** By field key (a parameter, a table, or `batches`): the value the source wrote, and the source. */
 export type ProjectSources = Record<string, { value: unknown; source: ValueSource }>;
 export type QuoteResponse = "accepted" | "declined";
-/** How far SAP has taken a quoted project, in order: the portal home's journey past "Quoted". */
+/** The statuses SAP moves a quoted project through, in order: an order, a delivery, an invoice off
+ *  its quotation (project-lifecycle.ts `advanceStep`, forward only). */
 export const SAP_STEPS = ["ordered", "delivered", "invoiced"] as const;
 export type SapStep = (typeof SAP_STEPS)[number];
 
@@ -142,11 +147,9 @@ export const configProject = pgTable(
     // nothing in another company: there a re-quote creates instead of patching, and no link shows.
     b1Company: text("b1_company"),
     quotedAt: timestamp("quoted_at", { withTimezone: true }),
-    // The furthest SAP document descending from the quotation (an order, a delivery, an invoice) and
-    // its DocDate: the portal home's journey past "Quoted", stored so it draws with SAP down. Written
-    // by the portal's `home.progress` (forward only, never bumping `updated_at`) and cleared by a
-    // (re-)quote in project-lifecycle.ts, which may link a new quotation.
-    sapStep: text("sap_step").$type<SapStep>(),
+    // The DocDate of the SAP document behind a SAP_STEPS status (the furthest one descending from the
+    // quotation), for the portal home's sub-line. Written with the status by `advanceStep`, cleared by
+    // a (re-)quote.
     sapStepAt: date("sap_step_at", { mode: "string" }),
     // Engineered value/cost of the selected candidates, captured when the quotation is confirmed
     // so the posted document's DocTotal can be checked against a frozen figure. Recomputing would
@@ -168,6 +171,7 @@ export type ConfigProject = typeof configProject.$inferSelect;
 export const PROJECT_EVENT_KINDS = [
   "created", "submitted", "resubmitted", "withdrawn", "accepted", "returned", "declined", "revised",
   "quoted", "quote_accepted", "quote_declined", "comment", "file", "assigned", "document_sent",
+  "ordered", "delivered", "invoiced",
 ] as const;
 export type ProjectEventKind = (typeof PROJECT_EVENT_KINDS)[number];
 export type ProjectInputs = { entries: Entries; batches: number[]; tables: TableRows };
@@ -193,7 +197,10 @@ export type ProjectEventPayload =
   | { via: "assistant" | "mcp" }
   /** `document_sent` (document-mail spec §5.5): the PDF as sent is `fileId`; `to` the addresses the
    *  mail went to, empty when it did not go, and `error` why not — staff only (the portal's copy drops it) */
-  | DocumentSentPayload;
+  | DocumentSentPayload
+  /** `ordered`/`delivered`/`invoiced`: the SAP document that moved the status there */
+  | SapStepPayload;
+export type SapStepPayload = { entity: string; docEntry: number; docNum: number | null; docDate: string; company: string };
 export type DocumentSentPayload = {
   entity: string; docEntry: number; docNum: number | null; company: string | null; fileId: string; to: string[]; error?: string;
 };
@@ -218,6 +225,8 @@ export const configProjectEvent = pgTable(
     payload: jsonb("payload").$type<ProjectEventPayload>(),
     // P7: a notification that failed lands here instead of failing the request.
     mailError: text("mail_error"),
+    // Who its notification mail went to (by their own switches), so the timeline can say so.
+    mailedTo: text("mailed_to").array(),
   },
   (t) => [index("config_project_event_project_idx").on(t.projectId, t.at)],
 );

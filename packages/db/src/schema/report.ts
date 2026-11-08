@@ -112,7 +112,7 @@ export const ReportDefZ = z.object({
   filters: z.array(ReportFilterZ).max(8).default([])
     .describe("The filter bar over the whole report. A value set there replaces the datasets' and sources' own conditions on that field; a measure's own filter on it (a compare period) stays"),
   datasets: z.record(Name, DatasetZ),
-  widgets: z.array(WidgetZ).min(1).max(12),
+  widgets: z.array(WidgetZ).min(1).max(20),
 });
 export type ReportDef = z.infer<typeof ReportDefZ>;
 

@@ -1,15 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { boolText, candidateLabel, mergeSelection, projectStatusText, sortRows, statusUi } from "./runView.ts";
+import { boolText, candidateLabel, latestDocument, mergeSelection, sortRows } from "./runView.ts";
 
 /** English sentences, not the properties file — `{n}` is filled in order. */
 const EN: Record<string, string> = {
   CONFIG_CANDIDATE: "Configuration",
-  CONFIG_STATUS_DRAFT: "Draft",
-  CONFIG_STATUS_QUOTED: "Quoted",
-  CONFIG_STATUS_SUBMITTED: "Submitted",
-  CONFIG_STATUS_IN_REVIEW: "In review",
-  CONFIG_STATUS_RETURNED: "Changes requested",
-  CONFIG_STATUS_DECLINED: "Declined",
 };
 const t = (key: string, ...params: string[]) => {
   const template = EN[key];
@@ -30,12 +24,6 @@ describe("labels", () => {
     expect(boolText("false", "Yes", "No")).toBe("No");
     expect(boolText("wide", "Yes", "No")).toBeUndefined();
     expect(boolText(null, "Yes", "No")).toBeUndefined();
-  });
-  test("list statuses and the request tag read as sentences", () => {
-    expect(statusUi(t).draft).toEqual({ state: "None", text: "Draft" });
-    expect(statusUi(t).quoted).toEqual({ state: "Positive", text: "Quoted" });
-    expect(projectStatusText(t, "in_review")).toBe("In review");
-    expect(projectStatusText(t, "custom")).toBe("custom");
   });
 });
 
@@ -60,5 +48,22 @@ describe("sortRows", () => {
   });
   test("an empty number sorts lowest; desc flips", () => {
     expect(sortRows(rows, [{ field: "p", direction: "desc" }]).map((r) => r.p)).toEqual([2, 1, null]);
+  });
+});
+
+describe("latestDocument", () => {
+  const step = (kind: string, entity: string, docEntry: number) => ({ kind, payload: { entity, docEntry, docNum: docEntry, docDate: "2026-11-08", company: "C" } });
+  const quoted = { kind: "quoted", payload: { docEntry: 5 } };
+  test("the quotation until SAP moves the project on", () => {
+    expect(latestDocument({ status: "quoted", b1DocEntry: 5 }, undefined)).toEqual({ entity: "Quotations", docEntry: 5 });
+    expect(latestDocument({ status: "quoted", b1DocEntry: 5 }, [quoted])).toEqual({ entity: "Quotations", docEntry: 5 });
+  });
+  test("the newest SAP step's document; nothing while the events load past Quoted", () => {
+    const events = [quoted, step("ordered", "Orders", 7), step("invoiced", "Invoices", 9)];
+    expect(latestDocument({ status: "invoiced", b1DocEntry: 5 }, events)).toEqual({ entity: "Invoices", docEntry: 9 });
+    expect(latestDocument({ status: "invoiced", b1DocEntry: 5 }, undefined)).toBeNull();
+  });
+  test("a status the migration set, with no step event, opens the quotation", () => {
+    expect(latestDocument({ status: "ordered", b1DocEntry: 5 }, [quoted])).toEqual({ entity: "Quotations", docEntry: 5 });
   });
 });

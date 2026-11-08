@@ -1,10 +1,10 @@
 import { ORPCError } from "@orpc/server";
-import { and, asc, eq, isNotNull, sql, type SQL } from "drizzle-orm";
-import { db, configModel, configProject, configProjectEvent, user, SAP_STEPS, type ProjectEventPayload } from "@confire/db";
+import { and, asc, eq, inArray, isNotNull, type SQL } from "drizzle-orm";
+import { db, configModel, configProject, configProjectEvent, user, type ProjectEventPayload } from "@confire/db";
 import { tenantConnector, viaB1 } from "./b1.ts";
 import { documentChain, furthestSteps, type ChainDoc } from "./doc-chain.ts";
 import { modelLabels } from "./config-project.ts";
-import { internalVisible, type Actor } from "./project-lifecycle.ts";
+import { advanceStep, internalVisible, type Actor } from "./project-lifecycle.ts";
 
 // A project's timeline (spec §8), for both sides: the events, and the SAP documents its quotations
 // became. The two are separate reads on purpose — events are Postgres and always load; documents
@@ -55,7 +55,7 @@ export async function timelineEvents(tenantId: string, projectId: string, actor:
     .select({
       id: configProjectEvent.id, at: configProjectEvent.at, kind: configProjectEvent.kind,
       actorSide: configProjectEvent.actorSide, actorName: user.name, visibility: configProjectEvent.visibility,
-      note: configProjectEvent.note, payload: configProjectEvent.payload,
+      note: configProjectEvent.note, payload: configProjectEvent.payload, mailedTo: configProjectEvent.mailedTo,
     })
     .from(configProjectEvent)
     .leftJoin(user, eq(user.id, configProjectEvent.actorUserId))
@@ -72,6 +72,9 @@ export async function timelineEvents(tenantId: string, projectId: string, actor:
     events: rows.map((r) => ({
       ...r, actorName: r.actorName ?? null,
       payload: actor.side === "external" ? externalPayload(r.payload) : r.payload,
+      // A client reads who was mailed only when it was its own side (a staff action's mail); the
+      // staff addresses a client's action mailed are not theirs.
+      mailedTo: actor.side === "external" && r.actorSide === "external" ? null : r.mailedTo,
     })),
     labels,
   };
@@ -121,38 +124,37 @@ export async function projectDocuments(tenantId: string, projectId: string, acto
   });
 }
 
-/** How far SAP has taken the tenant's quoted projects `fence` selects: walks the document chains of
- *  their quotations in the agent's company (a DocEntry means nothing in another) and stores each step
- *  that moved. Forward only, `updated_at` untouched; an invoiced project is never walked again.
- *  Answers how many moved. The portal home runs it over the company, each project page over itself. */
-export async function advanceSapSteps(tenantId: string, fence: SQL | undefined): Promise<number> {
+/** How far SAP has taken the tenant's projects `fence` selects — internal configurations and client
+ *  requests alike: walks the document chains of their quotations in the agent's company (a DocEntry
+ *  means nothing in another) and moves each status SAP took further (advanceStep: forward only, with
+ *  its event). An invoiced project is never walked again. `userId`: whoever made the document through
+ *  Confire, null for a read that only found it. Answers how many moved. The portal home runs it over
+ *  the company, each project page over itself, and a copy over the projects behind its sources. */
+export async function advanceSapSteps(tenantId: string, fence: SQL | undefined, userId: string | null = null): Promise<number> {
   const { b1, companyDb } = await tenantConnector(tenantId);
   if (!companyDb) return 0;
-  const open = await db.select({ id: configProject.id, docEntry: configProject.b1DocEntry, sapStep: configProject.sapStep })
+  const open = await db.select({ id: configProject.id, docEntry: configProject.b1DocEntry })
     .from(configProject)
     .where(and(
-      eq(configProject.tenantId, tenantId), fence, eq(configProject.status, "quoted"), isNotNull(configProject.b1DocEntry),
-      eq(configProject.b1Company, companyDb), sql`${configProject.sapStep} is distinct from 'invoiced'`,
+      eq(configProject.tenantId, tenantId), fence, inArray(configProject.status, ["quoted", "ordered", "delivered"]),
+      isNotNull(configProject.b1DocEntry), eq(configProject.b1Company, companyDb),
     ));
   if (!open.length) return 0;
   const found = await viaB1(() => furthestSteps(b1, open.map((p) => p.docEntry!)));
   let changed = 0;
   for (const p of open) {
     const f = found.get(p.docEntry!);
-    if (!f || SAP_STEPS.indexOf(f.step) <= (p.sapStep ? SAP_STEPS.indexOf(p.sapStep) : -1)) continue;
-    // Guarded on the value read, so a concurrent run can never move a step back.
-    const moved = await db.update(configProject).set({ sapStep: f.step, sapStepAt: f.at })
-      .where(and(eq(configProject.id, p.id), sql`${configProject.sapStep} is not distinct from ${p.sapStep}`))
-      .returning({ id: configProject.id });
-    changed += moved.length;
+    if (!f) continue;
+    const doc = { entity: f.entity, docEntry: f.docEntry, docNum: f.docNum, docDate: f.at, company: companyDb };
+    if (await advanceStep(tenantId, p.id, f.step, doc, userId)) changed++;
   }
   return changed;
 }
 
-/** advanceSapSteps for the one client project a page opens, fenced like its timeline (a client's
- *  own company; staff never a client's draft). The page refetches the project when it moved. */
+/** advanceSapSteps for the one project a page opens, fenced like its timeline (a client's own
+ *  company; staff never a client's draft). The page refetches the project when it moved. */
 export async function projectProgress(tenantId: string, projectId: string, actor: Actor): Promise<{ changed: boolean }> {
   await projectFor(tenantId, projectId, actor);
-  const n = await advanceSapSteps(tenantId, and(eq(configProject.id, projectId), isNotNull(configProject.portalCardCode)));
+  const n = await advanceSapSteps(tenantId, eq(configProject.id, projectId));
   return { changed: n > 0 };
 }

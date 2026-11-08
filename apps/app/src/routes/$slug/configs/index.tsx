@@ -2,12 +2,15 @@ import { useCallback, useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { t, title } from "../../../head.ts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, ObjectStatus, Text } from "@ui5/webcomponents-react";
+import { Button } from "@ui5/webcomponents-react";
 import { orpc } from "../../../orpc.ts";
 import { viewsQuery } from "@confire/ui/views.ts";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
 import { useListView } from "@confire/ui/useListView.ts";
-import { projectStatusText, statusUi } from "../../../components/configurator/runView.ts";
+import { projectStatusOptions } from "@confire/ui/timeline/projectStatus.ts";
+import { ProjectStatusCell } from "@confire/ui/timeline/ProjectStatus.tsx";
+import { EntityLink } from "@confire/ui/EntityLink.tsx";
+import { useUiI18n } from "@confire/ui/i18n.ts";
 import { confirm } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { useI18n } from "../../../i18n.ts";
@@ -20,8 +23,17 @@ export const Route = createFileRoute("/$slug/configs/")({
   component: Configs,
 });
 
+const CELLS = {
+  status: (row: Row) => <ProjectStatusCell status={row.status} />,
+  // The last document opens on its own entity's page (an order, a delivery…), so the route is the row's.
+  docNum: (row: Row) => row.docNum == null ? null : (
+    <EntityLink route={`/b1/${String(row.docEntity)}`} target={String(row.docEntry)}>{String(row.docNum)}</EntityLink>
+  ),
+};
+
 function Configs() {
   const i18n = useI18n();
+  const ui = useUiI18n();
   const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
   const navigate = useNavigate({ from: "/$slug" });
   const qc = useQueryClient();
@@ -80,21 +92,19 @@ function Configs() {
   );
 
   const first = models.data?.[0]?.id;
-  const statuses = statusUi(t);
   // The bundle object is stable across a language switch; the strings are not, so they are the deps.
   const title = t("CONFIG_LIST_TITLE");
   const colName = t("CONFIG_COL_NAME");
   const colModel = t("CONFIG_COL_MODEL");
   const colCustomer = t("CONFIG_COL_CUSTOMER");
   const colCardCode = t("CONFIG_COL_CARD_CODE");
-  const colQuote = t("CONFIG_COL_QUOTE");
+  const colDocument = t("CONFIG_COL_DOCUMENT");
   const colStatus = t("CONFIG_COL_STATUS");
   const colUpdated = t("CONFIG_COL_UPDATED");
   const colMine = t("CONFIG_COL_MINE");
   const yes = t("ADMIN_YES");
   const no = t("ADMIN_NO");
-  const draftText = statuses.draft.text;
-  const quotedText = statuses.quoted.text;
+  const statusOptions = projectStatusOptions((k) => ui.getText(k));
   const feature = useMemo<ListFeature>(() => ({
     // `customer` is jsonb; the server flattens it to customerName so it filters, sorts and searches
     // like any other column.
@@ -105,30 +115,17 @@ function Configs() {
       { key: "modelName", label: colModel, type: "string", groupable: true },
       { key: "cardCode", label: colCardCode, type: "string", linkConfig: { route: "/b1/BusinessPartners" } },
       { key: "customerName", label: colCustomer, type: "string", groupable: true },
-      {
-        key: "status", label: colStatus, type: "enum", groupable: true,
-        options: [
-          { value: "draft", label: draftText },
-          { value: "quoted", label: quotedText },
-        ],
-      },
-      // Shows the DocNum, opens by DocEntry; the server leaves both empty for another company's quote.
-      { key: "quoteDocNum", label: colQuote, type: "number", integer: true, linkConfig: { route: "/b1/Quotations", idField: "quoteDocEntry" } },
+      { key: "status", label: colStatus, type: "enum", groupable: true, options: statusOptions },
+      // The status's SAP document (order, delivery, invoice), else the quotation: the DocNum, opened by
+      // DocEntry (CELLS); the server leaves it empty for another company's document.
+      { key: "docNum", label: colDocument, type: "number", integer: true },
       { key: "updatedAt", label: colUpdated, type: "date" },
       // The server computes it per caller: the home page's "My drafts" links here with ?mine=yes.
       { key: "mine", label: colMine, type: "enum", options: [{ value: "yes", label: yes }, { value: "no", label: no }], hidden: true },
     ],
     filterFields: [{ key: "name" }, { key: "customerName" }, { key: "status" }],
-  }), [title, colName, colModel, colCardCode, colCustomer, colQuote, colStatus, colUpdated, colMine, yes, no, draftText, quotedText]);
-  const cells = useMemo(() => ({
-    status: (row: Row) => {
-      const known = statusUi(t)[row.status as "draft" | "quoted"];
-      return known
-        ? <ObjectStatus inverted state={known.state}>{known.text}</ObjectStatus>
-        : <Text>{projectStatusText(t, String(row.status ?? ""))}</Text>;
-    },
-  // `t` is a new function each render; the status words change only with the language.
-  }), [draftText, quotedText]);
+  // The status words change with the language, as `title` does.
+  }), [title, colName, colModel, colCardCode, colCustomer, colDocument, colStatus, colUpdated, colMine, yes, no]);
 
   return (
     <ListReport
@@ -136,7 +133,7 @@ function Configs() {
       data={data}
       onQuery={setQuery}
       keyOf={(r) => String(r.id)}
-      cellTemplates={cells}
+      cellTemplates={CELLS}
       error={remove.error ?? duplicate.error}
       createDisabled={first ? undefined : t("CONFIG_NO_MODELS")}
       toolbarActions={({ rows: sel, clear }) => {

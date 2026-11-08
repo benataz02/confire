@@ -21,7 +21,7 @@ import { ENTITY_PROFILES } from "./entity-profiles.ts";
 import { canonicalJson } from "./canon.ts";
 import { quotationIn, tenantCompany, tenantConnector, tenantCurrency, viaB1 } from "./b1.ts";
 import { liveEngine } from "./config-project.ts";
-import { assertWritable, inputsOf, internalVisible, transition } from "./project-lifecycle.ts";
+import { assertWritable, inputsOf, internalVisible, transition, quotedOrLater } from "./project-lifecycle.ts";
 import { afterPost, type MailAnswer } from "./document-mail.ts";
 import { t } from "./i18n/index.ts";
 
@@ -269,7 +269,7 @@ export async function quoteDraft(tenantId: string, projectId: string) {
   const project = await loadQuotable(tenantId, projectId);
   const { model, lookups } = await liveEngine(tenantId, project);
   const here = quotationIn(project, await tenantCompany(tenantId));
-  const done = project.status === "quoted" && here;
+  const done = quotedOrLater(project.status) && here;
   const sapItems = await viaB1(async () => sapItemsOf((await tenantConnector(tenantId)).b1, project, model.definition));
   return {
     commandId: commandIdOf(tenantId, project, here),
@@ -320,7 +320,7 @@ export async function createQuote(
   const here = quotationIn(project, conn.companyDb);
   // Already posted: the row IS the idempotency record for a retry that got its response.
   // It sends nothing either: whichever call quoted it sent it then (document-mail spec §5.3).
-  if (project.status === "quoted" && here)
+  if (quotedOrLater(project.status) && here)
     return { docEntry: project.b1DocEntry!, docNum: null, reused: true, row: null, etag: null, mode: "created" as const, mail: null as MailAnswer };
   const actor = { userId, side: "internal" as const };
   await assertWritable(tenantId, project.id, actor);

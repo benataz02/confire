@@ -1,0 +1,1 @@
+ALTER TABLE "sap_connection" ADD COLUMN "open_counts" jsonb;

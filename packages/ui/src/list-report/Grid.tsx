@@ -112,6 +112,17 @@ if (typeof document !== "undefined" && !document.getElementById(TABLE_ITEM)) {
   document.head.appendChild(el);
 }
 
+/** Overlay scrollbars (macOS on a trackpad, Omarchy's Chromium with its OverlayScrollbar flag) take
+ *  no room and show only while scrolling, and a wheel scrolls down, never across: the columns past
+ *  a table's end had no visible way in. Tested as the table tests it (useNativeScrollbar: a scroller
+ *  whose scrollbar is 0px), once; global.css then draws the table's horizontal scrollbar itself. */
+if (typeof document !== "undefined") {
+  const probe = document.body.appendChild(document.createElement("div"));
+  probe.style.cssText = "overflow:scroll;position:absolute;top:-9999px;width:100px;height:100px";
+  document.documentElement.classList.toggle("confire-overlay-scrollbars", probe.offsetWidth === probe.clientWidth);
+  probe.remove();
+}
+
 /** A `statusRows` grid's closed line (global.css). */
 const CLOSED_ROW = "confire-row-closed";
 

@@ -1,4 +1,4 @@
-import { actionPath, crossJoinPath, entityPath, entitySetPath, metadataPath } from "./query.ts";
+import { actionPath, crossJoinPath, entityPath, entitySetPath, metadataPath, sqlQueryPath } from "./query.ts";
 import type {
   B1MetadataParams, B1Requester, B1Response, B1Transport, CrossJoinSpec, Key, Prefer, QueryOptions,
 } from "./types.ts";
@@ -36,6 +36,10 @@ export class DirectTransport implements B1Transport {
 
   readEntity(entitySet: string, key: Key, q?: QueryOptions): Promise<B1Response> {
     return this.get(entityPath(entitySet, key, q));
+  }
+
+  sqlQuery(code: string): Promise<B1Response> {
+    return this.get(sqlQueryPath(code));
   }
 
   crossJoin(spec: CrossJoinSpec): Promise<B1Response> {

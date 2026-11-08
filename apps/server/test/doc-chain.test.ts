@@ -34,9 +34,9 @@ test("furthestSteps: invoiced via delivery, via order directly, ordered only, no
   const b1 = fake();
   const r = await furthestSteps(b1, [1, 2, 3, 4]);
   expect(Object.fromEntries(r)).toEqual({
-    1: { step: "invoiced", at: "2026-10-07" },
-    2: { step: "ordered", at: "2026-10-02" },
-    3: { step: "invoiced", at: "2026-10-08" },
+    1: { step: "invoiced", entity: "Invoices", docEntry: 30, docNum: 30, at: "2026-10-07" },
+    2: { step: "ordered", entity: "Orders", docEntry: 11, docNum: 11, at: "2026-10-02" },
+    3: { step: "invoiced", entity: "Invoices", docEntry: 31, docNum: 31, at: "2026-10-08" },
   });
   expect(b1.calls).toBe(3); // exactly three keys above: order 19 (base 99, never asked for) is attributed to nothing
 });
@@ -49,5 +49,5 @@ test("furthestSteps: no quotations, no SAP call", async () => {
 
 test("furthestSteps: DocEntry is per document type — an unrelated delivery 10 never dates order 10", async () => {
   const b1 = fake({ Orders: [doc(10, "2026-10-01", [[23, 1]])], DeliveryNotes: [doc(10, "2026-12-31", [[17, 77]])] });
-  expect(Object.fromEntries(await furthestSteps(b1, [1]))).toEqual({ 1: { step: "ordered", at: "2026-10-01" } });
+  expect(Object.fromEntries(await furthestSteps(b1, [1]))).toEqual({ 1: { step: "ordered", entity: "Orders", docEntry: 10, docNum: 10, at: "2026-10-01" } });
 });

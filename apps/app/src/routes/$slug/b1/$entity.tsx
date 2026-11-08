@@ -5,7 +5,7 @@ import { BusyIndicator, MessageStrip, Toolbar, ToolbarButton } from "@ui5/webcom
 import { client, orpc, useIsAdmin } from "../../../orpc.ts";
 import { useI18n } from "../../../i18n.ts";
 import { b1Feature } from "../../../features/b1/index.ts";
-import { localizedB1Feature, useCodeNames } from "../../../features/b1/localize.ts";
+import { b1Label, localizedB1Feature, useCodeNames } from "../../../features/b1/localize.ts";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
 import { viewsQuery } from "@confire/ui/views.ts";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
@@ -21,7 +21,6 @@ import { useUiI18n } from "@confire/ui/i18n.ts";
 import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import { CloseQuotations, CopyTo } from "../../../features/b1/documents.tsx";
 import { InviteNewClientDialog } from "../../../components/portal/BpPortal.tsx";
-import { b1Label } from "../../../components/AppShell.tsx";
 import { t, title } from "../../../head.ts";
 import type { EntityFeature, ListQuery, Row } from "@confire/ui/types.ts";
 
@@ -126,7 +125,7 @@ function EntityList({ feature }: { feature: EntityFeature }) {
                   preview — PrintActions releases the blob URL in its own
                   cleanup. No single row selected is NaN, which draws it disabled. */}
               <PrintActions key={docEntry} entity={entity} docEntry={docEntry} />
-              <CopyTo entity={entity} flows={meta.data.flows.filter((f) => b1Feature(f.target))} rows={rows as Row[]} />
+              <CopyTo entity={entity} flows={meta.data.flows} rows={rows as Row[]} />
               {entity === "Quotations" && rows.length ? <CloseQuotations rows={rows as Row[]} onClosed={clear} /> : null}
             </>
           );

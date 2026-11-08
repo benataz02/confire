@@ -1,9 +1,8 @@
 import { useEffect } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BusyIndicator, Button, MessageStrip, Modals, Tag, Text, ToolbarButton } from "@ui5/webcomponents-react";
+import { BusyIndicator, Button, MessageStrip, Modals, Text, ToolbarButton } from "@ui5/webcomponents-react";
 import { ProjectOverview } from "@confire/ui/project/ProjectOverview.tsx";
-import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import type { TimelineEvent } from "@confire/ui/timeline/ProjectTimeline.tsx";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
 import { toast } from "@confire/ui/toast.ts";
@@ -13,7 +12,6 @@ import { PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import { money } from "@confire/ui/money.ts";
 import { uploadFile } from "@confire/ui/files.ts";
 import { client, meQuery, orpc, type Me } from "../../../orpc.ts";
-import { PROJECT_STATUS_KEY } from "../../../features/labels.ts";
 import { useI18n } from "../../../i18n.ts";
 
 // A project's page (client-project-page spec, "The project page"): where it stands, the conversation,
@@ -95,7 +93,6 @@ function ProjectPage({ id }: { id: string }) {
   if (!p) return null;
 
   const status = p.project.status;
-  const st = PROJECT_STATUS[status];
   const { step, next } = p.journey;
   const labels = STEP_KEYS.map((k) => t(k));
   const answerable = buyer && status === "quoted" && p.project.quoteResponse === null;
@@ -144,16 +141,7 @@ function ProjectPage({ id }: { id: string }) {
   return (
     <ProjectOverview side="external" title={p.project.name} subtitle={p.model.name}
       breadcrumbs={<PageBreadcrumbs items={[{ text: t("PORTAL_PROJECTS"), to: "/projects" }]} current={p.project.name} />}
-      tags={
-        <>
-          <Tag design={st.state === "None" ? "Neutral" : st.state}>{t(PROJECT_STATUS_KEY[status])}</Tag>
-          {p.project.quoteResponse ? (
-            <Tag design={p.project.quoteResponse === "accepted" ? "Positive" : "Critical"}>
-              {t(p.project.quoteResponse === "accepted" ? "PORTAL_ACCEPTED_BY_YOU" : "PORTAL_DECLINED_BY_YOU")}
-            </Tag>
-          ) : null}
-        </>
-      }
+      status={status}
       actions={
         <>
           <ToolbarButton design={work ? "Emphasized" : "Transparent"} onClick={openConfig}

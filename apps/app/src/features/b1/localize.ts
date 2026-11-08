@@ -12,14 +12,18 @@ const TITLE: Record<string, string> = {
   Quotations: "NAV_QUOTATIONS",
   Orders: "NAV_ORDERS",
   DeliveryNotes: "NAV_DELIVERIES",
+  Invoices: "NAV_INVOICES",
   BusinessPartners: "NAV_BP",
   Items: "NAV_ITEMS",
 };
+/** A B1 entity's list as the side nav names it — every page, title and setting that names one. */
+export const b1Label = (entity: string, t: (key: string) => string): string => (TITLE[entity] ? t(TITLE[entity]) : entity);
 
 const CREATE: Record<string, string> = {
   Quotations: "ADMIN_NEW_QUOTATION",
   Orders: "ADMIN_NEW_ORDER",
   DeliveryNotes: "ADMIN_NEW_DELIVERY",
+  Invoices: "ADMIN_NEW_INVOICE",
   BusinessPartners: "ADMIN_NEW_BP",
   Items: "ADMIN_NEW_ITEM",
 };
@@ -60,7 +64,7 @@ function docStatus(t: AdminText): NonNullable<Facet["statusMapping"]> {
 export function localizedB1Feature(entity: string, t: AdminText): EntityFeature | undefined {
   const f = B1_FEATURES[entity];
   if (!f) return;
-  const title = TITLE[entity] ? t(TITLE[entity]) : f.label;
+  const title = TITLE[entity] ? b1Label(entity, t) : f.label;
   return {
     ...f,
     label: title,

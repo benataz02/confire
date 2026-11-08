@@ -1,16 +1,15 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ListItemStandard, Modals, SelectDialog, Tag, ToolbarButton } from "@ui5/webcomponents-react";
+import { ListItemStandard, Modals, SelectDialog, ToolbarButton } from "@ui5/webcomponents-react";
 import { ProjectOverview } from "@confire/ui/project/ProjectOverview.tsx";
-import { PROJECT_STATUS } from "@confire/ui/timeline/projectStatus.ts";
 import { uploadFile } from "@confire/ui/files.ts";
 import { toast } from "@confire/ui/toast.ts";
 import { PageBreadcrumbs } from "@confire/ui/PageBreadcrumbs.tsx";
 import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import { orpc, useCurrency } from "../../orpc.ts";
 import { useI18n } from "../../i18n.ts";
-import { projectStatusText } from "./runView.ts";
+import { latestDocument, OPEN_DOCUMENT } from "./runView.ts";
 
 // A client's request's project page (client-project-page spec, "The project page"): where it stands,
 // the conversation and Reassign. The configuration, its costs and the decisions on it (Accept, Send
@@ -32,7 +31,7 @@ export function RequestOverview({ id }: { id: string }) {
   // Live SAP, so it may fail on its own without taking the events with it.
   const documents = useQuery({ ...orpc.timeline.documents.queryOptions({ input: { projectId: id } }), retry: false });
   // SAP, off the page's path: brings the stored SAP step up to date, then the project redraws with it.
-  const progress = useQuery({ ...orpc.requests.progress.queryOptions({ input: { id } }), retry: false });
+  const progress = useQuery({ ...orpc.configs.progress.queryOptions({ input: { id } }), retry: false });
   useEffect(() => { if (progress.data?.changed) void qc.invalidateQueries({ queryKey: getKey }); }, [progress.data]);
   const comment = useMutation(orpc.timeline.comment.mutationOptions({
     onSuccess: () => void qc.invalidateQueries({ queryKey: listKey }),
@@ -63,10 +62,11 @@ export function RequestOverview({ id }: { id: string }) {
   const { project, request } = v;
   const { step, next } = request.journey;
   const name = project.name.trim() || t("CONFIG_NEW");
-  const st = PROJECT_STATUS[project.status] ?? PROJECT_STATUS.draft;
   const labels = STEP_KEYS.map((k) => t(k));
   // A DocEntry means something only in the SAP company it was posted in (as on the configuration page).
-  const quotationHere = project.b1DocEntry !== null && project.b1Company === v.sapCompany;
+  const doc = project.b1DocEntry !== null && project.b1Company === v.sapCompany
+    ? latestDocument({ status: project.status, b1DocEntry: project.b1DocEntry }, timeline.data?.events)
+    : null;
   // The request is staff's work while it waits on review.
   const review = next === "review";
 
@@ -75,24 +75,14 @@ export function RequestOverview({ id }: { id: string }) {
     <ProjectOverview side="internal" title={name}
       subtitle={t("CONFIG_REQUEST_SUB", request.cardName, request.assigneeName ? t("CONFIG_ASSIGNED", request.assigneeName) : t("CONFIG_NOT_ACCEPTED"))}
       breadcrumbs={<PageBreadcrumbs items={[{ text: t("NAV_REQUESTS"), to: "/requests" }]} current={name} />}
-      tags={
-        <>
-          <Tag design={st.state === "None" ? "Neutral" : st.state}>{projectStatusText(t, project.status)}</Tag>
-          {/* The client's answer to the quotation (D20). A decline reopens the request in review. */}
-          {project.quoteResponse ? (
-            <Tag design={project.quoteResponse === "accepted" ? "Positive" : "Critical"}>
-              {t(project.quoteResponse === "accepted" ? "CONFIG_ACCEPTED_CLIENT" : "CONFIG_DECLINED_CLIENT")}
-            </Tag>
-          ) : null}
-        </>
-      }
+      status={project.status}
       actions={
         <>
           <ToolbarButton design="Emphasized" icon={review ? undefined : "edit"} text={t(review ? "CONFIG_REVIEW_INQUIRY" : "CONFIG_EDIT")}
             onClick={() => void navigate({ to: "/$slug/configs/$id/configuration", params: { id } })} />
-          {quotationHere ? (
-            <ToolbarButton icon="document-text" design="Transparent" text={t("CONFIG_OPEN_QUOTE")}
-              onClick={() => void navigate({ to: "/$slug/b1/$entity/$key", params: { entity: "Quotations", key: String(project.b1DocEntry) } })} />
+          {doc ? (
+            <ToolbarButton icon="document-text" design="Transparent" text={t(OPEN_DOCUMENT[doc.entity]!)}
+              onClick={() => void navigate({ to: "/$slug/b1/$entity/$key", params: { entity: doc.entity, key: String(doc.docEntry) } })} />
           ) : null}
           <ToolbarButton icon="employee" design="Transparent" disabled={reassign.isPending}
             text={t("CONFIG_REASSIGN")} accessibilityAttributes={{ hasPopup: "dialog" }}

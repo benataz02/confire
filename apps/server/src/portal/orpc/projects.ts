@@ -13,7 +13,7 @@ import { keepsCandidates, liveProject, loadModel, QueryPageZ, queryTablePage } f
 import { PatchZ, defaultQuantities, patchColumns, patchProblems, touchesEngine } from "../../config-patch.ts";
 import { assertWritable, inputsOf, recordCreated, transition, writableBy, type Action, type Actor } from "../../project-lifecycle.ts";
 import {
-  toPortalForm, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalRows,
+  declaresWhere, toPortalForm, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalRows,
 } from "../projection.ts";
 import { t } from "../../i18n/index.ts";
 import { journeyOf, nextSql } from "../journey.ts";
@@ -213,6 +213,9 @@ export const projectsRouter = {
     const own = model.portal || (await db.select({ id: configProject.id }).from(configProject)
       .where(and(eq(configProject.modelId, model.id), seatFence(context))).limit(1)).length > 0;
     if (!own || !referencedTables(model.definition).has(input.table)) throw new ORPCError("NOT_FOUND");
+    // Only a filter the model declares: a free one on a column the portal hides would answer, row
+    // count by row count, what that column holds.
+    if (input.where && !declaresWhere(model.definition, input.table, input.where)) throw new ORPCError("NOT_FOUND");
     return toPortalPage(model.definition, input.table, await queryTablePage(context.tenantId, input));
   }),
 

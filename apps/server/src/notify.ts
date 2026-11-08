@@ -1,7 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import {
   db, configModel, configProject, configProjectEvent, EXTERNAL_ROLES, member, portalCompany, user,
-  type DocumentSentPayload, type RevisionDiff,
+  type RevisionDiff, type SapStepPayload,
 } from "@confire/db";
 import { tenantCurrency } from "./b1.ts";
 import { modelLabels } from "./config-project.ts";
@@ -29,14 +29,13 @@ const STAFF: Partial<Record<string, NotificationType>> = {
   submitted: "request.submitted", resubmitted: "request.resubmitted", comment: "request.comment", file: "request.file",
   quote_accepted: "request.quote_accepted", quote_declined: "request.quote_declined",
 };
-/** A staff action → what the client hears. `revised` is absent: its transition's mail lists it. */
+/** A staff action → what the client hears. `revised` is absent: its transition's mail lists it. A
+ *  SAP step (an order, a delivery, an invoice) is heard once, as it happens; `document_sent` is
+ *  absent: the document itself went from the tenant's mailbox, and its step already told them. */
 const CLIENT: Partial<Record<string, NotificationType>> = {
   accepted: "project.accepted", returned: "project.returned", declined: "project.declined", quoted: "project.quoted",
   comment: "project.comment", file: "project.file",
-};
-/** A sent document → what the client hears, by its type. A quotation's is `quoted`'s own. */
-const SENT: Partial<Record<string, NotificationType>> = {
-  Orders: "project.order", DeliveryNotes: "project.delivery", Invoices: "project.invoice",
+  ordered: "project.order", delivered: "project.delivery", invoiced: "project.invoice",
 };
 
 const inFlight = new Set<Promise<unknown>>();
@@ -127,7 +126,6 @@ async function notifyEvent(tenantId: string, eventId: string, revisedId: string 
   const type = e.kind === "assigned" ? "request.assigned"
     : e.visibility === "internal" ? undefined
     : e.actorSide === "external" ? STAFF[e.kind]
-    : e.kind === "document_sent" ? SENT[(e.payload as DocumentSentPayload).entity]
     : CLIENT[e.kind];
   if (!type) return;
 
@@ -157,18 +155,18 @@ async function notifyEvent(tenantId: string, eventId: string, revisedId: string 
   const fileName = e.kind === "file" ? ((e.payload as { name?: string } | null)?.name ?? null) : null;
   const params = { projectName: p.name, actorName, note: excerpt(e.note), fileName };
   const mailKey = `batch-event/${eventId}`;
-  let r: SendResult;
+  let r: SendResult & { mailed: string[] };
   if (type.startsWith("project.")) {
     const q = e.kind === "quoted" ? (e.payload as { docNum: number | null; value: number }) : null;
-    const sent = e.kind === "document_sent" ? (e.payload as DocumentSentPayload) : null;
+    const step = type === "project.order" || type === "project.delivery" || type === "project.invoice" ? (e.payload as SapStepPayload) : null;
     const currency = q ? await tenantCurrency(tenantId) : null;
     const path = `/projects/${e.projectId}`;
     // The client's mail is in its company's SAP language.
     const lang = mailLang(p.languageCode);
     const common = {
-      // A sent document's mail is its type's: project.invoice → invoice.
-      brand, kind: (sent ? type.slice("project.".length) : e.kind) as ClientEventKind, projectName: p.name, note: e.note, fileName, lang,
-      docNum: sent?.docNum ?? null,
+      // The mail is its type's: project.order → order.
+      brand, kind: type.slice("project.".length) as ClientEventKind, projectName: p.name, note: e.note, fileName, lang,
+      docNum: step?.docNum ?? null,
       actorName: e.actorName ?? (lang === "es" ? "Alguien" : "Someone"),
       revision: revisedId ? await revisionOf(revisedId, p.modelId, lang) : [],
       quote: q ? {
@@ -178,7 +176,7 @@ async function notifyEvent(tenantId: string, eventId: string, revisedId: string 
       url: portalTenantUrl(slug, path),
     };
     r = await deliver({
-      tenantId, type, to, params: q || sent ? { ...params, docNum: (q ?? sent)!.docNum } : params, path, mailKey,
+      tenantId, type, to, params: q || step ? { ...params, docNum: (q ?? step)!.docNum } : params, path, mailKey,
       mail: (x) => clientProjectMail({ ...common, to: x.email }),
     });
   } else {
@@ -193,7 +191,10 @@ async function notifyEvent(tenantId: string, eventId: string, revisedId: string 
       mail: (x) => staffRequestMail({ ...common, to: x.email }),
     });
   }
-  if (r.error) await db.update(configProjectEvent).set({ mailError: r.error }).where(eq(configProjectEvent.id, eventId));
+  if (r.error || r.mailed.length) {
+    await db.update(configProjectEvent).set(r.error ? { mailError: r.error } : { mailedTo: r.mailed })
+      .where(eq(configProjectEvent.id, eventId));
+  }
 }
 
 /** §5.4 step 6: the inviter hears that their new client's lead now exists in B1 — if they still

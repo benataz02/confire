@@ -7,10 +7,9 @@ import { attachThemeLoaded, detachThemeLoaded } from "@ui5/webcomponents-base/di
 import { firstName } from "@confire/ui/format.ts";
 import { useI18n } from "../i18n.ts";
 import { client, meQuery, orpc } from "../orpc.ts";
-import { useAssistantShell } from "./AssistantProvider.tsx";
+import { useAssistantShell } from "./shell.ts";
 import { useAssistantThread, type Thread } from "./useAssistant.ts";
 import { ChatDrawer, useChats, type ChatRow } from "./ChatDrawer.tsx";
-import { useOpenForm } from "./cards/registry.tsx";
 import { REPORT_ROUTE, threadInput } from "./routeContext.ts";
 import { paletteFor, paletteVars, type Palette } from "./palette.ts";
 import { cardBox, clampPos, type Pos } from "./geometry.ts";
@@ -58,7 +57,6 @@ export function AssistantPanel() {
   const route = useRoute();
   const me = useQuery(meQuery);
   const navigate = useNavigate({ from: "/$slug" });
-  const openForm = useOpenForm();
   const chats = useChats();
   const palette = usePalette();
   // A report's page: the panel is its chat, found through the report.
@@ -72,7 +70,6 @@ export function AssistantPanel() {
   const thread = useAssistantThread(threadInput({ picked, projectId: route.projectId, reportId, reportThread }));
   // The chat's configuration: the page's, else the thread's (one the chat created, followed elsewhere).
   const projectId = route.projectId ?? thread.data?.projectId ?? null;
-  const config = useQuery({ ...orpc.configs.get.queryOptions({ input: { id: projectId ?? "" } }), enabled: !!projectId });
   const kind = projectId ? "configure" : thread.data?.reportId ? "report" : kindOf(route);
   const [drawer, setDrawer] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -182,9 +179,6 @@ export function AssistantPanel() {
   useEffect(() => { if (prefill && thread.data && !thread.isPlaceholderData) used.current = prefill.at; });
 
   const row = chats.rows.find((r) => r.id === thread.data?.id);
-  // Open configuration, unless its form is what the page shows (a client's request's form is its own page).
-  const formRoute = config.data?.request ? "/$slug/configs/$id_/configuration" : "/$slug/configs/$id";
-  const offerForm = kind === "configure" && !!projectId && !(route.projectId === projectId && route.routeId === formRoute);
 
   const icon = (name: string, label: string, onClick: (e: { currentTarget: unknown }) => void, extra?: object) => (
     <Button design="Transparent" icon={name} tooltip={label} accessibleName={label} onClick={onClick} {...extra} />
@@ -199,7 +193,6 @@ export function AssistantPanel() {
           {empty || !row ? t("ASSISTANT_TITLE") : chats.label(row)}
         </span>
         {/* Pin, rename and delete are the drawer rows' •••. */}
-        {offerForm ? icon("sales-quote", t("ASSISTANT_OPEN_CONFIG"), () => void openForm(projectId!)) : null}
         {icon("write-new", t("ASSISTANT_NEW_CHAT"), () => void newChat())}
         {icon(maximized ? "exit-full-screen" : "full-screen", t(maximized ? "ASSISTANT_RESTORE" : "ASSISTANT_MAXIMIZE"), () => resize(!maximized))}
         {icon("decline", t("ASSISTANT_CLOSE"), shell.close)}

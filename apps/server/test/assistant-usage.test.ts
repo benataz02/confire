@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { chat } from "@tanstack/ai";
+import { chat, toolDefinition, type ModelMessage } from "@tanstack/ai";
 import { fakeText } from "@tanstack/ai/testing";
+import { z } from "zod";
 import { db, aiUsage, assistantSettings } from "@confire/db";
 import { useTestAdapter } from "../src/assistant/model.ts";
+import { SKILLS } from "../src/assistant/skills.ts";
 import {
   assertAssistant, costOf, meter, MONTHLY_LIMIT_USD, rateLimit, tokensOf, usageReport,
 } from "../src/assistant/usage.ts";
@@ -72,19 +74,48 @@ describe.skipIf(!process.env.DATABASE_URL)("budget", () => {
     expect(Number(rows[0]!.cost)).toBeGreaterThan(0);
   });
 
-  test("usageReport: this month's totals, kinds and users; every day and six months, gaps included", async () => {
+  test("meter tags each call with the chat's skill and the tools whose results it read", async () => {
+    const { tenantId } = await makeTenant();
+    const m = { tenantId, userId: "u1", threadId: null, projectId: null, kind: "chat" as const };
+    const lookup = toolDefinition({ name: "lookup", description: "x", inputSchema: z.object({}) }).server(async () => "ok");
+    const fake = fakeText();
+    fake.setResponses([
+      { toolCalls: [{ name: "load_skill", input: { name: "configure" } }] },
+      { toolCalls: [{ name: "lookup", input: {} }, { name: "lookup", input: {} }] },
+      { text: "done" },
+    ]);
+    for await (const _ of chat({ adapter: fake, threadId: "t1", messages: [{ role: "user", content: "hi" }], tools: [lookup], middleware: [SKILLS, meter(m)] }));
+    const rows = () => db.select().from(aiUsage).where(eq(aiUsage.tenantId, tenantId)).orderBy(aiUsage.at);
+    expect((await rows()).map((r) => [r.skill, r.tools])).toEqual([[null, []], ["configure", ["load_skill"]], ["configure", ["lookup"]]]);
+
+    // A later turn: the skill loaded earlier is still in the history, so its first call is already that skill's.
+    const history: ModelMessage[] = [
+      { role: "user", content: "a report" },
+      { role: "assistant", content: null, toolCalls: [{ id: "s1", type: "function", function: { name: "load_skill", arguments: '{"name":"report"}' } }] },
+      { role: "tool", toolCallId: "s1", content: "{}" },
+      { role: "user", content: "again" },
+    ];
+    fake.setResponses([{ text: "ok" }]);
+    for await (const _ of chat({ adapter: fake, threadId: "t2", messages: history, middleware: [meter({ ...m })] }));
+    expect((await rows()).at(-1)).toMatchObject({ skill: "report", tools: [] });
+  });
+
+  test("usageReport: this month's totals, steps, skills, tools and users; every day and six months, gaps included", async () => {
     const { tenantId } = await makeTenant();
     const row = { tenantId, model: "claude-sonnet-5-5", inputTokens: 10, outputTokens: 5, cacheReadTokens: 100, cacheWriteTokens: 0 };
     const lastMonth = new Date(); lastMonth.setUTCDate(1); lastMonth.setUTCMonth(lastMonth.getUTCMonth() - 1);
     await db.insert(aiUsage).values([
-      { ...row, userId: "a", kind: "chat", cost: "1.5", projectId: crypto.randomUUID() },
-      { ...row, userId: "a", kind: "intake", cost: "0.5" },
-      { ...row, userId: "b", kind: "chat", cost: "3" },
+      { ...row, userId: "a", kind: "chat", cost: "1.5" },
+      { ...row, userId: "a", kind: "intake", cost: "0.5", skill: "configure", tools: ["read_request"] },
+      { ...row, userId: "b", kind: "chat", cost: "3", skill: "report", tools: ["b1_read", "b1_schema"] },
       { ...row, userId: "a", kind: "chat", cost: "100", at: lastMonth },
     ]);
     const r = await usageReport(tenantId);
-    expect(r.totals).toMatchObject({ cost: 5, calls: 3, assisted: 1, input: 30, cacheRead: 300 });
-    expect(r.kinds.sort((x, y) => x.kind.localeCompare(y.kind)).map((k) => [k.kind, k.cost])).toEqual([["chat", 4.5], ["intake", 0.5]]);
+    expect(r.totals).toMatchObject({ cost: 5, calls: 3, input: 30, cacheRead: 300 });
+    expect(r.steps.map((s) => [s.step, s.cost]).sort()).toEqual([["intake", 0.5], ["reply", 1.5], ["tools", 3]]);
+    expect(r.skills.map((s) => [s.skill, s.cost]).sort()).toEqual([[null, 1.5], ["configure", 0.5], ["report", 3]]);
+    // b's call read two tools: each gets half of it.
+    expect(r.tools.map((x) => [x.tool, x.cost, x.calls]).sort()).toEqual([["b1_read", 1.5, 1], ["b1_schema", 1.5, 1], ["read_request", 0.5, 1]]);
     expect(r.users.map((u) => [u.userId, u.cost, u.calls])).toEqual([["b", 3, 1], ["a", 2, 2]]);
     expect(r.days).toHaveLength(new Date().getUTCDate());
     expect(r.days.at(-1)).toMatchObject({ cost: 5, calls: 3 });

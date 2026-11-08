@@ -6,7 +6,7 @@ import { userProcedure } from "../base.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { staffOf } from "../../notifications.ts";
 import { addComment, assign, transition, type Action } from "../../project-lifecycle.ts";
-import { projectDocuments, projectProgress, timelineEvents } from "../../project-timeline.ts";
+import { projectDocuments, timelineEvents } from "../../project-timeline.ts";
 
 // Portal → Requests (spec §10, §11): the clients' projects from their first submit on, and the
 // three decisions staff take on one — Accept, Send back, Decline. Quote stays configs.createQuote
@@ -79,10 +79,6 @@ export const requestsRouter = {
 
   /** Who a request can be assigned to: the workspace's staff, for the Reassign picker. */
   assignable: userProcedure.handler(({ context }) => staffOf(context.tenantId)),
-
-  /** How far SAP has taken this request (the portal home's walk, for one): the page refetches `get` when it moved. */
-  progress: userProcedure.input(z.object({ id: z.uuid() })).handler(({ input, context }) =>
-    projectProgress(context.tenantId, input.id, { userId: context.userId, side: "internal" })),
 };
 
 /** The project timeline, staff side (spec §8): every event, internal notes included. */

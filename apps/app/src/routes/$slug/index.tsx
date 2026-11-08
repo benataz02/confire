@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { t, title } from "../../head.ts";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { ObjectPage, ObjectPageSection, ObjectPageTitle, Text, Title } from "@ui5/webcomponents-react";
 import { Tile, type TileProps } from "@confire/ui/Tile.tsx";
 import { useGreeting } from "@confire/ui/greeting.ts";
@@ -8,7 +8,7 @@ import { meQuery, orpc, useCurrency, useIsAdmin } from "../../orpc.ts";
 import { formatLocale } from "@confire/ui/format.ts";
 import { useI18n } from "../../i18n.ts";
 import { B1_DOCUMENTS, B1_FEATURES } from "../../features/b1/index.ts";
-import { b1Label } from "../../components/AppShell.tsx";
+import { b1Label } from "../../features/b1/localize.ts";
 import { formatValue } from "../../reports/widgets.ts";
 
 // The workspace home, the portal home's layout: the caller's own figures first, then the side nav's
@@ -17,7 +17,6 @@ import { formatValue } from "../../reports/widgets.ts";
 // never disagree.
 export const Route = createFileRoute("/$slug/")({ head: () => title(t("NAV_HOME")), component: Home });
 
-const OPEN_DOC = { field: "DocumentStatus", op: "eq", value: "bost_Open" } as const;
 const flag = (n: number | undefined, state: "Critical" | "Negative") => (n ? state : undefined);
 
 function Home() {
@@ -29,18 +28,11 @@ function Home() {
   const { data: o } = useQuery(orpc.home.overview.queryOptions());
   // The user's saved reports, each its last run's headline: no SAP call here (reports spec §6.1).
   const { data: reports } = useQuery(orpc.reports.tiles.queryOptions());
-  // Open documents per SAP list: live reads through the agent, each its own query, so the page never
-  // waits on them and an agent that is down just leaves the tiles without a number.
-  const b1Docs = Object.values(B1_FEATURES).filter((f) => B1_DOCUMENTS.has(f.entity));
-  const openDocs = useQueries({
-    queries: b1Docs.map((f) => ({
-      ...orpc.entities.rows.queryOptions({ input: { entity: f.entity, count: true, query: { select: ["DocEntry"], filter: [OPEN_DOC], orderby: [] } } }),
-      retry: false,
-      select: (r: { total?: number }) => r.total,
-    })),
-  });
-  const openCount = Object.fromEntries(b1Docs.map((f, i) => [f.entity, openDocs[i]!]));
-
+  // Open documents per SAP list: one read through the agent, its own query, so the page never waits
+  // on it and an agent that is down just leaves the tiles without a number. Once per sign-in: neither
+  // coming back home nor refocusing the window reads it again (sign-out clears the cache), and the
+  // server shares one SAP read across the workspace for ten minutes.
+  const openCounts = useQuery({ ...orpc.home.openCounts.queryOptions(), staleTime: Infinity, gcTime: Infinity, retry: false });
   const groups: { id: string; title: string; tiles: TileProps[] }[] = [
     {
       id: "actions", title: t("HOME_QUICK_ACTIONS"),
@@ -92,7 +84,7 @@ function Home() {
       id: "sap", title: t("NAV_SAP"),
       tiles: Object.values(B1_FEATURES).map((f) => ({
         title: b1Label(f.entity, t), icon: f.icon, to: `/b1/${f.entity}`,
-        ...(B1_DOCUMENTS.has(f.entity) ? { subtitle: t("HOME_OPEN"), value: openCount[f.entity]!.data, loading: openCount[f.entity]!.isPending, search: { DocumentStatus: "bost_Open" } } : {}),
+        ...(B1_DOCUMENTS.has(f.entity) ? { subtitle: t("HOME_OPEN"), value: openCounts.data?.[f.entity], loading: openCounts.isPending, search: { DocumentStatus: "bost_Open" } } : {}),
       })),
     },
   ];

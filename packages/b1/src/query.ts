@@ -103,6 +103,10 @@ export const entityPath = (entitySet: string, key: Key, q?: QueryOptions): strin
 export const actionPath = (entitySet: string, key: Key, name: string): string =>
   `${entityPath(entitySet, key)}/${assertName(name, "action")}`;
 
+/** `SQLQueries('cf_x')/List` — runs a stored SQL query (B1 10.0 FP 2011+): a GET the agent's
+ *  allowlist already passes. No parameters: Confire's queries take none. */
+export const sqlQueryPath = (code: string): string => `${entityPath("SQLQueries", code)}/List`;
+
 /** `$crossjoin(A,A/B)?$expand=A($select=…),A/B($select=…)&$filter=…` — B1 wants the expand
  *  clause unencoded, so it is composed by hand and only the values are escaped. */
 export function crossJoinPath(spec: CrossJoinSpec): string {

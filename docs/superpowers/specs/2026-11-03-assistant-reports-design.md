@@ -272,11 +272,9 @@ still hold whatever a model does; this is a hint, as every page note is.
   `add-document` or similar), then every saved report as a tile — title, subtitle, the first KPI's
   value as the tile's number (state from its compare when it has one). From `last_result`; nothing on
   the home calls SAP.
-- **Refreshing a tile**: the home's read fires a background re-run of each saved report whose result
-  is older than **60 minutes**, off the request path and never throwing — `ensureFresh`'s pattern
-  (`masterdata-sync.ts`) — so the next visit shows fresh figures. It runs as the report's owner, with
-  the owner's current role (a user no longer on staff refreshes nothing). Opening a report always runs
-  it live.
+- **Refreshing a tile**: nothing refreshes a tile behind the user's back (2026-11-08: the 60-minute
+  background re-run sent every saved report to SAP on a home visit). A tile shows the run its page
+  last stored: opening a report runs it live, and so does its Refresh.
 
 ### 6.2 The report page — three states (the approved storyboard)
 
@@ -322,7 +320,7 @@ already ships).
 
 `reports.create` (on the first send: the report row, unsaved, and its thread), `get` (definition, last
 result, saved, thread id), `run` (run live, store `last_result`), `save` / `rename` / `delete`,
-`tiles` (the home's: saved reports with their headline, fires the stale refresh). `report_set` is the
+`tiles` (the home's: saved reports with their headline, no SAP call). `report_set` is the
 assistant's tool, not a page procedure: only the chat writes a definition.
 
 ## 8. Tests (the gates)
@@ -356,7 +354,7 @@ first drafts look like the mockup.
 - SAP does the totals (`$apply`), a time dimension grouped by day and bucketed on our side; rows
   only for the table (2,000); reading rows with a 20,000 cap is the fallback where `$apply` is refused.
 - `b1_read` gets the same `aggregate` (the user asked whether to extend it; recommended and taken).
-- Home tiles show the last run, refreshed in the background after 60 minutes; opening is live.
+- Home tiles show the last run stored by the report's page; opening is live.
 - Reports are personal; sharing is a later step.
 - The chat is the only editor; chips pre-fill it.
 - One thread per report; a report deleted deletes its chat.

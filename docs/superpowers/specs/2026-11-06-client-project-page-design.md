@@ -59,8 +59,9 @@ the messages button and "What comes next" are gone (the card's action moved to t
 block repeated the bar); a failed title or entry action is an Error MessageBox, as `PrintActions`' is.
 
 1. **Title**: breadcrumbs, the project's name, the product (model) name (staff: the client and the
-   assignee instead), the status tag and the
-   quote-response tag as today, then the **configuration action** first in the title's actions, its
+   assignee instead), one status tag — the status alone (2026-11-08: the quote-response tag is gone; a
+   stored answer outlives its moment, "Ordered · Accepted", and the bar's next step and the timeline
+   already say it) — then the **configuration action** first in the title's actions, its
    weight following whose work the configuration is:
    - Portal: draft → Emphasized **Continue configuring**; `changes` → Emphasized **Make the changes**;
      otherwise a plain **Open configuration**.
@@ -104,8 +105,8 @@ block repeated the bar); a failed title or entry action is an Error MessageBox, 
    side as today (staff keep the internal-only toggle, a lock button, and see internal notes). The comment box
    (`TimelineComposer`) is the page's floating footer (2026-11-07), in view however far one scrolls, as wide as
    the timeline's column: the shared chat box (`@confire/ui/Composer.tsx`, the assistant's too, 2026-11-07),
-   ChatGPT's — one pill row (attach and the lock, the box, a round send) until the text wraps, then the text
-   spans the pill and the buttons drop to a row under it; Enter posts, Shift+Enter breaks the line.
+   ChatGPT's — one row (attach and the lock, the box, send; UI5's paddings and corners) until the text wraps,
+   then the text spans the box and the buttons drop to a row under it; Enter posts, Shift+Enter breaks the line.
    The status tags sit beside the name in the title, centred on it as on the configuration page. One entry per document (`mergeEntries`): a quotation is its
    `quoted` event — the employee's, with the value, the PDF as mailed, Open and Preview — never a
    second SAP row; an order, delivery or invoice is its SAP row with no document status, and when
@@ -140,7 +141,7 @@ Staff:
 |---|---|
 | Review inquiry / Edit | project page title actions, first |
 | Reassign | project page title actions (Attach is the timeline composer's) |
-| Open quotation (when one exists here, as today) | project page title actions |
+| Open the latest document (when a quotation exists here): the newest SAP step's, else the quotation — *Open order*, *Open delivery*, *Open invoice* (`latestDocument`) | project page title actions |
 | Accept, Send back, Decline, Create/Update quote (`ProcessFooter`) | **configuration page footer, unchanged** — staff decide while looking at the configuration, its costs and candidates |
 | Sync, Copy, the cost rail toggle, Retry | configuration page, unchanged |
 
@@ -211,7 +212,9 @@ Both `projects.get` (portal) and `configs.get` (staff, client requests only) add
 `journeyOf` stays the one rule; where it lives so both routers import it is the builder's call
 (today `apps/server/src/portal/journey.ts`, which the staff router may import). Nothing else changes.
 
-Open check for the builder: whether `sapStep` is kept fresh outside the portal home (`home.progress`
+Resolved 2026-11-08: `sapStep` folded into `status`, and each project page (staff `configs.progress`,
+internal configurations included; portal `projects.progress`) runs the same SAP read; a copy moves the
+status at once. The original check, for the record: whether `sapStep` is kept fresh outside the portal home (`home.progress`
 writes it). If only the portal home refreshes it, a staff reader may see a stale step until a client
 opens their home; the plan should say how staff get it fresh (e.g. the same refresh on `configs.get`
 for a request, off the request path) or accept it.

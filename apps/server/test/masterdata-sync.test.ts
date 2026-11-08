@@ -129,4 +129,12 @@ describe.skipIf(!process.env.DATABASE_URL)("rowCache / pageRows", () => {
     const rows = await rowCache(tenantId)(md.id, { col: "ItemCode", values: ["C"] });
     expect(rows.map((r) => r.ItemCode)).toEqual(["C"]);
   });
+
+  test("a ref's row filter ANDs with the key probe", async () => {
+    const md = await seed("where");
+    await syncMasterdata(tenantId, md, paged(["A", "B", "C"]));
+    const where = { col: "ItemCode", values: ["A", "C"] };
+    expect((await pageRows(tenantId, md.id, { where })).rows.map((r) => r.ItemCode)).toEqual(["A", "C"]);
+    expect((await pageRows(tenantId, md.id, { where, col: "ItemCode", values: ["B"] })).rows).toEqual([]);
+  });
 });

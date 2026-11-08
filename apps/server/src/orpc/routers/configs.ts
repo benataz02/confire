@@ -2,7 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { openapi } from "@orpc/openapi";
 import { z } from "zod";
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
-import { db, configModel, configProject, configProjectEvent, portalCompany, user } from "@confire/db";
+import { db, configModel, configProject, configProjectEvent, portalCompany, SAP_STEPS, user } from "@confire/db";
 import { EntriesZ, historyFields, historyKey, referencedTables, syncTables, type Entries, type Val } from "@confire/config-engine";
 import { userProcedure } from "../base.ts";
 import { tenantCompany } from "../../b1.ts";
@@ -20,6 +20,7 @@ import { applySelection, createQuote, quoteDraft, validateSelectionPairs } from 
 import { assertWritable, internalVisible, recordCreated, writableBy } from "../../project-lifecycle.ts";
 import { t } from "../../i18n/index.ts";
 import { journeyOf, type JourneyInput } from "../../portal/journey.ts";
+import { projectProgress } from "../../project-timeline.ts";
 // The configuration process API: any member drives a project (draft -> quoted), and staff work a
 // client's request here once it is submitted (spec §10). The engine itself lives in
 // config-project.ts, shared with the portal process.
@@ -86,12 +87,20 @@ const CARD_CODE = sql<string>`${configProject.customer}->>'cardCode'`;
 /** The current quotation's DocEntry, only in the company it lives in (`quotationIn`): elsewhere it means nothing. */
 const quoteEntry = (company: string | null) =>
   sql<number | null>`case when ${configProject.b1Company} = ${company} then ${configProject.b1DocEntry} end`;
-/** Its DocNum, which only the `quoted` event keeps — the latest one for that DocEntry that read it. */
-const quoteNum = (company: string | null) => sql<number | null>`(
-  select (e.payload->>'docNum')::int from ${configProjectEvent} e
-  where e.project_id = ${configProject.id} and e.kind = 'quoted' and e.payload->>'docNum' is not null
-    and (e.payload->>'docEntry')::int = ${quoteEntry(company)}
+/** The project's last document in the connected company, as the event that read it: a SAP step's
+ *  (`ordered`/`delivered`/`invoiced` keep their document on the step's event, and nothing moves a
+ *  status back from one), else the current quotation's latest `quoted` event that read a DocNum.
+ *  `quoted` payloads carry no entity, so the default in front is theirs. */
+const lastDoc = (company: string | null) => sql`(
+  select '{"entity":"Quotations"}'::jsonb || e.payload from ${configProjectEvent} e
+  where e.project_id = ${configProject.id} and e.payload->>'docNum' is not null
+    and case when ${inArray(configProject.status, [...SAP_STEPS])}
+      then e.kind = ${configProject.status} and e.payload->>'company' = ${company}
+      else e.kind = 'quoted' and (e.payload->>'docEntry')::int = ${quoteEntry(company)} end
   order by e.at desc limit 1)`;
+const docNum = (company: string | null) => sql<number | null>`(${lastDoc(company)}->>'docNum')::int`;
+const docEntry = (company: string | null) => sql<number | null>`(${lastDoc(company)}->>'docEntry')::int`;
+const docEntity = (company: string | null) => sql<string | null>`${lastDoc(company)}->>'entity'`;
 
 /** Filterable/sortable columns of the configurations list. `mine` is per caller, so the fields are too. */
 const configFields = (userId: string, company: string | null): SqlFields => ({
@@ -99,7 +108,7 @@ const configFields = (userId: string, company: string | null): SqlFields => ({
   modelName: { col: configModel.name, kind: "string" },
   cardCode: { col: CARD_CODE, kind: "string" },
   customerName: { col: CUSTOMER_NAME, kind: "string" },
-  quoteDocNum: { col: quoteNum(company), kind: "number" },
+  docNum: { col: docNum(company), kind: "number" },
   status: { col: configProject.status, kind: "enum" },
   mine: { col: sql<string>`case when ${configProject.createdBy} = ${userId} then 'yes' else 'no' end`, kind: "enum" },
   updatedAt: { col: configProject.updatedAt, kind: "date" },
@@ -184,7 +193,7 @@ export const configsRouter = {
   rows: userProcedure
     .meta(openapi({
       summary: "List the configurations",
-      description: "One page of the workspace's own configurations (clients' requests are `requests.rows`). Fields: name, modelName, cardCode, customerName, quoteDocNum (the current quotation's DocNum; quoteDocEntry opens it), status (draft, quoted), mine (yes when the caller started it), updatedAt. Filter with `query.filter` (eq, in, contains…), search with `query.search`; newest first. Answers `rows`, `total` and `nextSkip`.",
+      description: "One page of the workspace's own configurations (clients' requests are `requests.rows`). Fields: name, modelName, cardCode, customerName, docNum (the last document's DocNum: the order, delivery or invoice its status names, else the current quotation; docEntity and docEntry open it), status (draft, quoted, ordered, delivered, invoiced), mine (yes when the caller started it), updatedAt. Filter with `query.filter` (eq, in, contains…), search with `query.search`; newest first. Answers `rows`, `total` and `nextSkip`.",
     }))
     .input(ListPageZ).handler(async ({ input, context }) => {
     const company = await tenantCompany(context.tenantId);
@@ -193,7 +202,7 @@ export const configsRouter = {
       .select({
         id: configProject.id, name: configProject.name, status: configProject.status,
         cardCode: CARD_CODE, customerName: CUSTOMER_NAME, modelName: configModel.name, updatedAt: configProject.updatedAt,
-        quoteDocEntry: quoteEntry(company), quoteDocNum: quoteNum(company),
+        docEntity: docEntity(company), docEntry: docEntry(company), docNum: docNum(company),
         _total: TOTAL,
       })
       .from(configProject)
@@ -302,9 +311,14 @@ export const configsRouter = {
       return fullView(context.tenantId, input.id);
     }),
 
+  /** How far SAP has taken this project (advanceSapSteps, for one) — an internal configuration or a
+   *  client's request alike: the page refetches `get` when its status moved. */
+  progress: userProcedure.input(z.object({ id: z.uuid() })).handler(({ input, context }) =>
+    projectProgress(context.tenantId, input.id, { userId: context.userId, side: "internal" })),
+
   // One delete path: the object page passes its single id in the same array the list report's
   // bulk action passes. One statement either way, so a partial delete is not a state that exists.
-  // Quoted is the same lock as update/calculate/select (the SAP document stays the system of
+  // Past draft is the same lock as update/calculate/select (the SAP document stays the system of
   // record). Checked up front so a mixed list selection is all-or-nothing, like models.remove —
   // not assertWritable per id, which would NOT_FOUND a stale row the current delete ignores.
   // A client's request is declined, never deleted by staff: it is the client's record too.
@@ -317,7 +331,7 @@ export const configsRouter = {
       .where(and(
         inArray(configProject.id, input.ids),
         eq(configProject.tenantId, context.tenantId),
-        sql`(${configProject.status} = 'quoted' or ${isNotNull(configProject.portalCardCode)})`,
+        sql`(${configProject.status} <> 'draft' or ${isNotNull(configProject.portalCardCode)})`,
       ))
       .limit(1);
     if (locked.length)

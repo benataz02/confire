@@ -64,6 +64,7 @@ export function stepSummary(name: string, input: unknown, output: unknown, t: (k
     case "b1_find": return Array.isArray(o.entities) ? t("ASSISTANT_STEP_FOUND", String(o.total ?? o.entities.length)) : "";
     case "b1_read": return o.row ? t("ASSISTANT_STEP_FOUND", "1") : Array.isArray(o.rows) ? t("ASSISTANT_STEP_FOUND", String(o.total ?? o.rows.length)) : "";
     case "b1_schema": return Array.isArray(o.fields) ? t("ASSISTANT_STEP_FIELDS", count(o.fields)) : "";
+    case "load_skill": { const k = `ASSISTANT_SKILL_${i.name}`; return t(k) === k ? "" : t(k); }
     default: return "";
   }
 }

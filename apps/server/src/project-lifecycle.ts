@@ -1,9 +1,9 @@
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import {
-  db, configProject, configProjectEvent, member, projectFile,
+  db, configProject, configProjectEvent, member, PROJECT_STATUSES, projectFile, SAP_STEPS,
   type ConfigProject, type DocumentSentPayload, type ProjectEventKind, type ProjectEventPayload, type ProjectInputs,
-  type ProjectStatus, type RevisionDiff,
+  type ProjectStatus, type RevisionDiff, type SapStep, type SapStepPayload,
 } from "@confire/db";
 import type { Val } from "@confire/config-engine";
 import { sameJson } from "./canon.ts";
@@ -35,18 +35,23 @@ export const internalVisible = or(isNull(configProject.portalCardCode), ne(confi
  *  races a submit or a send-back writes nothing rather than landing on the other side's status. */
 export const writableBy = (side: Side) => side === "external"
   ? inArray(configProject.status, ["draft", "returned"])
-  : and(ne(configProject.status, "quoted"), or(isNull(configProject.portalCardCode), eq(configProject.status, "in_review")));
+  : or(and(isNull(configProject.portalCardCode), eq(configProject.status, "draft")), eq(configProject.status, "in_review"));
 
 /** assertWritable's rule as a plain test, for a project already loaded: what a view refreshes on
- *  read (config-project.ts) and what a page locks. */
+ *  read (config-project.ts) and what a page locks. An internal configuration is staff's while it is
+ *  a draft; a client's request is the client's in draft and returned, staff's in review. */
 export const canWrite = (p: Pick<ConfigProject, "status" | "portalCardCode">, side: Side): boolean =>
-  p.portalCardCode === null ? side === "internal" && p.status !== "quoted"
+  p.portalCardCode === null ? side === "internal" && p.status === "draft"
   : side === "external" ? p.status === "draft" || p.status === "returned" : p.status === "in_review";
+
+/** Quoted, or past it in SAP: the quotation is posted, and posting it again is a no-op. */
+export const quotedOrLater = (s: ProjectStatus): boolean => PROJECT_STATUSES.indexOf(s) >= PROJECT_STATUSES.indexOf("quoted");
 
 /** Client-facing words for a status (spec §7), in the request's language. */
 const STATUS_TEXT: Record<ProjectStatus, TextKey> = {
   draft: "STATUS_DRAFT", submitted: "STATUS_SUBMITTED", in_review: "STATUS_IN_REVIEW", returned: "STATUS_RETURNED",
-  declined: "STATUS_DECLINED", quoted: "STATUS_QUOTED",
+  declined: "STATUS_DECLINED", quoted: "STATUS_QUOTED", ordered: "STATUS_ORDERED", delivered: "STATUS_DELIVERED", invoiced: "STATUS_INVOICED",
+  claim: "STATUS_CLAIM",
 };
 const statusWord = (s: ProjectStatus) => t(STATUS_TEXT[s]).toLowerCase();
 
@@ -94,7 +99,7 @@ export function revisionDiff(base: ProjectInputs, cur: ProjectInputs): RevisionD
 
 /** Append one event. Private to this module and the two exported writers below. */
 async function append(q: DbOrTx, e: {
-  tenantId: string; projectId: string; kind: ProjectEventKind; actor: Actor;
+  tenantId: string; projectId: string; kind: ProjectEventKind; actor: { userId: string | null; side: Side };
   visibility?: "external" | "internal"; note?: string | null; payload?: ProjectEventPayload | null;
 }) {
   const [row] = await q.insert(configProjectEvent).values({
@@ -226,7 +231,7 @@ export async function assign(tenantId: string, projectId: string, actor: Actor, 
  * One writer per status (spec §7's side table). Every handler that writes a project's inputs goes
  * through this first — configs.update/calculate/select/remove and their portal counterparts.
  *
- * An internal-only project (portalCardCode null) keeps the old rule: editable until quoted.
+ * An internal-only project (portalCardCode null) is editable while it is a draft.
  */
 export async function assertWritable(
   tenantId: string, projectId: string, actor: Actor, q: DbOrTx = db,
@@ -236,7 +241,7 @@ export async function assertWritable(
   const p = fenced(row, actor);
   if (p.portalCardCode === null) {
     if (actor.side === "external") throw new ORPCError("NOT_FOUND");
-    if (p.status === "quoted") throw new ORPCError("CONFLICT", { message: t("CONFIG_QUOTED_LOCKED") });
+    if (p.status !== "draft") throw new ORPCError("CONFLICT", { message: t("CONFIG_QUOTED_LOCKED") });
     return p;
   }
   if (!canWrite(p, actor.side)) {
@@ -313,9 +318,9 @@ async function step(tx: Tx, o: Parameters<typeof transition>[0]) {
       ...(o.action === "accept" ? { assigneeId: row.assigneeId ?? o.actor.userId } : {}),
       ...(o.action === "quoteAccept" ? { quoteResponse: "accepted" as const, quoteRespondedAt: now } : {}),
       ...(o.action === "quoteDecline" ? { quoteResponse: "declined" as const, quoteRespondedAt: now } : {}),
-      // A (re-)quote starts the journey past "Quoted" over: the next home.progress re-derives the SAP
-      // step from the quotation now linked, which may be a new one (a stale "ordered" would hide it).
-      ...(o.action === "quote" ? { quoteResponse: null, quoteRespondedAt: null, sapStep: null, sapStepAt: null } : {}),
+      // A (re-)quote starts the journey past "Quoted" over: the next SAP read (advanceSapSteps) takes
+      // the status on from the quotation now linked, which may be a new one.
+      ...(o.action === "quote" ? { quoteResponse: null, quoteRespondedAt: null, sapStepAt: null } : {}),
       ...o.set,
     })
     .where(eq(configProject.id, row.id));
@@ -324,4 +329,30 @@ async function step(tx: Tx, o: Parameters<typeof transition>[0]) {
     note: o.note?.trim() || null, payload: o.payload?.(row) ?? null,
   });
   return { from: row.status, to: tr.to, eventId, revisedId };
+}
+
+/** Where a SAP step may come from: quoted, or an earlier step. */
+const STEP_FROM: readonly ProjectStatus[] = ["quoted", "ordered", "delivered"];
+
+/**
+ * SAP took a project a step further — an order, a delivery or an invoice off its quotation — internal
+ * configuration or client request alike: the status, the document's date and the step's event in one
+ * transaction, then the event's notification. Forward only: a step at or behind the status writes
+ * nothing, so a jump (quoted straight to invoiced) is one event. `userId` is whoever made the document
+ * through Confire; null when a SAP read found it (advanceSapSteps). Answers whether it moved.
+ */
+export async function advanceStep(
+  tenantId: string, projectId: string, step: SapStep, doc: SapStepPayload, userId: string | null,
+): Promise<boolean> {
+  const eventId = await db.transaction(async (tx) => {
+    const [row] = await tx.select({ status: configProject.status }).from(configProject)
+      .where(and(eq(configProject.id, projectId), eq(configProject.tenantId, tenantId))).for("update");
+    if (!row || !STEP_FROM.includes(row.status)
+      || SAP_STEPS.indexOf(step) <= SAP_STEPS.indexOf(row.status as SapStep)) return null;
+    await tx.update(configProject).set({ status: step, sapStepAt: doc.docDate, updatedAt: new Date() })
+      .where(eq(configProject.id, projectId));
+    return append(tx, { tenantId, projectId, kind: step, actor: { userId, side: "internal" }, payload: doc });
+  });
+  if (eventId) notifyInBackground(tenantId, eventId);
+  return eventId !== null;
 }
