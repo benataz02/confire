@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { db, configMasterdata, configMasterdataRow, configModel } from "@confire/db";
+import { db, configMasterdata, configModel } from "@confire/db";
 import { ODataQueryZ, QuerySourceZ, ValZ, renameTable, syncTables } from "@confire/config-engine";
 import { isYesNo, type B1Field } from "@confire/b1";
 import { adminProcedure } from "../base.ts";
@@ -14,6 +14,7 @@ import { scalarFields } from "../../entity-list.ts";
 import { bad } from "../../entity-read.ts";
 import { copyName } from "../../copy-name.ts";
 import { masterdataRows } from "../../config-project.ts";
+import { forget, header } from "../../sap-cache.ts";
 import { t } from "../../i18n/index.ts";
 
 export { masterdataRows };
@@ -77,17 +78,29 @@ const SOURCE = sql<string>`case when ${configMasterdata.kind} = 'query'
 const COLUMN_COUNT = sql<number>`case when ${configMasterdata.kind} = 'query'
   then coalesce(jsonb_array_length(${configMasterdata.query}->'columns'), 0)
   else jsonb_array_length(${configMasterdata.columns}) end`;
-const ROW_COUNT = sql<string>`case when ${configMasterdata.kind} = 'query'
-  then ${configMasterdata.rowCount}::text else jsonb_array_length(${configMasterdata.rows})::text end`;
+/** A query row's cache state: its sap_cache entry, read in SQL so the list can sort and filter by it. */
+const cacheOf = (tenantId: string) => header(tenantId, "masterdata", sql`${configMasterdata.id}::text`);
+const rowCount = (tenantId: string) => sql<string>`case when ${configMasterdata.kind} = 'query'
+  then coalesce(${cacheOf(tenantId).rows}, 0)::text else jsonb_array_length(${configMasterdata.rows})::text end`;
 
-const MASTERDATA_FIELDS: SqlFields = {
+const masterdataFields = (tenantId: string): SqlFields => ({
   name: { col: configMasterdata.name, kind: "string" },
   kind: { col: KIND, kind: "string" },
   source: { col: SOURCE, kind: "string" },
   columnCount: { col: COLUMN_COUNT, kind: "number" },
-  rowCount: { col: ROW_COUNT, kind: "string" },
-  syncedAt: { col: configMasterdata.syncedAt, kind: "date" },
+  rowCount: { col: rowCount(tenantId), kind: "string" },
+  syncedAt: { col: cacheOf(tenantId).fetchedAt, kind: "date" },
   updatedAt: { col: configMasterdata.updatedAt, kind: "date" },
+});
+
+/** Every column of a row plus its cache state, under the names the pages read. */
+const withCache = (tenantId: string) => {
+  const c = cacheOf(tenantId);
+  return {
+    id: configMasterdata.id, tenantId: configMasterdata.tenantId, name: configMasterdata.name, kind: configMasterdata.kind,
+    columns: configMasterdata.columns, rows: configMasterdata.rows, query: configMasterdata.query,
+    updatedAt: configMasterdata.updatedAt, syncedAt: c.fetchedAt, syncError: c.error, rowCount: sql<number>`coalesce(${c.rows}, 0)`.mapWith(Number),
+  };
 };
 
 /** One row by id, tenant-fenced. */
@@ -105,12 +118,13 @@ export const masterdataRouter = {
    *  on: `list` returns whole rows including the `rows` jsonb, which MasterdataEditor and
    *  useDraftModel need and a list page must never drag down the wire. */
   rows: adminProcedure.input(ListPageZ).handler(async ({ input, context }) => {
-    const { where, orderBy } = compileQuery(MASTERDATA_FIELDS, input.query);
+    const { where, orderBy } = compileQuery(masterdataFields(context.tenantId), input.query);
+    const c = cacheOf(context.tenantId);
     const raw = await db
       .select({
         id: configMasterdata.id, name: configMasterdata.name, kind: KIND, source: SOURCE,
-        columnCount: COLUMN_COUNT, rowCount: ROW_COUNT, syncedAt: configMasterdata.syncedAt,
-        syncError: configMasterdata.syncError, updatedAt: configMasterdata.updatedAt,
+        columnCount: COLUMN_COUNT, rowCount: rowCount(context.tenantId), syncedAt: c.fetchedAt,
+        syncError: c.error, updatedAt: configMasterdata.updatedAt,
         _total: TOTAL,
       })
       .from(configMasterdata)
@@ -124,16 +138,16 @@ export const masterdataRouter = {
   }),
 
   list: adminProcedure.handler(({ context }) =>
-    db.select().from(configMasterdata).where(eq(configMasterdata.tenantId, context.tenantId)).orderBy(configMasterdata.name),
+    db.select(withCache(context.tenantId)).from(configMasterdata).where(eq(configMasterdata.tenantId, context.tenantId)).orderBy(configMasterdata.name),
   ),
 
   save: adminProcedure.input(SaveZ).handler(async ({ input, context }) => {
-    // The kind's own fields are written and the other kind's are reset. A query save also clears
-    // the sync state: the cached rows answer the query as it was, so an edited entity set or
-    // filter must re-sync before anything reads them rather than serve the old answer.
+    // The kind's own fields are written and the other kind's are reset. A save also forgets the
+    // cache entry: its rows answer the query as it was, so an edited entity set or filter must
+    // re-sync before anything reads them rather than serve the old answer.
     const fields = input.kind === "table"
-      ? { kind: "table" as const, columns: input.columns, rows: input.rows, query: null, syncedAt: null, syncError: null, rowCount: 0 }
-      : { kind: "query" as const, columns: [], rows: [], query: input.query, syncedAt: null, syncError: null, rowCount: 0 };
+      ? { kind: "table" as const, columns: input.columns, rows: input.rows, query: null }
+      : { kind: "query" as const, columns: [], rows: [], query: input.query };
     if (input.kind === "table") {
       for (const r of input.rows) {
         if (r.length !== input.columns.length)
@@ -149,9 +163,7 @@ export const masterdataRouter = {
           const [old] = await tx.select({ name: configMasterdata.name }).from(configMasterdata).where(fence).for("update");
           if (!old) throw new ORPCError("NOT_FOUND");
           await tx.update(configMasterdata).set(values).where(fence);
-          // The sync state was reset above; the rows themselves have to go with it.
-          await tx.delete(configMasterdataRow)
-            .where(and(eq(configMasterdataRow.tenantId, context.tenantId), eq(configMasterdataRow.masterdataId, id)));
+          await forget(context.tenantId, { kind: "masterdata", keys: [id] }, tx);
           if (old.name === input.name) return;
           // Models name their masterdata, as LOOKUP() does (an id there would be unreadable), so a
           // rename is carried into every model naming the old one, or each would fail on its next
@@ -235,8 +247,7 @@ export const masterdataRouter = {
           .join("; ")),
       });
     await db.transaction(async (tx) => {
-      await tx.delete(configMasterdataRow)
-        .where(and(inArray(configMasterdataRow.masterdataId, input.ids), eq(configMasterdataRow.tenantId, context.tenantId)));
+      await forget(context.tenantId, { kind: "masterdata", keys: input.ids }, tx);
       await tx.delete(configMasterdata)
         .where(and(inArray(configMasterdata.id, input.ids), eq(configMasterdata.tenantId, context.tenantId)));
     });

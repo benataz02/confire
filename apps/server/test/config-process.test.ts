@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import type { InferRouterInputs } from "@orpc/server";
-import { db, configMasterdata, configMasterdataRow, configModel, configProject } from "@confire/db";
+import { db, configMasterdata, configModel, configProject } from "@confire/db";
+import { fill } from "../src/sap-cache.ts";
 import { itemsTable, type ModelDef } from "@confire/config-engine";
 import { liveEngine, liveProject, recalculate } from "../src/config-project.ts";
 import { buildQuoteLines } from "../src/config-quote.ts";
@@ -46,20 +47,18 @@ async function setup(def: ModelDef = PRICED, price = 3) {
   // Synced, with no sync frequency: nothing decides it is stale and goes looking for an agent.
   const [md] = await db.insert(configMasterdata).values({
     tenantId, name: "catalog", kind: "query", query: { target: "b1", query: { entitySet: "Items" }, columns: [] },
-    syncedAt: new Date(), rowCount: 1,
   }).returning({ id: configMasterdata.id });
-  const setPrice = (p: number) => db.update(configMasterdataRow)
-    .set({ row: { ItemCode: "BODY", ItemPrices: [{ PriceList: 1, Price: p }] } }).where(eq(configMasterdataRow.masterdataId, md!.id));
-  await db.insert(configMasterdataRow).values({ tenantId, masterdataId: md!.id, seq: 0, row: {} });
+  const setPrice = (p: number) => fill(tenantId, "masterdata", md!.id, null,
+    (async function* () { yield [{ ItemCode: "BODY", ItemPrices: [{ PriceList: 1, Price: p }] }]; })());
   await setPrice(price);
   const [m] = await db.insert(configModel).values({ tenantId, name: def.name, definition: def }).returning({ id: configModel.id });
   const create = async (name = "Box", customer: typeof ACME | null = ACME) =>
     (await call(router.configs.create, { modelId: m!.id, name, customer }, ctx)).id;
-  /** A sync landing after the calculation: new rows and a newer syncedAt, in the database only —
-   *  the lookup cache must see it from there, as another process's would. */
+  /** A refill landing after the calculation, in the database only — the lookup cache must see it
+   *  from there, as another process's would. The pause puts its changedAt past the calculation. */
   const sync = async (p: number) => {
+    await Bun.sleep(5);
     await setPrice(p);
-    await db.update(configMasterdata).set({ syncedAt: later() }).where(eq(configMasterdata.id, md!.id));
   };
   const calc = (input: InferRouterInputs<typeof router>["configs"]["calculate"]) => call(router.configs.calculate, input, ctx);
   return { tenantId, ctx, modelId: m!.id, create, sync, calc };
@@ -173,6 +172,19 @@ describe.skipIf(!process.env.DATABASE_URL)("the configuration process", () => {
     await s.sync(7);
     const v = await call(router.configs.get, { id }, s.ctx);
     expect([v.project.status, price(v)]).toEqual(["quoted", 20]);
+  });
+
+  test("a refill with unchanged prices keeps the calculation and its selection", async () => {
+    const s = await setup(PRICED, 3);
+    const id = await s.create();
+    const v = await s.calc({ id, set: { size: "S" }, tables: { items: ITEMS } });
+    await call(router.configs.select, { projectId: id, selection: [{ candidateIdx: 0, batchQty: v.candidates.rows[0]!.perBatch[0]!.batchQty }] }, s.ctx);
+    const before = await load(id);
+    expect(before.selection).not.toBeNull();
+    await s.sync(3);
+    await call(router.configs.get, { id }, s.ctx);
+    const after = await load(id);
+    expect([after.selection, after.calculatedAt]).toEqual([before.selection, before.calculatedAt]);
   });
 
   test("get carries the option tables the model names, and only those", async () => {

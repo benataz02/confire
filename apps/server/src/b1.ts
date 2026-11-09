@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
-import { db, configMasterdata, configMasterdataRow, configProject, sapConnection } from "@confire/db";
+import { db, configProject, sapConnection } from "@confire/db";
 import {
   agentRequester, B1Error, COMPANY_CHANGED, DirectTransport, nextLinkOf, rowsOrThrow,
   type AgentTarget, type B1Transport, type Connector,
@@ -51,9 +51,6 @@ export async function adoptCompany(tenantId: string, companyDb: string): Promise
     await tx.update(configProject).set({ b1Company: companyDb })
       .where(and(eq(configProject.tenantId, tenantId), isNotNull(configProject.b1DocEntry), isNull(configProject.b1Company)));
     await forget(tenantId, {}, tx);
-    await tx.delete(configMasterdataRow).where(eq(configMasterdataRow.tenantId, tenantId));
-    await tx.update(configMasterdata).set({ syncedAt: null, rowCount: 0 })
-      .where(and(eq(configMasterdata.tenantId, tenantId), eq(configMasterdata.kind, "query")));
     return true;
   });
 }

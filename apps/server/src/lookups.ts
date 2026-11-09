@@ -74,7 +74,7 @@ export type MasterdataQuery = QuerySource & {
 };
 
 /** One config_masterdata row: values maintained here (`columns`/`rows`) or cached from a live read
- *  (`query` + the sync state beside it). */
+ *  (`query`), with its sap_cache entry's state: `syncedAt` (fetched), `syncError`, `rowCount`. */
 export type MasterdataRow = {
   id: string;
   name: string;
@@ -85,7 +85,10 @@ export type MasterdataRow = {
   syncedAt?: Date | null;
   syncError?: string | null;
   rowCount?: number;
-  /** the editor's last save — with syncedAt, what tells a stored calculation it is stale */
+  /** when the cached rows last changed (not merely refetched): with `updatedAt`, what tells a
+   *  stored calculation it is stale */
+  changedAt?: Date | null;
+  /** the editor's last save */
   updatedAt?: Date;
 };
 export type MasterdataQueryRow = MasterdataRow & { query: MasterdataQuery };

@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { db, configMasterdata, configMasterdataRow, configModel, configProject, type ConfigCandidate } from "@confire/db";
+import { db, configMasterdata, configModel, configProject, type ConfigCandidate } from "@confire/db";
+import { fill, forget } from "../src/sap-cache.ts";
 import type { Entries, ModelDef, ResolvedLookups } from "@confire/config-engine";
 import { cachedLookups, calculateProject, liveEngine, liveProject, loadModel, recalculate } from "../src/config-project.ts";
 import { applySelection, buildQuoteLines, configDocumentCommandId, createQuote } from "../src/config-quote.ts";
@@ -610,7 +611,7 @@ describe.skipIf(!process.env.DATABASE_URL)("calculating with no agent at all", (
   const offlineTenant = `test-offline-${crypto.randomUUID()}`;
 
   afterAll(async () => {
-    await db.delete(configMasterdataRow).where(eq(configMasterdataRow.tenantId, offlineTenant));
+    await forget(offlineTenant);
     await db.delete(configProject).where(eq(configProject.tenantId, offlineTenant));
     await db.delete(configModel).where(eq(configModel.tenantId, offlineTenant));
     await db.delete(configMasterdata).where(eq(configMasterdata.tenantId, offlineTenant));
@@ -622,12 +623,8 @@ describe.skipIf(!process.env.DATABASE_URL)("calculating with no agent at all", (
         tenantId: offlineTenant, name, kind: "query",
         // No syncMinutes: nothing may decide this is stale and go looking for an agent mid-test.
         query: { target: "b1", query: { entitySet: "Items" }, columns },
-        syncedAt: new Date(), rowCount: rows.length,
       }).returning({ id: configMasterdata.id });
-      if (rows.length)
-        await db.insert(configMasterdataRow).values(
-          rows.map((row, seq) => ({ tenantId: offlineTenant, masterdataId: md!.id, seq, row })),
-        );
+      await fill(offlineTenant, "masterdata", md!.id, null, (async function* () { yield rows; })());
     };
     await cache("items", [{ ItemCode: "A" }, { ItemCode: "B" }], ["ItemCode"]);
     await cache("catalog", [

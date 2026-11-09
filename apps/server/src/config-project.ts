@@ -11,6 +11,7 @@ import {
   type MasterdataRow, type RowCache,
 } from "./lookups.ts";
 import { ensureFresh, pageRows, rowCache } from "./masterdata-sync.ts";
+import { header } from "./sap-cache.ts";
 import { canWrite, type Side } from "./project-lifecycle.ts";
 import type { InputPatch } from "./config-patch.ts";
 import { t } from "./i18n/index.ts";
@@ -20,15 +21,16 @@ import { t } from "./i18n/index.ts";
 // internal auth.ts, which the portal process must not build. Both processes import this one.
 
 /** Every masterdata row of a tenant, in the shape the resolvers take. `id` is in there because it
- *  is the key of the row cache, the sync state because a view reports it, and both timestamps
- *  because they are what makes a stored calculation stale. */
+ *  is the key of its sap_cache entry, the entry's state because a view reports it, and `changedAt`
+ *  and `updatedAt` because they are what makes a stored calculation stale. */
 export async function masterdataRows(tenantId: string): Promise<MasterdataRow[]> {
+  const h = header(tenantId, "masterdata", sql`${configMasterdata.id}::text`);
   return db
     .select({
       id: configMasterdata.id, name: configMasterdata.name, kind: configMasterdata.kind,
       columns: configMasterdata.columns, rows: configMasterdata.rows, query: configMasterdata.query,
-      syncedAt: configMasterdata.syncedAt, syncError: configMasterdata.syncError,
-      rowCount: configMasterdata.rowCount, updatedAt: configMasterdata.updatedAt,
+      syncedAt: h.fetchedAt, syncError: h.error, rowCount: h.rows, changedAt: h.changedAt,
+      updatedAt: configMasterdata.updatedAt,
     })
     .from(configMasterdata)
     .where(eq(configMasterdata.tenantId, tenantId));
@@ -90,8 +92,8 @@ function canonicalLookups(
 ): Promise<ResolvedLookups> {
   const key = `${tenantId}:${model.id}`;
   const named = md.filter((r) => syncTables(model.definition).has(r.name));
-  // Per row, not a max: a company switch nulls every syncedAt, which a max could miss.
-  const version = [model.updatedAt.getTime(), ...named.map((r) => `${r.id}:${r.syncedAt?.getTime()}:${r.updatedAt?.getTime()}`)].join();
+  // Per row, not a max: a company switch drops every entry (changedAt null), which a max could miss.
+  const version = [model.updatedAt.getTime(), ...named.map((r) => `${r.id}:${r.changedAt?.getTime()}:${r.updatedAt?.getTime()}`)].join();
   const hit = lookupCache.get(key);
   if (hit?.version === version && Date.now() - hit.at < CACHE_TTL_MS) return hit.lookups;
   // Fire the frequency-driven refresh for the tables this model reads, off the request path.
@@ -197,14 +199,14 @@ function inLanguage(n: Notice): Notice {
 }
 
 /** A stored calculation is stale once the model changed after it, or any masterdata row the model
- *  reads was synced or edited after it — a price sync must reach the candidates, not only the
- *  quotation. Absent counts as stale. */
+ *  reads changed in a sync or was edited after it — a price sync must reach the candidates, not
+ *  only the quotation, and a sync that read the same rows changes nothing. Absent counts as stale. */
 export function isStale(calculatedAt: Date | null, model: LoadedModel, md: MasterdataRow[]): boolean {
   if (!calculatedAt) return true;
   if (calculatedAt < model.updatedAt) return true;
   const named = syncTables(model.definition);
   return md.some((r) => named.has(r.name)
-    && ((!!r.syncedAt && r.syncedAt > calculatedAt) || (!!r.updatedAt && r.updatedAt > calculatedAt)));
+    && ((!!r.changedAt && r.changedAt > calculatedAt) || (!!r.updatedAt && r.updatedAt > calculatedAt)));
 }
 
 /** waiting: something is missing, or there are conflicts. failed: nothing valid completes the

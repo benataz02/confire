@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { db, configMasterdata, configModel, configProject, invitation } from "@confire/db";
+import { fail } from "../src/sap-cache.ts";
 import { router } from "../src/orpc/router.ts";
 import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
 
@@ -24,10 +25,11 @@ test("home.overview counts the caller's own work and the workspace's to-dos", as
     p({ status: "quoted", quotedAt: lastYear, quotedValue: "999" }), // not this month
     p({ status: "quoted", createdBy: other.userId, quotedAt: new Date(), quotedValue: "5" }), // not mine
   ]);
-  await db.insert(configMasterdata).values([
+  const [, bad] = await db.insert(configMasterdata).values([
     { tenantId: t.tenantId, name: "ok", kind: "query" },
-    { tenantId: t.tenantId, name: "bad", kind: "query", syncError: "agent down" },
-  ]);
+    { tenantId: t.tenantId, name: "bad", kind: "query" },
+  ]).returning({ id: configMasterdata.id });
+  await fail(t.tenantId, "masterdata", bad!.id, null, "agent down");
   const inv = (expiresAt: Date) => ({
     id: crypto.randomUUID(), organizationId: t.tenantId, email: `${crypto.randomUUID()}@kunde.de`,
     role: "portal_buyer", status: "pending", expiresAt, inviterId: me.userId,

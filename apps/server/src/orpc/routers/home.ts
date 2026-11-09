@@ -5,6 +5,7 @@ import { userProcedure } from "../base.ts";
 import { openInvitation, portalInvitationOf } from "../../portal/members.ts";
 import { viaB1 } from "../../b1.ts";
 import { openCounts } from "../../open-counts.ts";
+import { header } from "../../sap-cache.ts";
 
 // The workspace home: the caller's own figures (its Quick actions), and one to-do count per tile.
 // Postgres only — a home page that waited on the agent would be down whenever the agent is.
@@ -36,7 +37,7 @@ export const homeRouter = {
         newRequests: n(sql`${configProject.portalCardCode} is not null and ${configProject.status} = 'submitted'`),
       }).from(configProject).where(eq(configProject.tenantId, tenantId)),
       db.select({ n: count() }).from(configModel).where(eq(configModel.tenantId, tenantId)),
-      db.select({ syncErrors: count(configMasterdata.syncError) }).from(configMasterdata)
+      db.select({ syncErrors: count(header(tenantId, "masterdata", sql`${configMasterdata.id}::text`).error) }).from(configMasterdata)
         .where(eq(configMasterdata.tenantId, tenantId)),
       db.select({ n: count() }).from(invitation).where(and(portalInvitationOf(tenantId), openInvitation())),
     ]);
