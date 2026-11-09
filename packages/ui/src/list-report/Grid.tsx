@@ -31,13 +31,16 @@ const tableStyle: CSSProperties = {
   maxHeight: "100%",
   boxSizing: "border-box",
   overflow: "hidden",
-  borderRadius: "var(--sapElement_BorderCornerRadius)",
 };
-// AutoWithEmptyRows rounds the row count down, so up to a row of the slot is left over: the frame
-// takes it inside its own background, or it reads as a deeper bottom margin than the sides'. The
-// lines the table draws where its rows stop go too (`confire-fill-table`, global.css), or the band
-// reads as a strip under the table rather than more of it.
-const fillTableStyle: CSSProperties = { ...tableStyle, height: "100%", background: "var(--sapList_Background)" };
+
+/** A column's floor where its declaration names none: its declared width up to this. Columns share
+ *  the table's width out evenly (the table's Default scaleWidthMode) and never go below their floor,
+ *  so the grid scrolls sideways only once the floors no longer fit. */
+const MIN_COLUMN_WIDTH = 100;
+
+/** A group row has no aggregates, and react-table falls back to Cell for them — which then formats
+ *  a record that does not exist (NaN out of a money template). */
+const NoAggregate = () => null;
 
 // Full screen is the page, not the browser's. AutoWithEmptyRows counts rows from the table's
 // parentElement, so the parent is ours: on the page it passes the slot's height through, full page
@@ -112,19 +115,11 @@ if (typeof document !== "undefined" && !document.getElementById(TABLE_ITEM)) {
   document.head.appendChild(el);
 }
 
-/** Overlay scrollbars (macOS on a trackpad, Omarchy's Chromium with its OverlayScrollbar flag) take
- *  no room and show only while scrolling, and a wheel scrolls down, never across: the columns past
- *  a table's end had no visible way in. Tested as the table tests it (useNativeScrollbar: a scroller
- *  whose scrollbar is 0px), once; global.css then draws the table's horizontal scrollbar itself. */
-if (typeof document !== "undefined") {
-  const probe = document.body.appendChild(document.createElement("div"));
-  probe.style.cssText = "overflow:scroll;position:absolute;top:-9999px;width:100px;height:100px";
-  document.documentElement.classList.toggle("confire-overlay-scrollbars", probe.offsetWidth === probe.clientWidth);
-  probe.remove();
-}
-
 /** A `statusRows` grid's closed line (global.css). */
 const CLOSED_ROW = "confire-row-closed";
+
+/** A cell's text: two lines at most, then an ellipsis (global.css). A template draws its own. */
+export const CELL_TEXT = "confire-cell-text";
 
 const GRID_FORM = { accessibleMode: "Edit", layout: FORM_LAYOUT, headerLevel: "H5" } as const;
 
@@ -220,26 +215,20 @@ export function Grid({
     [state.columns, byKey],
   );
 
-  // A width the table reported (useOnColumnResize below) comes back through `state`, but the table
-  // already shows it, so it must not rebuild the columns: that remounts every cell, and a rebuilt
-  // column the user did not resize falls back to react-table's 150px, because the table skips its
-  // own layout while it holds a manual width. Only widths from elsewhere (a view applied, a saved
-  // layout arriving) rebuild; any rebuild reads the latest ones.
-  const reported = useRef<GridState["columnWidths"]>(undefined);
-  const outsideWidths = useRef(state.columnWidths);
-  if (state.columnWidths !== reported.current) outsideWidths.current = state.columnWidths;
-
-  // One Cell component per column, built once per column set: a fresh function per render would be
-  // a new component type to React and remount every cell on every keystroke elsewhere on the page.
-  const tableColumns = useMemo<AnalyticalTableColumnDefinition[]>(
+  // One Cell and Header component per column, built once per column set: a fresh function per render
+  // would be a new component type to React and remount every cell on every keystroke elsewhere on
+  // the page. Widths are not in here, so a resize rebuilds the column definitions but no cell.
+  const renderers = useMemo(
     () =>
-      visible.map((c) => {
+      new Map(visible.map((c) => {
         const template = cellTemplates?.[c.key];
         // Inverted, as the local lists draw their status cells (configs, requests).
         const show = (v: unknown, unit?: unknown) => {
           const value = formatValue(v, c.type, c.options, c.integer);
           const text = value && unit ? `${value} ${String(unit)}` : value;
-          return c.status && text ? <ObjectStatus inverted state={statusState(v)}>{text}</ObjectStatus> : <span>{text}</span>;
+          return c.status && text
+            ? <ObjectStatus inverted state={statusState(v)}>{text}</ObjectStatus>
+            : <span className={CELL_TEXT} title={text || undefined}>{text}</span>;
         };
         const Cell = ({ cell }: AnalyticalTableCellInstance) => {
           // A group header row has no `original`, only the grouped value (react-table useGroupBy).
@@ -254,30 +243,40 @@ export function Grid({
               return (
                 <EntityLink route={route} target={target} value={v}
                   action={c.linkConfig!.action ? (x) => c.linkConfig!.action!(x, r) : undefined}>
-                  {String(v ?? "").trim()}
+                  <span className={CELL_TEXT}>{String(v ?? "").trim()}</span>
                 </EntityLink>
               );
           }
           return show(v, c.unitField ? r[c.unitField] : undefined);
         };
+        // A Label, not "*" in the text: UI5 draws the asterisk and announces "required".
+        const Header = c.required ? () => <Label required>{c.label ?? c.key}</Label> : c.label ?? c.key;
+        return [c.key, { Cell, Header }] as const;
+      })),
+    [visible, cellTemplates, canOpen],
+  );
+
+  // Every column has a floor and shares out the rest; one the user resized keeps that width (a
+  // `width` is fixed to the table's layout), and the others take up the difference. The resize comes
+  // back through `state` (useOnColumnResize below) and rebuilds these definitions, which drops the
+  // table's own resize state (autoResetResize) so it lays the others out again around it.
+  const tableColumns = useMemo<AnalyticalTableColumnDefinition[]>(
+    () =>
+      visible.map((c) => {
+        const width = state.columnWidths?.[c.key];
         return {
           id: c.key,
           accessor: (row: Row) => row[c.key],
-          // A Label, not "*" in the text: UI5 draws the asterisk and announces "required".
-          Header: c.required ? () => <Label required>{c.label ?? c.key}</Label> : c.label ?? c.key,
-          ...(c.minWidth ? { minWidth: c.minWidth } : {}),
-          ...(state.columnWidths?.[c.key] ?? c.width ? { width: state.columnWidths?.[c.key] ?? c.width } : {}),
+          ...renderers.get(c.key),
+          minWidth: c.minWidth ?? Math.min(c.width ?? MIN_COLUMN_WIDTH, MIN_COLUMN_WIDTH),
+          ...(width ? { width } : {}),
           ...(endAligned(c.type) ? { hAlign: "End" as const } : {}),
           disableSortBy: c.sortable === false,
           disableGroupBy: c.groupable !== true,
-          Cell,
-          // A group row has no aggregates, and react-table falls back to Cell for them — which
-          // then formats a record that does not exist (NaN out of a money template).
-          Aggregated: () => null,
+          Aggregated: NoAggregate,
         };
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- widths: outsideWidths, above
-    [visible, outsideWidths.current, cellTemplates, canOpen],
+    [visible, renderers, state.columnWidths],
   );
 
   // Sort and group are the view's, not the table's: the controlled state shows the view's rules in
@@ -304,9 +303,10 @@ export function Grid({
 
   // Widths are committed when a resize ends (useOnColumnResize watches state.columnResizing), not
   // on every pixel. The plugin captures its callback once, so it reads the latest through a ref.
-  // The commit must be a no-op when the width is already ours: the plugin (ui5 2.26) never clears
-  // its last-resized column, so after one resize it re-fires on every `columns` change — and when a
-  // commit still rebuilt `columns`, that was "Maximum update depth exceeded".
+  // The commit must be a no-op when the width is already ours: the plugin (ui5 2.27) never clears
+  // its last-resized column, so after one resize it re-fires on every `columns` change — which every
+  // commit causes, and without the check that was "Maximum update depth exceeded". (After the
+  // rebuild the table has dropped its resize state, so the re-fire reads no width at all.)
   const latest = useRef({ onStateChange, widths: state.columnWidths });
   latest.current = { onStateChange, widths: state.columnWidths };
 
@@ -320,10 +320,8 @@ export function Grid({
       AnalyticalTableHooks.useOnColumnResize(({ columnWidth, header }) => {
         const { onStateChange: change, widths } = latest.current;
         const width = Math.round(columnWidth);
-        if (header?.id && Number.isFinite(width) && widths?.[header.id] !== width) {
-          reported.current = { ...widths, [header.id]: width };
-          change?.({ columnWidths: reported.current });
-        }
+        if (header?.id && Number.isFinite(width) && widths?.[header.id] !== width)
+          change?.({ columnWidths: { ...widths, [header.id]: width } });
       }),
       // Fixed for a grid's lifetime, so the plugin list (and react-table's hook order) never changes.
       ...(expandGroups ? [useExpandGroups] : []),
@@ -429,12 +427,7 @@ export function Grid({
           data={rows}
           reactTableOptions={reactTableOptions}
           tableHooks={tableHooks}
-          // A reported width never rebuilds the columns (outsideWidths), so they lag the view until
-          // the next rebuild: without this, a container resize (full screen) lays out from them and
-          // undoes the user's resize.
-          retainColumnWidth
-          style={fill || maximized ? fillTableStyle : tableStyle}
-          className={fill || maximized ? "confire-fill-table" : undefined}
+          style={tableStyle}
           extension={toolbar}
           loading={loading}
           minRows={1}
@@ -463,6 +456,7 @@ export function Grid({
           selectedRowIds={selectedIds ?? selected.ids}
           onRowSelect={handleRowSelect}
           withNavigationHighlight={!!onRowClick && selectionMode !== "Single"}
+          // scaleWidthMode="Smart"
           onRowClick={(e) => {
             const target = e.target as HTMLElement | null;
             // The checkbox cell and a link inside a cell are not the row: one selects, the other

@@ -123,17 +123,18 @@ export function PageMessages({ messages, okText, onSection, openOn }: {
           ? i18n.getText(messages.length === 1 ? "UI_MSG_COUNT_ONE" : "UI_MSG_COUNT_MANY", String(messages.length))
           : ok}
         onClick={() => setOpen(true)} />
+      {/* The size is the popover's, not the MessageView's: a resize sets the popover's own width and
+          height, and MessageView (its panes at height:100%) fills whatever that is. Until then its
+          height is the list's own. The cap is ours: UI5's leaves no margin below a full-height
+          popover, which cuts its bottom resize handle off. */}
       <ResponsivePopover className="confire-msgpop" headerText={i18n.getText("UI_MESSAGES")} opener={button.current ?? undefined}
-        open={open && !!button.current} onClose={close}
+        open={open && !!button.current} onClose={close} resizable
+        style={{ width: "26rem", maxHeight: "calc(100vh - 2rem)" }}
         footer={
           <Bar design="Footer"
             endContent={<Button design="Transparent" onClick={close}>{i18n.getText("UI_CLOSE")}</Button>} />
         }>
-        {/* MessageView lays its two panes out at height:100%, so the popover cannot size itself to
-            the list. A grouped row with a subtitle is ~4rem; the cap keeps a long list on screen.
-            ponytail: one row per message with a cap; tune the 4rem if the rows grow. */}
-        <MessageView ref={view} groupItems showDetailsPageHeader
-          style={{ width: "26rem", height: `${Math.min(4 + messages.length * 4, 42)}rem` }}>
+        <MessageView ref={view} groupItems showDetailsPageHeader>
           {messages.length === 0 ? (
             <MessageItem type="Positive" titleText={ok} />
           ) : (

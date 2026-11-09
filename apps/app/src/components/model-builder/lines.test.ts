@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { asCode, isReplaceable, linkedForPreview, missingFields, newBomLine, newOpLine, pickOperation, withCatalogFigures, withoutCatalogFigures, type OpLine } from "./lines.ts";
+import { asCode, asLiteral, isReplaceable, linkedForPreview, missingFields, newBomLine, newOpLine, pickOperation, withCatalogFigures, withoutCatalogFigures, type OpLine } from "./lines.ts";
+import { evaluate } from "@confire/config-engine";
 
 test("asCode reads a single quoted literal, and nothing else", () => {
   expect(asCode('"AL-6060"')).toBe("AL-6060");
@@ -47,4 +48,11 @@ test("linkedForPreview asks the resolve for literal operations only, so typing a
 test("unlinking clears the bare catalog names a pick wrote, and keeps the author's formulas", () => {
   expect(withoutCatalogFigures({ setupMin: "beasSetup", runMinPerUnit: "beasRun * holes", ratePerHour: "beasRate" }))
     .toEqual({ setupMin: "", runMinPerUnit: "beasRun * holes", ratePerHour: "" });
+});
+
+test("asLiteral writes what asCode and the DSL read back, quotes and backslashes too", () => {
+  for (const text of ['TUBO 1/2"', "a\\b", "plain"]) {
+    expect(asCode(asLiteral(text))).toBe(text);
+    expect(evaluate(asLiteral(text), { vars: {} })).toBe(text);
+  }
 });

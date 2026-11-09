@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "ui5-wcr": {
-      "command": "bunx",
-      "args": ["@ui5/webcomponents-react-mcp@2.27.2"]
-    }
-  }
-}

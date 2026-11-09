@@ -7,11 +7,14 @@ import type { Row } from "@confire/ui/types.ts";
 export type BomLine = ModelDef["bom"][number];
 export type OpLine = ModelDef["routing"][number];
 
-// An item code is still an expression — the value help just writes the common case, a quoted
-// literal. `asCode` reads that case back out so the picker can show what was picked; anything
-// else (a ternary, a parameter) has no single code and is shown as the expression it is.
-const LITERAL = /^\s*"([^"\\]*)"\s*$/;
-export const asCode = (expr: string): string | undefined => LITERAL.exec(expr)?.[1];
+// An item code (and a BOM line's description) is still an expression — the value help just writes
+// the common case, a quoted literal. `asCode` reads that case back out so the picker can show what
+// was picked; anything else (a ternary, a parameter) has no single value and is shown as the
+// expression it is. The DSL's escape is a backslash before any character (\" and \\).
+const LITERAL = /^\s*"((?:[^"\\]|\\.)*)"\s*$/;
+export const asCode = (expr: string): string | undefined => LITERAL.exec(expr)?.[1]?.replace(/\\(.)/g, "$1");
+/** `text` as a DSL string literal — what a pick writes. */
+export const asLiteral = (text: string): string => `"${text.replace(/[\\"]/g, "\\$&")}"`;
 
 export const FIGURES = ["setupMin", "runMinPerUnit", "ratePerHour"] as const;
 /** Each figure's catalog name, in FIGURES' order (OPERATION_VARS is setup, run, rate). */

@@ -169,6 +169,13 @@
       "when": 1794168252945,
       "tag": "0023_bom_routing_no_ids",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794214054898,
+      "tag": "0024_bom_desc_formula",
+      "breakpoints": true
     }
   ]
 }

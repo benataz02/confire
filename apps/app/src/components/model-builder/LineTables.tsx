@@ -3,7 +3,7 @@ import {
   Bar, Button, Dialog, FlexBox, Form, FormGroup, FormItem, Input, Label, SegmentedButton, SegmentedButtonItem, Tag, Text,
 } from "@ui5/webcomponents-react";
 import {
-  bomItemCodes, checkModel, OPERATION_VARS, routingOperationIds, type ModelDef, type ResolvedLookups,
+  checkModel, OPERATION_VARS, type ModelDef,
 } from "@confire/config-engine";
 import { CflField } from "@confire/ui/cfl/CflField.tsx";
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
@@ -13,7 +13,7 @@ import { useI18n } from "../../i18n.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import {
-  asCode, FIGURES, missingFields, newBomLine, newOpLine, pickOperation, withCatalogFigures, withoutCatalogFigures, type BomLine, type OpLine,
+  asCode, asLiteral, FIGURES, missingFields, newBomLine, newOpLine, pickOperation, withCatalogFigures, withoutCatalogFigures, type BomLine, type OpLine,
 } from "./lines.ts";
 import { usePreviewLookups } from "./usePreviewLookups.ts";
 
@@ -38,16 +38,17 @@ const codeCell = (expr: string | undefined) => {
   return code !== undefined ? { code } : { formula: expr ?? "" };
 };
 
-/** What this one line's item/operation expression can give, over the preview's domains. */
-const codesOfLine = (kind: Kind, draft: ModelDef, line: Line, domains?: ResolvedLookups["domains"]): string[] =>
-  kind === "bom"
-    ? bomItemCodes({ ...draft, bom: [line as BomLine] }, domains)
-    : routingOperationIds({ ...draft, routing: [line as OpLine] }, domains);
+/** The description under a line's code: a BOM line's is an expression, shown as its text when it
+ *  is one literal and as the formula otherwise; a routing line's is plain text. */
+const descCell = (kind: Kind, desc: string | undefined) => {
+  if (!desc?.trim()) return null;
+  const text = kind === "bom" ? asCode(desc) : desc;
+  return <Text maxLines={1} style={text === undefined ? { ...SUB, ...MONO } : SUB}>{text ?? desc}</Text>;
+};
 
-export function LineTables({ kind, draft, lookups, tables, update }: {
+export function LineTables({ kind, draft, tables, update }: {
   kind: Kind;
   draft: ModelDef;
-  lookups?: ResolvedLookups;
   tables: TableCols[];
   update: Update;
 }): ReactElement {
@@ -64,12 +65,16 @@ export function LineTables({ kind, draft, lookups, tables, update }: {
     ...(kind === "bom"
       ? [{ key: "qty", label: t("MODEL_QTY_PER"), sortable: false }]
       : [
-          { key: "setupMin", label: t("MODEL_SETUP"), sortable: false },
+          { key: "resource", label: t("MODEL_RESOURCE"), sortable: false },
           { key: "runMinPerUnit", label: t("MODEL_RUN"), sortable: false },
           { key: "ratePerHour", label: t("MODEL_RATE"), sortable: false },
         ]),
   ], [i18n, kind]);
-  const state = useMemo<GridState>(() => ({ columns: columns.map((c) => c.key), sortBy: [], groupBy: [] }), [columns]);
+  // Grid takes a column's declared width as its floor only; a fixed width is the view's, as a resize.
+  const state = useMemo<GridState>(
+    () => ({ columns: columns.map((c) => c.key), sortBy: [], groupBy: [], columnWidths: { no: 48 } }),
+    [columns],
+  );
   const rows = lines.map((l, at): Row => ({ [AT]: at, ...l }));
   const open = (at: number) => setEditing({ at, line: structuredClone(lines[at]!) });
 
@@ -80,26 +85,25 @@ export function LineTables({ kind, draft, lookups, tables, update }: {
       const l = lines[at]!;
       const expr = kind === "bom" ? (l as BomLine).itemCode : (l as OpLine).operationId;
       const c = codeCell(expr);
-      const sub = kind === "bom" ? l.desc : [l.desc, (l as OpLine).resource].filter(Boolean).join(" · ");
-      const n = c.formula ? codesOfLine(kind, draft, l, lookups?.domains).length : 0;
+      // Two lines in all, as Grid's CELL_TEXT: the code (or formula) and its description, one each.
       return (
         // The messages popover focuses this to reach the line (builderMessages' anchor). Out of the
         // tab order, so only that jump focuses it — and opening the dialog on focus is safe.
         <FlexBox direction="Column" data-line={`${kind}:${at}`} tabIndex={-1} onFocus={() => open(at)} style={{ minWidth: 0 }}>
-          {c.code !== undefined ? <Text style={{ fontWeight: "bold" }}>{c.code || "—"}</Text>
-            : c.formula ? <Text style={MONO}>{c.formula}</Text>
+          {c.code !== undefined ? <Text maxLines={1} style={{ fontWeight: "bold" }}>{c.code || "—"}</Text>
+            : c.formula ? <Text maxLines={1} style={MONO}>{c.formula}</Text>
             : <Text style={SUB}>—</Text>}
-          {c.formula ? <Text style={SUB}>{t(kind === "bom" ? "MODEL_N_ITEMS" : "MODEL_N_OPS", String(n))}</Text>
-            : sub ? <Text style={SUB}>{sub}</Text> : null}
+          {descCell(kind, l.desc)}
         </FlexBox>
       );
     },
     when: (r: Row) => {
       const cond = lines[Number(r[AT])]!.condition;
-      return cond?.trim() ? <Text style={MONO}>{cond}</Text> : <Tag design="Neutral" hideStateIcon>{t("MODEL_ALWAYS")}</Tag>;
+      return cond?.trim() ? <Text maxLines={2} style={MONO}>{cond}</Text> : <Tag design="Neutral" hideStateIcon>{t("MODEL_ALWAYS")}</Tag>;
     },
+    resource: (r: Row) => <Text maxLines={1}>{(lines[Number(r[AT])] as OpLine).resource ?? ""}</Text>,
     ...Object.fromEntries((["qty", ...FIGURES] as const).map((k) => [
-      k, (r: Row) => <Text style={MONO}>{String((lines[Number(r[AT])] as Record<string, unknown>)[k] ?? "")}</Text>,
+      k, (r: Row) => <Text maxLines={2} style={MONO}>{String((lines[Number(r[AT])] as Record<string, unknown>)[k] ?? "")}</Text>,
     ])),
   };
 
@@ -130,7 +134,7 @@ export function LineTables({ kind, draft, lookups, tables, update }: {
           )} />
       </GridForm>
       {editing ? (
-        <LineDialog kind={kind} draft={draft} lookups={lookups} tables={tables} at={editing.at} initial={editing.line}
+        <LineDialog kind={kind} draft={draft} tables={tables} at={editing.at} initial={editing.line}
           onCancel={() => setEditing(null)}
           onOk={(line) => {
             setLines(editing.at === undefined ? [...lines, line] : lines.map((l, i) => (i === editing.at ? line : l)));
@@ -143,10 +147,9 @@ export function LineTables({ kind, draft, lookups, tables, update }: {
 
 /** One line, buffered: nothing reaches the model until OK. Checked as it will be once saved — the
  *  draft with this line in its place — so an OK that would break the model waits. */
-function LineDialog({ kind, draft, lookups, tables, at, initial, onCancel, onOk }: {
+function LineDialog({ kind, draft, tables, at, initial, onCancel, onOk }: {
   kind: Kind;
   draft: ModelDef;
-  lookups?: ResolvedLookups;
   tables: TableCols[];
   at?: number;
   initial: Line;
@@ -156,6 +159,7 @@ function LineDialog({ kind, draft, lookups, tables, at, initial, onCancel, onOk 
   const i18n = useI18n();
   const t = (key: string, ...params: string[]) => i18n.getText(key, ...params);
   const [line, setLine] = useState<Line>(initial);
+  const [height, setHeight] = useState<number>();
   const i = at ?? (kind === "bom" ? draft.bom.length : draft.routing.length);
   const scope = useMemo<ModelDef>(() => (kind === "bom"
     ? { ...draft, bom: [...draft.bom.slice(0, i), line as BomLine, ...draft.bom.slice(i + 1)] }
@@ -189,16 +193,15 @@ function LineDialog({ kind, draft, lookups, tables, at, initial, onCancel, onOk 
     if (next === "pick" && asCode(expr) === undefined) setExpr(undefined);
     setMode(next);
   };
-  const can = mode === "formula" && expr.trim() ? codesOfLine(kind, draft, line, lookups?.domains) : [];
   const hint = (f: (typeof FIGURES)[number]) => {
     if (opCode === undefined || !resolved) return null;
     if (!catalog) return <Text style={SUB}>{t("MODEL_NOT_IN_OPS")}</Text>;
     const v = f === "setupMin" ? catalog.setupMin : f === "runMinPerUnit" ? catalog.runMinPerUnit : catalog.ratePerHour;
     return <Text style={SUB}>{t("MODEL_FROM_BEAS", String(v))}</Text>;
   };
-  const field = (label: string, required: boolean, control: ReactElement, below?: ReactElement | null) => (
+  const field = (label: string, required: boolean, control: ReactElement) => (
     <FormItem labelContent={<Label showColon required={required}>{label}</Label>}>
-      <FlexBox direction="Column" gap="0.25rem" style={W}>{control}{below}</FlexBox>
+      <FlexBox direction="Column" gap="0.25rem" style={W}>{control}</FlexBox>
     </FormItem>
   );
   const exprField = (key: string, extraVars: string[], optional: boolean, placeholder?: string) => (
@@ -212,7 +215,12 @@ function LineDialog({ kind, draft, lookups, tables, at, initial, onCancel, onOk 
     : t(kind === "bom" ? "MODEL_LINE_MATERIAL" : "MODEL_LINE_OPERATION", String(at + 1));
 
   return (
-    <Dialog open onClose={onCancel} className="confire-pd" headerText={header} style={{ width: "min(44rem, 96vw)" }}
+    // Sized by its content once, then held: Pick ↔ Formula and the hints would
+    // otherwise resize it, and UI5 re-centres a dialog on every resize, so it jumped. More content
+    // than the opening size scrolls inside.
+    <Dialog open onClose={onCancel} className="confire-pd" headerText={header}
+      onOpen={(e) => { const opened = e.target.offsetHeight; setHeight((h) => h ?? opened); }}
+      style={{ width: "min(44rem, 96vw)", height }}
       footer={
         <Bar design="Footer" endContent={
           <>
@@ -221,8 +229,10 @@ function LineDialog({ kind, draft, lookups, tables, at, initial, onCancel, onOk 
           </>
         } />
       }>
-      {/* One column, as in FormulaDialog: an M-sized dialog would halve the formulas' width. */}
-      <Form layout="S1 M1 L1 XL1" style={{ padding: "1rem" }}>
+      {/* One column, as in FormulaDialog: an M-sized dialog would halve the formulas' width. Labels
+          at 3/12, not UI5's 4: short labels right-aligned in a third left the formulas narrow
+          beside empty space. Narrow (S) still puts them on top. */}
+      <Form layout="S1 M1 L1 XL1" labelSpan="S12 M3 L3 XL3" style={{ padding: "1rem" }}>
         <FormGroup accessibleName={header}>
           {field(t(kind === "bom" ? "MODEL_ITEM" : "MODEL_OPERATION"), kind === "bom", (
             <>
@@ -232,26 +242,26 @@ function LineDialog({ kind, draft, lookups, tables, at, initial, onCancel, onOk 
                 <SegmentedButtonItem data-mode="formula" selected={mode === "formula"}>{t("MODEL_FORMULA")}</SegmentedButtonItem>
               </SegmentedButton>
               {mode === "formula" ? (
-                <ExprInput value={expr} model={scope} tables={tables} extraVars={qtyVars} rows={2} optional={kind === "routing"}
+                <ExprInput value={expr} model={scope} tables={tables} extraVars={qtyVars} optional={kind === "routing"}
                   issue={issueOf(exprKey)} onChange={setExpr} />
               ) : kind === "bom" ? (
                 <CflField config={{ dialogConfig: cfl.items() }} accessibleName={t("MODEL_ITEM")} value={asCode(expr) ?? null}
                   error={issueOf(exprKey)?.message}
-                  onValueChange={(code) => setExpr(code === null || code === undefined || code === "" ? "" : JSON.stringify(String(code)))}
-                  onRowSelect={(row) => { if (row.ItemName != null) setLine((l) => ({ ...l, desc: String(row.ItemName) })); }} />
+                  onValueChange={(code) => setExpr(code === null || code === undefined || code === "" ? "" : asLiteral(String(code)))}
+                  onRowSelect={(row) => { if (row.ItemName != null) setLine((l) => ({ ...l, desc: asLiteral(String(row.ItemName)) })); }} />
               ) : (
                 // Typed text stays even when Beas cannot be reached (mustExist off): a code typed
                 // there is checked by the calculation, which flags one the cache lacks.
                 <CflField config={{ dialogConfig: cfl.beasOperations() }} mustExist={false} accessibleName={t("MODEL_OPERATION")}
                   value={opCode ?? null}
-                  onValueChange={(code) => setExpr(code === null || code === undefined || code === "" ? undefined : JSON.stringify(String(code).trim()))}
+                  onValueChange={(code) => setExpr(code === null || code === undefined || code === "" ? undefined : asLiteral(String(code).trim()))}
                   onRowSelect={(row) => setLine((l) => pickOperation(l as OpLine, row))} />
               )}
             </>
-          ), can.length ? <Text style={SUB}>{t("MODEL_CAN_GIVE", can.join(", "))}</Text> : null)}
-          {field(t("MODEL_DESC"), false, (
+          ))}
+          {field(t("MODEL_DESC"), false, kind === "bom" ? exprField("desc", qtyVars, true, t("MODEL_DESC_FROM_ITEM")) : (
             <Input style={W} value={line.desc ?? ""} accessibleName={t("MODEL_DESC")}
-              placeholder={t(kind === "bom" ? "MODEL_DESC_FROM_ITEM" : "MODEL_OP_DESC_PH")}
+              placeholder={t("MODEL_OP_DESC_PH")}
               onInput={(e) => { const desc = e.target.value; setLine((l) => ({ ...l, desc: desc || undefined })); }} />
           ))}
           {op ? field(t("MODEL_RESOURCE"), false, (

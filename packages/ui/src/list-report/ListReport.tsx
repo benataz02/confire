@@ -129,12 +129,11 @@ export function ListReport({
       ) : undefined}
     >
       {/* Flex column so the table gets exactly the leftover height and the page never scrolls.
-          DynamicPage's content padding is `1rem 1rem 0`, so the bottom gap is ours to add. */}
+          DynamicPage's content padding is `1rem 1rem 0`, so the bottom gap is ours to add: the top's. */}
       <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", height: "100%", paddingBottom: "1rem", boxSizing: "border-box" }}>
         {err ? <MessageStrip design="Negative" hideCloseButton>{err.message}</MessageStrip> : null}
-        {/* Plain div, not a Card: AutoWithEmptyRows measures this element, so the frame goes on
-            the table itself and this box only supplies the height. */}
-        <div style={{ flex: 1, minHeight: 0 }}>
+        {/* The leftover height, framed as a Card (global.css says why not a ui5-card). */}
+        <div className="confire-list-frame">
           {state ? (
             <Grid
               title={feature.title}

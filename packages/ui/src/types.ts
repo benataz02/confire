@@ -32,6 +32,8 @@ export type ListColumn = {
   label?: string;
   type?: FieldType;
   options?: Option[];
+  /** the export's column width, and the grid's floor up to Grid's MIN_COLUMN_WIDTH (the grid shares
+   *  its width out among the columns) */
   width?: number;
   /** the narrowest the table may lay it out; past every column's, the grid scrolls sideways */
   minWidth?: number;

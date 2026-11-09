@@ -81,43 +81,22 @@ body {
   }
 }
 
-/* Grid's fill mode stretches the table's frame over the part of a row AutoWithEmptyRows leaves
-   over; the table's own bottom rules (the body's footer border and the scroll area's sticky ::after)
-   would draw a line where the rows stop with that band under it. The last row's border ends it.
-   ponytail: the ::after is internal; recheck on a webcomponents-react upgrade. */
-.confire-fill-table {
-  --sapList_TableFooterBorder: transparent;
+/* Grid's CELL_TEXT: a cell wraps to two lines at most and cuts the rest with an ellipsis. Rows are
+   one fixed height (2.75rem cozy, 2rem compact), so the lines are set to fit two inside the shorter
+   one. A link cell wraps only in a grid (EntityLink is one line elsewhere): its host's `nowrap` is
+   a :host rule, which a document rule beats, and the clamp is on the span slotted into it. */
+.confire-cell-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: break-word;
+  line-height: 1.25;
 }
-.confire-fill-table [data-component-name="AnalyticalTableContainer"]::after {
-  display: none;
-}
-/* AutoWithEmptyRows leaves room for the horizontal scrollbar only if it measured one (an overlay
-   measures 0, so the styled one below never counts) and the columns already overflowed when it
-   counted rows. Otherwise the scrollbar lands under rows that fill the frame, and the frame's
-   `overflow: hidden` cut it off. Allowed to shrink, the table ends at the frame and its last
-   visible row gives up those few pixels instead. */
-.confire-fill-table [data-component-name="AnalyticalTableContainerWithScrollbar"] {
-  min-height: 0;
-}
-
-/* Under overlay scrollbars (Grid marks `html`) the table's horizontal one is drawn as a styled
-   scrollbar, which Chromium never overlays: the theme's look, as UI5's own scrollbars had. Chromium
-   skips `::-webkit-scrollbar` while `scrollbar-color` is set, and UI5 sets it on html: `auto` lifts
-   that. Firefox has no such escape and keeps its overlay. */
-.confire-overlay-scrollbars [data-component-name="AnalyticalTableContainer"] {
-  scrollbar-color: auto;
-}
-.confire-overlay-scrollbars [data-component-name="AnalyticalTableContainer"]::-webkit-scrollbar {
-  height: var(--sapScrollBar_Dimension);
-  background: var(--sapScrollBar_TrackColor);
-}
-.confire-overlay-scrollbars [data-component-name="AnalyticalTableContainer"]::-webkit-scrollbar-thumb {
-  background: var(--sapScrollBar_FaceColor);
-  border-radius: var(--sapElement_BorderCornerRadius);
-}
-.confire-overlay-scrollbars [data-component-name="AnalyticalTableContainer"]::-webkit-scrollbar-thumb:hover {
-  background: var(--sapScrollBar_Hover_FaceColor);
-}
+.ui5-content-density-compact .confire-cell-text { line-height: 1.1 }
+[data-column-id-cell] .confire-entity-link { white-space: normal }
 
 /* Grid's `statusRows`: a closed line reads muted. */
 .confire-row-closed [data-column-id-cell] {
@@ -287,4 +266,21 @@ ui5-shellbar-search.confire-shellbar-search {
   [ui5-dialog]:popover-open {
     animation-name: confire-fade-in;
   }
+}
+
+/* ListReport's grid frame: a Card's (Horizon: tile radius, Shadow0, no border) drawn by hand, not a
+   ui5-card — its host is inline-block and its content part has no height, so the Grid's height: 100%
+   would collapse and AutoWithEmptyRows count no rows. Full screen escapes the clip (the slot moves to
+   the top layer) and stays square. The background fills the pixels under the last whole row, where
+   the table's own closing line would cut across the bottom corners. */
+.confire-list-frame {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--sapTile_BorderCornerRadius);
+  box-shadow: var(--sapContent_Shadow0);
+  background: var(--sapList_Background);
+}
+.confire-list-frame [data-component-name="AnalyticalTableContainer"]::after {
+  display: none;
 }

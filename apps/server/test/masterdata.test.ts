@@ -63,3 +63,29 @@ describe.skipIf(!process.env.DATABASE_URL)("masterdata.duplicate (integration)",
     expect(copy2!.name).toBe("materials (copy 2)");
   });
 });
+
+describe.skipIf(!process.env.DATABASE_URL)("masterdata.save (integration)", () => {
+  test("a rename is carried into the models naming the table; a taken name is refused", async () => {
+    const { tenantId, slug } = await makeTenant();
+    const admin = await makeUser("admin", tenantId);
+    const ctx = { context: { headers: tenantHeaders(slug, admin.cookie) } };
+
+    const columns = [{ key: "code", label: "Code", type: "string" as const }];
+    const rows = [["steel"], ["alu"]];
+    const [t] = await db.insert(configMasterdata).values({ tenantId, name: "materials", kind: "table", columns, rows })
+      .returning({ id: configMasterdata.id });
+    await db.insert(configMasterdata).values({ tenantId, name: "taken", kind: "table", columns, rows });
+    const [m] = await db.insert(configModel)
+      .values({ tenantId, name: "Cable", definition: usingTable("materials") })
+      .returning({ id: configModel.id });
+
+    await call(router.masterdata.save, { id: t!.id, name: "metals", kind: "table", columns, rows }, ctx);
+    const [stored] = await db.select({ definition: configModel.definition }).from(configModel).where(eq(configModel.id, m!.id));
+    expect(stored!.definition).toEqual(usingTable("metals"));
+    // The delete guard reads the model under the new name.
+    await expect(call(router.masterdata.remove, { ids: [t!.id] }, ctx)).rejects.toThrow(/used by model Cable/);
+
+    await expect(call(router.masterdata.save, { id: t!.id, name: "taken", kind: "table", columns, rows }, ctx))
+      .rejects.toThrow("A table named 'taken' already exists");
+  });
+});

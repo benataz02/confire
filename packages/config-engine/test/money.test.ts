@@ -86,7 +86,7 @@ describe("costBreakdown", () => {
     // resource. unitCost = 10 material + 16 labor, so the lines must add up to 26 * 3.
     const withOps: ModelDef = {
       ...model,
-      bom: [{ itemCode: '"SHEET"', qty: "1", desc: "Steel sheet" }],
+      bom: [{ itemCode: '"SHEET"', qty: "1", desc: '"Steel sheet"' }],
       routing: [{ resource: "Laser", setupMin: "30", runMinPerUnit: "6", ratePerHour: "60" }],
     };
     const [m] = breakdown([{ candidateIdx: 0, batchQty: 3 }], withOps);

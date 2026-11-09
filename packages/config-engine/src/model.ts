@@ -104,7 +104,7 @@ export type Constraint = z.infer<typeof ConstraintZ>;
 // the one number in a configuration that is a snapshot — see the "nothing is snapshotted" rule.
 export const BomLineZ = z.object({
   itemCode: z.string(), // expr -> a B1 item code
-  // Plain text, not an expression: it is the item's name, filled from B1 when the line is picked.
+  // expr -> the line's text; picking an item writes its B1 name as a literal.
   desc: z.string().optional(),
   condition: z.string().optional(), // expr -> boolean
   qty: z.string(), // expr, per finished unit; batch qty available as `qty`
@@ -116,7 +116,7 @@ export const OperationZ = z.object({
   operationId: z.string().optional(),
   // Plain text; empty = the catalog's ResourceId for the evaluated operation.
   resource: z.string().optional(),
-  // Plain text, not an expression, like BomLineZ.desc: what the operation does, for the salesperson.
+  // Plain text, not an expression (unlike BomLineZ.desc): what the operation does, for the salesperson.
   desc: z.string().optional(),
   condition: z.string().optional(),
   setupMin: z.string(), // expr, minutes per batch

@@ -1,12 +1,12 @@
 import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
-import { Button, CheckBox, Input, Option, Select, Text } from "@ui5/webcomponents-react";
+import { Button, CheckBox, Input, Option, Select } from "@ui5/webcomponents-react";
 import {
   cellDefault, columnOptions, requiredColumn, COST_COL, ITEM_COL, PRICE_COL,
   type ResolvedTable, type RowMoney, type TableColumn, type TableDef, type Val,
 } from "@confire/config-engine";
 import { CflField } from "../cfl/CflField.tsx";
 import { cfl, type QueryScope } from "../cfl/cfl-configs.ts";
-import { Grid, type CellTemplate, type GridState } from "../list-report/Grid.tsx";
+import { CELL_TEXT, Grid, type CellTemplate, type GridState } from "../list-report/Grid.tsx";
 import type { ListColumn } from "../types.ts";
 import type { FieldMark } from "./ConfiguratorForm.tsx";
 import { displayValue } from "./formHelpers.ts";
@@ -32,13 +32,13 @@ const show = (v: Val): string =>
 
 const header = (c: TableColumn) => c.label + (c.unit ? ` (${c.unit})` : "");
 
-/** A display cell keeps the row's height: one line, cut with an ellipsis, the whole value on hover.
- *  A bare Text wraps (maxLines is unbounded) and spills out of the row. */
+/** A display cell keeps the row's height: two lines, cut with an ellipsis, the whole value on hover
+ *  (Grid's CELL_TEXT). A bare Text wraps (maxLines is unbounded) and spills out of the row. */
 /** A column's narrowest width: its control's, or its header's when that is wider.
  *  ponytail: the header is guessed at 8px a character; measure it if headers come out cut. */
 const floor = (label: string, control: number) => Math.max(control, label.length * 8 + 40);
 
-const CellText = ({ text }: { text: string }) => <Text maxLines={1} title={text}>{text}</Text>;
+const CellText = ({ text }: { text: string }) => <span className={CELL_TEXT} title={text}>{text}</span>;
 
 /**
  * The one table component for both roles. An `items` table becomes n quotation lines; a `calc`

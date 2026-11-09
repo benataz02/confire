@@ -176,6 +176,7 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   });
   model.bom.forEach((l, i) => {
     checkExpr(l.itemCode, `bom[${i}].itemCode`, withQty);
+    checkExpr(l.desc, `bom[${i}].desc`, withQty);
     checkExpr(l.condition, `bom[${i}].condition`, withQty);
     checkExpr(l.qty, `bom[${i}].qty`, withQty);
   });
@@ -406,21 +407,11 @@ function codesOf(exprs: string[], domains: Record<string, { value: unknown }[]> 
     const code = typeof v === "string" ? (trim ? v.trim() : v) : "";
     if (code) out.add(code);
   };
-  const walk = (n: Ast): void => {
-    if (n.t === "lit") add(n.v);
-    else if (n.t === "ident") for (const o of domains?.[n.name] ?? []) add(o.value);
-    else if (n.t === "call") n.args.forEach(walk);
-    else if (n.t === "un") walk(n.e);
-    else if (n.t === "bin") { walk(n.l); walk(n.r); }
-    else if (n.t === "tern") { walk(n.c); walk(n.a); walk(n.b); }
-  };
-  for (const src of exprs) {
-    try {
-      walk(parse(src));
-    } catch {
-      // an unparseable expression is checkModel's problem, not this one's
+  for (const src of exprs)
+    for (const n of nodesOf(src)) {
+      if (n.t === "lit") add(n.v);
+      else if (n.t === "ident") for (const o of domains?.[n.name] ?? []) add(o.value);
     }
-  }
   return [...out];
 }
 
@@ -496,7 +487,8 @@ export function renameTable(model: ModelDef, from: string, to: string): ModelDef
       .filter((l): l is NonNullable<typeof l> => l?.name === from)
       // right to left, so an earlier span keeps its offsets
       .sort((a, b) => b.from - a.from)
-      .reduce((s, l) => s.slice(0, l.from) + JSON.stringify(to) + s.slice(l.to), src);
+      // quoted as is, not JSON.stringify: the DSL's strings have no escapes
+      .reduce((s, l) => `${s.slice(0, l.from)}"${to}"${s.slice(l.to)}`, src);
   const m = mapExprs(model, expr);
   return {
     ...m,

@@ -36,10 +36,16 @@ export function tokenize(src: string): Tok[] {
       continue;
     }
     if (c === '"') {
-      // ponytail: no escape sequences; add \" support if an author ever needs it
-      const end = src.indexOf('"', i + 1);
-      if (end < 0) throw new DslError("unterminated string", i, src.length);
-      out.push({ k: "str", v: src.slice(i + 1, end), from: i, to: end + 1 });
+      // A backslash takes the next character as it is: \" and \\ — a B1 item name in inches
+      // (`TUBO 1/2"`) is a description literal. ponytail: no \n/\t/\u; add if an author needs one.
+      let v = "";
+      let end = i + 1;
+      while (end < src.length && src[end] !== '"') {
+        if (src[end] === "\\" && end + 1 < src.length) end++;
+        v += src[end++];
+      }
+      if (end >= src.length) throw new DslError("unterminated string", i, src.length);
+      out.push({ k: "str", v, from: i, to: end + 1 });
       i = end + 1;
       continue;
     }

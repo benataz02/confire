@@ -69,7 +69,7 @@ export function computeOutputs(
     // missing one price still quotes, and the process page names the item in its messages.
     const listed = lookups.prices?.[itemCode];
     const unitPrice = listed ?? 0;
-    const desc = l.desc ?? "";
+    const desc = l.desc === undefined ? "" : String(evaluate(l.desc, scope) ?? "");
     const totalQty = qtyPerUnit * batchQty;
     bom.push({
       itemCode, desc, qtyPerUnit, totalQty, unitPrice, lineTotal: totalQty * unitPrice,

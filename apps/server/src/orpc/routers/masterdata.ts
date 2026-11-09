@@ -2,7 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, configMasterdata, configMasterdataRow, configModel } from "@confire/db";
-import { ODataQueryZ, QuerySourceZ, ValZ, syncTables } from "@confire/config-engine";
+import { ODataQueryZ, QuerySourceZ, ValZ, renameTable, syncTables } from "@confire/config-engine";
 import { isYesNo, type B1Field } from "@confire/b1";
 import { adminProcedure } from "../base.ts";
 import { DEFAULT_PAGE, fetchQueryTable, queryRowOf, withMatch, withSearch, type MasterdataRow } from "../../lookups.ts";
@@ -19,8 +19,8 @@ import { t } from "../../i18n/index.ts";
 export { masterdataRows };
 
 // Tenant masterdata: one entity, two kinds. "table" keeps its values here; "query" keeps a live
-// B1/Beas read. Models reference either by name and never hold the definition, so the same query
-// is defined once for the whole tenant.
+// B1/Beas read. Models reference either by name (a rename is carried into them: save) and never
+// hold the definition, so the same query is defined once for the whole tenant.
 
 const ColumnZ = z.object({
   key: z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, "must be a valid identifier"),
@@ -37,7 +37,9 @@ const MasterdataQueryZ = QuerySourceZ.extend({
   syncMinutes: z.number().int().positive().optional(),
 });
 
-const base = { id: z.uuid().optional(), name: z.string().min(1) };
+// No `"`: a LOOKUP() names its table in a string literal, which has no escapes, so a rename to one
+// could not be written into the models that LOOKUP it.
+const base = { id: z.uuid().optional(), name: z.string().min(1).refine((n) => !n.includes('"'), 'A name cannot contain "') };
 const TargetZ = QuerySourceZ.shape.target;
 
 /** What a filter compares a field with, as typed: B1 sends an enum as its member name and a
@@ -141,17 +143,28 @@ export const masterdataRouter = {
     const values = { name: input.name, ...fields, updatedAt: new Date() };
     try {
       if (input.id) {
-        const updated = await db
-          .update(configMasterdata)
-          .set(values)
-          .where(and(eq(configMasterdata.id, input.id), eq(configMasterdata.tenantId, context.tenantId)))
-          .returning({ id: configMasterdata.id });
-        if (!updated.length) throw new ORPCError("NOT_FOUND");
-        // The sync state was reset above; the rows themselves have to go with it.
-        await db
-          .delete(configMasterdataRow)
-          .where(and(eq(configMasterdataRow.tenantId, context.tenantId), eq(configMasterdataRow.masterdataId, input.id)));
-        return { id: input.id };
+        const id = input.id;
+        await db.transaction(async (tx) => {
+          const fence = and(eq(configMasterdata.id, id), eq(configMasterdata.tenantId, context.tenantId));
+          const [old] = await tx.select({ name: configMasterdata.name }).from(configMasterdata).where(fence).for("update");
+          if (!old) throw new ORPCError("NOT_FOUND");
+          await tx.update(configMasterdata).set(values).where(fence);
+          // The sync state was reset above; the rows themselves have to go with it.
+          await tx.delete(configMasterdataRow)
+            .where(and(eq(configMasterdataRow.tenantId, context.tenantId), eq(configMasterdataRow.masterdataId, id)));
+          if (old.name === input.name) return;
+          // Models name their masterdata, as LOOKUP() does (an id there would be unreadable), so a
+          // rename is carried into every model naming the old one, or each would fail on its next
+          // calculate. The same scan over the tenant's models as the delete guard below.
+          const models = await tx.select({ id: configModel.id, definition: configModel.definition })
+            .from(configModel).where(eq(configModel.tenantId, context.tenantId)).for("update");
+          for (const m of models)
+            if (syncTables(m.definition).has(old.name))
+              await tx.update(configModel)
+                .set({ definition: renameTable(m.definition, old.name, input.name), updatedAt: new Date() })
+                .where(eq(configModel.id, m.id));
+        });
+        return { id };
       }
       const [ins] = await db
         .insert(configMasterdata)
@@ -159,7 +172,8 @@ export const masterdataRouter = {
         .returning({ id: configMasterdata.id });
       return { id: ins!.id };
     } catch (e) {
-      if ((e as { code?: string }).code === "23505")
+      // Drizzle wraps the driver's error (DrizzleQueryError): Postgres' code is on its cause.
+      if ((e as { cause?: { code?: string } }).cause?.code === "23505")
         throw new ORPCError("BAD_REQUEST", { message: t("MASTERDATA_NAME_TAKEN", input.name) });
       throw e;
     }

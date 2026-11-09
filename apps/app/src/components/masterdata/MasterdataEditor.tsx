@@ -153,6 +153,7 @@ function issuesOf(r: Row, t: Translate): RecordIssues {
   const fields: Record<string, string> = {};
   const columns: Record<string, string> = {};
   if (!d.name.trim()) fields.name = t("ADMIN_MD_NEED_NAME");
+  else if (d.name.includes('"')) fields.name = t("ADMIN_MD_NAME_QUOTE");
   if (d.kind === "query") {
     if (!d.query.query.entitySet) fields["query.entitySet"] = t("ADMIN_MD_NEED_ENTITY");
     const n = d.query.syncMinutes;
@@ -199,10 +200,12 @@ function Editor({ row }: { row?: MasterdataRow }) {
   const [preview, setPreview] = useState<{ cols: string[]; rows: Cell[][] } | null>(null);
 
   // Both keys: `list` is what this editor and the model builder read, `rows` is the list page's
-  // display projection. A write invalidates both or the list shows a stale row.
+  // display projection. A write invalidates both or the list shows a stale row — and the models,
+  // which a rename rewrites.
   const invalidate = () => Promise.all([
     qc.invalidateQueries({ queryKey: orpc.masterdata.list.queryOptions().queryKey }),
     qc.invalidateQueries({ queryKey: orpc.masterdata.rows.key() }),
+    qc.invalidateQueries({ queryKey: orpc.models.key() }),
   ]);
   const testFetch = useMutation(orpc.masterdata.queryPage.mutationOptions({
     onSuccess: (r) => setPreview({ cols: r.columns, rows: r.rows as Cell[][] }),

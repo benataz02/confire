@@ -173,3 +173,10 @@ describe("evaluate", () => {
     expect(() => evaluate("toString", scope)).toThrow(DslError);
   });
 });
+
+describe("string escapes", () => {
+  test("a backslash takes the next character as it is", () => {
+    expect(evaluate('"TUBO 1/2\\" x \\\\"', { vars: {} })).toBe('TUBO 1/2" x \\');
+    expect(() => evaluate('"open\\"', { vars: {} })).toThrow("unterminated string");
+  });
+});

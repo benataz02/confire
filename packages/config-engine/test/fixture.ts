@@ -68,7 +68,7 @@ export const model: ModelDef = {
   bom: [
     {
       itemCode: 'CONCAT("COND-", material)',
-      desc: "conductor",
+      desc: '"conductor"',
       qty: "section * 0.02",
     },
     {

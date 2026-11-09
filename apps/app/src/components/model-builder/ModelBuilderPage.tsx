@@ -104,11 +104,11 @@ export function ModelBuilderPage() {
               update={(fn) => ctx.update(withDef(fn))} />
           ),
           bom: (ctx) => (
-            <LineTables kind="bom" draft={defOf(ctx.formData)} lookups={lookups.data} tables={m.tableCols}
+            <LineTables kind="bom" draft={defOf(ctx.formData)} tables={m.tableCols}
               update={(fn) => ctx.update(withDef(fn))} />
           ),
           routing: (ctx) => (
-            <LineTables kind="routing" draft={defOf(ctx.formData)} lookups={lookups.data} tables={m.tableCols}
+            <LineTables kind="routing" draft={defOf(ctx.formData)} tables={m.tableCols}
               update={(fn) => ctx.update(withDef(fn))} />
           ),
           // The query's columns are stored when its masterdata row is saved; until then nothing here

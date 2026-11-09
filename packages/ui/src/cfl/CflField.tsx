@@ -81,6 +81,10 @@ export function CflField({
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** the suggestion the arrow keys or the mouse last landed on — `change` then says it was taken */
   const preview = useRef<{ idx: number | "all"; text: string } | null>(null);
+  /** the user typed (or used the clear icon) since focus. Label mode empties the box on focus, and
+   *  UI5 — which took the label as the box's value at focusin — fires `change("")` on focusout, so an
+   *  empty `change` alone does not mean the user cleared it. */
+  const edited = useRef(false);
   useEffect(() => () => clearTimeout(timer.current), []);
 
   const tokens = multi && Array.isArray(value) ? (value as Row[]) : [];
@@ -191,6 +195,8 @@ export function CflField({
   const onChange = (text: string) => {
     const pv = preview.current;
     preview.current = null;
+    const userEdited = edited.current;
+    edited.current = false;
     if (pv && pv.text === text) {
       if (pv.idx === "all") {
         // The "Show all" item put its own caption in the input; put the search back.
@@ -209,7 +215,7 @@ export function CflField({
       // the value, and an exact key from the suggestions counts as picking it.
       setTyped(null);
       if (!t) {
-        if (!isBlank(value)) onValueChange(null);
+        if (userEdited && !isBlank(value)) onValueChange(null);
         return;
       }
       const hit = sugg?.rows.find((r) => String(r[key] ?? "").trim().toLowerCase() === t.toLowerCase());
@@ -262,7 +268,7 @@ export function CflField({
         tokens={multi ? tokens.map((t) => (
           <Token key={String(t[key])} text={tokenLabel(t, d)} data-k={String(t[key] ?? "")} />
         )) : undefined}
-        onFocus={() => { focusedRef.current = true; setFocused(true); }}
+        onFocus={() => { focusedRef.current = true; edited.current = false; setFocused(true); }}
         onBlur={() => {
           focusedRef.current = false;
           setFocused(false);
@@ -275,6 +281,7 @@ export function CflField({
           // no keystroke value.
           if (preview.current && t === preview.current.text) return;
           latestText.current = t;
+          edited.current = true;
           setTyped(t);
           // Plain single select: every keystroke is the value (Beas valueChange(text)).
           if (!multi && !labelMode && !commitOnly) onValueChange(t === "" ? null : t);
