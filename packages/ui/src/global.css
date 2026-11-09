@@ -43,6 +43,13 @@ body {
   gap: 0.5rem;
   padding-block: 0.5rem;
 }
+/* The total line of a checkout-style list: its text is in the item's shadow DOM, so only a part
+   reaches it. */
+.confire-total::part(title),
+.confire-total::part(additional-text) {
+  font-family: var(--sapFontBoldFamily);
+  color: var(--sapTextColor);
+}
 
 /* SplitterLayout's bar calls focus() on mousedown and styles :focus, not :focus-visible, so every
    drag leaves it outlined as if selected. Re-pointing its focus variables at the resting look keeps
@@ -113,6 +120,23 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none }
+}
+
+/* A new page, and a tab-mode ObjectPage's new tab, fade in the way a UI5 popup opens (Popup.css:
+   `.ui5-popup-opening` starts it at opacity .1). Plain CSS on mount, not a router view transition:
+   the ObjectPage swaps its tab before it reports the change, so a transition started by the
+   `?section=` navigate would capture the new tab on both sides. Opacity only — a transform would make
+   the page the containing block of its `position: fixed` / sticky children while it ran. */
+@keyframes confire-fade-in {
+  from { opacity: 0.1 }
+}
+ui5-navigation-layout > :not([slot]),
+.confire-tabs [data-component-name="ObjectPageSection"] {
+  animation: confire-fade-in 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  ui5-navigation-layout > :not([slot]),
+  .confire-tabs [data-component-name="ObjectPageSection"] { animation: none }
 }
 
 /* ObjectPage loading skeleton. Bars are AnalyticalTable's TablePlaceholder cells

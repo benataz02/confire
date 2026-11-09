@@ -93,12 +93,15 @@ export function evalTableRows(
   scopeVars: Record<string, Val>,
   tables?: Record<string, ResolvedTable>,
 ): Record<string, Val>[] {
+  // An items grid's sole row is the whole product: the batch quantity is its quantity, so its own
+  // reads 1 (the grid hides the column), whatever an earlier multi-row grid left stored there.
+  const sole = def.role === "items" && rows.length === 1;
   return rows.map((row) => {
     const vars: Record<string, Val> = { ...scopeVars };
     const out: Record<string, Val> = {};
     for (const c of def.columns) {
       if (c.cell.kind === "formula") continue;
-      const v = row[c.key] ?? cellDefault(c, tables);
+      const v = sole && c.key === QTY_COL ? 1 : row[c.key] ?? cellDefault(c, tables);
       out[c.key] = v;
       vars[c.key] = v;
       // derived cells go into `out` as well as `vars`: basisExpr reads the returned row.
@@ -115,7 +118,8 @@ export function evalTableRows(
       // to the formula, which is why absence — not a sentinel — is what "no override" looks like.
       const override = row[c.key];
       let v: Val;
-      if (override !== undefined && override !== null) v = override;
+      if (sole && c.key === QTY_COL) v = 1;
+      else if (override !== undefined && override !== null) v = override;
       else
         try {
           v = evaluate(c.cell.expr, { vars, tables });

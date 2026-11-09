@@ -284,6 +284,13 @@ describe("itemSplit", () => {
     expect(out.map((l) => l.quantity)).toEqual([30, 10]);
   });
 
+  test("a sole row ships the batch quantity, whatever its own quantity says", () => {
+    for (const quantity of [3, 0, null]) {
+      const out = itemSplit(parts, [{ ...rows[0]!, quantity }], scope, undefined, 10, { cost: 600, price: 1100 });
+      expect(out.map((l) => [l.quantity, l.cost])).toEqual([[10, 600]]);
+    }
+  });
+
   test("a row that ships nothing gets no share, and index still points at the grid", () => {
     const withBlank = [rows[0]!, { code: "C", name: "Offcut", width: 5, quantity: 0 }, rows[1]!];
     const out = itemSplit(parts, withBlank, scope, undefined, 1, { cost: 600, price: 1100 });

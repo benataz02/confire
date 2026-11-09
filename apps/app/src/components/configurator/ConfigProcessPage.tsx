@@ -1,17 +1,15 @@
 import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IllustratedMessage, Input, Label,
-  Link, ObjectPage, ObjectPageSection, ObjectPageTitle, Panel, Popover, ResponsivePopover, Text, Title,
+  Link, ObjectPage, ObjectPageSection, ObjectPageTitle, Popover, ResponsivePopover, Text, Title,
   ToggleButton, Toolbar,
   ToolbarButton, ToolbarItem,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/NoData.js";
 import { historyKey, itemsTableOf, type Val } from "@confire/config-engine";
 import { orpc, useCurrency } from "../../orpc.ts";
-import { money as formatMoney } from "@confire/ui/money.ts";
 import { confirm, promptNote } from "@confire/ui/confirm.ts";
 import { ProjectStatusTag } from "@confire/ui/timeline/ProjectStatus.tsx";
 import { staffWritable } from "@confire/ui/timeline/projectStatus.ts";
@@ -20,7 +18,7 @@ import { configuratorSections } from "@confire/ui/configurator/ConfiguratorForm.
 import { GENERAL_SECTION } from "@confire/ui/configurator/formHelpers.ts";
 import { useI18n } from "../../i18n.ts";
 import { PriceAnalysis } from "./PriceAnalysis.tsx";
-import { CostBody } from "./InsightsRail.tsx";
+import { CostRail } from "./CostRail.tsx";
 import { SimilarConfigs } from "./SimilarConfigs.tsx";
 import { configMessages } from "./configMessages.ts";
 import { latestDocument, OPEN_DOCUMENT } from "./runView.ts";
@@ -98,7 +96,10 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
   const accept = useMutation(orpc.requests.accept.mutationOptions({ onSuccess: decided(t("CONFIG_TOAST_ACCEPTED")) }));
   const sendBack = useMutation(orpc.requests.sendBack.mutationOptions({ onSuccess: decided(t("CONFIG_TOAST_SENT_BACK")) }));
   const decline = useMutation(orpc.requests.decline.mutationOptions({ onSuccess: decided(t("CONFIG_TOAST_DECLINED")) }));
-  const deciding = accept.isPending || sendBack.isPending || decline.isPending;
+  // Quoted, and the configuration has to change: unlock it; the footer's Update quote then re-posts
+  // the SAP quotation in place.
+  const reopen = useMutation(orpc.configs.reopen.mutationOptions({ onSuccess: decided(t("CONFIG_TOAST_REOPENED")) }));
+  const deciding = accept.isPending || sendBack.isPending || decline.isPending || reopen.isPending;
   const model = view?.model;
   // A DocEntry means something only in the SAP company it was posted in: elsewhere there is no
   // quotation to open, and quoting creates one (the server decides the same way).
@@ -272,37 +273,13 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
     missing: view.missing, issues: view.issues, form, calculation: view.calculation,
     syncError: proc.sync.error as Error | null,
     writeError: queue.error,
-    configErrors: [proc.update.error, proc.pickNow.error, proc.duplicate.error, proc.remove.error, accept.error, sendBack.error, decline.error] as (Error | null)[],
+    configErrors: [proc.update.error, proc.pickNow.error, proc.duplicate.error, proc.remove.error, accept.error, sendBack.error, decline.error, reopen.error] as (Error | null)[],
     locked: locked && { request: !!request, status: project.status, quoteResponse: project.quoteResponse },
   });
 
-  // Beside every section, sticky under the title and anchor bar. ObjectPage has no slot for side
-  // content (each child becomes an anchor), so the rail is portaled into its content area and
-  // global.css reserves a quarter of that area for it. The content's offset is where the sticky bars
-  // end. While an edit is out the figures are the last answer's: dimmed, not hidden.
-  // ponytail: no fall-down below the sections on a narrow screen; the toggle hides the rail.
-  const content = page?.querySelector<HTMLElement>('[data-component-name="ObjectPageContent"]');
-  const rail = railShown && page && content ? createPortal(
-    <aside className="confire-rail" aria-label={t("CONFIG_INSIGHTS")}>
-    <div style={{ top: content.offsetTop, maxHeight: `calc(${page.clientHeight - content.offsetTop}px - ${footerUp ? "4.5rem" : "1rem"})` }}>
-      {/* The total rides in headerText rather than a `header` slot: a custom header is only
-          toggled by its arrow, this one by the whole bar — and the figure survives collapsing.
-          Region, not the default Form: read-only figures, nothing to fill in. */}
-      <Panel accessibleRole="Region" headerLevel="H5" style={queue.busy ? { opacity: 0.6 } : undefined}
-        headerText={cost ? t("CONFIG_COST_ELEMENTS_TOTAL", formatMoney(cost.cost, currency)) : t("CONFIG_COST_ELEMENTS")}>
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", padding: "0 0.25rem 0.5rem" }}>
-          {cost ? (
-            <CostBody rows={itemRows} cost={cost} cur={currency} />
-          ) : (
-            <IllustratedMessage name="NoData" design="ExtraSmall" titleText={t("CONFIG_NO_COSTS")}
-              subtitleText={t("CONFIG_NO_COSTS_SUB")} />
-          )}
-        </div>
-      </Panel>
-    </div>
-    </aside>,
-    content,
-  ) : null;
+  const rail = railShown
+    ? <CostRail page={page} cost={cost} rows={itemRows} cur={currency} busy={queue.busy} footerUp={footerUp} />
+    : null;
 
   // Read-only has no edit to lose, so a locked page shows its configuration regardless.
   const configurable = headReady || locked;
@@ -389,13 +366,19 @@ export function ConfigProcessPage({ id = "", new: isNew = false }: { id?: string
           }
           actionsBar={
             <Toolbar design="Transparent">
+              {/* Only from quoted (the server's rule too): past it SAP has an order a re-quote would not reach. */}
+              {project.status === "quoted" ? (
+                <ToolbarButton icon="edit" design="Transparent" disabled={deciding} tooltip={t("CONFIG_REOPEN_TIP")}
+                  text={t("CONFIG_REOPEN")} onClick={() => reopen.mutate({ id })} />
+              ) : null}
               <ToolbarButton icon="copy" design="Transparent" disabled={queue.busy || proc.duplicate.isPending}
                 tooltip={queue.busy ? t("CONFIG_CALCULATING") : t("CONFIG_DUPLICATE_TIP")}
                 text={proc.duplicate.isPending ? t("CONFIG_DUPLICATING") : t("CONFIG_DUPLICATE")}
                 onClick={() => proc.duplicate.mutate({ id })} />
               {/* A client's request is declined, never deleted (the server refuses it too). */}
-              {request ? null : <ToolbarButton icon="delete" design="Transparent" disabled={locked || proc.remove.isPending}
-                tooltip={locked ? t("CONFIG_DELETE_LOCKED") : t("CONFIG_DELETE_TIP")}
+              {/* A reopened draft still has its quotation in SAP: the server refuses to orphan it. */}
+              {request ? null : <ToolbarButton icon="delete" design="Transparent" disabled={locked || project.b1DocEntry !== null || proc.remove.isPending}
+                tooltip={locked || project.b1DocEntry !== null ? t("CONFIG_DELETE_LOCKED") : t("CONFIG_DELETE_TIP")}
                 text={t("CONFIG_DELETE")}
                 onClick={async () => {
                   if (await confirm({

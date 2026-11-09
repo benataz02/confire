@@ -20,8 +20,8 @@ export type RowMoney = {
 };
 /** One element of what the cost is made of: a BOM line under its description, an operation under
  *  its resource, a priced parameter under its label. Batch totals, so they add up to the same cost
- *  the items rows split. */
-export type CostLine = { kind: "material" | "operation" | "other"; label: string; amount: number };
+ *  the items rows split. Which of the three it is, is which list it is in. */
+export type CostLine = { label: string; amount: number };
 
 /** What the process page shows for one batch quantity. */
 export type CostBreakdown = {
@@ -30,6 +30,8 @@ export type CostBreakdown = {
   operations: CostLine[];
   other: CostLine[];
   cost: number;
+  /** cost per piece at this batch quantity */
+  unitCost: number;
   /** what the quotation would total — a typed price wins, each line in whole cents */
   price: number;
   /** share of the price that is margin; null without a price */
@@ -103,10 +105,10 @@ type Pick = { candidateIdx: number; batchQty: number };
 
 /** The same description twice — two BOM lines of the same part, or one line across two candidates
  *  picked at the same quantity — is one row: this reads as a cost breakdown, not a line dump. */
-function addLine(m: Map<string, CostLine>, kind: CostLine["kind"], label: string, amount: number) {
-  const cur = m.get(`${kind}|${label}`);
+function addLine(m: Map<string, CostLine>, label: string, amount: number) {
+  const cur = m.get(label);
   if (cur) cur.amount += amount;
-  else m.set(`${kind}|${label}`, { kind, label, amount });
+  else m.set(label, { label, amount });
 }
 
 /**
@@ -126,7 +128,9 @@ export function costBreakdown(
   return batches.map((batchQty) => {
     const at = selection.filter((s) => s.batchQty === batchQty);
     const pairs = at.length ? at : [{ candidateIdx: selection[0]?.candidateIdx ?? 0, batchQty }];
-    const lines = new Map<string, CostLine>();
+    const materials = new Map<string, CostLine>();
+    const operations = new Map<string, CostLine>();
+    const other = new Map<string, CostLine>();
     const acc = new Map<number, { cost: number; price: number; quantity: number; typed: boolean }>();
     let cost = 0;
     let price = 0;
@@ -135,9 +139,9 @@ export function costBreakdown(
       const outputs = cand?.perBatch.find((b) => b.batchQty === batchQty)?.outputs;
       if (!cand || !outputs) continue;
       const pm = pairMoney(model, lookups, cand.assignment, batchQty, tableRows, outputs);
-      for (const b of outputs.bom) addLine(lines, "material", b.desc.trim() || b.itemCode, b.lineTotal);
-      for (const o of outputs.ops) addLine(lines, "operation", o.resource, o.cost);
-      for (const o of outputs.other) addLine(lines, "other", o.label, o.amount * batchQty);
+      for (const b of outputs.bom) addLine(materials, b.desc.trim() || b.itemCode, b.lineTotal);
+      for (const o of outputs.ops) addLine(operations, o.resource, o.cost);
+      for (const o of outputs.other) addLine(other, o.label, o.amount * batchQty);
       cost += pm.cost;
       price += pm.value;
       for (const l of pm.lines) {
@@ -145,13 +149,12 @@ export function costBreakdown(
         acc.set(l.index, { cost: a.cost + l.cost, price: a.price + l.unitPrice * l.quantity, quantity: a.quantity + l.quantity, typed: a.typed || l.typed });
       }
     }
-    const all = [...lines.values()];
     return {
       batchQty,
-      materials: all.filter((l) => l.kind === "material"),
-      operations: all.filter((l) => l.kind === "operation"),
-      other: all.filter((l) => l.kind === "other"),
-      cost, price, margin: marginOf(price, cost),
+      materials: [...materials.values()],
+      operations: [...operations.values()],
+      other: [...other.values()],
+      cost, unitCost: cost / batchQty, price, margin: marginOf(price, cost),
       // several candidates at this quantity -> a quantity-weighted per-unit figure, which is what
       // the document averages to
       items: rows.map((_, i) => {

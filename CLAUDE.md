@@ -219,7 +219,9 @@ external rules are what a client may write.
 both processes: `transition()` locks the row and writes the status and its events in one
 transaction (it opens its own, then notifies after commit); `assertWritable(…, actor)` +
 `writableBy(side)` say who may edit in which status (an internal configuration only as a draft); an
-internal read never sees a client's draft (`internalVisible`). **One status, one lifecycle**: a request
+internal read never sees a client's draft (`internalVisible`). Staff's `reopen` (`configs.reopen`, only from `quoted`) takes a
+quoted project back — an internal one to draft, a request to in review — so its next quote PATCHes the
+open quotation in place; a reopened draft keeps `b1DocEntry`, so `configs.remove` refuses it. **One status, one lifecycle**: a request
 has the portal's steps before `quoted`, and from `quoted` on internal configurations and requests alike
 follow SAP — `advanceStep` moves the status to `ordered`/`delivered`/`invoiced` (forward only) with
 that step's event, at once on a copy (`postWrite`'s `stepAfterCopy`, any path: page, chat, MCP) and on
@@ -761,6 +763,9 @@ request.
   `U_CF_Key` on OQUT and OCRD, `U_CF_ItemCode` on QUT1. One row per kind is the install: B1 adds a
   marketing document's UDF to every document of its kind (verified live: OQUT's reached ORDR…, QUT1's
   every lines table). Creating one drops the tenant's stored schemas, which never expire on their own.
+  **Several picks are one offer**: `buildQuoteLines` orders them (candidate, batch) and sends every pair
+after the first as `LineType: dlt_Alternative`, which B1 leaves out of DocTotal — and so does
+`quotedValue`.
   `createQuote` (`config-quote.ts`) is create-**or-modify**: a reopened request re-quotes its open
   quotation in place (PATCH + If-Match + replaced lines + a rewritten key; a 412 whose re-read shows
   our key is the lost-response success), and posts a new one once B1 has closed it — then the hash

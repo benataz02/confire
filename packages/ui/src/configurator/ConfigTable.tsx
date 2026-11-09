@@ -1,7 +1,7 @@
 import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Button, CheckBox, Input, Option, Select } from "@ui5/webcomponents-react";
 import {
-  cellDefault, columnOptions, requiredColumn, COST_COL, ITEM_COL, PRICE_COL,
+  cellDefault, columnOptions, requiredColumn, COST_COL, ITEM_COL, PRICE_COL, QTY_COL,
   type ResolvedTable, type RowMoney, type TableColumn, type TableDef, type Val,
 } from "@confire/config-engine";
 import { CflField } from "../cfl/CflField.tsx";
@@ -223,8 +223,10 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
   // and a cell cuts what does not fit with an ellipsis, rather than squeezing to the table's 60px.
   // The floor is static (the header and the control), never the cell text, which would change per
   // commit and rebuild every cell.
+  // A sole items row ships the batch quantity itself (evalTableRows), so its quantity has nothing to say.
+  const soleItem = def.role === "items" && rows.length === 1;
   const columns = useMemo<ListColumn[]>(() => [
-    ...def.columns.map((c) => ({
+    ...def.columns.filter((c) => !(soleItem && c.key === QTY_COL)).map((c) => ({
       key: c.key, label: header(c), type: c.type, sortable: false, required: !readOnly && requiredColumn(def, c),
       // a value help carries two icons beside its code
       minWidth: floor(header(c), !readOnly && c.cell.kind === "options" && c.cell.ref.source === "query" ? 200 : 140),
@@ -233,7 +235,7 @@ export function ConfigTable({ def, rows, evaluated, tables, onChange, disabled, 
       { key: COST_COL, label: costHeader, type: "number" as const, sortable: false, minWidth: floor(costHeader, 140) },
       { key: PRICE_COL, label: priceHeader, type: "number" as const, sortable: false, minWidth: floor(priceHeader, 140) },
     ] : []),
-  ], [def, readOnly, showMoney, costHeader, priceHeader]);
+  ], [def, readOnly, showMoney, costHeader, priceHeader, soleItem]);
   const state = useMemo<GridState>(() => ({ columns: columns.map((c) => c.key), sortBy: [], groupBy: [] }), [columns]);
   const data = useMemo(() => rows.map((r, i) => ({ ...r, [IDX]: i })), [rows]);
 

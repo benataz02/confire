@@ -1,6 +1,6 @@
 import { evaluate, parse } from "./dsl";
 import type { Entries, ModelDef, Option, Param, ResolvedLookups, TableRows, Val } from "./model";
-import { derivedKey, derivedColumns, refKeyCols, requiredColumn, structureId } from "./model";
+import { derivedKey, derivedColumns, refKeyCols, requiredColumn, structureId, QTY_COL } from "./model";
 import { evalTableRows, tableAggregates } from "./tables";
 
 export type Bindings = {
@@ -372,7 +372,9 @@ export function missingInputs(
     const evald = evalTableRows(t, rows, prop.values, lookups.tables);
     for (const c of t.columns) {
       if (!requiredColumn(t, c)) continue;
-      const answered = c.cell.kind === "formula" || (c.cell.kind === "options" && c.cell.ref.source !== "query");
+      // A sole items row's quantity is the batch's (evalTableRows), so it is never blank.
+      const answered = c.cell.kind === "formula" || (c.cell.kind === "options" && c.cell.ref.source !== "query")
+        || (t.role === "items" && c.key === QTY_COL && rows.length === 1);
       const empty = rows.flatMap((r, i) => (blank(answered ? evald[i]![c.key] : r[c.key]) ? [i + 1] : []));
       if (!empty.length) continue;
       const col = c.label || c.key;

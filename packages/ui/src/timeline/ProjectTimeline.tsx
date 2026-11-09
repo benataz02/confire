@@ -54,6 +54,8 @@ const KIND: Record<string, { title: (side: "internal" | "external") => string; i
   returned: { title: () => "UI_STATUS_CHANGES", icon: "edit", state: "Critical" },
   declined: { title: () => "UI_STATUS_DECLINED", icon: "decline", state: "Negative" },
   quoted: { title: () => "UI_EVT_QUOTED", icon: "sales-quote", state: "Positive" },
+  // Staff took the quoted project back to change it; the next quote updates the quotation.
+  reopened: { title: () => "UI_EVT_REOPENED", icon: "edit", state: "Information" },
   quote_accepted: { title: (s) => (s === "external" ? "UI_EVT_ACCEPTED_YOU" : "UI_EVT_ACCEPTED"), icon: "approvals", state: "Positive" },
   quote_declined: { title: (s) => (s === "external" ? "UI_EVT_DECLINED_YOU" : "UI_EVT_DECLINED_QUOTE"), icon: "cancel", state: "Critical" },
   comment: { title: () => "UI_EVT_COMMENT", icon: "comment" },

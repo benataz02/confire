@@ -241,6 +241,25 @@ describe.skipIf(!process.env.DATABASE_URL)("the configuration process", () => {
     expect(at20.items[1]).toMatchObject({ unitPrice: 4, typed: true });
   });
 
+  test("several batches are one offer: the smallest is regular, the rest B1 alternatives out of the total", async () => {
+    const s = await setup();
+    const id = await s.create();
+    await s.calc({ id, set: { size: "L" }, tables: { items: ITEMS } });
+    // picked largest first: the order of the picks must not decide which line is regular
+    const v = await call(router.configs.select, { projectId: id, selection: [{ candidateIdx: 0, batchQty: 20 }, { candidateIdx: 0, batchQty: 10 }] }, s.ctx);
+    const row = await load(id);
+    const { model, lookups } = await liveEngine(s.tenantId, row);
+    const q = buildQuoteLines(row, model.definition, lookups);
+    const at10 = v.costs.find((c) => c.batchQty === 10)!;
+    const n = at10.items.length;
+    expect(q.lines.slice(0, n).every((l) => l.LineType === undefined)).toBe(true);
+    expect(q.lines.slice(n).every((l) => l.LineType === "dlt_Alternative")).toBe(true);
+    expect(q.lines).toHaveLength(n * 2);
+    // what B1 totals — the regular lines — is what is stored as quotedValue/quotedCost
+    expect(q.value).toBeCloseTo(at10.price, 8);
+    expect(q.cost).toBeCloseTo(at10.cost, 8);
+  });
+
   test("a broken rule keeps the last calculation; fixing it prices again", async () => {
     const ruled: ModelDef = {
       ...PRICED,

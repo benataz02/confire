@@ -64,6 +64,10 @@ const TRANSITIONS = {
   decline: { from: ["submitted", "in_review"], to: "declined", side: "internal", kind: "declined", revise: true },
   // An internal-only configuration quotes straight from draft; a portal one only from review.
   quote: { from: ["in_review"], to: "quoted", side: "internal", kind: "quoted", revise: true },
+  // Staff take a quoted project back to change it (an internal one to draft, below): the next
+  // `quote` re-quotes its open quotation in place (createQuote's modify path), or replaces a closed one.
+  // Only from quoted: past it SAP has an order, which a re-quote would not reach.
+  reopen: { from: ["quoted"], to: "in_review", side: "internal", kind: "reopened" },
   quoteAccept: { from: ["quoted"], to: "quoted", side: "external", kind: "quote_accepted" },
   quoteDecline: { from: ["quoted"], to: "in_review", side: "external", kind: "quote_declined" },
 } as const satisfies Record<string, {
@@ -286,7 +290,8 @@ async function step(tx: Tx, o: Parameters<typeof transition>[0]) {
 
   const internalOnly = row.portalCardCode === null;
   const from: readonly ProjectStatus[] = o.action === "quote" && internalOnly ? ["draft"] : tr.from;
-  if (!from.includes(row.status) || (internalOnly && o.action !== "quote")) {
+  const to: ProjectStatus = o.action === "reopen" && internalOnly ? "draft" : tr.to;
+  if (!from.includes(row.status) || (internalOnly && o.action !== "quote" && o.action !== "reopen")) {
     throw new ORPCError("CONFLICT", {
       message: t("PROJECT_MOVED_ON", statusWord(row.status)),
     });
@@ -313,7 +318,7 @@ async function step(tx: Tx, o: Parameters<typeof transition>[0]) {
   const now = new Date();
   await tx.update(configProject)
     .set({
-      status: tr.to, updatedAt: now,
+      status: to, updatedAt: now,
       // Accept takes the request only when nobody holds it: one reassigned before anyone accepted stays put.
       ...(o.action === "accept" ? { assigneeId: row.assigneeId ?? o.actor.userId } : {}),
       ...(o.action === "quoteAccept" ? { quoteResponse: "accepted" as const, quoteRespondedAt: now } : {}),
@@ -328,7 +333,7 @@ async function step(tx: Tx, o: Parameters<typeof transition>[0]) {
     tenantId: o.tenantId, projectId: row.id, kind: tr.kind, actor: o.actor,
     note: o.note?.trim() || null, payload: o.payload?.(row) ?? null,
   });
-  return { from: row.status, to: tr.to, eventId, revisedId };
+  return { from: row.status, to, eventId, revisedId };
 }
 
 /** Where a SAP step may come from: quoted, or an earlier step. */

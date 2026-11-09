@@ -90,17 +90,18 @@ describe("costBreakdown", () => {
       routing: [{ resource: "Laser", setupMin: "30", runMinPerUnit: "6", ratePerHour: "60" }],
     };
     const [m] = breakdown([{ candidateIdx: 0, batchQty: 3 }], withOps);
-    expect(m!.materials).toEqual([{ kind: "material", label: "Steel sheet", amount: 30 }]);
-    expect(m!.operations).toEqual([{ kind: "operation", label: "Laser", amount: 48 }]);
+    expect(m!.materials).toEqual([{ label: "Steel sheet", amount: 30 }]);
+    expect(m!.operations).toEqual([{ label: "Laser", amount: 48 }]);
     // same total the Items block splits over the grid
     expect(m!.cost).toBeCloseTo(78, 8);
+    expect(m!.unitCost).toBeCloseTo(26, 8);
     expect(m!.items.reduce((a, r) => a + (r ? r.lineCost : 0), 0)).toBeCloseTo(78, 8);
   });
 
   test("an unnamed BOM line falls back to its item code, and repeats merge", () => {
     const twice: ModelDef = { ...model, bom: [{ itemCode: '"SHEET"', qty: "1" }, { itemCode: '"SHEET"', qty: "2" }] };
     const [m] = breakdown([], twice);
-    expect(m!.materials).toEqual([{ kind: "material", label: "SHEET", amount: 90 }]); // (1 + 2) x 3 sheets
+    expect(m!.materials).toEqual([{ label: "SHEET", amount: 90 }]); // (1 + 2) x 3 sheets
   });
 
   test("a typed unit price wins over the split, the way the quotation does", () => {

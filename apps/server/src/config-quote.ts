@@ -79,9 +79,14 @@ export const QUOTE_HEADER = new Set(ENTITY_PROFILES.Quotations!.editable);
  * One selected (candidate, batch) pair is normally one line. With an items table it is n lines —
  * merge production yields several different items from one run, so the cost is joint and can only
  * be *split*, never computed per item. Each pair is priced by the engine's pairMoney, the same unit
- * the process page's Cost elements pane is drawn from, so the two cannot disagree. `value` is the
- * sum of the lines actually built, which makes the stored `quotedValue` and the posted document
- * agree by construction.
+ * the process page's Cost elements pane is drawn from, so the two cannot disagree.
+ *
+ * Several pairs are one offer at several quantities (or designs), not a sum: the first pair's lines
+ * are regular and every later pair's are B1 alternative lines (`LineType: dlt_Alternative`), which
+ * B1 leaves out of DocTotal. Pairs go in (candidate, batch) order — the commandId's — so the
+ * smallest batch of the first pick is the regular one whatever order the picks were made in.
+ * `value`/`cost` are the regular pair's alone, which keeps the stored `quotedValue` and the posted
+ * DocTotal agreeing by construction.
  */
 export function buildQuoteLines(
   project: ConfigProjectRow, model: ModelDef, lookups: ResolvedLookups, sapItems: SapItems = new Map(),
@@ -90,8 +95,10 @@ export function buildQuoteLines(
   const lines: Record<string, unknown>[] = [];
   let value = 0;
   let cost = 0;
+  let first = true;
 
-  for (const s of project.selection ?? []) {
+  const pairs = [...(project.selection ?? [])].sort((a, b) => a.candidateIdx - b.candidateIdx || a.batchQty - b.batchQty);
+  for (const s of pairs) {
     const cand = project.candidates[s.candidateIdx];
     if (!cand) continue;
     let pm;
@@ -103,8 +110,9 @@ export function buildQuoteLines(
       }
       throw e;
     }
-    cost += pm.cost;
-    value += pm.value;
+    // dlt_Regular is B1's default, so the regular pair sends no LineType and a one-pair quote is unchanged.
+    const alt = first ? {} : { LineType: "dlt_Alternative" };
+    if (first) { cost = pm.cost; value = pm.value; first = false; }
 
     const desc =
       Object.entries(cand.assignment)
@@ -113,7 +121,7 @@ export function buildQuoteLines(
         .join(", ") || "Configuration";
 
     if (!pm.lines.length) {
-      lines.push({ ItemCode: model.pricing.quoteItemCode, ItemDescription: desc, Quantity: s.batchQty, UnitPrice: pm.outputs.unitPrice });
+      lines.push({ ItemCode: model.pricing.quoteItemCode, ItemDescription: desc, Quantity: s.batchQty, UnitPrice: pm.outputs.unitPrice, ...alt });
       continue;
     }
     for (const l of pm.lines) {
@@ -127,6 +135,7 @@ export function buildQuoteLines(
         Quantity: l.quantity,
         // the salesperson's price wins over the split: the grid showed it, so the document carries it
         UnitPrice: l.unitPrice,
+        ...alt,
       };
       for (const [col, field] of Object.entries(items?.map ?? {})) {
         if (item && col === ITEM_COL) continue;

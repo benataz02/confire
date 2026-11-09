@@ -18,7 +18,7 @@ import {
 import { PatchZ, SourcesZ, defaultQuantities, patchColumns, patchProblems, touchesEngine, writtenOf } from "../../config-patch.ts";
 import { configView } from "../../config-view.ts";
 import { applySelection, createQuote, quoteDraft, validateSelectionPairs } from "../../config-quote.ts";
-import { assertWritable, internalVisible, recordCreated, writableBy } from "../../project-lifecycle.ts";
+import { assertWritable, internalVisible, recordCreated, transition, writableBy } from "../../project-lifecycle.ts";
 import { t } from "../../i18n/index.ts";
 import { journeyOf, type JourneyInput } from "../../portal/journey.ts";
 import { projectProgress } from "../../project-timeline.ts";
@@ -314,6 +314,15 @@ export const configsRouter = {
 
   /** How far SAP has taken this project (advanceSapSteps, for one) — an internal configuration or a
    *  client's request alike: the page refetches `get` when its status moved. */
+  /** Take a quoted configuration — or a client's quoted request — back to edit it; its next quote
+   *  updates the SAP quotation in place (createQuote's modify path). */
+  reopen: userProcedure
+    .meta(openapi({ summary: "Reopen a quoted configuration", description: "Unlock a quoted configuration (back to draft) or a quoted client request (back to in review) so it can be changed and quoted again; the new quote updates the open SAP quotation. Only while quoted." }))
+    .input(z.object({ id: z.uuid() })).handler(async ({ input, context }) => {
+      const r = await transition({ tenantId: context.tenantId, projectId: input.id, action: "reopen", actor: { userId: context.userId, side: "internal" } });
+      return { status: r.to };
+    }),
+
   progress: userProcedure.input(z.object({ id: z.uuid() })).handler(({ input, context }) =>
     projectProgress(context.tenantId, input.id, { userId: context.userId, side: "internal" })),
 
@@ -332,7 +341,8 @@ export const configsRouter = {
       .where(and(
         inArray(configProject.id, input.ids),
         eq(configProject.tenantId, context.tenantId),
-        sql`(${configProject.status} <> 'draft' or ${isNotNull(configProject.portalCardCode)})`,
+        // a reopened draft still has its quotation in SAP: deleting it would orphan that document
+        sql`(${configProject.status} <> 'draft' or ${isNotNull(configProject.portalCardCode)} or ${isNotNull(configProject.b1DocEntry)})`,
       ))
       .limit(1);
     if (locked.length)

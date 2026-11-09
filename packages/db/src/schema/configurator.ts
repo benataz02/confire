@@ -165,7 +165,7 @@ export type ConfigProject = typeof configProject.$inferSelect;
 
 export const PROJECT_EVENT_KINDS = [
   "created", "submitted", "resubmitted", "withdrawn", "accepted", "returned", "declined", "revised",
-  "quoted", "quote_accepted", "quote_declined", "comment", "file", "assigned", "document_sent",
+  "quoted", "reopened", "quote_accepted", "quote_declined", "comment", "file", "assigned", "document_sent",
   "ordered", "delivered", "invoiced",
 ] as const;
 export type ProjectEventKind = (typeof PROJECT_EVENT_KINDS)[number];

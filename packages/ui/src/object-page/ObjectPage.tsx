@@ -185,6 +185,7 @@ function Page({ record: r, ...p }: PageProps & { record: ObjectRecord }) {
         ref={pageRef}
         hidePinButton
         mode={tabs ? "IconTabBar" : "Default"}
+        className={tabs ? "confire-tabs" : undefined}
         {...(tabs ? section.props : {})}
         titleArea={objectPageTitle({
           header: p.header, formData: r.formData, label, ctx: headerCtx,

@@ -179,6 +179,36 @@ describe("portal projects", () => {
     expect(await codeOf(call(portalRouter.projects.respondQuote, { id, accept: false }, s.portal))).toBe("CONFLICT");
   });
 
+  test("reopen: a quoted configuration goes back to draft, changes, and updates its SAP quotation in place", async () => {
+    const s = await setup();
+    const { id } = await call(router.configs.create, { modelId: s.model.id, name: "Internal", customer: { cardCode: "C1", cardName: "Acme" } }, s.staff);
+    const pick = async () => {
+      const { candidates } = await call(router.configs.calculate, { id }, s.staff);
+      await call(router.configs.select, { projectId: id, selection: candidates.rows[0]!.perBatch.map((b) => ({ candidateIdx: 0, batchQty: b.batchQty })) }, s.staff);
+    };
+    await call(router.configs.calculate, { id, set: { material: "steel" } }, s.staff);
+    await pick();
+    const first = await quote(s, id);
+    // two batch quantities: one offer, the second line an alternative B1 keeps out of DocTotal
+    const doc = agent.store.Quotations!.find((q) => q.DocEntry === first.posted.docEntry)!;
+    expect((doc.DocumentLines as { LineType?: string }[]).map((l) => l.LineType)).toEqual([undefined, "dlt_Alternative"]);
+
+    // Quoted: locked, and not reopenable twice.
+    expect(await codeOf(call(router.configs.calculate, { id, set: { material: "alu" } }, s.staff))).toBe("CONFLICT");
+    expect(await call(router.configs.reopen, { id }, s.staff)).toEqual({ status: "draft" });
+    expect(await codeOf(call(router.configs.reopen, { id }, s.staff))).toBe("CONFLICT");
+    // A reopened draft still has its quotation in SAP: never deleted from under it.
+    expect(await codeOf(call(router.configs.remove, { ids: [id] }, s.staff))).toBe("CONFLICT");
+
+    await call(router.configs.calculate, { id, set: { material: "alu" } }, s.staff);
+    await pick();
+    const second = await quote(s, id);
+    expect(second.draft.replaces).toEqual({ docEntry: first.posted.docEntry });
+    expect(second.posted).toMatchObject({ mode: "updated", docEntry: first.posted.docEntry });
+    expect(doc.U_CF_Key).toBe(second.draft.commandId);
+    expect((await events(id)).map((e) => e.kind)).toEqual(["created", "quoted", "reopened", "quoted"]);
+  });
+
   test("the fences: another company, a viewer, a refused input, staff-only notes, staff deletes", async () => {
     const s = await setup();
     const { id } = await s.create();
