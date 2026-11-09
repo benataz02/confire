@@ -111,7 +111,11 @@ export const BomLineZ = z.object({
 });
 
 export const OperationZ = z.object({
-  resource: z.string(),
+  // expr -> a Beas OperationId (spec 2026-11-08). Absent = a hand-written line with no catalog
+  // link: every model saved before operations existed, and every line in a workspace without Beas.
+  operationId: z.string().optional(),
+  // Plain text; empty = the catalog's ResourceId for the evaluated operation.
+  resource: z.string().optional(),
   // Plain text, not an expression, like BomLineZ.desc: what the operation does, for the salesperson.
   desc: z.string().optional(),
   condition: z.string().optional(),
@@ -119,6 +123,11 @@ export const OperationZ = z.object({
   runMinPerUnit: z.string(), // expr, minutes per unit
   ratePerHour: z.string(), // expr, cost per hour
 });
+
+/** The names a linked routing line's setup, run and rate formulas may read: the operation's
+ *  current catalog figures (ResolvedLookups.operations). Picking an operation writes them in, so
+ *  the line follows Beas the way a BOM line follows the price list — never a copied number. */
+export const OPERATION_VARS = ["beasSetup", "beasRun", "beasRate"] as const;
 
 export const HistoryMappingZ = z.object({
   param: KeyZ,
@@ -304,6 +313,9 @@ export const ModelDefZ = z.object({
     // survives into the cache. `priceList` then picks the line out of it. Named here rather than
     // built in, for the same reason `history.table` is: the query is the tenant's, defined once.
     itemTable: z.string().min(1).optional(),
+    // The tenant masterdata query (target beas, OperationsCatalog) whose cached rows carry the
+    // routing operations' times and rates. Required by checkModel once a routing line is linked.
+    operationTable: z.string().min(1).optional(),
   }),
   batchDefaults: z.array(z.number().int().positive()),
 });
@@ -330,7 +342,11 @@ export type ResolvedLookups = {
   /** B1 item code -> unit price in the model's `pricing.priceList`, read live on every resolve.
    *  Same seam as `tables`: the engine never learns where the number came from. */
   prices?: Record<string, number>;
+  /** Beas OperationId -> its catalog figures, read out of `pricing.operationTable`'s cache on
+   *  every resolve, like `prices`. Minutes and per hour, as Beas keeps them. */
+  operations?: Record<string, CatalogOperation>;
 };
+export type CatalogOperation = { desc: string; resource: string; setupMin: number; runMinPerUnit: number; ratePerHour: number };
 /** User-entered values only; absent key = open parameter. */
 export type Entries = Record<string, Val>;
 

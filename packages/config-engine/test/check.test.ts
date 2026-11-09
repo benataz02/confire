@@ -1,7 +1,7 @@
 import { describe, expect, it, test } from "bun:test";
-import { bomItemCodes, checkModel, referencedTables, renameTable, syncTables } from "../src/check";
+import { bomItemCodes, checkModel, referencedTables, renameTable, routingOperationIds, syncTables } from "../src/check";
 import { itemsTable, type ModelDef } from "../src/model";
-import { fieldGroup, model } from "./fixture";
+import { fieldGroup, linkedModel, model } from "./fixture";
 
 // The model's namespace: the manual price table it LOOKUPs, and the `Items` query its BOM is
 // costed from. The latter declares no columns on purpose — an Items read sends no $select, so the
@@ -371,5 +371,41 @@ describe("bomItemCodes", () => {
   it("yields nothing for a code only decidable at evaluation time", () => {
     expect(bomItemCodes(withItem('CONCAT("X", 1 + 1)'))).toEqual(["X"]);
     expect(bomItemCodes(withItem("1 + "))).toEqual([]); // unparseable: checkModel's problem
+  });
+});
+
+describe("Beas operations", () => {
+  const OPS = [...PRICES, { name: "ops", columns: [] }];
+  const linked = linkedModel();
+
+  test("a linked line may use the catalog names", () => {
+    expect(checkModel(linked, OPS)).toEqual([]);
+  });
+  test("a Beas name is refused on a line with no operation", () => {
+    const m = structuredClone(model);
+    m.routing[0]!.runMinPerUnit = "beasRun";
+    const issue = checkModel(m, PRICES).find((i) => i.path === "routing[0].runMinPerUnit");
+    expect(issue?.message).toBe("unknown identifier 'beasRun'");
+  });
+  test("the condition never gets them, linked or not", () => {
+    const m = linkedModel();
+    m.routing[2]!.condition = "beasSetup > 0";
+    expect(checkModel(m, OPS).map((i) => i.path)).toContain("routing[2].condition");
+  });
+  test("a linked line needs an operations source, and a known one", () => {
+    const none = { ...linked, pricing: { ...linked.pricing, operationTable: undefined } };
+    expect(checkModel(none, OPS).find((i) => i.path === "pricing.operationTable")?.message)
+      .toBe("a routing line linked to a Beas operation needs an operations masterdata query");
+    const unknown = { ...linked, pricing: { ...linked.pricing, operationTable: "nope" } };
+    expect(checkModel(unknown, OPS).find((i) => i.path === "pricing.operationTable")?.message).toBe("unknown table 'nope'");
+  });
+  test("routingOperationIds: literals and a parameter's domain, trimmed, once each", () => {
+    const m = linkedModel();
+    m.routing.push({ operationId: 'coated ? "ACA_AGUJEROS " : material', setupMin: "0", runMinPerUnit: "0", ratePerHour: "0" });
+    expect(routingOperationIds(m, { material: [{ value: "steel" }, { value: "alu" }] }).sort())
+      .toEqual(["ACA_AGUJEROS", "alu", "steel"]);
+  });
+  test("syncTables keeps the operations source fresh", () => {
+    expect(syncTables(linked).has("ops")).toBe(true);
   });
 });

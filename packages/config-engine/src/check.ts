@@ -1,5 +1,5 @@
 import { type Ast, assertCallArity, DslError, parse } from "./dsl";
-import { aggregateKey, derivedKey, historyFields, historyKey, type ModelDef, type TableDef, derivedColumns, refKeyCols, COST_COL, PRICE_COL, QTY_COL } from "./model";
+import { aggregateKey, derivedKey, historyFields, historyKey, type LookupRef, type ModelDef, type TableDef, derivedColumns, refKeyCols, COST_COL, PRICE_COL, QTY_COL, OPERATION_VARS } from "./model";
 
 export type Issue = { path: string; message: string; from?: number; to?: number };
 
@@ -121,6 +121,9 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   const derivedSet = new Set(derived);
   const base = new Set([...paramKeys, ...computedKeys, ...derived, ...aggregates]);
   const withQty = new Set([...base, "qty"]);
+  // A linked routing line's figures may read its operation's catalog figures; its condition may
+  // not — the operation has to be known before its figures are.
+  const withOps = new Set([...withQty, ...OPERATION_VARS]);
 
   const checkExpr = (src: string | undefined, path: string, allowed: Set<string>) => {
     if (src === undefined) return;
@@ -177,10 +180,12 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
     checkExpr(l.qty, `bom[${i}].qty`, withQty);
   });
   model.routing.forEach((o, i) => {
+    const figures = o.operationId === undefined ? withQty : withOps;
+    checkExpr(o.operationId, `routing[${i}].operationId`, withQty);
     checkExpr(o.condition, `routing[${i}].condition`, withQty);
-    checkExpr(o.setupMin, `routing[${i}].setupMin`, withQty);
-    checkExpr(o.runMinPerUnit, `routing[${i}].runMinPerUnit`, withQty);
-    checkExpr(o.ratePerHour, `routing[${i}].ratePerHour`, withQty);
+    checkExpr(o.setupMin, `routing[${i}].setupMin`, figures);
+    checkExpr(o.runMinPerUnit, `routing[${i}].runMinPerUnit`, figures);
+    checkExpr(o.ratePerHour, `routing[${i}].ratePerHour`, figures);
   });
   // 100% would divide the cost by zero; below 0 is selling under cost by design, which no shop sets
   // as its default.
@@ -196,6 +201,11 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
     issues.push({ path: "pricing.itemTable", message: "a model with a BOM needs an item masterdata query — it is where the prices are read from" });
   else if (model.pricing.itemTable && !tableCols.has(model.pricing.itemTable))
     issues.push({ path: "pricing.itemTable", message: `unknown table '${model.pricing.itemTable}'` });
+  // The same pair for the routing: a linked line's figures are read from this query's cache.
+  if (model.routing.some((o) => o.operationId !== undefined) && !model.pricing.operationTable)
+    issues.push({ path: "pricing.operationTable", message: "a routing line linked to a Beas operation needs an operations masterdata query" });
+  else if (model.pricing.operationTable && !tableCols.has(model.pricing.operationTable))
+    issues.push({ path: "pricing.operationTable", message: `unknown table '${model.pricing.operationTable}'` });
 
   // computed dependency cycles (computed -> computed edges only)
   const compSet = new Set(computedKeys);
@@ -249,30 +259,11 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
 
   // LOOKUP table names when statically known (first arg is a string literal)
   const tables = new Set(knownTables.map((t) => t.name));
-  const checkLookups = (src: string | undefined, path: string) => {
-    if (src === undefined) return;
-    let ast: Ast;
-    try {
-      ast = parse(src);
-    } catch {
-      return;
+  const checkLookups = (src: string, path: string) => {
+    for (const n of nodesOf(src)) {
+      const l = lookupTable(n);
+      if (l && !tables.has(l.name)) issues.push({ path, message: `unknown table '${l.name}'`, from: l.from, to: l.to });
     }
-    const walk = (n: Ast): void => {
-      if (n.t === "call") {
-        if (n.name === "LOOKUP" && n.args[0]?.t === "lit" && typeof n.args[0].v === "string" && !tables.has(n.args[0].v))
-          issues.push({ path, message: `unknown table '${n.args[0].v}'`, from: n.args[0].from, to: n.args[0].to });
-        n.args.forEach(walk);
-      } else if (n.t === "un") walk(n.e);
-      else if (n.t === "bin") {
-        walk(n.l);
-        walk(n.r);
-      } else if (n.t === "tern") {
-        walk(n.c);
-        walk(n.a);
-        walk(n.b);
-      }
-    };
-    walk(ast);
   };
   model.routing.forEach((o, i) => checkLookups(o.ratePerHour, `routing[${i}].ratePerHour`));
 
@@ -367,21 +358,11 @@ export function referencedTables(model: ModelDef): Set<string> {
   for (const t of model.tables ?? [])
     for (const c of t.columns)
       if (c.cell.kind === "options" && c.cell.ref.source !== "manual") out.add(c.cell.ref.table);
-  const walk = (n: Ast): void => {
-    if (n.t === "call") {
-      if (n.name === "LOOKUP" && n.args[0]?.t === "lit" && typeof n.args[0].v === "string") out.add(n.args[0].v);
-      n.args.forEach(walk);
-    } else if (n.t === "un") walk(n.e);
-    else if (n.t === "bin") { walk(n.l); walk(n.r); }
-    else if (n.t === "tern") { walk(n.c); walk(n.a); walk(n.b); }
-  };
-  for (const src of exprsOf(model)) {
-    try {
-      walk(parse(src));
-    } catch {
-      // an unparseable expression is checkModel's problem, not this one's
+  for (const src of exprsOf(model))
+    for (const n of nodesOf(src)) {
+      const l = lookupTable(n);
+      if (l) out.add(l.name);
     }
-  }
   return out;
 }
 
@@ -395,6 +376,7 @@ export function syncTables(model: ModelDef): Set<string> {
   const out = referencedTables(model);
   if (model.history?.table) out.add(model.history.table);
   if (model.pricing.itemTable) out.add(model.pricing.itemTable);
+  if (model.pricing.operationTable) out.add(model.pricing.operationTable);
   return out;
 }
 
@@ -407,8 +389,23 @@ export function syncTables(model: ModelDef): Set<string> {
  *  nothing here, and the line then costs 0 in computeOutputs, flagged `unpriced` — the process
  *  page names every such item in its messages, so a free material is never a silent one. */
 export function bomItemCodes(model: ModelDef, domains?: Record<string, { value: unknown }[]>): string[] {
+  return codesOf(model.bom.map((l) => l.itemCode), domains, false);
+}
+
+/** The Beas operations a resolve has to read catalog figures for — `bomItemCodes`' rule over the
+ *  routing lines' `operationId`. Trimmed: Beas pads its codes (char columns), and computeOutputs
+ *  trims the evaluated code the same way. */
+export function routingOperationIds(model: ModelDef, domains?: Record<string, { value: unknown }[]>): string[] {
+  return codesOf(model.routing.flatMap((o) => (o.operationId === undefined ? [] : [o.operationId])), domains, true);
+}
+
+/** The string literals in each expression, plus every value a bare identifier's domain holds. */
+function codesOf(exprs: string[], domains: Record<string, { value: unknown }[]> | undefined, trim: boolean): string[] {
   const out = new Set<string>();
-  const add = (v: unknown) => { if (typeof v === "string" && v) out.add(v); };
+  const add = (v: unknown) => {
+    const code = typeof v === "string" ? (trim ? v.trim() : v) : "";
+    if (code) out.add(code);
+  };
   const walk = (n: Ast): void => {
     if (n.t === "lit") add(n.v);
     else if (n.t === "ident") for (const o of domains?.[n.name] ?? []) add(o.value);
@@ -417,9 +414,9 @@ export function bomItemCodes(model: ModelDef, domains?: Record<string, { value: 
     else if (n.t === "bin") { walk(n.l); walk(n.r); }
     else if (n.t === "tern") { walk(n.c); walk(n.a); walk(n.b); }
   };
-  for (const l of model.bom) {
+  for (const src of exprs) {
     try {
-      walk(parse(l.itemCode));
+      walk(parse(src));
     } catch {
       // an unparseable expression is checkModel's problem, not this one's
     }
@@ -427,21 +424,106 @@ export function bomItemCodes(model: ModelDef, domains?: Record<string, { value: 
   return [...out];
 }
 
-/** Every expression string in a model, in no particular order. */
-function* exprsOf(model: ModelDef): Generator<string> {
-  for (const p of model.parameters)
-    for (const e of [p.defaultExpr, p.visibleWhen, p.requiredWhen, p.priceExpr]) if (e) yield e;
-  for (const c of model.computed) yield c.expr;
-  for (const s of model.structure.sections) {
-    if (s.visibleWhen) yield s.visibleWhen;
-    for (const g of s.groups) if (g.visibleWhen) yield g.visibleWhen;
+/** Every node of an expression, depth first; none for one that does not parse (checkModel's problem). */
+function nodesOf(src: string): Ast[] {
+  let ast: Ast;
+  try {
+    ast = parse(src);
+  } catch {
+    return [];
   }
-  for (const c of model.constraints) if (c.kind === "expr") { if (c.when) yield c.when; yield c.assert; }
-  for (const l of model.bom) for (const e of [l.itemCode, l.condition, l.qty]) if (e) yield e;
-  for (const o of model.routing)
-    for (const e of [o.condition, o.setupMin, o.runMinPerUnit, o.ratePerHour]) if (e) yield e;
-  // must include cell formulas, or referencedTables misses the masterdata a LOOKUP() there needs
-  // and it fails at runtime with "unknown table" while checkModel reports nothing.
-  for (const t of model.tables ?? [])
-    for (const c of t.columns) if (c.cell.kind === "formula") yield c.cell.expr;
+  const out: Ast[] = [];
+  const walk = (n: Ast): void => {
+    out.push(n);
+    if (n.t === "call") n.args.forEach(walk);
+    else if (n.t === "un") walk(n.e);
+    else if (n.t === "bin") { walk(n.l); walk(n.r); }
+    else if (n.t === "tern") { walk(n.c); walk(n.a); walk(n.b); }
+  };
+  walk(ast);
+  return out;
+}
+
+/** A LOOKUP's table when it is statically known (its first argument a string literal), with that
+ *  literal's span, quotes included: what a message points at and what a rename rewrites. */
+function lookupTable(n: Ast): { name: string; from: number; to: number } | undefined {
+  if (n.t !== "call" || n.name !== "LOOKUP") return undefined;
+  const a = n.args[0];
+  return a?.t === "lit" && typeof a.v === "string" ? { name: a.v, from: a.from, to: a.to } : undefined;
+}
+
+/** The model with every expression passed through `fn`, everything else as it was. The one list of
+ *  where a model keeps expressions: `exprsOf` reads it and `renameTable` rewrites through it, so a
+ *  new expression field added here is seen by both. It must include cell formulas and `basisExpr`,
+ *  or referencedTables misses the masterdata a LOOKUP() there needs and it fails at runtime with
+ *  "unknown table" while checkModel reports nothing. */
+function mapExprs(model: ModelDef, fn: (e: string) => string): ModelDef {
+  const over = <T extends object>(o: T, keys: readonly (keyof T)[]): T => {
+    const r = { ...o };
+    for (const k of keys) if (typeof r[k] === "string") (r as Record<keyof T, unknown>)[k] = fn(r[k] as string);
+    return r;
+  };
+  return {
+    ...model,
+    parameters: model.parameters.map((p) => over(p, ["defaultExpr", "visibleWhen", "requiredWhen", "priceExpr"])),
+    computed: model.computed.map((c) => over(c, ["expr"])),
+    structure: {
+      ...model.structure,
+      sections: model.structure.sections.map((s) => ({ ...over(s, ["visibleWhen"]), groups: s.groups.map((g) => over(g, ["visibleWhen"])) })),
+    },
+    constraints: model.constraints.map((c) => (c.kind === "expr" ? over(c, ["when", "assert"]) : c)),
+    bom: model.bom.map((l) => over(l, ["itemCode", "condition", "qty"])),
+    routing: model.routing.map((o) => over(o, ["operationId", "condition", "setupMin", "runMinPerUnit", "ratePerHour"])),
+    ...(model.tables
+      ? {
+          tables: model.tables.map((t): TableDef => ({
+            ...(t.role === "items" ? over(t, ["basisExpr"]) : t),
+            columns: t.columns.map((c) => (c.cell.kind === "formula" ? { ...c, cell: { ...c.cell, expr: fn(c.cell.expr) } } : c)),
+          })),
+        }
+      : {}),
+  };
+}
+
+/** A masterdata rename carried into a model: every place `syncTables` reads a table name from — a
+ *  domain or cell ref, a LOOKUP's literal table argument, the history and pricing queries — and
+ *  nowhere else (the same text as a LOOKUP key or another argument is a value, not the table). */
+export function renameTable(model: ModelDef, from: string, to: string): ModelDef {
+  const ref = (r: LookupRef): LookupRef => (r.source !== "manual" && r.table === from ? { ...r, table: to } : r);
+  const expr = (src: string) =>
+    nodesOf(src)
+      .map(lookupTable)
+      .filter((l): l is NonNullable<typeof l> => l?.name === from)
+      // right to left, so an earlier span keeps its offsets
+      .sort((a, b) => b.from - a.from)
+      .reduce((s, l) => s.slice(0, l.from) + JSON.stringify(to) + s.slice(l.to), src);
+  const m = mapExprs(model, expr);
+  return {
+    ...m,
+    parameters: m.parameters.map((p) => (p.domain?.kind === "options" ? { ...p, domain: { ...p.domain, ref: ref(p.domain.ref) } } : p)),
+    ...(m.tables
+      ? {
+          tables: m.tables.map((t): TableDef => ({
+            ...t,
+            columns: t.columns.map((c) => (c.cell.kind === "options" ? { ...c, cell: { ...c.cell, ref: ref(c.cell.ref) } } : c)),
+          })),
+        }
+      : {}),
+    ...(m.history?.table === from ? { history: { ...m.history, table: to } } : {}),
+    pricing: {
+      ...m.pricing,
+      ...(m.pricing.itemTable === from ? { itemTable: to } : {}),
+      ...(m.pricing.operationTable === from ? { operationTable: to } : {}),
+    },
+  };
+}
+
+/** Every expression string in a model. */
+function exprsOf(model: ModelDef): string[] {
+  const out: string[] = [];
+  mapExprs(model, (e) => {
+    out.push(e);
+    return e;
+  });
+  return out;
 }

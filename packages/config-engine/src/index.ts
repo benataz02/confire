@@ -1,10 +1,10 @@
-export { ModelDefZ, LookupRefZ, ParamZ, ConstraintZ, BomLineZ, OperationZ, ValZ, EntriesZ, ODataQueryZ, QuerySourceZ, KeyZ, TableColumnZ, TableDefZ, TableRowsZ, GroupZ, structureId, aggregateKey, historyKey, historyFields, derivedColumns, displayColumns, refKeyCols, refRows, derivedKey, itemsTable, placedTables, requiredColumn, REQUIRED_ITEM_COLS, QTY_COL, ITEM_COL, ITEM_NAME_COL, COST_COL, PRICE_COL } from "./model";
-export type { Constraint, Entries, Group, LookupRef, ModelDef, ODataQuery, Option, Param, QuerySource, ResolvedLookups, ResolvedTable, ItemsTable, TableColumn, TableDef, TableRows, Val } from "./model";
+export { ModelDefZ, LookupRefZ, ParamZ, ConstraintZ, BomLineZ, OperationZ, ValZ, EntriesZ, ODataQueryZ, QuerySourceZ, KeyZ, TableColumnZ, TableDefZ, TableRowsZ, GroupZ, structureId, aggregateKey, historyKey, historyFields, derivedColumns, displayColumns, refKeyCols, refRows, derivedKey, itemsTable, placedTables, requiredColumn, REQUIRED_ITEM_COLS, QTY_COL, ITEM_COL, ITEM_NAME_COL, COST_COL, PRICE_COL, OPERATION_VARS } from "./model";
+export type { CatalogOperation, Constraint, Entries, Group, LookupRef, ModelDef, ODataQuery, Option, Param, QuerySource, ResolvedLookups, ResolvedTable, ItemsTable, TableColumn, TableDef, TableRows, Val } from "./model";
 export { cellDefault, columnOptions, evalTableRows, itemSplit, splitShares, splitWeights, tableAggregates, typedPrice } from "./tables";
 export type { ItemLine } from "./tables";
 export { DslError, evaluate, parse, tokenize } from "./dsl";
 export type { Ast, Scope } from "./dsl";
-export { checkModel, FUNCS, RESERVED_LINE_FIELDS, aggregateKeysOf, bomItemCodes, referencedTables, syncTables } from "./check";
+export { checkModel, FUNCS, RESERVED_LINE_FIELDS, aggregateKeysOf, bomItemCodes, referencedTables, renameTable, routingOperationIds, syncTables } from "./check";
 export type { Issue, KnownTable } from "./check";
 export { bindings, domainOf, missingInputs, paramPrices, propagate } from "./propagate";
 export type { Bindings, CostElement, DomainOption, Notice, Propagation } from "./propagate";

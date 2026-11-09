@@ -114,3 +114,12 @@ export const lookups: ResolvedLookups = {
   // What the server's price-list read hands the engine: item code -> unit price.
   prices: { "COND-steel": 1.5, "COND-alu": 2.5, "COAT-1": 0.8 },
 };
+
+/** The fixture with a third routing line linked to a Beas operation, and the operations source it
+ *  needs. Its figures are the catalog's, the run time scaled by the cross-section. */
+export const linkedModel = (): ModelDef => {
+  const m = structuredClone(model);
+  m.routing.push({ operationId: '"ACA_AGUJEROS"', setupMin: "beasSetup", runMinPerUnit: "beasRun * section", ratePerHour: "beasRate" });
+  m.pricing.operationTable = "ops";
+  return m;
+};
