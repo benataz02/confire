@@ -2,13 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { FlexBox, Input, MultiComboBox, MultiComboBoxItem, Option, Select, StepInput, Text, TextArea } from "@ui5/webcomponents-react";
 import { historyFields, historyKey, type ModelDef, type Param, type TableColumn } from "@confire/config-engine";
 import { BatchInput } from "@confire/ui/configurator/ConfiguratorForm.tsx";
-import { CflField } from "@confire/ui/cfl/CflField.tsx";
-import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
 import type { Control, ControlContext } from "@confire/ui/types.ts";
 import { orpc } from "../../orpc.ts";
 import { useI18n } from "../../i18n.ts";
 import { ExprInput } from "./ExprInput.tsx";
-import { asCode } from "./lines.ts";
 import { rowVars, type TableCols } from "./exprHelpers.ts";
 import { MasterdataQuerySelect } from "./MasterdataQuerySelect.tsx";
 
@@ -51,7 +48,6 @@ export const UI_META: Record<Param["ui"], { text: string; icon: string; hint: st
   slider: { text: "MODEL_UI_SLIDER", icon: "measure", hint: "MODEL_UI_SLIDER_HINT" },
 };
 
-const ITEM = { dialogConfig: cfl.items() };
 
 /** historyKey's inverse: a dot only ever separates the items grid from its column. */
 const fromKey = (key: string): Pick<HistoryMapping, "param" | "table"> => {
@@ -82,7 +78,6 @@ const expr = (o: { scope: (c: ControlContext) => ModelDef; tables: TableCols[] }
 export function builderControls(o: { scope: (c: ControlContext) => ModelDef; tables: TableCols[] }): Record<string, Control> {
   const e = o;
   const none = () => undefined;
-  const qty = () => ["qty"];
   return {
     text: text(() => ""),
     optionalText: text(() => undefined),
@@ -106,7 +101,6 @@ export function builderControls(o: { scope: (c: ControlContext) => ModelDef; tab
     expr: expr(e, none),
     paramDefault: (c) => ((c.formData as Param).ui === "multicombo" ? <MultiDefault ctx={c} /> : expr(e, none)(c)),
     exprArea: expr(e, none, 3),
-    lineExpr: expr(e, qty),
     // A grid row's formula: the model's names plus this table's own columns.
     rowExpr: expr(e, (c) => rowVars((c.formData.columns as TableColumn[] | undefined) ?? [], o.tables), 2),
     batches: (c) => (
@@ -119,15 +113,6 @@ export function builderControls(o: { scope: (c: ControlContext) => ModelDef; tab
           accessibleName={c.field.label ?? c.field.key} onChange={(v) => c.onChange(v)} />
       </FlexBox>
     ),
-    // Picking fills the description too; both stay editable afterwards.
-    itemCode: (c) => {
-      const v = String(c.value ?? "");
-      return (
-        <CflField config={ITEM} accessibleName={c.field.label} value={asCode(v) ?? (v.trim() || null)} error={c.error}
-          onValueChange={(code) => c.onChange(code === null || code === "" ? '""' : JSON.stringify(String(code)))}
-          onRowSelect={(row) => { if (row.ItemName != null) c.patch({ desc: String(row.ItemName) }); }} />
-      );
-    },
     paramUi: (c) => <ParamUi c={c} />,
     historyDisplay: (c) => <HistoryDisplay c={c} table={o.scope(c).history?.table} />,
     historyColumn: (c) => <HistoryColumn c={c} table={o.scope(c).history?.table} />,

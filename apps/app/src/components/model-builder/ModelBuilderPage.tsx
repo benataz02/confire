@@ -14,6 +14,7 @@ import { builderControls } from "./controls.tsx";
 import { ParamsTab } from "./ParamsTab.tsx";
 import { PreviewOverlay } from "./PreviewOverlay.tsx";
 import { CombinationTables } from "./CombinationTables.tsx";
+import { LineTables } from "./LineTables.tsx";
 import { usePreviewLookups } from "./usePreviewLookups.ts";
 
 /** The model: the shared Object Page over the scope's record, in tabs, always editing. */
@@ -100,6 +101,14 @@ export function ModelBuilderPage() {
         subsectionTemplates={{
           combinations: (ctx) => (
             <CombinationTables draft={defOf(ctx.formData)} lookups={lookups.data}
+              update={(fn) => ctx.update(withDef(fn))} />
+          ),
+          bom: (ctx) => (
+            <LineTables kind="bom" draft={defOf(ctx.formData)} lookups={lookups.data} tables={m.tableCols}
+              update={(fn) => ctx.update(withDef(fn))} />
+          ),
+          routing: (ctx) => (
+            <LineTables kind="routing" draft={defOf(ctx.formData)} lookups={lookups.data} tables={m.tableCols}
               update={(fn) => ctx.update(withDef(fn))} />
           ),
           // The query's columns are stored when its masterdata row is saved; until then nothing here
