@@ -1,4 +1,4 @@
-import type { Entries, Val } from "@confire/config-engine";
+import type { Entries, Group, ModelDef, Val, Visual } from "@confire/config-engine";
 
 // Pure helpers for ConfiguratorForm, kept UI-free so they're unit-testable without the UI5 runtime.
 
@@ -43,3 +43,9 @@ export const GENERAL_SECTION = "__general";
 /** The batch field's message anchor — the server's `batches_required` key. `__`: data-param shares
  *  its namespace with parameter keys. */
 export const BATCHES_PARAM = "__batches";
+
+/** The tenant visual a field group lists, if any — checkModel allows one per group. */
+export function groupVisual(model: ModelDef, group: Group): Visual | undefined {
+  const keys = new Set(group.params);
+  return (model.visuals ?? []).find((v) => keys.has(v.key));
+}

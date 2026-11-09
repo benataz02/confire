@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { addBatch, displayValue, multiItem } from "./formHelpers.ts";
+import { itemsTable, type ModelDef, type Visual } from "@confire/config-engine";
+import { addBatch, displayValue, groupVisual, multiItem } from "./formHelpers.ts";
 
 const yn = [
   { value: true, label: "Yes" },
@@ -34,4 +35,25 @@ test("multiItem: the chip is the label, the stored value is the key", () => {
 test("addBatch: positive integers only, de-duped, ascending", () => {
   expect(addBatch([10], " 5 ")).toEqual([5, 10]);
   for (const raw of ["", "  ", "-3", "0", "2.5", "abc", "10"]) expect(addBatch([10], raw)).toEqual([10]);
+});
+
+// The engine's test model (packages/config-engine/test/fixture.ts `withSheet`), copied.
+const SHEET_INPUTS = { sheetLength: "1000", sheetWidth: "500", pieceLength: "120", pieceWidth: "70", gapX: "3", gapY: "3", marginX: "10", marginY: "10" };
+const withSheet = (over: Partial<Visual> = {}): ModelDef => ({
+  name: "Sheet",
+  parameters: [{ key: "width", label: "Width", type: "number", ui: "input" }],
+  structure: { sections: [{ key: "s", title: "S", groups: [
+    { key: "g", title: "G", params: ["width", "hoja"] },
+    { key: "it", title: "Items", params: ["items"] },
+  ] }] },
+  computed: [{ key: "perSheet", expr: "hoja_piezas" }],
+  tables: [itemsTable()], constraints: [], bom: [], routing: [],
+  pricing: { margin: 20, quoteItemCode: "Q", priceList: 1 },
+  batchDefaults: [1],
+  visuals: [{ key: "hoja", kind: "hera.sheetLayout", inputs: SHEET_INPUTS, ...over }],
+});
+
+test("groupVisual finds the visual a group lists, not a parameter or table", () => {
+  expect(groupVisual(withSheet(), { key: "g", title: "", params: ["width", "hoja"] })?.key).toBe("hoja");
+  expect(groupVisual(withSheet(), { key: "it", title: "", params: ["items"] })).toBeUndefined();
 });

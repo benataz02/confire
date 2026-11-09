@@ -6,6 +6,7 @@ import {
 import {
   placedTables, structureId,
   type FieldOption, type FormState, type Group, type LookupRef, type ModelDef, type ResolvedTable, type RowMoney, type TableRows, type Val,
+  type Visual,
 } from "@confire/config-engine";
 import { CflField } from "../cfl/CflField.tsx";
 import { cfl, type QueryScope } from "../cfl/cfl-configs.ts";
@@ -13,7 +14,8 @@ import { TABLE_ITEM } from "../list-report/Grid.tsx";
 import { FORM_LAYOUT } from "../formLayout.ts";
 import { ConfigTable } from "./ConfigTable.tsx";
 import type { Row } from "./configTableOps.ts";
-import { addBatch, BATCHES_PARAM, displayValue, multiItem } from "./formHelpers.ts";
+import { addBatch, BATCHES_PARAM, displayValue, groupVisual, multiItem } from "./formHelpers.ts";
+import { VisualPanel } from "./visuals/index.tsx";
 import { useUiI18n } from "../i18n.ts";
 
 // The one form the builder preview, the configuration page and the portal render. The pages take
@@ -369,9 +371,34 @@ function SectionForm({ model, form, tables, rows, onChange, onRowsChange, disabl
     </FormGroup>
   );
 
+  // A group showing a tenant visual: its fields in one half, the picture in the other — stacked when
+  // the form is narrow, the picture alone across the width when no field is shown. One full-width
+  // FormGroup (the tables' TABLE_ITEM trick) holds a nested one-column Form, because a FormGroup's
+  // items cannot share a row with anything else. A table the group also lists breaks out below.
+  const visualGroup = (g: Group, gi: number, visual: Visual) => {
+    const fields = g.params.filter((k) => !defOf(k) && model.parameters.some((p) => p.key === k) && fieldOf(k).visible);
+    return [
+      <FormGroup key={`${g.key}:${gi}:v`} headerText={head(g.title)} colSpan={FORM_LAYOUT}>
+        <FormItem className={TABLE_ITEM} data-param={visual.key}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(18rem, 1fr))", gap: "1rem", inlineSize: "100%", alignItems: "start" }}>
+            {fields.length ? (
+              <Form layout="S1 M1 L1 XL1" accessibleName={g.title || title} {...formMode}>
+                <FormGroup>{fields.map(fieldItem)}</FormGroup>
+              </Form>
+            ) : null}
+            <VisualPanel kind={visual.kind} view={form.visuals?.[visual.key]} />
+          </div>
+        </FormItem>
+      </FormGroup>,
+      ...g.params.flatMap((k) => { const def = defOf(k); return def ? [tableGroup(k, def)] : []; }),
+    ];
+  };
+
   return (
     <Form headerText={headerText} accessibleName={headerText ? undefined : title} layout={FORM_LAYOUT} {...formMode}>
       {groups.flatMap((g, gi) => {
+        const visual = groupVisual(model, g);
+        if (visual) return visualGroup(g, gi, visual);
         // Runs of fields share the group's FormGroup; each table breaks out into one of its own.
         // The group's title heads whichever comes first.
         const runs: (string | string[])[] = [];
