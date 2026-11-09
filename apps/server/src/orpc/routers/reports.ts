@@ -3,7 +3,7 @@ import { openapi } from "@orpc/openapi";
 import { z } from "zod";
 import { FilterValueZ, ReportDefZ, type FilterValue, type ReportDef } from "@confire/db";
 import { userProcedure } from "../base.ts";
-import { tenantCompany, viaB1 } from "../../b1.ts";
+import { viaB1 } from "../../b1.ts";
 import { ownThread, withThread } from "../../assistant/threads.ts";
 import { summarize } from "../../reports/aggregate.ts";
 import { ReportInvalid, runReport } from "../../reports/run.ts";
@@ -39,7 +39,7 @@ export const reportsRouter = {
       // Run first: a refused definition leaves a general chat general (no empty report behind it).
       const result = await run(context, input.definition);
       const reportId = thread.reportId ?? await adoptReport(context.tenantId, context.userId, thread.id);
-      await storeRun(reportId, result, input.definition);
+      await storeRun(context.tenantId, reportId, result, input.definition);
       return summarize(result);
     }),
 
@@ -54,7 +54,7 @@ export const reportsRouter = {
     const r = await getReport(context.tenantId, context.userId, input.id);
     if (!r.definition) throw new ORPCError("BAD_REQUEST", { message: t("REPORT_NOT_DRAFTED") });
     const result = await run(context, r.definition, input.filters);
-    if (!input.filters) await storeResult(r.id, result, r.definition);
+    if (!input.filters) await storeResult(context.tenantId, r.id, result, r.definition);
     return result;
   }),
 
@@ -69,23 +69,22 @@ export const reportsRouter = {
   /** Under the chat's lease: never while it answers (THREAD_BUSY). The chat goes with the report. */
   delete: userProcedure.input(Id).handler(async ({ input, context }) => {
     const r = await getReport(context.tenantId, context.userId, input.id);
-    await withThread(r.threadId, () => deleteReport(r.id));
+    await withThread(r.threadId, () => deleteReport(context.tenantId, r.id));
   }),
 
   /** The home's Reports group: each saved report's headline (its first KPI) from its last run — no
    *  SAP call here, nor behind it: a report reads SAP only when its page opens or Refreshes, which
-   *  stores the run the tile shows — hidden when that run read another company than the agent serves now. */
+   *  stores the run the tile shows — none when that run read another company than the agent serves now
+   *  (sap_cache's company rule). */
   tiles: userProcedure.handler(async ({ context }) => {
     const reports = await savedReports(context.tenantId, context.userId);
-    const company = await tenantCompany(context.tenantId);
     return reports.map((r) => {
       const kpi = r.lastResult?.widgets.find((w): w is KpiResult => w.kind === "kpi");
-      const fresh = !!r.lastResult && r.lastResult.company === company;
       return {
         id: r.id, title: r.title, subtitle: r.definition?.subtitle ?? null,
         // No good/bad colour: whether a figure going down is bad depends on the measure (overdue
         // invoices falling is good news), which the definition does not say.
-        value: fresh ? kpi?.value ?? null : null, format: kpi?.format ?? "number", currency: r.lastResult?.currency ?? null,
+        value: kpi?.value ?? null, format: kpi?.format ?? "number", currency: r.lastResult?.currency ?? null,
       };
     });
   }),

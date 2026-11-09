@@ -117,7 +117,7 @@ export const ReportDefZ = z.object({
 export type ReportDef = z.infer<typeof ReportDefZ>;
 
 /** A user's report. `definition` null: a New report page nothing was drafted on yet. `saved`: on the
- *  home page. `lastResult` is the last run's ReportResult — the tile's figure, never SAP's live word. */
+ *  home page. Its last run, the tile's figure, is its `report` entry in sap_cache. */
 export const assistantReport = pgTable("assistant_report", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: text("tenant_id").notNull(),
@@ -125,8 +125,6 @@ export const assistantReport = pgTable("assistant_report", {
   title: text("title").notNull().default(""),
   definition: jsonb("definition").$type<ReportDef>(),
   saved: boolean("saved").notNull().default(false),
-  lastResult: jsonb("last_result").$type<unknown>(),
-  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index("assistant_report_user_idx").on(t.tenantId, t.userId, t.updatedAt)]);

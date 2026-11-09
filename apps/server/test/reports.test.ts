@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
-import { db, assistantReport, configModel, configProject, sapConnection } from "@confire/db";
+import { and, eq } from "drizzle-orm";
+import { db, assistantReport, configModel, configProject, sapCache, sapConnection } from "@confire/db";
 import { router } from "../src/orpc/router.ts";
 import { auth } from "../src/auth.ts";
 import { serve } from "../src/serve.ts";
@@ -128,12 +128,17 @@ describe.skipIf(!process.env.DATABASE_URL)("reports", () => {
 
   test("delete mid-run is THREAD_BUSY; after, the report and its chat are gone", async () => {
     const w = await world();
+    await call(router.reports.set, { definition: DEF }, w.chat);
+    const entryOf = () => db.select().from(sapCache)
+      .where(and(eq(sapCache.tenantId, w.tenantId), eq(sapCache.kind, "report"), eq(sapCache.key, w.r.id)));
+    expect(await entryOf()).toHaveLength(1);
     const lease = await takeLease(w.r.threadId);
     expect(await code(call(router.reports.delete, { id: w.r.id }, w.staff))).toBe("THREAD_BUSY");
     await releaseLease(w.r.threadId, lease);
     await call(router.reports.delete, { id: w.r.id }, w.staff);
     expect(await code(ownThread(w.tenantId, w.u.userId, w.r.threadId))).toBe("NOT_FOUND");
     expect(await db.select().from(assistantReport).where(eq(assistantReport.id, w.r.id))).toEqual([]);
+    expect(await entryOf()).toEqual([]);
   });
 
   test("the chat list names a report's chat by its report", async () => {
@@ -174,7 +179,7 @@ describe.skipIf(!process.env.DATABASE_URL)("reports", () => {
     const old = await call(router.reports.get, { id: w.r.id }, w.staff);
     agent.store["Quotations#apply"] = [{ sum_DocTotal: 7 }];
     await call(router.reports.set, { definition: { ...DEF, title: "Only Spain" } }, w.chat);
-    await storeResult(w.r.id, old.lastResult!, old.definition!);
+    await storeResult(w.tenantId, w.r.id, old.lastResult!, old.definition!);
     const now = await call(router.reports.get, { id: w.r.id }, w.staff);
     expect(now.lastResult!.widgets[0]).toMatchObject({ value: 7 });
   });
