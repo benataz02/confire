@@ -107,7 +107,8 @@ export default function CflDialog({ config, initialSearch, multiSelect, onSelect
       fetchPage(client, src, { ...request, cursor: pageParam, count: pageParam === undefined }),
     initialPageParam: undefined as string | number | undefined,
     getNextPageParam: (last: { next?: string | number }) => last.next,
-    enabled: src.kind === "masterdata" || !meta.isPending,
+    // Only an entity has metadata to wait for: a masterdata or Beas source declares its columns.
+    enabled: src.kind !== "entity" || !meta.isPending,
   });
 
   const rowId = (r: Row) => String(r[key] ?? "");

@@ -42,6 +42,18 @@ export async function fetchPage(client: UiSource["client"], source: CflSource, r
     return { rows: page.rows, total: page.total, next: page.nextCursor };
   }
   const eq = req.filter?.find((f) => f.op === "eq" && !Array.isArray(f.value));
+  if (source.kind === "beas") {
+    if (!client.masterdata) throw new Error("A Beas value help needs the masterdata client");
+    const page = await client.masterdata.queryPage({
+      target: "beas",
+      query: { entitySet: source.entitySet, orderby: source.orderby, ...(source.filter ? { filter: source.filter } : {}) },
+      ...(req.select?.length ? { columns: req.select } : {}),
+      ...(req.search?.trim() ? { search: req.search.trim(), searchCols: req.searchFields } : {}),
+      ...(typeof req.cursor === "number" ? { cursor: req.cursor } : {}),
+      ...(eq ? { match: { col: eq.field, value: eq.value as string | number } } : {}),
+    });
+    return { rows: toRows(page.columns, page.rows), next: page.nextSkip, columns: page.columns };
+  }
   const input = {
     modelId: source.modelId,
     table: source.table,
@@ -57,4 +69,6 @@ export async function fetchPage(client: UiSource["client"], source: CflSource, r
 /** A stable cache identity for a source — the user-state key of its dialog (`cfl:<source>`) and the
  *  head of every query key a value help mints. */
 export const sourceKey = (s: CflSource): string =>
-  s.kind === "entity" ? s.entitySet : `${s.modelId}:${s.table}${s.where ? `:${JSON.stringify(s.where)}` : ""}`;
+  s.kind === "entity" ? s.entitySet
+  : s.kind === "beas" ? `beas:${s.entitySet}`
+  : `${s.modelId}:${s.table}${s.where ? `:${JSON.stringify(s.where)}` : ""}`;

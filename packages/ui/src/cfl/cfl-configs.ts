@@ -147,6 +147,38 @@ export const cfl = {
     ...o,
   }),
 
+  /** The Beas operations catalog — the model builder's routing pick. Padded codes come back
+   *  trimmed (the server's Beas branch); the figures shown are what picking fills in. */
+  beasOperations: (o: Overrides = {}): CflDialogConfig => ({
+    title: "Beas operation",
+    source: { kind: "beas", entitySet: "OperationsCatalog", orderby: "OperationId" },
+    keyField: "OperationId",
+    columns: [
+      { key: "OperationId", width: 160 },
+      { key: "Description" },
+      { key: "ResourceId" },
+      { key: "SetupTime" },
+      { key: "ProductionTime" },
+      { key: "CostRate" },
+    ],
+    searchFields: ["OperationId", "Description"],
+    ...o,
+  }),
+
+  /** Beas resources still in use — a routing line's resource. */
+  beasResources: (o: Overrides = {}): CflDialogConfig => ({
+    title: "Beas resource",
+    source: { kind: "beas", entitySet: "Resource", orderby: "ResourceId", filter: "Active eq true" },
+    keyField: "ResourceId",
+    columns: [
+      { key: "ResourceId", width: 160 },
+      { key: "ResourceDescription" },
+      { key: "ResourceGroup" },
+    ],
+    searchFields: ["ResourceId", "ResourceDescription"],
+    ...o,
+  }),
+
   /**
    * A configurator query table. Key and label are the ref's convention (refKeyCols: 1st column,
    * 2nd column) against the masterdata row's own column list; the dialog's headers and hidden

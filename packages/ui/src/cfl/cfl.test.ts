@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { cfl, keyFieldOf, keysToTokens, tokensToKeys } from "./cfl-configs.ts";
 import { exists, findRow, probeRequest } from "./existence.ts";
+import { fetchPage, sourceKey } from "./cfl-provider.ts";
 import { canOpenRoute, entityPath, showLink } from "../navigation.ts";
 import type { CflFieldConfig } from "../types.ts";
 import type { UiSource } from "../source.tsx";
@@ -90,4 +91,16 @@ test("entityPath: <route>/<key>, trimmed; a composite key as JSON", () => {
   expect(entityPath("/b1/Items", " A1 ")).toBe("/b1/Items/A1");
   expect(entityPath("/b1/Orders/", 12)).toBe("/b1/Orders/12");
   expect(decodeURIComponent(entityPath("/b1/X", { Code: "A", Line: 1 }))).toBe('/b1/X/{"Code":"A","Line":1}');
+});
+
+test("a Beas source pages masterdata.queryPage: search, exact probe, offset cursor", async () => {
+  const calls: unknown[] = [];
+  const client = { masterdata: { queryPage: async (i: unknown) => { calls.push(i); return { columns: ["OperationId"], rows: [["A"]], nextSkip: 50 }; } } } as unknown as UiSource["client"];
+  const src = cfl.beasOperations().source;
+  const page = await fetchPage(client, src, { search: "aguj", searchFields: ["OperationId"], cursor: 50 });
+  expect(page).toEqual({ rows: [{ OperationId: "A" }], next: 50, columns: ["OperationId"] });
+  expect(calls[0]).toEqual({ target: "beas", query: { entitySet: "OperationsCatalog", orderby: "OperationId" }, search: "aguj", searchCols: ["OperationId"], cursor: 50 });
+  await fetchPage(client, cfl.beasResources().source, { filter: [{ field: "ResourceId", op: "eq", value: "ACA" }] });
+  expect(calls[1]).toMatchObject({ query: { entitySet: "Resource", orderby: "ResourceId", filter: "Active eq true" }, match: { col: "ResourceId", value: "ACA" } });
+  expect(sourceKey(src)).toBe("beas:OperationsCatalog");
 });

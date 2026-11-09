@@ -18,6 +18,8 @@ export type UiSource = {
     entities: Pick<Client["entities"], "rows" | "neighbor" | "print">;
     /** The configurator's value help pages here. The portal plugs its own `projects.queryPage` in. */
     configs: Pick<Client["configs"], "queryPage">;
+    /** Live Beas reads for a `beas` value-help source — the staff app's model builder only. */
+    masterdata?: Pick<Client["masterdata"], "queryPage">;
   };
   orpc: {
     entities: Pick<Utils["entities"], "metadata" | "one" | "create" | "update" | "neighbor">;

@@ -89,7 +89,11 @@ export type FilterField = {
  *  or a masterdata query table paged through configs.queryPage. */
 export type CflSource =
   | { kind: "entity"; entitySet: string }
-  | { kind: "masterdata"; modelId: string; table: string; where?: Extract<LookupRef, { source: "query" }>["where"] };
+  | { kind: "masterdata"; modelId: string; table: string; where?: Extract<LookupRef, { source: "query" }>["where"] }
+  /** A live Beas entity set, paged through the admin-only masterdata.queryPage (the model builder's
+   *  pickers). Beas pages only in a fixed order, hence `orderby`; `filter` is OData declared in code
+   *  (`Active eq true`), never user input. */
+  | { kind: "beas"; entitySet: string; orderby: string; filter?: string };
 
 /** Value-help doc §2. `keyField ?? columns[0].key` is the key everywhere. */
 export type CflDialogConfig = {
