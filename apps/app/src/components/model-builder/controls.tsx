@@ -8,6 +8,7 @@ import type { Control, ControlContext } from "@confire/ui/types.ts";
 import { orpc } from "../../orpc.ts";
 import { useI18n } from "../../i18n.ts";
 import { ExprInput } from "./ExprInput.tsx";
+import { asCode } from "./lines.ts";
 import { rowVars, type TableCols } from "./exprHelpers.ts";
 import { MasterdataQuerySelect } from "./MasterdataQuerySelect.tsx";
 
@@ -50,11 +51,6 @@ export const UI_META: Record<Param["ui"], { text: string; icon: string; hint: st
   slider: { text: "MODEL_UI_SLIDER", icon: "measure", hint: "MODEL_UI_SLIDER_HINT" },
 };
 
-// An item code is still an expression — the value help just writes the common case, a quoted
-// literal. `asCode` reads that case back out so the picker can show what was picked; anything
-// else (a ternary, a parameter) has no single code and is shown as the expression it is.
-const LITERAL = /^\s*"([^"\\]*)"\s*$/;
-const asCode = (expr: string): string | undefined => LITERAL.exec(expr)?.[1];
 const ITEM = { dialogConfig: cfl.items() };
 
 /** historyKey's inverse: a dot only ever separates the items grid from its column. */
