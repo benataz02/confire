@@ -5,7 +5,7 @@ import { VISUALS, visualOutputKey, visualsFor } from "@confire/config-engine";
 import { ObjectPage } from "@confire/ui/object-page/ObjectPage.tsx";
 import { PageError } from "@confire/ui/object-page/ObjectPageSkeleton.tsx";
 import type { Row } from "@confire/ui/types.ts";
-import { commitVisual, fromVisualRecord, toVisualRecord, visualIssues, visualSections } from "../../features/model/visual.ts";
+import { commitVisual, fromVisualRecord, toVisualRecord, visualIssues, visualSections, withoutStub } from "../../features/model/visual.ts";
 import { useI18n } from "../../i18n.ts";
 import type { Translate } from "./builderMessages.ts";
 import { builderControls } from "./controls.tsx";
@@ -61,7 +61,11 @@ export function VisualPage({ search }: { search: TableSearch }) {
           );
         },
       }}
-      onLeave={back}
+      // A visual just added and left without a formula goes back out (see withoutStub).
+      onLeave={() => {
+        m.editModel((d) => withoutStub(d, initial.key));
+        return back();
+      }}
       onSave={async (_diff, { formData }) => {
         m.saveModel(commitVisual(m.def, initial.key, fromVisualRecord(formData)));
         await back();

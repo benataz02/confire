@@ -2,6 +2,7 @@ import { checkModel, VISUALS, type ModelDef, type Visual, type VisualCalc } from
 import type { RecordIssues } from "@confire/ui/object-page/useObjectRecord.ts";
 import type { Row, Section } from "@confire/ui/types.ts";
 import { issueText, type TableCols } from "../../components/model-builder/exprHelpers.ts";
+import { deleteNodes } from "../../components/model-builder/structureOps.ts";
 import { keyProblem } from "./table.ts";
 
 // One tenant visual of the open model, as a record of its own: key, title, kind, and one formula per
@@ -98,4 +99,14 @@ export function visualIssues(r: Row, draft: ModelDef, tables: TableCols[], opene
     fields[`${INPUT}${name}`] ??= issueText(issue, v.inputs[name] ?? "", t);
   }
   return { fields, other: [] };
+}
+
+/** The draft without this visual if it never got a formula: Add puts an empty visual in the tree and
+ *  opens its page, so leaving that page without a Save must take it back out — an empty one fails
+ *  the check and would block the model's Save. A visual with any formula stays (its issues say what
+ *  is left). */
+export function withoutStub(d: ModelDef, key: string): ModelDef {
+  const v = (d.visuals ?? []).find((x) => x.key === key);
+  if (!v || Object.values(v.inputs).some((src) => src.trim())) return d;
+  return deleteNodes(d, [{ kind: "visual", key }]);
 }

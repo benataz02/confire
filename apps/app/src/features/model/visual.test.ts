@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { commitVisual, fromVisualRecord, toVisualRecord, visualIssues } from "./visual.ts";
+import { commitVisual, fromVisualRecord, toVisualRecord, visualIssues, withoutStub } from "./visual.ts";
 import { SHEET_INPUTS, withSheet } from "./visualTestModel.ts";
 
 const t = (key: string, ...params: string[]) => [key, ...params].join(" ");
@@ -23,4 +23,12 @@ test("commitVisual writes the visual back, a rename following into its group", (
   const d = commitVisual(withSheet(), "hoja", { ...hoja, key: "sheet" });
   expect(d.visuals!.map((v) => v.key)).toEqual(["sheet"]);
   expect(d.structure.sections[0]!.groups[0]!.params).toEqual(["width", "sheet"]);
+});
+
+test("leaving a visual never given a formula drops it from the draft; one with a formula stays", () => {
+  const stub = withSheet({ inputs: {} });
+  expect(withoutStub(stub, "hoja").visuals).toEqual([]);
+  expect(withoutStub(stub, "hoja").structure.sections[0]!.groups[0]!.params).toEqual(["width"]);
+  expect(withoutStub(withSheet({ inputs: { sheetLength: " " } }), "hoja").visuals).toEqual([]);
+  expect(withoutStub(withSheet(), "hoja")).toEqual(withSheet());
 });
