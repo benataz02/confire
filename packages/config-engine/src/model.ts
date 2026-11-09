@@ -298,7 +298,7 @@ export const ModelDefZ = z.object({
     })
     .optional(),
   // No currency here: it is B1's, fixed when the company database is created, so it belongs to the
-  // tenant rather than to each model — sap_connection.localCurrency, served on `me`.
+  // tenant rather than to each model — its `currency` entry in sap_cache, served on `me`.
   pricing: z.object({
     // Share of the price, in percent: price = unit cost / (1 - margin / 100). checkModel keeps it
     // in [0, 100). A configuration may override it (config_project.margin).

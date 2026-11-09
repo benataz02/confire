@@ -1,13 +1,12 @@
 import { createHash } from "node:crypto";
-import { eq } from "drizzle-orm";
-import { db, sapConnection } from "@confire/db";
 import { B1Error, COMPANY_CHANGED, rowsOf, type B1Transport } from "@confire/b1";
 import { tenantConnector } from "./b1.ts";
+import { cached, entry } from "./sap-cache.ts";
 
 // The home's open-document counts, one per SAP document tile. A `$count` over a document set takes
 // SAP seconds, and the agent's one session answers one call at a time, so the four of them held every
 // other SAP call behind them for half a minute. Instead one stored SQL query counts all four in one
-// call, and its answer is kept on `sap_connection` for the whole workspace for TTL_MS.
+// call, and its answer is kept in sap_cache for the whole workspace for ten minutes.
 
 /** Entity set → its header table and the ObjType B1 writes on every row of that table. Open is
  *  DocStatus 'O', which is what the tile's list filters on (`DocumentStatus eq 'bost_Open'`). */
@@ -28,8 +27,6 @@ export const OPEN_COUNTS_SQL = Object.values(DOCS)
  *  an older server is still running. ponytail: superseded entries stay in SAP. Delete them by hand if
  *  they ever pile up. */
 export const OPEN_COUNTS_CODE = `CF_OC_${createHash("sha1").update(OPEN_COUNTS_SQL).digest("hex").slice(0, 8)}`;
-
-const TTL_MS = 10 * 60_000;
 
 /** By entity set. Column names are matched case-insensitively, because HANA may upper-case them. */
 export function countsOf(rows: Record<string, unknown>[]): Record<string, number> {
@@ -64,7 +61,7 @@ async function byCount(b1: B1Transport): Promise<Record<string, number>> {
  *  cases the `$count` reads would fail the same way. */
 const refused = (e: unknown) => e instanceof B1Error && e.status >= 400 && e.status < 500 && e.code !== COMPANY_CHANGED;
 
-async function refresh(tenantId: string): Promise<Record<string, number>> {
+async function read(tenantId: string): Promise<{ company: string | null; data: Record<string, number> }> {
   const conn = await tenantConnector(tenantId);
   const counts = await bySql(conn.b1).catch((e: unknown) => {
     if (!refused(e)) throw e;
@@ -72,31 +69,18 @@ async function refresh(tenantId: string): Promise<Record<string, number>> {
     return byCount(conn.b1);
   });
   // Under the company the call carried (`Connector.companyDb`), not a second read of it.
-  await db.update(sapConnection).set({ openCounts: { company: conn.companyDb, at: new Date().toISOString(), counts } })
-    .where(eq(sapConnection.tenantId, tenantId));
-  return counts;
+  return { company: conn.companyDb, data: counts };
 }
 
-const inflight = new Map<string, Promise<Record<string, number>>>();
-
-/** The cached counts while they are fresh and from the agent's current company. Otherwise SAP is
- *  read once, and every caller asking meanwhile shares that one read. If SAP fails, the last counts
- *  of the same company are better than none. ponytail: the in-flight Map is per process, so two
- *  staff processes may each read SAP once. */
+/** The counts while they are fresh (10 min, sap-cache.ts LIFETIME_MS) and of the agent's current
+ *  company. Otherwise SAP is read once, and every caller asking meanwhile shares that one read. If
+ *  SAP fails, the last counts of the same company are better than none. */
 export async function openCounts(tenantId: string): Promise<Record<string, number>> {
-  const [row] = await db.select({ company: sapConnection.companyDb, cached: sapConnection.openCounts })
-    .from(sapConnection).where(eq(sapConnection.tenantId, tenantId)).limit(1);
-  const cached = row?.cached?.company === row?.company ? row?.cached : null;
-  if (cached && Date.now() - Date.parse(cached.at) < TTL_MS) return cached.counts;
-  let run = inflight.get(tenantId);
-  if (!run) {
-    run = refresh(tenantId).finally(() => inflight.delete(tenantId));
-    inflight.set(tenantId, run);
-  }
   try {
-    return await run;
+    return await cached(tenantId, "open_counts", "", () => read(tenantId));
   } catch (e) {
-    if (cached && !(e instanceof B1Error && e.code === COMPANY_CHANGED)) return cached.counts;
+    const last = e instanceof B1Error && e.code === COMPANY_CHANGED ? null : await entry<Record<string, number>>(tenantId, "open_counts", "");
+    if (last?.data) return last.data;
     throw e;
   }
 }

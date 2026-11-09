@@ -14,16 +14,9 @@ export const sapConnection = pgTable("sap_connection", {
   /** The company the agent last said it serves. The agent owns it (agent.json `companyDb`): Confire
    *  sends it on every call and adopts the agent's answer when they differ (b1.ts `adoptCompany`). */
   companyDb: text("company_db"),
-  /** B1's local currency (OADM.MainCurncy), read once from CompanyService_GetAdminInfo. A company's
-   *  local currency is fixed when its database is created, so — like entity_meta below — there is
-   *  no TTL; null only means "not read yet". */
-  localCurrency: text("local_currency"),
   /** The engine `/print` uses (print spec §5.1): the SAP API Gateway, or Direct — Crystal run by
    *  the agent's confire-print.exe — only once the agent reports it set up (`sap.setPrintEngine`). */
   printEngine: text("print_engine", { enum: ["gateway", "crystal"] }).notNull().default("gateway"),
-  /** The home's open-document counts, one read shared by the whole workspace (open-counts.ts): by
-   *  entity set, with the company that answered and when — a count of another company is no count. */
-  openCounts: jsonb("open_counts").$type<{ company: string | null; at: string; counts: Record<string, number> }>(),
   status: text("status", { enum: ["ok", "error"] }).notNull().default("ok"),
   lastOkAt: timestamp("last_ok_at", { withTimezone: true }),
   lastError: text("last_error"),

@@ -7,7 +7,7 @@ import { and, eq, gt, like } from "drizzle-orm";
 import { db, organization, sapConnection, verification } from "@confire/db";
 import { agentPost } from "@confire/b1";
 import { adoptCompany, agentTarget, tenantConnector, type Connector } from "./b1.ts";
-import { forget } from "./sap-cache.ts";
+import { forget, put } from "./sap-cache.ts";
 import { DEDUP_UDF } from "./config-quote.ts";
 import { ITEM_UDF } from "./doc-copy.ts";
 import { agentHost, cloudflareConfig, provisionAgent } from "./cloudflare.ts";
@@ -214,9 +214,8 @@ export async function agentStatus(tenantId: string) {
     void ensureUdfs(tenantId, conn);
     const cur = (data as { LocalCurrency?: unknown } | null)?.LocalCurrency;
     const lastOkAt = new Date();
-    await db.update(sapConnection)
-      .set({ status: "ok", lastOkAt, lastError: null, ...(typeof cur === "string" && cur ? { localCurrency: cur } : {}) })
-      .where(eq(sapConnection.tenantId, tenantId));
+    if (typeof cur === "string" && cur) await put(tenantId, "currency", [{ key: "", data: cur }], { company: conn.companyDb });
+    await db.update(sapConnection).set({ status: "ok", lastOkAt, lastError: null }).where(eq(sapConnection.tenantId, tenantId));
     return {
       ...base, paired: true, connected: true, version: health.version, companyDb: health.companyDb, services: servicesOf(health),
       updateAvailable: isNewer(bundledAgentVersion, health.version), lastOkAt, error: null,

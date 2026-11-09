@@ -6,7 +6,7 @@ import {
   type AgentTarget, type B1Transport, type Connector,
 } from "@confire/b1";
 import { decryptSecret } from "./crypto.ts";
-import { forget } from "./sap-cache.ts";
+import { cached, forget } from "./sap-cache.ts";
 import { DEFAULT_PAGE, type QueryRunner } from "./lookups.ts";
 import { t } from "./i18n/index.ts";
 
@@ -34,9 +34,9 @@ export async function agentTarget(tenantId: string): Promise<AgentTarget> {
  * Follow a company switch made on the SAP server (spec 2026-10-21 §6.2): the agent is the authority
  * on which company it serves, and Confire adopts its answer — from a 409 COMPANY_CHANGED, a health
  * check or a pairing. Once, however many calls hit the 409 together: the `is distinct from` update
- * is what only one of them wins. The winner clears every cache of the old company's data, each of
- * which refills on its own: the local currency on the next `me`, entity schemas on the next read,
- * masterdata rows through their TTL (synced_at null = stale).
+ * is what only one of them wins. The winner forgets the tenant's sap_cache, every entry of which
+ * refills on its own: the local currency on the next `me`, entity schemas on the next read,
+ * masterdata rows through their TTL (no entry = stale).
  *
  * Quotations posted before companies were recorded (dev only — spec A15) get the first company
  * adopted. `portal_settings.leadSeries` is a setting, not a cache: it names a series of the old
@@ -44,7 +44,7 @@ export async function agentTarget(tenantId: string): Promise<AgentTarget> {
  */
 export async function adoptCompany(tenantId: string, companyDb: string): Promise<boolean> {
   return db.transaction(async (tx) => {
-    const [row] = await tx.update(sapConnection).set({ companyDb, localCurrency: null })
+    const [row] = await tx.update(sapConnection).set({ companyDb })
       .where(and(eq(sapConnection.tenantId, tenantId), sql`${sapConnection.companyDb} is distinct from ${companyDb}`))
       .returning({ tenantId: sapConnection.tenantId });
     if (!row) return false;
@@ -83,9 +83,8 @@ export const quotationIn = (p: { b1DocEntry: number | null; b1Company: string | 
 
 /** The tenant's B1 local currency — what every money figure in the app is denominated in.
  *
- *  Read through `sap_connection.localCurrency`: B1 offers no way to change a company's local
- *  currency once the database exists, so one successful read is cached forever and there is no
- *  TTL to get wrong. Populated lazily rather than at sign-in, because better-auth has no sign-in
+ *  A `currency` entry in sap_cache: B1 offers no way to change a company's local currency once the
+ *  database exists, so one successful read is kept forever and there is no TTL to get wrong. Populated lazily rather than at sign-in, because better-auth has no sign-in
  *  hook and, more to the point, logging in must not depend on the customer's agent being up.
  *
  *  Never throws, for the same reason: `me` calls this on every cold load, and a tenant whose
@@ -95,19 +94,13 @@ export const quotationIn = (p: { b1DocEntry: number | null; b1Company: string | 
  *  Layer base, which is exactly the URL readEntitySet builds when there are no query options. It
  *  answers with a single object, not a collection, so there is no `rowsOf` here. */
 export async function tenantCurrency(tenantId: string): Promise<string | null> {
-  const [row] = await db
-    .select({ localCurrency: sapConnection.localCurrency })
-    .from(sapConnection)
-    .where(eq(sapConnection.tenantId, tenantId))
-    .limit(1);
-  if (!row) return null;
-  if (row.localCurrency) return row.localCurrency;
   try {
-    const { data } = await (await tenantConnector(tenantId)).b1.readEntitySet("CompanyService_GetAdminInfo");
-    const cur = (data as { LocalCurrency?: unknown } | null)?.LocalCurrency;
-    if (typeof cur !== "string" || !cur) return null;
-    await db.update(sapConnection).set({ localCurrency: cur }).where(eq(sapConnection.tenantId, tenantId));
-    return cur;
+    return await cached(tenantId, "currency", "", async () => {
+      const conn = await tenantConnector(tenantId);
+      const cur = ((await conn.b1.readEntitySet("CompanyService_GetAdminInfo")).data as { LocalCurrency?: unknown } | null)?.LocalCurrency;
+      if (typeof cur !== "string" || !cur) throw new Error("no LocalCurrency");
+      return { company: conn.companyDb, data: cur };
+    });
   } catch {
     return null;
   }

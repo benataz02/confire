@@ -5,7 +5,7 @@ import { put } from "../src/sap-cache.ts";
 import { adoptCompany, tenantConnector, viaB1 } from "../src/b1.ts";
 import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
-import { call, makePortalSeat, makePortalUser, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
+import { call, makePortalSeat, makePortalUser, makeTenant, makeUser, seedCache, tenantHeaders, TEST_MODEL } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
 // A company switch made on the SAP server (spec 2026-10-21 §6.2): the agent refuses a call built for
@@ -24,7 +24,7 @@ describe("following a company switch", () => {
     agent.company.db = "SBODEMO";
     const t = await makeTenant();
     await connectTenant(t.tenantId, agent);
-    await db.update(sapConnection).set({ localCurrency: "EUR" }).where(eq(sapConnection.tenantId, t.tenantId));
+    await seedCache(t.tenantId, "currency", "", "EUR");
     await put(t.tenantId, "schema", [{ key: "Items", data: { name: "Items", keys: [], fields: [], navigations: [] } }], { company: "SBODEMO" });
     const [md] = await db.insert(configMasterdata).values({
       tenantId: t.tenantId, name: "items", kind: "query", syncedAt: new Date(), rowCount: 1,
@@ -42,7 +42,7 @@ describe("following a company switch", () => {
     expect((results[0] as PromiseRejectedResult).reason).toMatchObject({ code: "CONFLICT", message: "SAP company changed to OTHER — try again." });
     expect(agent.calls.length).toBe(before);
 
-    expect(await conn(t.tenantId)).toMatchObject({ companyDb: "OTHER", localCurrency: null });
+    expect(await conn(t.tenantId)).toMatchObject({ companyDb: "OTHER" });
     expect(await db.select().from(configMasterdataRow).where(eq(configMasterdataRow.tenantId, t.tenantId))).toEqual([]);
     expect((await db.select().from(configMasterdata).where(eq(configMasterdata.id, md!.id)))[0]).toMatchObject({ syncedAt: null, rowCount: 0 });
     expect(await db.select().from(sapCache).where(eq(sapCache.tenantId, t.tenantId))).toEqual([]);
@@ -58,7 +58,7 @@ describe("following a company switch", () => {
     const t = await makeTenant();
     await connectTenant(t.tenantId, agent);
     // A known currency, so drafting makes no SAP call of its own.
-    await db.update(sapConnection).set({ localCurrency: "EUR" }).where(eq(sapConnection.tenantId, t.tenantId));
+    await seedCache(t.tenantId, "currency", "", "EUR");
     const admin = await makeUser("admin", t.tenantId);
     const client = await makePortalUser();
     await makePortalSeat(t.tenantId, client.userId, "buyer");
@@ -104,7 +104,7 @@ describe("following a company switch", () => {
 
     // A switch while a re-quote is on its way: refused before SAP, then a new quotation in the new one.
     // (Each adoption cleared the currency; with it unknown, drafting would read SAP and learn first.)
-    await db.update(sapConnection).set({ localCurrency: "EUR" }).where(eq(sapConnection.tenantId, t.tenantId));
+    await seedCache(t.tenantId, "currency", "", "EUR");
     agent.company.db = "OTHER";
     const updates = agent.calls.filter((c) => c.route === "/update").length;
     const stale = await draft(); // still believes SBODEMO: no SAP call to find out otherwise

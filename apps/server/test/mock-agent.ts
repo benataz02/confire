@@ -61,6 +61,8 @@ function operationOf(method: string, path: string, headers: Record<string, strin
   if (!m) return { route: `/unknown ${method} ${target}`, body: {} };
   const [, entitySet, rawKey, action] = m;
   const key = rawKey === undefined ? undefined : keyOf(rawKey);
+  // A stored SQL query run: `SQLQueries('<code>')/List`, paged like a collection.
+  if (method === "GET" && entitySet === "SQLQueries" && action === "List") return { route: "/sql", body: { entitySet, key, query, target, qs } };
   if (method === "GET") return key === undefined ? { route: "/entity-set", body: { entitySet, query, target, qs } } : { route: "/entity", body: { entitySet, key, query } };
   if (method === "POST" && action) return { route: "/action", body: { entitySet, key, name: action } };
   if (method === "POST") return { route: "/create", body: { entitySet, data, prefer: headers.Prefer } };
@@ -219,6 +221,11 @@ export function startMockAgent(store: MockStore = {}): MockAgent {
             })));
           // Paged only when asked (a report's fallback read); the doc-chain walk sends `$top` alone.
           return Response.json({ status: 200, data: body.query?.maxPageSize !== undefined ? page(value, body) : { value } });
+        }
+        case "/sql": {
+          // Answers once the query exists (a POST to SQLQueries made it), from `SQLQueries#<code>`.
+          if (!rows.some((r) => r.SqlCode === body.key)) return fail(404, -2028, "No matching records found");
+          return Response.json({ status: 200, data: page(store[`SQLQueries#${body.key}`] ?? [], body) });
         }
         case "/print": {
           if (!["Quotations", "Orders", "DeliveryNotes", "Invoices"].includes(body.entity))
