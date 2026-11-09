@@ -8,6 +8,7 @@ import { resolveLookups } from "../../lookups.ts";
 import { knownTables } from "./masterdata.ts";
 import { masterdataRows } from "../../config-project.ts";
 import { ensureFresh, rowCache } from "../../masterdata-sync.ts";
+import { ensurePriceList, priceListOf } from "../../price-list.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { copyName } from "../../copy-name.ts";
 import { t } from "../../i18n/index.ts";
@@ -71,6 +72,8 @@ export const modelsRouter = {
           portal: input.portal, portalPricing: input.portalPricing,
         })
         .returning();
+      // The model's prices start filling now, off the save's path (price-list.ts).
+      ensurePriceList(context.tenantId, priceListOf(input.definition));
       return ins!;
     }),
 
@@ -88,7 +91,7 @@ export const modelsRouter = {
         ...(input.portal === undefined ? {} : { portal: input.portal }),
         ...(input.portalPricing === undefined ? {} : { portalPricing: input.portalPricing }),
       };
-      return db.transaction(async (tx) => {
+      const saved = await db.transaction(async (tx) => {
         const fence = and(eq(configModel.id, input.id), eq(configModel.tenantId, context.tenantId));
         const [row] = await tx.select({ definition: configModel.definition, updatedAt: configModel.updatedAt })
           .from(configModel).where(fence).for("update");
@@ -97,13 +100,17 @@ export const modelsRouter = {
         const changed = !isEmptyPatch(input.patch);
         const definition = changed ? applyModelPatch(row.definition, input.patch) : row.definition;
         if (changed) assertValid(definition, known);
-        if (!changed && !Object.keys(portal).length) return { updatedAt: row.updatedAt };
+        const priceList = priceListOf(definition);
+        if (!changed && !Object.keys(portal).length) return { updatedAt: row.updatedAt, priceList };
         const [updated] = await tx.update(configModel)
           .set({ ...portal, ...(changed ? { name: definition.name, definition, updatedAt: new Date() } : {}) })
           .where(fence)
           .returning({ updatedAt: configModel.updatedAt });
-        return updated!;
+        return { updatedAt: updated!.updatedAt, priceList };
       });
+      // After the commit, off the save's path: a list the model now names, missing or stale, fills.
+      ensurePriceList(context.tenantId, saved.priceList);
+      return { updatedAt: saved.updatedAt };
     }),
 
   // Copy under the first free name. Server-side so the stored definition is what gets copied,

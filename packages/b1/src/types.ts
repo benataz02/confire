@@ -83,7 +83,7 @@ export interface B1Transport {
   readNext(nextLink: string, maxPageSize?: number): Promise<B1Response>;
   crossJoin(spec: CrossJoinSpec): Promise<B1Response>;
   /** Runs a stored `SQLQueries` entry, `GET SQLQueries('<code>')/List`. */
-  sqlQuery(code: string): Promise<B1Response>;
+  sqlQuery(code: string, o?: { maxPageSize?: number }): Promise<B1Response>;
   /** A bound document action, `POST Quotations(5)/Close`. The agent allowlists the names. */
   action(entitySet: string, key: Key, name: string): Promise<B1Response>;
 }

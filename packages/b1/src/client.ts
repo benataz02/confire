@@ -38,8 +38,9 @@ export class DirectTransport implements B1Transport {
     return this.get(entityPath(entitySet, key, q));
   }
 
-  sqlQuery(code: string): Promise<B1Response> {
-    return this.get(sqlQueryPath(code));
+  sqlQuery(code: string, o?: { maxPageSize?: number }): Promise<B1Response> {
+    // Paged like any collection: 20 rows and an `@odata.nextLink` unless a page size is asked for.
+    return this.get(sqlQueryPath(code), pageHeader(o));
   }
 
   crossJoin(spec: CrossJoinSpec): Promise<B1Response> {

@@ -8,6 +8,7 @@ import { userProcedure } from "../base.ts";
 import { tenantCompany } from "../../b1.ts";
 import { queryRowOf } from "../../lookups.ts";
 import { ensureFresh, rowCache, syncNow } from "../../masterdata-sync.ts";
+import { priceListOf, syncPriceList } from "../../price-list.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { scoreRows } from "../../similarity.ts";
 import { copyName } from "../../copy-name.ts";
@@ -342,10 +343,10 @@ export const configsRouter = {
     return { ok: true };
   }),
 
-  /** Refill the cache for every query table this configuration's model reads. The toolbar button;
-   *  unlike the background refresh it reports failure, because a user asked for it. */
+  /** Refill the cache for every query table this configuration's model reads, and its price list.
+   *  The toolbar button; unlike the background refresh it reports failure, because a user asked. */
   sync: userProcedure
-    .meta(openapi({ summary: "Refresh a configuration's data from SAP", description: "Refill the cache of every SAP query table this configuration's model reads, one after another. Answers how many tables and rows; read the configuration again for the new prices." }))
+    .meta(openapi({ summary: "Refresh a configuration's data from SAP", description: "Refill the cache of every SAP query table this configuration's model reads, and its price list, one after another. Answers how many tables and rows; read the configuration again for the new prices." }))
     .input(z.object({ id: z.uuid().describe("The configuration's id") }))
     .handler(async ({ input, context }) => {
       const [project] = await db
@@ -361,7 +362,9 @@ export const configsRouter = {
       // would point N concurrent multi-page walks at one customer's Service Layer.
       let count = 0;
       for (const md of due) count += (await syncNow(context.tenantId, md as never)).count;
-      return { tables: due.length, count };
+      const list = priceListOf(model.definition);
+      if (list) count += (await syncPriceList(context.tenantId, list)).rows;
+      return { tables: due.length + (list ? 1 : 0), count };
     }),
 
   // Value help paging for a query-backed parameter (see queryTablePage).
