@@ -18,3 +18,7 @@ export { enumerate } from "./enumerate";
 export type { Enumeration } from "./enumerate";
 export { computeOutputs } from "./output";
 export type { BomResult, OpResult, Outputs } from "./output";
+export { computeVisual, VISUALS, visualsFor } from "./visuals/index.ts";
+export { nest, sheetPieces } from "./visuals/hera/sheetLayout.ts";
+export type { VisualCalc, VisualIO, VisualResult } from "./visuals/types.ts";
+export type { SheetBlock, SheetView } from "./visuals/hera/sheetLayout.ts";
