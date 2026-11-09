@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ModelDef } from "@confire/config-engine";
 import {
-  bindEntryValues, queryPageSource, resolveLookups,
+  bindEntryValues, queryPageSource, resolveLookups, withMatch, withSearch,
   type MasterdataRow, type RowCache,
 } from "../src/lookups.ts";
 
@@ -148,5 +148,23 @@ describe("queryPageSource", () => {
     // An `Items` read sends no $select on purpose, so its fields are whatever B1 returned and
     // there is no declared list to check a search column against.
     expect(() => queryPageSource(rows, { table: "catalog", searchCols: ["ItemName"] })).not.toThrow();
+  });
+});
+
+describe("withSearch", () => {
+  test("speaks each target's dialect: Beas refuses contains(), its like matches anywhere", () => {
+    const q = { entitySet: "OperationsCatalog" };
+    expect(withSearch(q, ["OperationId", "Description"], "aguj", "beas").filter)
+      .toBe("OperationId like 'aguj' or Description like 'aguj'");
+    expect(withSearch(q, ["ItemName"], "it's", "b1").filter).toBe("contains(ItemName,'it''s')");
+  });
+});
+
+describe("withMatch", () => {
+  test("an exact key probe, ANDed after the query's own filter, a text quoted and a number bare", () => {
+    expect(withMatch({ entitySet: "Resource", filter: "Active eq true" }, { col: "ResourceId", value: "AC'A" }).filter)
+      .toBe("(Active eq true) and (ResourceId eq 'AC''A')");
+    expect(withMatch({ entitySet: "PriceLists" }, { col: "PriceListNo", value: 3 }).filter).toBe("PriceListNo eq 3");
+    expect(() => withMatch({ entitySet: "X" }, { col: "a) or (1 eq 1", value: "x" })).toThrow();
   });
 });

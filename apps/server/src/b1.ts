@@ -166,6 +166,9 @@ export async function viaB1<T>(fn: () => Promise<T>): Promise<T> {
  *  One page per call, always. The masterdata sync walks a table by following `nextSkip` and
  *  inserting each page as it lands, so there is no multi-page branch here to hide an unbounded
  *  read behind — see packages/b1's note on why there is no `readAll`. */
+const trimmed = (r: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(r).map(([k, v]) => [k, typeof v === "string" ? v.trim() : v]));
+
 export function runnerFor(conn: Connector): QueryRunner {
   return (target, query, columns, opts) =>
     viaB1(async () => {
@@ -179,6 +182,16 @@ export function runnerFor(conn: Connector): QueryRunner {
       // The caller may ask for less than a page (the masterdata editor's preview reads five rows);
       // DEFAULT_PAGE stays the ceiling, so `size` can only ever shrink the read.
       const size = Math.min(opts?.top ?? DEFAULT_PAGE, DEFAULT_PAGE);
+      if (target === "beas") {
+        // Beas pages only with `$top` + `$skip` + `$orderby` together (query.ts has its two refusals)
+        // and sends no next link we rely on, so a full page means "there may be more". Without an
+        // order it cannot page at all: one read, everything it answers — the sync's old behaviour.
+        // Its char columns come back padded ("ACA_ACABADO         "), so strings are trimmed here,
+        // for the value helps and the cache alike.
+        const res = await t.readEntitySet(query.entitySet, query.orderby ? { ...base, top: size, skip: opts?.skip ?? 0 } : base);
+        const rows = rowsOrThrow(res.data, `Lookup ${target} ${query.entitySet}`).map(trimmed);
+        return { rows, ...(query.orderby && rows.length === size ? { nextSkip: (opts?.skip ?? 0) + size } : {}) };
+      }
       // Page size is `Prefer: odata.maxpagesize`, not `$top`: `$top` bounds the whole result set,
       // so B1 stops emitting `@odata.nextLink` once it is exhausted and the value help would page
       // exactly once. `$skip` stays the cursor here — see the note in CLAUDE.md; the entity list

@@ -5,7 +5,7 @@ import { db, configMasterdata, configMasterdataRow, configModel } from "@confire
 import { ODataQueryZ, QuerySourceZ, ValZ, syncTables } from "@confire/config-engine";
 import { isYesNo, type B1Field } from "@confire/b1";
 import { adminProcedure } from "../base.ts";
-import { DEFAULT_PAGE, fetchQueryTable, queryRowOf, withSearch, type MasterdataRow } from "../../lookups.ts";
+import { DEFAULT_PAGE, fetchQueryTable, queryRowOf, withMatch, withSearch, type MasterdataRow } from "../../lookups.ts";
 import { syncNow } from "../../masterdata-sync.ts";
 import { compileQuery, listPage, ListPageZ, TOTAL, type SqlFields } from "../../list-sql.ts";
 import { runnerFor, tenantConnector, viaB1 } from "../../b1.ts";
@@ -272,12 +272,14 @@ export const masterdataRouter = {
       cursor: z.number().int().min(0).optional(),
       /** Shrinks the read below a page; the editor's preview asks for five rows. */
       top: z.number().int().min(1).max(DEFAULT_PAGE).optional(),
+      /** one exact key: a value help's existence probe (the builder's Beas pickers) */
+      match: z.object({ col: z.string(), value: z.union([z.string(), z.number()]) }).optional(),
     }))
     .handler(async ({ input, context }) =>
       fetchQueryTable(
         runnerFor(await tenantConnector(context.tenantId)),
         input.target,
-        withSearch(input.query, input.searchCols ?? [], input.search ?? ""),
+        withSearch(input.match ? withMatch(input.query, input.match) : input.query, input.searchCols ?? [], input.search ?? "", input.target),
         input.columns,
         { skip: input.cursor, top: input.top },
       ),

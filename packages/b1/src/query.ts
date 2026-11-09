@@ -83,9 +83,11 @@ export function queryString(q?: QueryOptions): string {
   if (q.select?.length) set("$select", q.select.map((c) => assertName(c, "column")).join(","));
   if (q.orderby) set("$orderby", q.orderby);
   if (q.top !== undefined) set("$top", String(q.top));
-  // `$skip=0` is a no-op, and Beas refuses a lone one: "Syntax error in $top/$skip: It's not
-  // allowed to define only one of this parameter. Define both or none".
-  if (q.skip) set("$skip", String(q.skip));
+  // `$skip=0` is a no-op on its own, but Beas wants the pair or neither: "Syntax error in $top/$skip:
+  // It's not allowed to define only one of this parameter. Define both or none" — so a `$top` always
+  // carries its `$skip`, 0 included. Beas also wants an order then: "Syntax error in $top/$skip: only
+  // allowed, if an $orderby is defined!" (both verified on hera's Beas, 2026-11-08).
+  if (q.skip || (q.skip !== undefined && q.top !== undefined)) set("$skip", String(q.skip));
   if (q.expand) set("$expand", q.expand);
   if (q.count) set("$count", "true");
   return parts.join("&");

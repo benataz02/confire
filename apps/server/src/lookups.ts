@@ -3,7 +3,7 @@ import type {
   Entries, LookupRef, ModelDef, ODataQuery, Option, QuerySource, ResolvedLookups, ResolvedTable,
   TableRows, Val,
 } from "@confire/config-engine";
-import { andFilter, escapeLiteral } from "@confire/b1";
+import { andFilter, assertName, escapeLiteral } from "@confire/b1";
 import { t as text } from "./i18n/index.ts";
 
 // Resolve a model's external references (manual lists, and the tenant's masterdata) into the
@@ -149,11 +149,22 @@ export function toResolvedTable(raw: Record<string, unknown>[], columns?: string
   return { columns: cols, rows: raw.map((r) => cols.map((c) => asVal(r[c]))) };
 }
 
-/** AND a `contains(col,'q')` OR-group onto a query's $filter. Was regex surgery on a
- *  URL-encoded `$filter=` group; with a structured query it is string composition. */
-export function withSearch(query: ODataQuery, cols: string[], q: string): ODataQuery {
-  const term = q.trim();
-  const ors = cols.filter((c) => IDENT.test(c)).map((c) => `contains(${c},'${escapeLiteral(term)}')`);
+/** AND an exact key match onto a query's $filter: a value help's existence probe. `eq` is the one
+ *  comparison B1 and Beas both take; the column must be a plain name, so a probe cannot smuggle
+ *  OData past the query it narrows. */
+export function withMatch(query: ODataQuery, match: { col: string; value: string | number }): ODataQuery {
+  const v = typeof match.value === "number" ? String(match.value) : `'${escapeLiteral(match.value)}'`;
+  return { ...query, filter: andFilter(query.filter, `${assertName(match.col, "column")} eq ${v}`) };
+}
+
+/** AND a search OR-group onto a query's $filter, in the target's dialect: B1's `contains(col,'q')`,
+ *  Beas' `col like 'q'` — Beas refuses every function ("A logic command is always [item] [logical
+ *  comand] [value]"), and its `like` already matches anywhere, ignoring case, with no `%` (verified
+ *  on hera, 2026-11-08). Was regex surgery on a URL-encoded `$filter=` group; with a structured
+ *  query it is string composition. */
+export function withSearch(query: ODataQuery, cols: string[], q: string, target: "b1" | "beas"): ODataQuery {
+  const term = escapeLiteral(q.trim());
+  const ors = cols.filter((c) => IDENT.test(c)).map((c) => (target === "beas" ? `${c} like '${term}'` : `contains(${c},'${term}')`));
   if (!term || !ors.length) return query;
   return { ...query, filter: andFilter(query.filter, ors.join(" or ")) };
 }

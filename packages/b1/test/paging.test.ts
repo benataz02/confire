@@ -98,3 +98,17 @@ describe("followPages", () => {
     expect(capped.truncated).toBe(true);
   });
 });
+
+describe("$top and $skip travel together", () => {
+  test("a $top always carries its $skip, 0 included — Beas refuses either alone", async () => {
+    const { calls, t } = spy();
+    await t.readEntitySet("OperationsCatalog", { top: 50, skip: 0, orderby: "OperationId" });
+    expect(calls[0]!.path).toContain("$top=50");
+    expect(calls[0]!.path).toContain("$skip=0");
+  });
+  test("a bare $skip=0 is still not sent", async () => {
+    const { calls, t } = spy();
+    await t.readEntitySet("Items", { skip: 0 });
+    expect(calls[0]!.path).not.toContain("$skip");
+  });
+});
