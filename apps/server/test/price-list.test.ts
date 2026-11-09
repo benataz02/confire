@@ -2,7 +2,9 @@ import { afterAll, describe, expect, setSystemTime, test } from "bun:test";
 import {
   ensurePriceList, priceListCode, priceListSql, priceRow, priceState, syncPriceList,
 } from "../src/price-list.ts";
-import { makeTenant } from "./harness.ts";
+import { db, configModel } from "@confire/db";
+import { liveEngine } from "../src/config-project.ts";
+import { makeTenant, TEST_MODEL } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
 // The model's price list (spec 2026-11-09 §The price list): one stored SQL query per list over ITM1,
@@ -53,6 +55,16 @@ describe.skipIf(!process.env.DATABASE_URL)("syncing a price list", () => {
     const state = await priceState(s.tenantId, 1);
     expect(state).toMatchObject({ rows: 0, error: null });
     expect(state!.fetchedAt).toBeInstanceOf(Date);
+  });
+
+  test("a quotation is never priced off a list not read yet: the engine reads it first", async () => {
+    // After a deploy or a company switch every list is missing, while stored calculations still
+    // show their old prices: the quote's own re-pricing must not cost each material at 0.
+    const s = await setup([{ ItemCode: "BODY", Price: 3 }]);
+    const def = { ...TEST_MODEL, bom: [{ itemCode: '"BODY"', qty: "1" }] };
+    const [m] = await db.insert(configModel).values({ tenantId: s.tenantId, name: def.name, definition: def }).returning({ id: configModel.id });
+    const { lookups } = await liveEngine(s.tenantId, { modelId: m!.id, entries: {}, tables: {}, margin: null });
+    expect(lookups.prices).toEqual({ BODY: 3 });
   });
 
   test("a list that cannot reach SAP says why", async () => {

@@ -12,7 +12,8 @@ import {
 } from "./lookups.ts";
 import { ensureFresh, pageRows, rowCache } from "./masterdata-sync.ts";
 import { header } from "./sap-cache.ts";
-import { ensurePriceList, priceListOf, priceState, type PriceState } from "./price-list.ts";
+import { ensurePriceList, priceListOf, priceState, syncPriceList, type PriceState } from "./price-list.ts";
+import { viaB1 } from "./b1.ts";
 import { canWrite, type Side } from "./project-lifecycle.ts";
 import type { InputPatch } from "./config-patch.ts";
 import { t } from "./i18n/index.ts";
@@ -166,7 +167,16 @@ export async function liveEngine(
   tenantId: string, project: { modelId: string; entries: Entries; tables?: TableRows; margin: number | null },
 ) {
   const model = withMargin(await loadModel(tenantId, project.modelId), project.margin);
-  return { model, lookups: await cachedLookups(tenantId, model, project.entries, project.tables) };
+  // A quotation is priced off this, so never off a price list not read yet (after a deploy or a
+  // company switch): every material would cost 0, while the stored calculation the page shows,
+  // priced before, says nothing is unpriced. Read it now; a failure refuses the quotation.
+  const list = priceListOf(model.definition);
+  let prices = await priceState(tenantId, list);
+  if (list && !prices?.fetchedAt) {
+    await viaB1(() => syncPriceList(tenantId, list));
+    prices = await priceState(tenantId, list);
+  }
+  return { model, lookups: await cachedLookups(tenantId, model, project.entries, project.tables, undefined, undefined, prices) };
 }
 
 // ---- The calculation ------------------------------------------------------------------------

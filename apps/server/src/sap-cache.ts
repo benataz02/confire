@@ -84,12 +84,19 @@ export async function put(
 
 /** Park a refresh's failure on its entry, keeping the last good data and `fetchedAt`. A first
  *  failure makes an entry of its own, under the call's company or else the tenant's, so it is seen.
+ *  `since` is when the failed attempt started: a read that succeeded after it (another process's
+ *  refill) is newer than this failure, which is then not stamped on it.
  *  Never throws: it runs on paths whose contract is not to disturb what started them. */
-export async function fail(tenantId: string, kind: CacheKind, key: string, company: string | null, error: unknown): Promise<void> {
+export async function fail(
+  tenantId: string, kind: CacheKind, key: string, company: string | null, error: unknown, since?: Date,
+): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
   await db.insert(sapCache)
     .values({ tenantId, kind, key, seq: 0, company: sql`coalesce(${company}::text, ${current(tenantId)})`, error: message })
-    .onConflictDoUpdate({ target: ENTRY_PK, set: { error: message } })
+    .onConflictDoUpdate({
+      target: ENTRY_PK, set: { error: message },
+      ...(since ? { setWhere: sql`${sapCache.fetchedAt} is null or ${sapCache.fetchedAt} <= ${since}` } : {}),
+    })
     .catch(() => {});
 }
 
@@ -132,6 +139,7 @@ export async function fill(
   tenantId: string, kind: CacheKind, key: string, company: string | null,
   pages: AsyncIterable<Record<string, unknown>[]>,
 ): Promise<{ rows: number; changed: boolean }> {
+  const started = new Date();
   try {
     return await db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`${tenantId}|${kind}|${key}`}))`);
@@ -150,11 +158,14 @@ export async function fill(
       const now = new Date();
       const changed = prev?.hash !== digest || !prev.changedAt;
       const head: RowsHeader = { rows: n, hash: digest, changedAt: changed ? now.toISOString() : prev!.changedAt! };
-      await tx.insert(sapCache).values({ tenantId, kind, key, seq: 0, company, data: head, error: null, fetchedAt: now });
+      // An upsert: a failed fill of this entry that held the lock before this one records its error
+      // (`fail`, outside any lock) after its rollback, which can be after this one's delete.
+      await tx.insert(sapCache).values({ tenantId, kind, key, seq: 0, company, data: head, error: null, fetchedAt: now })
+        .onConflictDoUpdate({ target: ENTRY_PK, set: { company, data: head, error: null, fetchedAt: now } });
       return { rows: n, changed };
     });
   } catch (e) {
-    await fail(tenantId, kind, key, company, e);
+    await fail(tenantId, kind, key, company, e, started);
     throw e;
   }
 }
@@ -201,6 +212,15 @@ export function header(tenantId: string, kind: CacheKind, key: SQL) {
  *  or some keys of a kind (a masterdata saved or deleted, a report deleted). */
 export async function forget(tenantId: string, o: { kind?: CacheKind; keys?: string[] } = {}, tx: Tx | typeof db = db): Promise<void> {
   if (o.keys && !o.keys.length) return;
+  if (!o.kind && !o.keys) {
+    // The tenant's all — a company switch — skips rows a refill holds: that refill is mid-walk, and
+    // the switch may be adopted from inside it (its page answered 409 COMPANY_CHANGED and awaits
+    // adoptCompany), so waiting on its locks would wait on itself, holding the sap_connection row
+    // and a pooled connection forever. What it skips is the old company's, which no read serves.
+    await tx.execute(sql`delete from ${sapCache} where ctid = any(array(
+      select ctid from ${sapCache} where ${sapCache.tenantId} = ${tenantId} for update skip locked))`);
+    return;
+  }
   await tx.delete(sapCache).where(and(
     eq(sapCache.tenantId, tenantId),
     o.kind ? eq(sapCache.kind, o.kind) : undefined,

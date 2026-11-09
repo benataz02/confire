@@ -53,6 +53,7 @@ export function ensureFresh(tenantId: string, rows: MasterdataRow[]): void {
   for (const md of due) {
     const key = `${tenantId}:${md.id}`;
     if (inFlight.has(key)) continue;
+    const since = new Date();
     const p = (async () => {
       const conn = await tenantConnector(tenantId);
       await syncMasterdata(tenantId, md, runnerFor(conn), conn.companyDb);
@@ -60,7 +61,7 @@ export function ensureFresh(tenantId: string, rows: MasterdataRow[]): void {
       // Recorded here as well as inside the fill, because the most common failure — no
       // sap_connection row, or an unreachable agent — happens before the walk even starts, and a
       // table stuck on "never synced" with no reason given is the worst version of this.
-      .catch((e) => fail(tenantId, "masterdata", md.id, null, e))
+      .catch((e) => fail(tenantId, "masterdata", md.id, null, e, since))
       .finally(() => inFlight.delete(key));
     inFlight.set(key, p);
   }

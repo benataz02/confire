@@ -74,12 +74,13 @@ export function ensurePriceList(tenantId: string, list: number | undefined): voi
   if (!list) return;
   const id = `${tenantId}|${list}`;
   if (inFlight.has(id)) return;
+  const since = new Date();
   const run = (async () => {
     if (isFresh("price_list", await entry(tenantId, "price_list", String(list)))) return;
     await syncPriceList(tenantId, list);
   })()
     // Recorded here as well as by the fill: no agent, or one unreachable, fails before it starts.
-    .catch((e) => fail(tenantId, "price_list", String(list), null, e))
+    .catch((e) => fail(tenantId, "price_list", String(list), null, e, since))
     .finally(() => inFlight.delete(id));
   inFlight.set(id, run);
 }

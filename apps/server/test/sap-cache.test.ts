@@ -4,6 +4,7 @@ import { db, sapCache, sapConnection } from "@confire/db";
 import {
   cached, entry, fail, fill, forget, isFresh, put, rows, PARSER_EPOCH, type CacheEntry, type RowsHeader,
 } from "../src/sap-cache.ts";
+import { adoptCompany } from "../src/b1.ts";
 
 // The one SAP cache (spec 2026-11-09): seq 0 is the entry, a many-row entry's rows are seq 1..n, and
 // an entry of another company than the tenant's is no entry.
@@ -134,6 +135,47 @@ describe.skipIf(!process.env.DATABASE_URL)("sap-cache", () => {
     const left = await db.select().from(sapCache)
       .where(and(eq(sapCache.tenantId, t), eq(sapCache.kind, "masterdata"), eq(sapCache.key, "k"), gte(sapCache.seq, 1)));
     expect([1, 3]).toContain(left.length);
+  });
+
+  test("a company switch adopted while a refill is mid-walk does not wait on it", async () => {
+    // The 409 path: a page read answers COMPANY_CHANGED and awaits adoptCompany while the fill's
+    // transaction still holds the rows it deleted.
+    const t = await tenant("A");
+    await fill(t, "masterdata", "k", "A", pages([{ c: 1 }]));
+    let adopted: unknown;
+    async function* walk() {
+      yield [{ c: 2 }];
+      adopted = await Promise.race([adoptCompany(t, "B"), Bun.sleep(2000).then(() => "blocked")]);
+      throw new Error("COMPANY_CHANGED");
+    }
+    expect(fill(t, "masterdata", "k", "A", walk())).rejects.toThrow("COMPANY_CHANGED");
+    await Bun.sleep(2100);
+    expect(adopted).toBe(true);
+    expect(await rows(t, "masterdata", "k")).toEqual([]);
+  });
+
+  test("a fill waiting on a failing one finishes, its fresh entry clear of that failure", async () => {
+    const t = await tenant("A");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    async function* failing() { yield [{ c: 1 }]; await gate; throw new Error("agent down"); }
+    const a = fill(t, "masterdata", "k", "A", failing());
+    const aDone = a.catch(() => {});
+    await Bun.sleep(50); // A holds the entry's lock
+    async function* ok() { yield [{ c: 2 }]; await aDone; } // A's failure is recorded before B ends
+    const b = fill(t, "masterdata", "k", "A", ok());
+    await Bun.sleep(50);
+    release();
+    expect(await b).toEqual({ rows: 1, changed: true });
+    expect(await entry(t, "masterdata", "k")).toMatchObject({ error: null });
+  });
+
+  test("a failure older than the entry's last good read is not stamped on it", async () => {
+    const t = await tenant("A");
+    const attempt = new Date(Date.now() - 1000);
+    await fill(t, "masterdata", "k", "A", pages([{ c: 1 }]));
+    await fail(t, "masterdata", "k", "A", new Error("late"), attempt);
+    expect((await entry(t, "masterdata", "k"))!.error).toBeNull();
   });
 
   test("forget by tenant, by kind, by keys", async () => {
