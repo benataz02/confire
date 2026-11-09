@@ -168,3 +168,30 @@ describe("withMatch", () => {
     expect(() => withMatch({ entitySet: "X" }, { col: "a) or (1 eq 1", value: "x" })).toThrow();
   });
 });
+
+describe("operations from the cached Beas catalog", () => {
+  const OPS_ROWS = [
+    { OperationId: "ACA_AGUJEROS", Description: "AGUJEROS", ResourceId: "ACA_ACABADO         ", SetupTime: 5, ProductionTime: 0.1, QuantityPer: 1, CostRate: 21 },
+    { OperationId: "PAD", Description: null, ResourceId: null, SetupTime: null, ProductionTime: 3, QuantityPer: 0, CostRate: null },
+    { OperationId: "UNUSED", SetupTime: 1, ProductionTime: 1, QuantityPer: 1, CostRate: 1 },
+  ];
+  const opsRows = [...rows, md("o", "ops", { query: { target: "beas", query: { entitySet: "OperationsCatalog", orderby: "OperationId" }, columns: [] } })];
+  const op = (operationId: string) => ({ operationId, setupMin: "beasSetup", runMinPerUnit: "beasRun", ratePerHour: "beasRate" });
+  const linked: ModelDef = { ...model, parameters: [], bom: [], routing: [op('"ACA_AGUJEROS"'), op('"PAD"')], pricing: { ...model.pricing, operationTable: "ops" } };
+
+  test("cachedOperations trims codes and resources, reading only the model's operations", async () => {
+    const l = await resolveLookups(linked, opsRows, cacheOf({ o: OPS_ROWS }));
+    expect(l.operations?.ACA_AGUJEROS).toEqual({ desc: "AGUJEROS", resource: "ACA_ACABADO", setupMin: 5, runMinPerUnit: 0.1, ratePerHour: 21 });
+    expect(l.operations?.UNUSED).toBeUndefined();
+  });
+  test("null figures read as 0, QuantityPer 0 as 1", async () => {
+    const l = await resolveLookups(linked, opsRows, cacheOf({ o: OPS_ROWS }));
+    expect(l.operations?.PAD).toEqual({ desc: "", resource: "", setupMin: 0, runMinPerUnit: 3, ratePerHour: 0 });
+  });
+  test("a model with no linked line reads no operations", async () => {
+    const read: string[] = [];
+    const l = await resolveLookups({ ...linked, routing: [] }, opsRows, cacheOf({ o: OPS_ROWS }, read));
+    expect(l.operations).toEqual({});
+    expect(read).not.toContain("o");
+  });
+});

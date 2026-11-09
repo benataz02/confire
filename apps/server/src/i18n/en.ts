@@ -98,6 +98,7 @@ export const en = {
   NOTICE_CAPPED_WIDEST: "Stopped at {0} candidates — set more parameters ({1} has {2} options)",
   NOTICE_UNPRICED_LIST: "No price for {0} in price list {1} — its material is costed at 0",
   NOTICE_UNPRICED: "No price for {0} in the price list — its material is costed at 0",
+  NOTICE_UNCATALOGUED: "Operation {0} is not in the operations source — its Beas figures counted as 0",
 
   // Quotations (config-quote.ts)
   QUOTE_NEEDS_CUSTOMER: "Customer is required before quoting",

@@ -72,6 +72,10 @@ function issuesOf(live: Pick<LiveProject, "row" | "model" | "md" | "lookups" | "
       code: "unpriced", params: [code, ...(list ? [String(list)] : [])],
       message: list ? t("NOTICE_UNPRICED_LIST", code, list) : t("NOTICE_UNPRICED", code),
     });
+  // The routing's twin: a linked operation the cache lacks costed its Beas figures at 0.
+  const uncatalogued = new Set(row.candidates.flatMap((c) => c.perBatch.flatMap((b) => b.outputs.ops.flatMap((o) => (o.uncatalogued && o.operationId ? [o.operationId] : [])))));
+  for (const id of uncatalogued)
+    out.push({ code: "uncatalogued", params: [id], message: t("NOTICE_UNCATALOGUED", id) });
   return out;
 }
 

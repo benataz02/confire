@@ -133,6 +133,10 @@ export function configMessages(a: {
       case "unpriced":
         out.push({ id, type: "Critical", text: list ? t("CONFIG_UNPRICED_LIST", p0, String(list)) : t("CONFIG_UNPRICED", p0), detail: t("CONFIG_UNPRICED_DETAIL"), ...candidates });
         break;
+      // Critical too: the operation's Beas figures counted as 0, the calculation went through.
+      case "uncatalogued":
+        out.push({ id, type: "Critical", text: t("CONFIG_UNCATALOGUED", p0), detail: t("CONFIG_UNCATALOGUED_DETAIL"), ...candidates });
+        break;
       default:
         out.push({ id, type: "Critical", text: m.message, ...configure });
     }

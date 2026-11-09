@@ -93,6 +93,7 @@ export const es: Partial<Record<keyof typeof en, string>> = {
   NOTICE_CAPPED_WIDEST: "Detenido en {0} candidatos — defina más parámetros ({1} tiene {2} opciones)",
   NOTICE_UNPRICED_LIST: "Sin precio para {0} en la lista de precios {1} — su material se costea a 0",
   NOTICE_UNPRICED: "Sin precio para {0} en la lista de precios — su material se costea a 0",
+  NOTICE_UNCATALOGUED: "La operación {0} no está en el origen de operaciones — sus valores de Beas cuentan como 0",
 
   QUOTE_NEEDS_CUSTOMER: "Indique el cliente antes de ofertar",
   QUOTE_INCOMPLETE: "Complete la configuración antes de ofertar: {0}",

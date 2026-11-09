@@ -93,6 +93,7 @@ export const eu: Partial<Record<keyof typeof en, string>> = {
   NOTICE_CAPPED_WIDEST: "{0} hautagaitan gelditu da — zehaztu parametro gehiago ({1} eremuak {2} aukera ditu)",
   NOTICE_UNPRICED_LIST: "{0} artikuluak ez du preziorik {1} prezio-zerrendan — materiala 0an kosteatzen da",
   NOTICE_UNPRICED: "{0} artikuluak ez du preziorik prezio-zerrendan — materiala 0an kosteatzen da",
+  NOTICE_UNCATALOGUED: "{0} eragiketa ez dago eragiketen iturrian — bere Beas balioak 0 dira",
 
   QUOTE_NEEDS_CUSTOMER: "Adierazi bezeroa eskaintza egin aurretik",
   QUOTE_INCOMPLETE: "Osatu konfigurazioa eskaintza egin aurretik: {0}",

@@ -1,6 +1,6 @@
-import { bomItemCodes, refKeyCols, refRows, referencedTables } from "@confire/config-engine";
+import { bomItemCodes, refKeyCols, refRows, referencedTables, routingOperationIds } from "@confire/config-engine";
 import type {
-  Entries, LookupRef, ModelDef, ODataQuery, Option, QuerySource, ResolvedLookups, ResolvedTable,
+  CatalogOperation, Entries, LookupRef, ModelDef, ODataQuery, Option, QuerySource, ResolvedLookups, ResolvedTable,
   TableRows, Val,
 } from "@confire/config-engine";
 import { andFilter, assertName, escapeLiteral } from "@confire/b1";
@@ -251,6 +251,40 @@ async function cachedPrices(
   return prices;
 }
 
+/** Beas' own field names on `OperationsCatalog`, hardcoded for the reason ITEM_CODE is:
+ *  `pricing.operationTable` is an OperationsCatalog read by definition. */
+const OP = { id: "OperationId", desc: "Description", resource: "ResourceId", setup: "SetupTime", run: "ProductionTime", per: "QuantityPer", rate: "CostRate" } as const;
+
+/** A Beas figure as a number: a null or missing one is 0. Read by value — the EDMX declares
+ *  ProductionTime Int32 and Beas answers 0.1. */
+const figure = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+
+/** The routing's catalog figures, read out of the cached `OperationsCatalog` rows — `cachedPrices`'
+ *  rule: only the operations the model can produce. Minutes and per hour, as Beas keeps them; the
+ *  run time is per `QuantityPer` units there, so it is divided down to one (0 or none counts as 1).
+ *  An operation the cache lacks is absent, and computeOutputs flags its line `uncatalogued`. */
+async function cachedOperations(
+  model: ModelDef, rows: MasterdataRow[], domains: ResolvedLookups["domains"], cache: RowCache,
+): Promise<Record<string, CatalogOperation>> {
+  const source = model.pricing.operationTable ? queryRowOf(rows, model.pricing.operationTable) : undefined;
+  const ids = routingOperationIds(model, domains);
+  if (!source || !ids.length) return {};
+  // ponytail: matched on the trimmed code, which the cache holds once synced through runnerFor's
+  // trim; a cache synced before that, with a padded *key*, is only found after its next sync.
+  const raw = await cache(source.id, { col: OP.id, values: ids });
+  const out: Record<string, CatalogOperation> = {};
+  for (const r of raw) {
+    const id = str(r[OP.id]);
+    if (!id) continue;
+    out[id] = {
+      desc: str(r[OP.desc]), resource: str(r[OP.resource]),
+      setupMin: figure(r[OP.setup]), runMinPerUnit: figure(r[OP.run]) / (figure(r[OP.per]) || 1), ratePerHour: figure(r[OP.rate]),
+    };
+  }
+  return out;
+}
+
 /** Every (table, column, values) triple a persisted selection needs bound, deduped so two
  *  parameters over the same table cost one cache read. */
 function offPageNeeds(
@@ -329,7 +363,11 @@ export async function resolveLookups(
   const domains = projectDomains(model, tables);
   // After the domains: a BOM line whose item code is a parameter is priced across everything that
   // parameter could hold, and those values are only known once its domain is resolved.
-  return { domains, tables, prices: await cachedPrices(model, rows, domains, cache) };
+  return {
+    domains, tables,
+    prices: await cachedPrices(model, rows, domains, cache),
+    operations: await cachedOperations(model, rows, domains, cache),
+  };
 }
 
 function projectDomains(
@@ -387,5 +425,7 @@ export async function bindEntryValues(
   // A bare-identifier BOM item code is priced across its parameter's domain, so a newly bound
   // value needs its price fetched too — the codes that were already priced are not re-read.
   const prices = { ...canonical.prices, ...(await cachedPrices(model, rows, domains, cache)) };
-  return { domains, tables, prices };
+  // The same for an operation chosen by a parameter (a bare identifier in `operationId`).
+  const operations = { ...canonical.operations, ...(await cachedOperations(model, rows, domains, cache)) };
+  return { domains, tables, prices, operations };
 }
