@@ -36,12 +36,13 @@ function portalTable(t: TableDef): TableDef {
         ...(t.minRows === undefined ? {} : { minRows: t.minRows }), ...(t.maxRows === undefined ? {} : { maxRows: t.maxRows }) };
 }
 
-/** The structure without its visibility rules: what they hide arrives as toPortalForm's `hidden`. */
-function portalStructure(s: ModelDef["structure"]): ModelDef["structure"] {
+/** The structure without its visibility rules: what they hide arrives as toPortalForm's `hidden`.
+ *  A tenant visual is staff only, so its key leaves every group with it. */
+function portalStructure(s: ModelDef["structure"], visuals: Set<string>): ModelDef["structure"] {
   return {
     sections: s.sections.map(({ key, title, groups }) => ({
       key, title,
-      groups: groups.map((g) => ({ key: g.key, title: g.title, params: g.params })),
+      groups: groups.map((g) => ({ key: g.key, title: g.title, params: g.params.filter((k) => !visuals.has(k)) })),
     })),
   };
 }
@@ -53,7 +54,7 @@ export function toPortalModelDef(model: ModelDef): ModelDef {
     name: model.name,
     ...(model.description ? { description: model.description } : {}),
     parameters: model.parameters.map(portalParam),
-    structure: portalStructure(model.structure),
+    structure: portalStructure(model.structure, new Set((model.visuals ?? []).map((v) => v.key))),
     ...(model.tables ? { tables: model.tables.map(portalTable) } : {}),
     computed: [], constraints: [], bom: [], routing: [],
     pricing: { margin: 0, quoteItemCode: "" },
@@ -67,8 +68,10 @@ export function toPortalModelDef(model: ModelDef): ModelDef {
  *  about a field the rules hide — a hidden field is not drawn, so its value and options have nowhere
  *  to go but the wire — and the price badges unless the model shows indicative prices. */
 export function toPortalForm(form: FormState, indicative: boolean): FormState {
+  // A tenant visual's drawing is staff only.
+  const { visuals: _staffOnly, ...shown } = form;
   return {
-    ...form,
+    ...shown,
     fields: Object.fromEntries(Object.entries(form.fields).map(([k, f]) => {
       if (!f.visible) return [k, { visible: false, required: false }];
       const { price, ...rest } = f;

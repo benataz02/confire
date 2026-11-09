@@ -17,8 +17,8 @@ import { t } from "../../i18n/index.ts";
 // ModelDefZ + checkModel here can never produce a parse/unknown-ref error at runtime.
 
 /** models.save/create reject an invalid definition with BAD_REQUEST + data.issues (span Issues). */
-function assertValid(definition: ModelDef, known: KnownTable[]) {
-  const issues = checkModel(definition, known);
+function assertValid(definition: ModelDef, known: KnownTable[], tenant: string) {
+  const issues = checkModel(definition, known, tenant);
   if (issues.length) throw new ORPCError("BAD_REQUEST", { message: t("MODEL_HAS_ERRORS"), data: { issues } });
 }
 
@@ -64,7 +64,7 @@ export const modelsRouter = {
   create: adminProcedure
     .input(z.object({ definition: ModelDefZ, ...PortalZ }))
     .handler(async ({ input, context }) => {
-      assertValid(input.definition, knownTables(await masterdataRows(context.tenantId)));
+      assertValid(input.definition, knownTables(await masterdataRows(context.tenantId)), context.tenantSlug);
       const [ins] = await db
         .insert(configModel)
         .values({
@@ -99,7 +99,7 @@ export const modelsRouter = {
         // The stored definition already passed the gate: a portal-only save does not run it again.
         const changed = !isEmptyPatch(input.patch);
         const definition = changed ? applyModelPatch(row.definition, input.patch) : row.definition;
-        if (changed) assertValid(definition, known);
+        if (changed) assertValid(definition, known, context.tenantSlug);
         const priceList = priceListOf(definition);
         if (!changed && !Object.keys(portal).length) return { updatedAt: row.updatedAt, priceList };
         const [updated] = await tx.update(configModel)

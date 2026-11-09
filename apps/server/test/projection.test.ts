@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formState, propagate, type ModelDef, type ResolvedLookups } from "@confire/config-engine";
+import { formState, itemsTable, propagate, type ModelDef, type ResolvedLookups, type Visual } from "@confire/config-engine";
 import {
   declaresWhere, toPortalForm, toPortalLookups, toPortalModelDef, toPortalPage, toPortalPrices, toPortalRows,
 } from "../src/portal/projection.ts";
@@ -145,5 +145,34 @@ describe("toPortalPrices", () => {
 describe("toPortalRows", () => {
   test("a stored table goes out with its writable cells only: no override, no typed price", () => {
     expect(toPortalRows(model, tables)).toEqual({ items: [{ itemcode: "X1", quantity: 2 }, { itemcode: "X2", quantity: 1 }] });
+  });
+});
+
+describe("tenant visuals stay home", () => {
+  // The engine's test model (packages/config-engine/test/fixture.ts `withSheet`), copied.
+  const SHEET_INPUTS = { sheetLength: "1000", sheetWidth: "500", pieceLength: "120", pieceWidth: "70", gapX: "3", gapY: "3", marginX: "10", marginY: "10" };
+  const withSheet = (over: Partial<Visual> = {}): ModelDef => ({
+    name: "Sheet",
+    parameters: [{ key: "width", label: "Width", type: "number", ui: "input" }],
+    structure: { sections: [{ key: "s", title: "S", groups: [
+      { key: "g", title: "G", params: ["width", "hoja"] },
+      { key: "it", title: "Items", params: ["items"] },
+    ] }] },
+    computed: [{ key: "perSheet", expr: "hoja_piezas" }],
+    tables: [itemsTable()], constraints: [], bom: [], routing: [],
+    pricing: { margin: 20, quoteItemCode: "Q", priceList: 1 },
+    batchDefaults: [1],
+    visuals: [{ key: "hoja", kind: "hera.sheetLayout", inputs: SHEET_INPUTS, ...over }],
+  });
+  const none: ResolvedLookups = { domains: {}, tables: {} };
+
+  test("no visual in the model, its key out of every group, no view in the form", () => {
+    const def = withSheet();
+    const m = toPortalModelDef(def);
+    expect(m.visuals).toBeUndefined();
+    expect(m.structure.sections.flatMap((s) => s.groups.flatMap((g) => g.params))).not.toContain("hoja");
+    const form = formState(def, none, propagate(def, none, {}), {});
+    expect(form.visuals?.hoja).toBeDefined();
+    expect(toPortalForm(form, true).visuals).toBeUndefined();
   });
 });

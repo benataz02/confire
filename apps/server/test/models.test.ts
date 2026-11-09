@@ -11,6 +11,22 @@ const relabel = (d: ModelDef, key: string, label: string): ModelDef =>
   ({ ...d, parameters: d.parameters.map((p) => (p.key === key ? { ...p, label } : p)) });
 
 describe.skipIf(!process.env.DATABASE_URL)("models.save (integration)", () => {
+  test("refuses a tenant visual written for another workspace", async () => {
+    const { tenantId, slug } = await makeTenant(); // a `t…` slug, never hera
+    const admin = await makeUser("admin", tenantId);
+    const ctx = { context: { headers: tenantHeaders(slug, admin.cookie) } };
+    const SHEET_INPUTS = { sheetLength: "1000", sheetWidth: "500", pieceLength: "120", pieceWidth: "70", gapX: "3", gapY: "3", marginX: "10", marginY: "10" };
+    const [sec] = VALID.structure.sections;
+    const withVisual: ModelDef = {
+      ...VALID,
+      visuals: [{ key: "hoja", kind: "hera.sheetLayout", inputs: SHEET_INPUTS }],
+      structure: { sections: [{ ...sec!, groups: [{ ...sec!.groups[0]!, params: [...sec!.groups[0]!.params, "hoja"] }] }] },
+    };
+    const err = await call(router.models.create, { definition: withVisual }, ctx)
+      .then(() => null, (e: unknown) => e as { data?: { issues?: { path: string }[] } });
+    expect(err?.data?.issues?.map((i) => i.path)).toContain("visuals[0].kind");
+  });
+
   test("two admins' patches of different parameters both stand; the answer is only updatedAt", async () => {
     const { tenantId, slug } = await makeTenant();
     const admin = await makeUser("admin", tenantId);

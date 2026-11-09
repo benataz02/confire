@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, configModel, configProject } from "@confire/db";
 import { requireAdmin } from "../src/orpc/base.ts";
 import { CHAT_TOOLS, GENERAL, pageFor } from "../src/assistant/pages.ts";
-import { CARD_FIELDS, chatTools, LIST_CAP, missingSources, procedureOf, type ToolCtx } from "../src/assistant/tools.ts";
+import { CARD_FIELDS, chatTools, LIST_CAP, missingSources, procedureOf, withoutVisuals, type ToolCtx } from "../src/assistant/tools.ts";
 import { newThread } from "../src/assistant/threads.ts";
 import { readsClientContent } from "../src/assistant/auto.ts";
 import { PIPELINE_INPUT } from "./fixtures/pipeline-report.ts";
@@ -38,6 +38,11 @@ test("no tool posts, and no tool is admin-only", () => {
 
 test("the chat re-runs the intake steps and may ask: its history may hold their calls", () => {
   expect(CHAT_TOOLS).toEqual(expect.arrayContaining(["read_request", "extract_values", "ask_user"]));
+});
+
+test("tool results carry no drawing data", () => {
+  expect(withoutVisuals({ form: { fields: {}, visuals: { hoja: {} } }, missing: [] })).toEqual({ form: { fields: {} }, missing: [] });
+  expect(withoutVisuals({ rows: [] })).toEqual({ rows: [] });
 });
 
 test("missingSources names every unsourced write", () => {

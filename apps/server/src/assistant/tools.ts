@@ -75,6 +75,15 @@ const contextOf = (c: CallCtx) => ({
 });
 
 /** A procedure as a tool: `configs.get` is `configs_get`, the same name in the chat and over MCP. */
+/** A tool result without a view's drawing data (`form.visuals`): a picture is for people, and a
+ *  layout can be large. Every configs tool answers through procedureTool, and MCP reuses them. */
+export function withoutVisuals(out: unknown): unknown {
+  const o = out as { form?: { visuals?: unknown } } | null;
+  if (!o || typeof o !== "object" || !o.form || typeof o.form !== "object" || !("visuals" in o.form)) return out;
+  const { visuals: _v, ...form } = o.form;
+  return { ...o, form };
+}
+
 export function procedureTool(path: string, p: AnyProcedure, ctx: CtxOf, o: {
   name?: string; input?: z.ZodType; describe?: string; slim?: (out: unknown) => unknown; cap?: boolean;
   prepare?: (input: Record<string, unknown>) => Record<string, unknown>;
@@ -92,7 +101,7 @@ export function procedureTool(path: string, p: AnyProcedure, ctx: CtxOf, o: {
     if (o.prepare) input = o.prepare(input);
     let out = await run(() => call(p, input, { context: contextOf(c) }));
     if (o.cap) out = capped(out);
-    return o.slim ? o.slim(out) : out;
+    return withoutVisuals(o.slim ? o.slim(out) : out);
   }) as AnyServerTool;
 }
 

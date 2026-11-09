@@ -56,7 +56,7 @@ export async function membershipOf(slugValue: string | null | undefined, userId:
   const slug = tenantSlug(slugValue);
   if (!slug) throw new ORPCError("BAD_REQUEST", { message: t("NO_WORKSPACE") });
   const [row] = await db
-    .select({ tenantId: organization.id, role: member.role })
+    .select({ tenantId: organization.id, slug: organization.slug, role: member.role })
     .from(organization)
     .innerJoin(member, eq(member.organizationId, organization.id))
     .where(and(eq(organization.slug, slug), eq(member.userId, userId), notInArray(member.role, EXTERNAL_ROLES)))
@@ -72,7 +72,8 @@ export async function membershipOf(slugValue: string | null | undefined, userId:
  */
 export const userProcedure = base.use(requireUser).use(async ({ context, next }) => {
   const row = await membershipOf(context.headers.get(TENANT_HEADER), context.user.id);
-  return next({ context: { tenantId: row.tenantId, role: row.role, userId: context.user.id } });
+  // The slug rides along for what is scoped by it rather than by id: a tenant visual's `tenants`.
+  return next({ context: { tenantId: row.tenantId, tenantSlug: row.slug, role: row.role, userId: context.user.id } });
 });
 
 /** The admin check, named so a caller (the assistant's tool list) can tell an admin procedure. */
