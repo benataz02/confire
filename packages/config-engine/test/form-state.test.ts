@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { formState } from "../src/form-state";
 import { propagate } from "../src/propagate";
 import type { ModelDef, ResolvedLookups } from "../src/model";
+import { withSheet } from "./fixture";
 
 const model: ModelDef = {
   name: "Box",
@@ -81,5 +82,21 @@ describe("formState", () => {
 
   test("tables arrive evaluated, declared columns only", () => {
     expect(state({}, { holes: [{ d: 4, junk: 1 }] }).tables).toEqual({ holes: [{ d: 4, r: 2 }] });
+  });
+});
+
+describe("formState: tenant visuals", () => {
+  const none: ResolvedLookups = { domains: {}, tables: {} };
+  const visualsOf = (m: ModelDef) => formState(m, none, propagate(m, none, {}), {}).visuals;
+  test("a placed visual's view rides the form state", () => {
+    expect((visualsOf(withSheet())!.hoja as { count: number }).count).toBe(48);
+  });
+  test("no view for a visual in a hidden group, or placed nowhere", () => {
+    const hidden = withSheet();
+    hidden.structure.sections[0]!.groups[0]!.visibleWhen = "false";
+    expect(visualsOf(hidden)).toBeUndefined();
+    const unplaced = withSheet();
+    unplaced.structure.sections[0]!.groups[0]!.params = ["width"];
+    expect(visualsOf(unplaced)).toBeUndefined();
   });
 });

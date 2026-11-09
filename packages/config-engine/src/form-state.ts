@@ -1,5 +1,5 @@
 import {
-  displayColumns, refKeyCols,
+  displayColumns, refKeyCols, structureId,
   type LookupRef, type ModelDef, type ResolvedLookups, type ResolvedTable, type TableRows, type Val,
 } from "./model";
 import { domainOf, paramPrices, type DomainOption, type Propagation } from "./propagate";
@@ -38,6 +38,10 @@ export type FormState = {
   tables: Record<string, Record<string, Val>[]>;
   /** structureIds of the sections and field groups the rules hide; absent = none */
   hidden?: string[];
+  /** each tenant visual's view, by key: the placed ones in a shown section and group that have one
+   *  (plain JSON, drawn by @confire/ui's VISUAL_VIEWS); absent = none. Staff only — toPortalForm
+   *  drops it. */
+  visuals?: Record<string, unknown>;
 };
 
 /** The ref's display columns for one option value, joined. A `table` ref only: its rows are the
@@ -83,6 +87,16 @@ export function formState(model: ModelDef, lookups: ResolvedLookups, prop: Propa
     fields[p.key] = f;
   }
 
+  const visualKeys = new Set((model.visuals ?? []).map((v) => v.key));
+  const visuals: Record<string, unknown> = {};
+  for (const s of model.structure.sections) {
+    if (prop.hiddenStructure.has(structureId(s.key))) continue;
+    for (const g of s.groups) {
+      if (prop.hiddenStructure.has(structureId(s.key, g.key))) continue;
+      for (const k of g.params) if (visualKeys.has(k) && prop.views[k] !== undefined) visuals[k] = prop.views[k];
+    }
+  }
+
   return {
     fields,
     conflicts: prop.conflicts.map((c) => ({ message: c.message, params: c.params })),
@@ -93,5 +107,6 @@ export function formState(model: ModelDef, lookups: ResolvedLookups, prop: Propa
       return [def.key, rows.map((r) => Object.fromEntries(cols.map((c) => [c, r[c] ?? null])))];
     })),
     ...(prop.hiddenStructure.size ? { hidden: [...prop.hiddenStructure] } : {}),
+    ...(Object.keys(visuals).length ? { visuals } : {}),
   };
 }

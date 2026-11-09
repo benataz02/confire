@@ -1,6 +1,7 @@
 import { evaluate, parse } from "./dsl";
 import type { Entries, ModelDef, Option, Param, ResolvedLookups, TableRows, Val } from "./model";
-import { derivedKey, derivedColumns, refKeyCols, requiredColumn, structureId, QTY_COL } from "./model";
+import { derivedKey, derivedColumns, refKeyCols, requiredColumn, structureId, visualOutputKey, QTY_COL } from "./model";
+import { computeVisual, VISUALS } from "./visuals/index.ts";
 import { evalTableRows, tableAggregates } from "./tables";
 
 export type Bindings = {
@@ -11,6 +12,9 @@ export type Bindings = {
   hiddenStructure: Set<string>;
   /** tables placed in a hidden section: their rows count for nothing */
   hiddenTables: Set<string>;
+  /** each tenant visual's last view, by its key; absent = undecided. formState keeps the placed,
+   *  shown ones. */
+  views: Record<string, unknown>;
 };
 
 const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((k) => b.has(k));
@@ -82,7 +86,8 @@ function settle(
     }
   };
 
-  const maxIter = model.parameters.length * 2 + model.computed.length + 2;
+  const views: Record<string, unknown> = {};
+  const maxIter = model.parameters.length * 2 + model.computed.length + (model.visuals?.length ?? 0) + 2;
   for (let iter = 0; iter < maxIter; iter++) {
     let changed = false;
     for (const p of model.parameters) {
@@ -131,6 +136,30 @@ function settle(
         }
       }
     }
+    // tenant visuals: their outputs are values like a computed value's, whatever their group's
+    // visibility — only the drawing follows it. An undecided input (unbound, null, mistyped) leaves
+    // the outputs absent, so every formula reading them is undecidable too.
+    for (const v of model.visuals ?? []) {
+      const calc = VISUALS[v.kind];
+      if (!calc) continue;
+      const inputs = Object.fromEntries(Object.entries(v.inputs).map(([name, src]) => [name, tryEval(src)]));
+      const r = computeVisual(calc, inputs);
+      for (const out of Object.keys(calc.outputs)) {
+        const k = visualOutputKey(v.key, out);
+        if (r) {
+          const val = r.outputs[out] ?? null;
+          if (values[k] !== val) {
+            values[k] = val;
+            changed = true;
+          }
+        } else if (k in values) {
+          delete values[k];
+          changed = true;
+        }
+      }
+      if (r) views[v.key] = r.view;
+      else delete views[v.key];
+    }
     if (!changed) break;
   }
   // A rule that cannot evaluate yet (an unbound ref) hides nothing yet.
@@ -154,7 +183,7 @@ function settle(
     }
   }
   for (const p of model.parameters) visible[p.key] = !inHidden.has(p.key) && shows(p.visibleWhen);
-  return { values, defaulted, visible, hiddenStructure, hiddenTables: nextTables };
+  return { values, defaulted, visible, hiddenStructure, hiddenTables: nextTables, views };
 }
 
 export type DomainOption = { value: Val; label: string; eliminatedBy?: string };

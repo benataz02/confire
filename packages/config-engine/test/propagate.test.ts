@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ModelDef, ResolvedLookups } from "../src/model";
 import { bindings, domainOf, missingInputs, propagate } from "../src/propagate";
-import { fieldGroup, lookups, model } from "./fixture";
+import { fieldGroup, lookups, model, SHEET_INPUTS, withSheet } from "./fixture";
 
 describe("bindings", () => {
   test("entries pass through; defaults fill absent params", () => {
@@ -322,5 +322,24 @@ describe("missingInputs", () => {
       .toEqual(["Cross-section is required", "Items: Note is empty in row 1"]);
     expect(keys({ material: "steel" }, [{ itemcode: "A", itemname: "a", quantity: 1, note: "x" }, { itemcode: "B" }]))
       .toEqual(["Items: Item name is empty in row 2", "Items: Quantity is empty in row 2", "Items: Note is empty in row 2"]);
+  });
+});
+
+describe("tenant visuals in the calculation", () => {
+  const none: ResolvedLookups = { domains: {}, tables: {} };
+  test("a visual's outputs are values every formula reads", () => {
+    const p = propagate(withSheet(), none, {});
+    expect(p.values.hoja_piezas).toBe(48);
+    expect(p.values.hoja_aprovechamiento).toBe(81);
+    expect(p.values.perSheet).toBe(48);
+    expect((p.views.hoja as { count: number }).count).toBe(48);
+  });
+  test("an undecided input leaves the outputs absent and no view", () => {
+    // an empty items row (0), several rows (ALUMIGRAF's IF → null), an unbound parameter
+    for (const pieceLength of ["0", "null", "width"]) {
+      const p = propagate(withSheet({ inputs: { ...SHEET_INPUTS, pieceLength } }), none, {});
+      expect("hoja_piezas" in p.values).toBe(false);
+      expect(p.views.hoja).toBeUndefined();
+    }
   });
 });
