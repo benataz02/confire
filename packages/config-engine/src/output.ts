@@ -21,6 +21,10 @@ export type OpResult = {
   totalMin: number;
   ratePerHour: number;
   cost: number;
+  /** the Beas operation the line is linked to, as evaluated */
+  operationId?: string;
+  /** linked, but the operation is not in the operations source: its catalog figures counted as 0 */
+  uncatalogued?: true;
 };
 export type Outputs = {
   bom: BomResult[];
@@ -46,8 +50,8 @@ export function computeOutputs(
   const b = bindings(model, lookups, assignment, tableRows);
   const { values } = b;
   const scope: Scope = { vars: { ...values, qty: batchQty }, tables: lookups.tables };
-  const numeric = (src: string, what: string): number => {
-    const v = evaluate(src, scope);
+  const numeric = (src: string, what: string, at: Scope = scope): number => {
+    const v = evaluate(src, at);
     if (typeof v !== "number") throw new DslError(`${what} did not evaluate to a number`, 0, src.length);
     return v;
   };
@@ -78,11 +82,25 @@ export function computeOutputs(
   for (const [i, o] of model.routing.entries()) {
     if (!included(o.condition)) continue;
     const at = `Routing line ${i + 1}`;
-    const setupMin = numeric(o.setupMin, `${at} setupMin`);
-    const runMinPerUnit = numeric(o.runMinPerUnit, `${at} runMinPerUnit`);
-    const rate = numeric(o.ratePerHour, `${at} ratePerHour`);
+    // A linked line reads its operation's catalog figures by name. One missing from the cache
+    // (not in the operations query, not synced yet) counts 0 and is flagged, like an unpriced item:
+    // the process page names it, and one stale row never stops a quote.
+    const operationId = o.operationId === undefined ? undefined : String(evaluate(o.operationId, scope) ?? "").trim();
+    const cat = operationId === undefined ? undefined : lookups.operations?.[operationId];
+    const lineScope: Scope = operationId === undefined ? scope : {
+      ...scope,
+      vars: { ...scope.vars, beasSetup: cat?.setupMin ?? 0, beasRun: cat?.runMinPerUnit ?? 0, beasRate: cat?.ratePerHour ?? 0 },
+    };
+    const setupMin = numeric(o.setupMin, `${at} setupMin`, lineScope);
+    const runMinPerUnit = numeric(o.runMinPerUnit, `${at} runMinPerUnit`, lineScope);
+    const rate = numeric(o.ratePerHour, `${at} ratePerHour`, lineScope);
     const totalMin = setupMin + runMinPerUnit * batchQty;
-    ops.push({ resource: o.resource, desc: o.desc ?? "", setupMin, runMinPerUnit, totalMin, ratePerHour: rate, cost: (totalMin / 60) * rate });
+    ops.push({
+      resource: o.resource || cat?.resource || "", desc: o.desc || cat?.desc || "",
+      setupMin, runMinPerUnit, totalMin, ratePerHour: rate, cost: (totalMin / 60) * rate,
+      ...(operationId === undefined ? {} : { operationId }),
+      ...(operationId !== undefined && !cat ? { uncatalogued: true as const } : {}),
+    });
     laborPerUnit += ((setupMin / batchQty + runMinPerUnit) / 60) * rate;
   }
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DslError } from "../src/dsl";
 import { computeOutputs } from "../src/output";
-import { lookups, model } from "./fixture";
+import { linkedModel, lookups, model } from "./fixture";
 
 const full = { material: "steel", section: 16, coated: true, color: "black" };
 
@@ -84,5 +84,39 @@ describe("computeOutputs", () => {
     const bad = structuredClone(model);
     bad.bom[0]!.qty = '"5"';
     expect(() => computeOutputs(bad, lookups, full, 100)).toThrow(DslError);
+  });
+});
+
+describe("computeOutputs over the Beas catalog", () => {
+  const withOps = { ...lookups, operations: { ACA_AGUJEROS: { desc: "AGUJEROS", resource: "ACA_ACABADO", setupMin: 5, runMinPerUnit: 0.1, ratePerHour: 21 } } };
+
+  test("a linked line costs from the catalog, and its formula may scale a catalog figure", () => {
+    const o = computeOutputs(linkedModel(), withOps, full, 100); // full.section = 16
+    const op = o.ops[2]!;
+    expect(op.operationId).toBe("ACA_AGUJEROS");
+    expect(op.resource).toBe("ACA_ACABADO"); // the line's resource is empty
+    expect(op.desc).toBe("AGUJEROS");
+    expect(op.setupMin).toBe(5);
+    expect(op.runMinPerUnit).toBeCloseTo(1.6); // beasRun * section
+    expect(op.ratePerHour).toBe(21);
+    expect(op.cost).toBeCloseTo(((5 + 1.6 * 100) / 60) * 21);
+    expect(op.uncatalogued).toBeUndefined();
+  });
+  test("the line's own resource and description win over the catalog's", () => {
+    const m = linkedModel();
+    m.routing[2] = { ...m.routing[2]!, resource: "SAW2", desc: "x" };
+    const op = computeOutputs(m, withOps, full, 100).ops[2]!;
+    expect(op.resource).toBe("SAW2");
+    expect(op.desc).toBe("x");
+  });
+  test("an operation missing from the catalog is flagged and its names count as 0", () => {
+    const o = computeOutputs(linkedModel(), lookups, full, 100); // no `operations`
+    expect(o.ops[2]!.uncatalogued).toBe(true);
+    expect(o.ops[2]!.cost).toBe(0);
+  });
+  test("computeOutputs trims an evaluated operation code", () => {
+    const m = linkedModel();
+    m.routing[2]!.operationId = '"ACA_AGUJEROS  "';
+    expect(computeOutputs(m, withOps, full, 100).ops[2]!.uncatalogued).toBeUndefined();
   });
 });
