@@ -5,6 +5,7 @@ import { agentPost, agentRequester, DirectTransport } from "@confire/b1";
 import { agentTarget, viaB1 } from "./b1.ts";
 import { PRINTABLE } from "./entity-profiles.ts";
 import { t } from "./i18n/index.ts";
+import { cached } from "./sap-cache.ts";
 
 // Printing (print spec §5.1). Confire decides what to print and the agent only renders it, so a
 // change here ships without an agent update:
@@ -26,10 +27,6 @@ export const REPORT_PREFIX: Record<string, string> = { Quotations: "QUT", Orders
 export const reportCode = (entity: string, docType: unknown): string =>
   REPORT_PREFIX[entity] + (docType === "dDocument_Service" ? "1" : "2");
 
-const LAYOUT_TTL_MS = 2 * 60 * 60 * 1000;
-// Keyed by the company the call itself carries, so a company switch never serves the old one's.
-// ponytail: per-process Map, never pruned — a few keys per customer; prune if a tenant ever has thousands of customers printing.
-const layouts = new Map<string, { layout: string; until: number }>();
 
 /** `doc` is the document when the caller has already read it (CardCode, DocType): one read less. */
 export async function printDocument(
@@ -42,18 +39,16 @@ export async function printDocument(
     { CardCode?: unknown; DocType?: unknown };
   const code = reportCode(entity, row.DocType);
   const cardCode = typeof row.CardCode === "string" ? row.CardCode : undefined;
-  const key = `${tenantId}|${target.companyDb}|${code}|${cardCode}`;
-  const hit = layouts.get(key);
-  let layout = hit && hit.until > Date.now() ? hit.layout : undefined;
-  if (!layout) {
+  // A print_layout entry, 2 h (sap-cache.ts LIFETIME_MS), under the company the call carries, so a
+  // company switch never serves the old one's. A PLD default throws inside the load: never stored.
+  const layout = await cached(tenantId, "print_layout", `${code}|${cardCode ?? ""}`, async () => {
     const found = (await viaB1(() => b1.createEntity("ReportLayoutsService_GetDefaultReport", { ReportParams: { ReportCode: code, CardCode: cardCode } })))
       .data as { LayoutCode: string };
     const kind = (await viaB1(() => b1.createEntity("ReportLayoutsService_GetReportLayout", { ReportLayoutParams: { LayoutCode: found.LayoutCode } })))
       .data as { Category?: string };
     if (kind.Category !== "rlcCrystal") throw new ORPCError("PRECONDITION_FAILED", { message: t("PRINT_NOT_CRYSTAL", found.LayoutCode) });
-    layout = found.LayoutCode;
-    layouts.set(key, { layout, until: Date.now() + LAYOUT_TTL_MS });
-  }
+    return { company: target.companyDb ?? null, data: found.LayoutCode };
+  });
   const [conn] = await db.select({ engine: sapConnection.printEngine }).from(sapConnection)
     .where(eq(sapConnection.tenantId, tenantId)).limit(1);
   return viaB1(async () => (await agentPost(target, "/print", { entity, docEntry, layout, engine: conn?.engine ?? "gateway" })) as PrintedDocument);

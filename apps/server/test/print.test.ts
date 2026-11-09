@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, setSystemTime, test } from "bun:test";
-import { eq } from "drizzle-orm";
-import { db, sapConnection } from "@confire/db";
+import { and, eq } from "drizzle-orm";
+import { db, sapCache, sapConnection } from "@confire/db";
 import { router } from "../src/orpc/router.ts";
 import { adoptCompany } from "../src/b1.ts";
 import { call, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
@@ -75,6 +75,14 @@ test("the layout is looked up once per 2 hours", async () => {
   } finally {
     setSystemTime();
   }
+});
+
+test("the layout is kept in sap_cache", async () => {
+  const s = await setup();
+  await s.print(1);
+  const stored = await db.select({ key: sapCache.key, data: sapCache.data }).from(sapCache)
+    .where(and(eq(sapCache.tenantId, s.tenantId), eq(sapCache.kind, "print_layout")));
+  expect(stored).toEqual([{ key: "QUT2|C1", data: "QUT20001" }]);
 });
 
 test("a company switch looks the layout up again", async () => {
