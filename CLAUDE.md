@@ -578,6 +578,20 @@ the margin is a share of the price, `pricing.margin` unless the configuration's 
 expression language; `check.ts` validates a whole model and is the gate on save, so a model that
 saves cannot produce a parse/unknown-ref error at runtime.
 
+**Tenant visuals** (`docs/superpowers/specs/2026-11-09-tenant-visuals-design.md`) are code a Confire
+developer writes for one tenant: a picture beside a field group with a calculation of its own, for
+what the formula language cannot do (it has no loops, on purpose). Two halves share a kind id: the
+calculation in `config-engine/src/visuals/` (`VISUALS`, a folder per tenant — hera's `sheetLayout`
+nests pieces on a sheet) and the drawing in `@confire/ui/configurator/visuals/` (`VISUAL_VIEWS`,
+lazily loaded; a test keeps the lists equal). A model places one in a group like a table
+(`ModelDef.visuals`: kind + a formula per input); `propagate` runs it in its fixed-point loop
+(`computeVisual`, memoized, a throw or an undecided input = no outputs) and writes its outputs as
+`<key>_<output>` for every formula; the view rides `FormState.visuals`, and the group draws its fields
+in one half and the picture in the other. A kind lists the tenant slugs it serves (`tenants`):
+`models.save` passes `context.tenantSlug` to `checkModel`, the builder only offers the tenant's
+kinds. Staff only: `toPortalForm` and the portal's model drop them; chat and MCP results drop the
+drawing data (`withoutVisuals`).
+
 `ResolvedLookups` is the seam: the engine never sees where options came from — manual lists and
 tenant `config_masterdata` rows (kind `table` = values maintained in Confire, kind `query` = rows
 cached from a B1/Beas read) are all resolved to the same shape by `apps/server/src/lookups.ts`
