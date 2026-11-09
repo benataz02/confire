@@ -31,17 +31,15 @@ export const modelSections = (t: Translate): Section[] => [
       {
         id: "pricing", label: t("MODEL_PRICING"),
         fields: [
-          // BOM lines carry no price of their own: this list is where every material's unit price is
-          // read from, live, on each calculation. Label mode: its name shows, its number is stored.
+          // BOM lines carry no price of their own: every material's unit price is this list's, cached
+          // from SAP (refreshed after a day, or by a configuration's Refresh). Label mode: its name
+          // shows, its number is stored.
           {
             key: "pricing.priceList", label: t("MODEL_PRICE_LIST"), required: true, help: t("MODEL_PRICE_LIST_ERR"),
             cfl: { dialogConfig: cfl.priceLists() },
             onChange: (v) => ({ "pricing.priceList": v === null || v === undefined || v === "" ? undefined : Number(v) }),
           },
-          // Where those prices are cached: an `Items` masterdata query with no columns selected, so
-          // B1 returns whole rows and the nested ItemPrices collection survives the sync.
-          { key: "pricing.itemTable", label: t("MODEL_ITEM_SOURCE"), required: true, controlType: "masterdataQuery" },
-          // Where the routing's Beas operations are cached, as the item source is for the BOM.
+          // Where the routing's Beas operations are cached: a masterdata query over OperationsCatalog.
           // Optional: checkModel asks for it only once a routing line is linked to an operation.
           { key: "pricing.operationTable", label: t("MODEL_OP_SOURCE"), controlType: "masterdataQuery", help: t("MODEL_OP_SOURCE_HELP") },
           // A share of the price; each configuration may set its own in its Candidates section.

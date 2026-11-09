@@ -304,15 +304,11 @@ export const ModelDefZ = z.object({
     // in [0, 100). A configuration may override it (config_project.margin).
     margin: z.number(),
     quoteItemCode: z.string().min(1),
-    // The B1 price list the BOM materials are costed from. Optional here, required by checkModel:
-    // a model saved before price lists existed must still load, it just cannot be saved again
-    // until one is picked.
+    // The B1 price list the BOM materials are costed from: cached whole by its own stored SQL query
+    // (the server's price-list.ts), so nothing else names where prices live. Optional here,
+    // required by checkModel: a model saved before price lists existed must still load, it just
+    // cannot be saved again until one is picked.
     priceList: z.number().int().positive().optional(),
-    // The tenant masterdata query whose cached rows carry the item prices — an `Items` read with
-    // no declared columns, so B1 returns whole rows and the nested `ItemPrices` collection
-    // survives into the cache. `priceList` then picks the line out of it. Named here rather than
-    // built in, for the same reason `history.table` is: the query is the tenant's, defined once.
-    itemTable: z.string().min(1).optional(),
     // The tenant masterdata query (target beas, OperationsCatalog) whose cached rows carry the
     // routing operations' times and rates. Required by checkModel once a routing line is linked.
     operationTable: z.string().min(1).optional(),

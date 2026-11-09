@@ -16,7 +16,7 @@ import { t as text } from "./i18n/index.ts";
 // a failed request.
 //
 // Two seams, and the module knows nothing behind either: `RowCache` is where cached rows come
-// from (faked wholesale in tests), and `QueryRunner` is the read hop the *sync* uses. Only the
+// from — a masterdata's, or the model's price list's (faked wholesale in tests) — and `QueryRunner` is the read hop the *sync* uses. Only the
 // sync and the masterdata editor's live preview still hold a QueryRunner.
 
 /** Rows per B1 page: the `$top` Confire asks for, and (via packages/b1's pageHeader) the
@@ -61,8 +61,9 @@ export type RowQuery = {
   searchCols?: string[];
 };
 
-/** Cached rows of one query masterdata, raw as B1 returned them. */
-export type RowCache = (masterdataId: string, q?: RowQuery) => Promise<Record<string, unknown>[]>;
+/** Cached rows, raw as SAP returned them: a query masterdata's (keyed by its id) or a price list's
+ *  (keyed by its number, rows `{ ItemCode, Price }`). */
+export type RowCache = (kind: "masterdata" | "price_list", key: string, q?: RowQuery) => Promise<Record<string, unknown>[]>;
 
 /** A live read plus the two display-only fields the value-help dialog reads, and the sync
  *  frequency. Structurally the `query` column of config_masterdata; spelled out here so this
@@ -93,9 +94,9 @@ export type MasterdataRow = {
 };
 export type MasterdataQueryRow = MasterdataRow & { query: MasterdataQuery };
 
-/** Scalars only. A nested B1 collection (`ItemPrices`) is not a cell value — it is read straight
- *  off the raw row by the price path, and `String()`-ing it here would put "[object Object]" in a
- *  column. Absent and non-scalar both resolve to null. */
+/** Scalars only. A nested B1 collection (an `Items` row's `ItemPrices`) is not a cell value, and
+ *  `String()`-ing it here would put "[object Object]" in a column. Absent and non-scalar both
+ *  resolve to null. */
 const asVal = (v: unknown): Val =>
   v === null || v === undefined ? null
   : typeof v === "number" || typeof v === "boolean" ? v
@@ -109,8 +110,7 @@ export function tablesFromMasterdata(rows: MasterdataRow[]): Record<string, Reso
 }
 
 /** The query rows a model actually reads as a lookup. Masterdata is tenant-wide, so without this
- *  filter every model would load every tenant query. `pricing.itemTable` is deliberately NOT here:
- *  its rows are read for prices, by code, not shipped to the browser as a table. */
+ *  filter every model would load every tenant query. */
 export function queryRowsFor(model: ModelDef, rows: MasterdataRow[]): MasterdataQueryRow[] {
   const named = referencedTables(model);
   return rows.filter((r): r is MasterdataQueryRow => r.kind === "query" && !!r.query && named.has(r.name));
@@ -145,8 +145,8 @@ const fieldsOf = (rows: Record<string, unknown>[]): string[] =>
 const IDENT = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 /** Raw cached rows -> the engine's table shape. Columns come from the masterdata's declared list
- *  when it has one, and otherwise from the rows themselves — which is the `Items` case, where no
- *  `$select` is sent precisely so the nested price collection survives. */
+ *  when it has one, and otherwise from the rows themselves — a query that declares none sends no
+ *  `$select`, and its fields are whatever B1 returned. */
 export function toResolvedTable(raw: Record<string, unknown>[], columns?: string[]): ResolvedTable {
   const cols = columns?.length ? columns : fieldsOf(raw);
   return { columns: cols, rows: raw.map((r) => cols.map((c) => asVal(r[c]))) };
@@ -187,9 +187,8 @@ export function queryPageSource(
   if (!row) throw new Error(text("QUERY_TABLE_UNKNOWN", input.table));
   const searchCols = input.searchCols ?? [];
   const declared = row.query.columns;
-  // Only enforced when the masterdata declares its columns: an `Items` query declares none on
-  // purpose (no $select, so the nested price collection survives), and its fields are whatever
-  // B1 returned.
+  // Only enforced when the masterdata declares its columns: one that declares none sends no
+  // $select, and its fields are whatever B1 returned.
   const unknownCol = declared.length
     ? [...searchCols, ...(input.match ? [input.match.col] : []), ...(input.where ? [input.where.col] : [])].find((c) => !declared.includes(c))
     : undefined;
@@ -223,39 +222,29 @@ export async function fetchQueryTable(
   };
 }
 
-/** B1's own field names on the `Items` entity. Hardcoded for the same reason `readItemPrices`
- *  hardcoded them: `pricing.itemTable` is an `Items` read by definition, and the price lives in a
- *  nested collection no masterdata column list could name. */
-const ITEM_CODE = "ItemCode";
-const ITEM_PRICES = "ItemPrices";
-
-/** The BOM's unit prices, read out of the cached `Items` rows.
+/** The BOM's unit prices, read out of the model's cached price list (price-list.ts), whose rows are
+ *  `{ ItemCode, Price }`.
  *
- *  Scoped by `bomItemCodes` rather than built from the whole table: `prices` crosses the wire to
- *  the browser with the rest of ResolvedLookups, and a tenant's item masterdata is tens of
- *  thousands of rows. An item the cache has no line for is simply absent — computeOutputs then
- *  refuses that BOM line by name rather than costing the material at zero. */
+ *  Scoped by `bomItemCodes` rather than built from the whole list: `prices` crosses the wire to the
+ *  browser with the rest of ResolvedLookups, and a price list is tens of thousands of rows. An item
+ *  the list has no row for is simply absent — computeOutputs then flags that BOM line `unpriced`
+ *  rather than costing the material at zero.
+ *  ponytail: no index on data->>'ItemCode'; the read scans one list's rows. A partial expression
+ *  index (where kind = 'price_list') if it profiles slow. */
 async function cachedPrices(
-  model: ModelDef, rows: MasterdataRow[], domains: ResolvedLookups["domains"], cache: RowCache,
+  model: ModelDef, domains: ResolvedLookups["domains"], cache: RowCache,
 ): Promise<Record<string, number>> {
-  const { priceList, itemTable } = model.pricing;
-  if (!priceList || !itemTable) return {};
-  const source = queryRowOf(rows, itemTable);
+  const { priceList } = model.pricing;
   const codes = bomItemCodes(model, domains);
-  if (!source || !codes.length) return {};
-  const raw = await cache(source.id, { col: ITEM_CODE, values: codes });
+  if (!priceList || !codes.length) return {};
+  const raw = await cache("price_list", String(priceList), { col: "ItemCode", values: codes });
   const prices: Record<string, number> = {};
-  for (const r of raw) {
-    const code = r[ITEM_CODE];
-    const line = (r[ITEM_PRICES] as { PriceList?: number; Price?: number }[] | undefined)
-      ?.find((pr) => pr.PriceList === priceList);
-    if (typeof code === "string" && typeof line?.Price === "number") prices[code] = line.Price;
-  }
+  for (const r of raw) if (typeof r.ItemCode === "string" && typeof r.Price === "number") prices[r.ItemCode] = r.Price;
   return prices;
 }
 
-/** Beas' own field names on `OperationsCatalog`, hardcoded for the reason ITEM_CODE is:
- *  `pricing.operationTable` is an OperationsCatalog read by definition. */
+/** Beas' own field names on `OperationsCatalog`, hardcoded: `pricing.operationTable` is an
+ *  OperationsCatalog read by definition. */
 const OP = { id: "OperationId", desc: "Description", resource: "ResourceId", setup: "SetupTime", run: "ProductionTime", per: "QuantityPer", rate: "CostRate" } as const;
 
 /** A Beas figure as a number: a null or missing one is 0. Read by value — the EDMX declares
@@ -275,7 +264,7 @@ async function cachedOperations(
   if (!source || !ids.length) return {};
   // ponytail: matched on the trimmed code, which the cache holds once synced through runnerFor's
   // trim; a cache synced before that, with a padded *key*, is only found after its next sync.
-  const raw = await cache(source.id, { col: OP.id, values: ids });
+  const raw = await cache("masterdata", source.id, { col: OP.id, values: ids });
   const out: Record<string, CatalogOperation> = {};
   for (const r of raw) {
     const id = str(r[OP.id]);
@@ -351,7 +340,7 @@ export async function resolveLookups(
   // Every query table the model names, whole — or, past ENUM_MAX rows, its start marked `partial`:
   // a domain is complete or it is not one, never whatever fits on a page. Concurrent SQL reads.
   const named = queryRowsFor(model, rows);
-  const pages = await Promise.all(named.map((r) => cache(r.id, { top: ENUM_MAX + 1 })));
+  const pages = await Promise.all(named.map((r) => cache("masterdata", r.id, { top: ENUM_MAX + 1 })));
   named.forEach((r, i) => {
     const raw = pages[i]!;
     const partial = raw.length > ENUM_MAX;
@@ -368,7 +357,7 @@ export async function resolveLookups(
   // parameter could hold, and those values are only known once its domain is resolved.
   return {
     domains, tables,
-    prices: await cachedPrices(model, rows, domains, cache),
+    prices: await cachedPrices(model, domains, cache),
     operations: await cachedOperations(model, rows, domains, cache),
   };
 }
@@ -384,7 +373,7 @@ function projectDomains(
     // ponytail: a `where` filters the table's resolved rows. Over a partial query table (> ENUM_MAX)
     // that is its first rows plus the bound picks, so the field stays picked through the value help
     // (which filters in SQL), never enumerated, however few rows the filter keeps. Upgrade: read
-    // `cache(id, { where, top: ENUM_MAX + 1 })` per filtered ref and mark partial per domain.
+    // `cache("masterdata", id, { where, top: ENUM_MAX + 1 })` per filtered ref and mark partial per domain.
     domains[p.key] = optionsFromRef(ref, tables);
   }
   return domains;
@@ -410,7 +399,7 @@ export async function bindEntryValues(
 ): Promise<ResolvedLookups> {
   const needs = [...offPageNeeds(model, rows, canonical.tables, entries, tableRows).values()];
   if (!needs.length) return canonical;
-  const bound = await Promise.all(needs.map((n) => cache(n.row.id, { col: n.col, values: n.values })));
+  const bound = await Promise.all(needs.map((n) => cache("masterdata", n.row.id, { col: n.col, values: n.values })));
 
   const tables = { ...canonical.tables };
   const touched = new Set<string>();
@@ -427,7 +416,7 @@ export async function bindEntryValues(
   const domains = { ...canonical.domains, ...projectDomains(model, tables, touched) };
   // A bare-identifier BOM item code is priced across its parameter's domain, so a newly bound
   // value needs its price fetched too — the codes that were already priced are not re-read.
-  const prices = { ...canonical.prices, ...(await cachedPrices(model, rows, domains, cache)) };
+  const prices = { ...canonical.prices, ...(await cachedPrices(model, domains, cache)) };
   // The same for an operation chosen by a parameter (a bare identifier in `operationId`).
   const operations = { ...canonical.operations, ...(await cachedOperations(model, rows, domains, cache)) };
   return { domains, tables, prices, operations };

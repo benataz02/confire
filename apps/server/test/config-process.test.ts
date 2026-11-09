@@ -33,7 +33,7 @@ const PRICED: ModelDef = {
   constraints: [],
   bom: [{ itemCode: '"BODY"', qty: 'size == "S" ? 1 : 2' }],
   routing: [],
-  pricing: { margin: 50, quoteItemCode: "BOX", priceList: 1, itemTable: "catalog" },
+  pricing: { margin: 50, quoteItemCode: "BOX", priceList: 1 },
   batchDefaults: [10, 20],
 };
 const ITEMS = [{ itemcode: "P1", itemname: "Part 1", quantity: 1 }, { itemcode: "P2", itemname: "Part 2", quantity: 2 }];
@@ -44,12 +44,9 @@ async function setup(def: ModelDef = PRICED, price = 3) {
   const { tenantId, slug } = await makeTenant();
   const admin = await makeUser("admin", tenantId);
   const ctx = { context: { headers: tenantHeaders(slug, admin.cookie) } };
-  // Synced, with no sync frequency: nothing decides it is stale and goes looking for an agent.
-  const [md] = await db.insert(configMasterdata).values({
-    tenantId, name: "catalog", kind: "query", query: { target: "b1", query: { entitySet: "Items" }, columns: [] },
-  }).returning({ id: configMasterdata.id });
-  const setPrice = (p: number) => fill(tenantId, "masterdata", md!.id, null,
-    (async function* () { yield [{ ItemCode: "BODY", ItemPrices: [{ PriceList: 1, Price: p }] }]; })());
+  // The model's price list, read just now: nothing decides it is stale and goes looking for an agent.
+  const setPrice = (p: number) => fill(tenantId, "price_list", "1", null,
+    (async function* () { yield [{ ItemCode: "BODY", Price: p }]; })());
   await setPrice(price);
   const [m] = await db.insert(configModel).values({ tenantId, name: def.name, definition: def }).returning({ id: configModel.id });
   const create = async (name = "Box", customer: typeof ACME | null = ACME) =>

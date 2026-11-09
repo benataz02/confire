@@ -196,13 +196,7 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   // list every material costs an unanswerable question.
   if (!model.pricing.priceList)
     issues.push({ path: "pricing.priceList", message: "a model needs a price list — it is what prices the BOM materials" });
-  // The price list says WHICH price; the item table says where the prices are cached. A BOM
-  // without one cannot be costed at all, so it is refused at save rather than at calculate.
-  if (model.bom.length && !model.pricing.itemTable)
-    issues.push({ path: "pricing.itemTable", message: "a model with a BOM needs an item masterdata query — it is where the prices are read from" });
-  else if (model.pricing.itemTable && !tableCols.has(model.pricing.itemTable))
-    issues.push({ path: "pricing.itemTable", message: `unknown table '${model.pricing.itemTable}'` });
-  // The same pair for the routing: a linked line's figures are read from this query's cache.
+  // The routing's figures are read from a query's cache: a linked line needs that query.
   if (model.routing.some((o) => o.operationId !== undefined) && !model.pricing.operationTable)
     issues.push({ path: "pricing.operationTable", message: "a routing line linked to a Beas operation needs an operations masterdata query" });
   else if (model.pricing.operationTable && !tableCols.has(model.pricing.operationTable))
@@ -368,15 +362,14 @@ export function referencedTables(model: ModelDef): Set<string> {
 }
 
 /** Every masterdata query a SYNC has to keep fresh for this model: the live lookups above, plus
- *  the two cache sources `referencedTables` deliberately leaves out — the history query and the
- *  item/price query. Kept separate because those two are cache sources the form never pages.
+ *  the cache sources `referencedTables` deliberately leaves out — the history query and the
+ *  operations query. Kept separate because those are cache sources the form never pages.
  *
  *  This is the one place that knows the full set, which is what lets `masterdata.remove` stop
  *  guessing: before it, the delete guard had to re-add `history.table` by hand. */
 export function syncTables(model: ModelDef): Set<string> {
   const out = referencedTables(model);
   if (model.history?.table) out.add(model.history.table);
-  if (model.pricing.itemTable) out.add(model.pricing.itemTable);
   if (model.pricing.operationTable) out.add(model.pricing.operationTable);
   return out;
 }
@@ -504,7 +497,6 @@ export function renameTable(model: ModelDef, from: string, to: string): ModelDef
     ...(m.history?.table === from ? { history: { ...m.history, table: to } } : {}),
     pricing: {
       ...m.pricing,
-      ...(m.pricing.itemTable === from ? { itemTable: to } : {}),
       ...(m.pricing.operationTable === from ? { operationTable: to } : {}),
     },
   };

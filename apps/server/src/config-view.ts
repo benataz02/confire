@@ -5,6 +5,7 @@ import {
 } from "@confire/config-engine";
 import type { ConfigCandidate } from "@confire/db";
 import { liveProject, type LiveProject } from "./config-project.ts";
+import { priceListOf, type PriceState } from "./price-list.ts";
 import type { RowCache } from "./lookups.ts";
 import { t } from "./i18n/index.ts";
 
@@ -32,7 +33,18 @@ function widestOf(prop: Propagation): { key: string; size: number } | undefined 
 }
 
 /** What the message popover says that the server knows, beyond `missing` and the conflicts. */
-function issuesOf(live: Pick<LiveProject, "row" | "model" | "md" | "lookups" | "prop">, capped: boolean): Notice[] {
+/** The model's price list, as the masterdata's freshness is told: a failed read is worth knowing,
+ *  a list never read is why every BOM line is unpriced. Merely stale says nothing (24 h refresh). */
+export function priceListNotices(list: number | undefined, prices: PriceState | null): Notice[] {
+  if (!list) return [];
+  const name = t("PRICE_LIST_NAME", list);
+  if (prices?.error)
+    return [{ code: "sync_failed", params: [name, prices.error, String(prices.rows)], message: t("NOTICE_SYNC_FAILED", name, prices.error) }];
+  if (!prices?.fetchedAt) return [{ code: "sync_never", params: [name], message: t("NOTICE_SYNC_NEVER", name) }];
+  return [];
+}
+
+function issuesOf(live: Pick<LiveProject, "row" | "model" | "md" | "prices" | "lookups" | "prop">, capped: boolean): Notice[] {
   const { row, md, lookups, prop } = live;
   const model = live.model.definition;
   const out: Notice[] = [];
@@ -57,6 +69,7 @@ function issuesOf(live: Pick<LiveProject, "row" | "model" | "md" | "lookups" | "
     else if (!r.syncedAt)
       out.push({ code: "sync_never", params: [r.name], message: t("NOTICE_SYNC_NEVER", r.name) });
   }
+  out.push(...priceListNotices(priceListOf(model), live.prices));
   if (capped) {
     const w = widestOf(prop);
     out.push({
@@ -86,7 +99,7 @@ export function uncataloguedOperations(candidates: ConfigCandidate[]): string[] 
 }
 
 /** The view, from a live project. Pure: everything it reads is already loaded. */
-export function composeView(live: Pick<LiveProject, "row" | "model" | "md" | "lookups" | "prop" | "missing" | "calculation">) {
+export function composeView(live: Pick<LiveProject, "row" | "model" | "md" | "prices" | "lookups" | "prop" | "missing" | "calculation">) {
   const { row, lookups, prop } = live;
   const model = live.model.definition;
   const stored = row.candidates;

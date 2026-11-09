@@ -94,6 +94,7 @@ export const en = {
   NOTICE_NOT_AN_OPTION: "{0} is not one of {1}'s options",
   NOTICE_SYNC_FAILED: "'{0}' could not be refreshed: {1}",
   NOTICE_SYNC_NEVER: "'{0}' has not been synced yet",
+  PRICE_LIST_NAME: "Price list {0}",
   NOTICE_CAPPED: "Stopped at {0} candidates — set more parameters",
   NOTICE_CAPPED_WIDEST: "Stopped at {0} candidates — set more parameters ({1} has {2} options)",
   NOTICE_UNPRICED_LIST: "No price for {0} in price list {1} — its material is costed at 0",

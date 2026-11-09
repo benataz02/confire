@@ -31,7 +31,7 @@ const model: ModelDef = {
       { key: "double", label: "Double", type: "number", cell: { kind: "formula", expr: "quantity * 2" } },
     ],
   }],
-  pricing: { margin: 50, quoteItemCode: "CFG", priceList: 1, itemTable: "catalog" },
+  pricing: { margin: 50, quoteItemCode: "CFG", priceList: 1 },
   batchDefaults: [10],
 };
 

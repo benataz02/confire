@@ -89,6 +89,7 @@ export const eu: Partial<Record<keyof typeof en, string>> = {
   NOTICE_NOT_AN_OPTION: "{0} ez da {1} eremuko aukeretako bat",
   NOTICE_SYNC_FAILED: "Ezin izan da «{0}» eguneratu: {1}",
   NOTICE_SYNC_NEVER: "«{0}» oraindik ez da sinkronizatu",
+  PRICE_LIST_NAME: "{0} prezio-zerrenda",
   NOTICE_CAPPED: "{0} hautagaitan gelditu da — zehaztu parametro gehiago",
   NOTICE_CAPPED_WIDEST: "{0} hautagaitan gelditu da — zehaztu parametro gehiago ({1} eremuak {2} aukera ditu)",
   NOTICE_UNPRICED_LIST: "{0} artikuluak ez du preziorik {1} prezio-zerrendan — materiala 0an kosteatzen da",

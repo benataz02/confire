@@ -89,6 +89,7 @@ export const es: Partial<Record<keyof typeof en, string>> = {
   NOTICE_NOT_AN_OPTION: "{0} no es una de las opciones de {1}",
   NOTICE_SYNC_FAILED: "No se ha podido actualizar «{0}»: {1}",
   NOTICE_SYNC_NEVER: "«{0}» aún no se ha sincronizado",
+  PRICE_LIST_NAME: "Lista de precios {0}",
   NOTICE_CAPPED: "Detenido en {0} candidatos — defina más parámetros",
   NOTICE_CAPPED_WIDEST: "Detenido en {0} candidatos — defina más parámetros ({1} tiene {2} opciones)",
   NOTICE_UNPRICED_LIST: "Sin precio para {0} en la lista de precios {1} — su material se costea a 0",

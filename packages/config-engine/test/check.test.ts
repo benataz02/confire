@@ -1,6 +1,6 @@
 import { describe, expect, it, test } from "bun:test";
 import { bomItemCodes, checkModel, referencedTables, renameTable, routingOperationIds, syncTables } from "../src/check";
-import { itemsTable, type ModelDef } from "../src/model";
+import { itemsTable, ModelDefZ, type ModelDef } from "../src/model";
 import { fieldGroup, linkedModel, model } from "./fixture";
 
 // The model's namespace: the manual price table it LOOKUPs, and the `Items` query its BOM is
@@ -303,13 +303,11 @@ describe("syncTables", () => {
     m.bom[0]!.qty = 'LOOKUP("prices", "code", material, "price")'; // a live lookup
     m.history = { table: "past", mappings: [], display: [] };      // a cache source
     expect([...referencedTables(m)]).toEqual(["prices"]);
-    // "items" is pricing.itemTable on the fixture — the other cache source.
-    expect([...syncTables(m)].sort()).toEqual(["items", "past", "prices"]);
+    expect([...syncTables(m)].sort()).toEqual(["past", "prices"]);
   });
 
   it("is referencedTables when a model names no cache source", () => {
     const m = structuredClone(model);
-    m.pricing = { ...m.pricing, itemTable: undefined };
     expect([...syncTables(m)].sort()).toEqual([...referencedTables(m)].sort());
   });
 });
@@ -322,7 +320,6 @@ describe("renameTable", () => {
     m.bom[0]!.qty = 'LOOKUP("prices", "code", "prices", "price") + LOOKUP("margins", "k", "std", "v")';
     m.tables = [{ ...itemsTable(), basisExpr: 'LOOKUP("prices", "code", "x", "price")' }];
     m.history = { table: "prices", mappings: [], display: [] };
-    m.pricing = { ...m.pricing, itemTable: "prices" };
 
     const r = renameTable(m, "prices", "price_list");
     expect([...syncTables(r)].sort()).toEqual(["margins", "price_list"]);
@@ -332,18 +329,17 @@ describe("renameTable", () => {
   });
 });
 
-describe("pricing.itemTable", () => {
-  it("is required once a model has a BOM, and must name a known table", () => {
-    const noTable = { ...model, pricing: { ...model.pricing, itemTable: undefined } };
-    expect(checkModel(noTable, PRICES).map((i) => i.path)).toContain("pricing.itemTable");
-
-    const ghost = { ...model, pricing: { ...model.pricing, itemTable: "nope" } };
-    expect(checkModel(ghost, PRICES).some((i) => i.message.includes("unknown table 'nope'"))).toBe(true);
+describe("BOM pricing", () => {
+  it("a model with a BOM needs a price list and nothing else — its prices are the list's cache", () => {
+    expect(model.bom.length).toBeGreaterThan(0);
+    expect(checkModel(model, PRICES).filter((i) => i.path.startsWith("pricing."))).toEqual([]);
+    const noList = { ...model, pricing: { ...model.pricing, priceList: undefined } };
+    expect(checkModel(noList, PRICES).map((i) => i.path)).toContain("pricing.priceList");
   });
 
-  it("is not required by a model with no BOM — there is nothing to price", () => {
-    const noBom = { ...model, bom: [], pricing: { ...model.pricing, itemTable: undefined } };
-    expect(checkModel(noBom, PRICES).some((i) => i.path === "pricing.itemTable")).toBe(false);
+  it("a stored model still naming an item table parses, the key dropped", () => {
+    const old = { ...model, pricing: { ...model.pricing, itemTable: "items" } };
+    expect(ModelDefZ.parse(old).pricing).not.toHaveProperty("itemTable");
   });
 });
 

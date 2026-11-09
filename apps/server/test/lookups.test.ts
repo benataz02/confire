@@ -6,8 +6,8 @@ import {
 } from "../src/lookups.ts";
 
 // Masterdata is tenant-wide: these cover the filter that keeps a model from loading tables it
-// never names, and the two things the cache made possible — prices out of a nested B1 collection,
-// and a stored off-page pick that reaches the domain instead of only the table.
+// never names, and the two things the cache made possible — prices out of the model's cached price
+// list, and a stored off-page pick that reaches the domain instead of only the table.
 
 const model: ModelDef = {
   name: "m",
@@ -20,7 +20,7 @@ const model: ModelDef = {
   constraints: [],
   bom: [{ itemCode: "grade", qty: "1" }],
   routing: [],
-  pricing: { margin: 0, quoteItemCode: "X", priceList: 2, itemTable: "catalog" },
+  pricing: { margin: 0, quoteItemCode: "X", priceList: 2 },
   batchDefaults: [1],
 };
 
@@ -37,44 +37,45 @@ const rows: MasterdataRow[] = [
   md("u", "unused", { query: { target: "b1", query: { entitySet: "Orders" }, columns: ["DocNum"] } }),
 ];
 
-/** A cache over literal rows, honouring the `col`/`values` filter the binder and prices use. */
-const cacheOf = (byId: Record<string, Record<string, unknown>[]>, log?: string[]): RowCache =>
-  async (id, q) => {
-    log?.push(id);
-    const all = byId[id] ?? [];
+/** A cache over literal rows, honouring the `col`/`values` filter the binder and prices use. A
+ *  masterdata entry is keyed by its id, a price list as `price_list:<n>`. */
+const cacheOf = (byKey: Record<string, Record<string, unknown>[]>, log?: string[], asked?: unknown[]): RowCache =>
+  async (kind, key, q) => {
+    const k = kind === "masterdata" ? key : `${kind}:${key}`;
+    log?.push(k);
+    asked?.push([kind, key, q]);
+    const all = byKey[k] ?? [];
     return q?.col && q.values
       ? all.filter((r) => q.values!.some((v) => String(v) === String(r[q.col!])))
       : all;
   };
 
-const CATALOG = [
-  // two lists on the same item: only the model's price list (2) may be picked
-  { ItemCode: "A", ItemPrices: [{ PriceList: 1, Price: 99 }, { PriceList: 2, Price: 7 }] },
-  // priced on another list only — B1 returned the item, but not for this list
-  { ItemCode: "B", ItemPrices: [{ PriceList: 1, Price: 50 }] },
-];
+// The model's list (2), as its stored SQL query answers it: "B" has no price on it.
+const PRICES = { "price_list:2": [{ ItemCode: "A", Price: 7 }] };
 
 describe("resolveLookups over cached masterdata", () => {
   test("loads only the tables the model names, and carries their display metadata", async () => {
     const read: string[] = [];
-    const lookups = await resolveLookups(model, rows, cacheOf({ i: [{ ItemCode: "A" }], c: CATALOG }, read));
-    expect(read.sort()).toEqual(["c", "i"]); // "unused" and the manual "prices" are never read
+    const lookups = await resolveLookups(model, rows, cacheOf({ i: [{ ItemCode: "A" }], ...PRICES }, read));
+    expect(read.sort()).toEqual(["i", "price_list:2"]); // "unused" and the manual "prices" are never read
     expect(lookups.tables.prices!.rows).toEqual([["A", 2]]);
     expect(lookups.tables.items!.labels).toEqual({ ItemCode: "Item" });
     expect(lookups.domains.grade).toEqual([{ value: "A", label: "A" }]);
   });
 
-  test("prices come out of the nested ItemPrices collection, for this model's list only", async () => {
+  test("prices come from the model's price list, by the BOM's codes only", async () => {
     const both = { ...model, parameters: [], bom: [{ itemCode: '"A"', qty: "1" }] };
-    const lookups = await resolveLookups(both, rows, cacheOf({ c: CATALOG }));
+    const asked: unknown[] = [];
+    const lookups = await resolveLookups(both, rows, cacheOf(PRICES, undefined, asked));
     expect(lookups.prices).toEqual({ A: 7 });
+    expect(asked).toEqual([["price_list", "2", { col: "ItemCode", values: ["A"] }]]);
   });
 
   test("an item with no line for the price list is absent, not zero", async () => {
     // Absent is what makes computeOutputs refuse the BOM line by name; a 0 would quietly ship a
     // free material into a quotation.
     const onlyB = { ...model, parameters: [], bom: [{ itemCode: '"B"', qty: "1" }] };
-    const lookups = await resolveLookups(onlyB, rows, cacheOf({ c: CATALOG }));
+    const lookups = await resolveLookups(onlyB, rows, cacheOf(PRICES));
     expect(lookups.prices).toEqual({});
     expect("B" in (lookups.prices ?? {})).toBe(false);
   });
@@ -89,9 +90,9 @@ describe("resolveLookups over cached masterdata", () => {
 });
 
 describe("bindEntryValues", () => {
-  const cache = cacheOf({ i: [{ ItemCode: "A" }], c: CATALOG });
+  const cache = cacheOf({ i: [{ ItemCode: "A" }], ...PRICES });
   // "B" exists in the item table but not on the canonical page the resolve loaded.
-  const withB = cacheOf({ i: [{ ItemCode: "A" }, { ItemCode: "B" }], c: CATALOG });
+  const withB = cacheOf({ i: [{ ItemCode: "A" }, { ItemCode: "B" }], ...PRICES });
 
   test("a stored off-page pick reaches the domain, not just the table", async () => {
     const canonical = await resolveLookups(model, rows, cache);
@@ -145,8 +146,8 @@ describe("queryPageSource", () => {
   });
 
   test("a table that declares no columns accepts any search column", () => {
-    // An `Items` read sends no $select on purpose, so its fields are whatever B1 returned and
-    // there is no declared list to check a search column against.
+    // A query that declares no columns sends no $select, so its fields are whatever B1 returned
+    // and there is no declared list to check a search column against.
     expect(() => queryPageSource(rows, { table: "catalog", searchCols: ["ItemName"] })).not.toThrow();
   });
 });

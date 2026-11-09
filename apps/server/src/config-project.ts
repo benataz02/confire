@@ -12,6 +12,7 @@ import {
 } from "./lookups.ts";
 import { ensureFresh, pageRows, rowCache } from "./masterdata-sync.ts";
 import { header } from "./sap-cache.ts";
+import { ensurePriceList, priceListOf, priceState, type PriceState } from "./price-list.ts";
 import { canWrite, type Side } from "./project-lifecycle.ts";
 import type { InputPatch } from "./config-patch.ts";
 import { t } from "./i18n/index.ts";
@@ -88,16 +89,21 @@ const lookupCache = new Map<string, { version: string; at: number; lookups: Prom
  *  turn this Map into a leak and miss on every edit. `bindEntryValues` is the per-
  *  configuration half, and it is cheap enough not to need caching. */
 function canonicalLookups(
-  tenantId: string, model: LoadedModel, md: MasterdataRow[], cache?: RowCache,
+  tenantId: string, model: LoadedModel, md: MasterdataRow[], prices: PriceState | null, cache?: RowCache,
 ): Promise<ResolvedLookups> {
   const key = `${tenantId}:${model.id}`;
   const named = md.filter((r) => syncTables(model.definition).has(r.name));
   // Per row, not a max: a company switch drops every entry (changedAt null), which a max could miss.
-  const version = [model.updatedAt.getTime(), ...named.map((r) => `${r.id}:${r.changedAt?.getTime()}:${r.updatedAt?.getTime()}`)].join();
+  const version = [
+    model.updatedAt.getTime(), `prices:${prices?.changedAt?.getTime()}`,
+    ...named.map((r) => `${r.id}:${r.changedAt?.getTime()}:${r.updatedAt?.getTime()}`),
+  ].join();
   const hit = lookupCache.get(key);
   if (hit?.version === version && Date.now() - hit.at < CACHE_TTL_MS) return hit.lookups;
-  // Fire the frequency-driven refresh for the tables this model reads, off the request path.
+  // Fire the frequency-driven refresh for the tables and the price list this model reads, off the
+  // request path.
   ensureFresh(tenantId, named);
+  ensurePriceList(tenantId, priceListOf(model.definition));
   const p = resolveLookups(model.definition, md, cache ?? rowCache(tenantId));
   p.catch(() => lookupCache.delete(key));
   lookupCache.set(key, { version, at: Date.now(), lookups: p });
@@ -109,11 +115,12 @@ function canonicalLookups(
  *  row that is not on the canonical page. */
 export async function cachedLookups(
   tenantId: string, model: LoadedModel,
-  entries: Entries = {}, tableRows: TableRows = {}, cache?: RowCache, rows?: MasterdataRow[],
+  entries: Entries = {}, tableRows: TableRows = {}, cache?: RowCache, rows?: MasterdataRow[], prices?: PriceState | null,
 ): Promise<ResolvedLookups> {
   const md = rows ?? (await masterdataRows(tenantId));
   const rc = cache ?? rowCache(tenantId);
-  const canonical = await canonicalLookups(tenantId, model, md, rc);
+  const ps = prices === undefined ? await priceState(tenantId, priceListOf(model.definition)) : prices;
+  const canonical = await canonicalLookups(tenantId, model, md, ps, rc);
   return bindEntryValues(model.definition, md, canonical, rc, entries, tableRows);
 }
 
@@ -198,12 +205,14 @@ function inLanguage(n: Notice): Notice {
   }
 }
 
-/** A stored calculation is stale once the model changed after it, or any masterdata row the model
- *  reads changed in a sync or was edited after it — a price sync must reach the candidates, not
- *  only the quotation, and a sync that read the same rows changes nothing. Absent counts as stale. */
-export function isStale(calculatedAt: Date | null, model: LoadedModel, md: MasterdataRow[]): boolean {
+/** A stored calculation is stale once the model changed after it, or its price list or any
+ *  masterdata row the model reads changed in a refill or was edited after it — a price change must
+ *  reach the candidates, not only the quotation, and a refill that read the same rows changes
+ *  nothing. Absent counts as stale. */
+export function isStale(calculatedAt: Date | null, model: LoadedModel, md: MasterdataRow[], prices: PriceState | null): boolean {
   if (!calculatedAt) return true;
   if (calculatedAt < model.updatedAt) return true;
+  if (prices?.changedAt && prices.changedAt > calculatedAt) return true;
   const named = syncTables(model.definition);
   return md.some((r) => named.has(r.name)
     && ((!!r.changedAt && r.changedAt > calculatedAt) || (!!r.updatedAt && r.updatedAt > calculatedAt)));
@@ -311,7 +320,7 @@ export async function liveProject(tenantId: string, where: SQL, side: Side, cach
     return row;
   };
   const derive = async (row: ProjectRow) => {
-    const lookups = await cachedLookups(tenantId, model, row.entries, row.tables, cache, md);
+    const lookups = await cachedLookups(tenantId, model, row.entries, row.tables, cache, md, prices);
     let prop: Propagation;
     try {
       prop = propagate(model.definition, lookups, row.entries, row.tables);
@@ -326,11 +335,12 @@ export async function liveProject(tenantId: string, where: SQL, side: Side, cach
   let row = await read();
   const model = withMargin(await loadModel(tenantId, row.modelId), row.margin);
   const md = await masterdataRows(tenantId);
+  const prices = await priceState(tenantId, priceListOf(model.definition));
   let d = await derive(row);
   // Candidates may outlive a broken rule. That is not a current calculation: nothing is quoted off it.
   let calculation: Calculation = d.prop.conflicts.length ? { state: "waiting" } : shown(row);
   const gateOpen = !d.missing.length && !d.prop.conflicts.length;
-  if (canWrite(row, side) && isStale(row.calculatedAt, model, md) && (gateOpen || row.candidates.length)) {
+  if (canWrite(row, side) && isStale(row.calculatedAt, model, md, prices) && (gateOpen || row.candidates.length)) {
     const r = await recalculate(tenantId, row, model, d.lookups, { missing: d.missing, conflicts: d.prop.conflicts });
     row = await read();
     // Lost: the newer row is built once, as it is — no loop.
@@ -340,7 +350,7 @@ export async function liveProject(tenantId: string, where: SQL, side: Side, cach
     }
     else calculation = { state: r.state, ...(r.message ? { message: r.message } : {}) };
   }
-  return { row, model, md, ...d, calculation };
+  return { row, model, md, prices, ...d, calculation };
 }
 export type LiveProject = Awaited<ReturnType<typeof liveProject>>;
 

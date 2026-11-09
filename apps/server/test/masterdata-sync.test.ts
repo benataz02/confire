@@ -144,7 +144,7 @@ describe.skipIf(!process.env.DATABASE_URL)("rowCache / pageRows", () => {
   test("the cache resolves values by column, which is how an off-page pick is bound", async () => {
     const md = await seed("bycol");
     await syncMasterdata(tenantId, md, paged(["A", "B", "C"]), null);
-    const rows = await rowCache(tenantId)(md.id, { col: "ItemCode", values: ["C"] });
+    const rows = await rowCache(tenantId)("masterdata", md.id, { col: "ItemCode", values: ["C"] });
     expect(rows.map((r) => r.ItemCode)).toEqual(["C"]);
   });
 

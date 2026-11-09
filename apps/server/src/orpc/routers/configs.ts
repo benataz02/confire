@@ -56,7 +56,7 @@ export async function searchSimilarRows(tenantId: string, projectId: string, ent
   if (!source) return { results: [] };
   ensureFresh(tenantId, [source]);
   // ponytail: the whole history table per call; cache it keyed by source.syncedAt if it profiles slow.
-  const rows = (await rowCache(tenantId)(source.id)) as Record<string, Val>[];
+  const rows = (await rowCache(tenantId)("masterdata", source.id)) as Record<string, Val>[];
   const fields = historyFields(model.definition);
   const coerce = (key: string, v: Val): Val =>
     v === null ? null

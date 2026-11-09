@@ -72,10 +72,10 @@ export async function syncNow(tenantId: string, md: MasterdataQueryRow): Promise
   return syncMasterdata(tenantId, md, runnerFor(conn), conn.companyDb);
 }
 
-/** The cached rows of one query masterdata. This is `RowCache` — the seam every resolve is
- *  written against, and the only thing standing between the configurator and Postgres. */
+/** The cached rows of a query masterdata or a price list. This is `RowCache` — the seam every
+ *  resolve is written against, and the only thing standing between the configurator and Postgres. */
 export function rowCache(tenantId: string): RowCache {
-  return (masterdataId, q) => rows(tenantId, "masterdata", masterdataId, q ?? {});
+  return (kind, key, q) => rows(tenantId, kind, key, q ?? {});
 }
 
 /** One page of cached rows plus the value help's cursor. `nextSkip` is a plain row offset, as it
