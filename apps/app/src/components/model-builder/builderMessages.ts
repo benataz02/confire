@@ -87,7 +87,15 @@ export function modelIssues(r: Row, issues: Issue[], t: Translate): RecordIssues
     if (c) {
       const [, table = "", row = "0", col = "param"] = c;
       const line = ((r[table] as Row[] | undefined) ?? [])[Number(row)];
-      return cell(table, Number(row), col, issueText(issue, String(line?.[col] ?? ""), t));
+      const text = issueText(issue, String(line?.[col] ?? ""), t);
+      // A BOM/routing line is edited in its dialog, not a cell: the message lands on its row, whose
+      // first cell opens that dialog when the popover focuses it (LineTables).
+      if (table === "bom" || table === "routing")
+        return other.push({
+          id: `${issue.path}:${i}`, text, section: "outputs", anchor: `[data-line="${table}:${row}"]`,
+          detail: t("MODEL_LINE_AT", t(table === "bom" ? "MODEL_BOM" : "MODEL_ROUTING"), String(Number(row) + 1)),
+        });
+      return cell(table, Number(row), col, text);
     }
     const rule = RULE.exec(issue.path);
     if (rule) {

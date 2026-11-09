@@ -11,6 +11,8 @@ const EN: Record<string, string> = {
   MODEL_ACTION_FAILED: "Action failed",
   MODEL_GROUP_MODEL: "Model",
   MODEL_EXPR_AT: " at '{0}'",
+  MODEL_LINE_AT: "{0}, line {1}",
+  MODEL_ROUTING: "Routing",
 };
 const t: Translate = (key, ...params) =>
   params.reduce((s, p, i) => s.replaceAll(`{${i}}`, p), EN[key] ?? key);
@@ -42,8 +44,10 @@ test("an issue lands on its field, a grid's on its cell, the rest under its sect
   ];
   const out = modelIssues(record(d), issues, t);
   expect(out.fields?.["pricing.priceList"]).toBe("needs a price list");
-  // The span names the part of the expression it is about.
-  expect(out.cells?.bom).toEqual({ "1:qty": "unknown identifier 'nope' at 'nope'" });
+  // A BOM/routing line has no cell any more (its table opens a dialog): the issue is a message on
+  // its row, and the span still names the part of the expression it is about.
+  expect(out.cells?.bom).toBeUndefined();
+  expect(out.other!.find((m) => m.anchor === '[data-line="bom:1"]')?.text).toBe("unknown identifier 'nope' at 'nope'");
   expect(out.cells?.constraints).toEqual({ "0:assert": "bad" });
   const combo = out.other!.find((m) => m.detail === "constraints[1].params[1]")!;
   expect(combo.section).toBe("rules");
@@ -76,4 +80,15 @@ test("failures are messages: option lists under Rules, a refused action under Mo
   const out = builderMessages({ t, title, lookupsError: new Error("agent offline"), actionError: new Error("still in use") });
   expect(out.find((m) => m.id === "lookups")?.section).toBe("rules");
   expect(out.find((m) => m.id === "action")?.group).toBe("Model");
+});
+
+test("a line issue is a message anchored on its row", () => {
+  const d: ModelDef = { ...named(), routing: [
+    { resource: "SAW", setupMin: "1", runMinPerUnit: "1", ratePerHour: "60" },
+    { resource: "SAW", setupMin: "nope", runMinPerUnit: "1", ratePerHour: "60" },
+  ] };
+  const r = record(d);
+  const out = modelIssues(r, checkModel(d), t);
+  expect(out.cells?.routing).toBeUndefined();
+  expect(out.other).toContainEqual(expect.objectContaining({ section: "outputs", anchor: '[data-line="routing:1"]', detail: "Routing, line 2" }));
 });

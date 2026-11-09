@@ -41,6 +41,9 @@ export const modelSections = (t: Translate): Section[] => [
           // Where those prices are cached: an `Items` masterdata query with no columns selected, so
           // B1 returns whole rows and the nested ItemPrices collection survives the sync.
           { key: "pricing.itemTable", label: t("MODEL_ITEM_SOURCE"), required: true, controlType: "masterdataQuery" },
+          // Where the routing's Beas operations are cached, as the item source is for the BOM.
+          // Optional: checkModel asks for it only once a routing line is linked to an operation.
+          { key: "pricing.operationTable", label: t("MODEL_OP_SOURCE"), controlType: "masterdataQuery", help: t("MODEL_OP_SOURCE_HELP") },
           // A share of the price; each configuration may set its own in its Candidates section.
           {
             key: "pricing.margin", label: t("MODEL_MARGIN"), type: "number", required: true, help: t("MODEL_MARGIN_HELP"),
@@ -93,37 +96,9 @@ export const modelSections = (t: Translate): Section[] => [
   {
     id: MODEL_SECTIONS.outputs, label: t("MODEL_SECTION_OUTPUTS"),
     subsections: [
-      {
-        id: "bom", label: t("MODEL_BOM"),
-        table: {
-          key: "bom",
-          columns: [
-            // A line is its place: the counter is what a calculation's error names.
-            { key: "VisualOrder", label: "#", width: 48, readonly: true },
-            { key: "itemCode", label: t("MODEL_ITEM"), width: 240, controlType: "itemCode", required: true },
-            { key: "desc", label: t("MODEL_DESC"), controlType: "text", placeholder: t("MODEL_DESC_FROM_ITEM") },
-            { key: "condition", label: t("MODEL_CONDITION"), controlType: "lineExpr", placeholder: t("MODEL_COND_EMPTY") },
-            { key: "qty", label: t("MODEL_QTY_PER"), width: 144, controlType: "lineExpr", required: true },
-          ],
-          newRow: () => ({ itemCode: '""', qty: "1" }),
-        },
-      },
-      {
-        id: "routing", label: t("MODEL_ROUTING"),
-        table: {
-          key: "routing",
-          columns: [
-            { key: "VisualOrder", label: "#", width: 48, readonly: true },
-            { key: "resource", label: t("MODEL_RESOURCE"), controlType: "text", required: true, placeholder: t("MODEL_RESOURCE_PH") },
-            { key: "desc", label: t("MODEL_DESC"), controlType: "text", placeholder: t("MODEL_OP_DESC_PH") },
-            { key: "condition", label: t("MODEL_CONDITION"), controlType: "lineExpr", placeholder: t("MODEL_OP_COND_EMPTY") },
-            { key: "setupMin", label: t("MODEL_SETUP"), controlType: "lineExpr", required: true },
-            { key: "runMinPerUnit", label: t("MODEL_RUN"), controlType: "lineExpr", required: true },
-            { key: "ratePerHour", label: t("MODEL_RATE"), controlType: "lineExpr", required: true },
-          ],
-          newRow: () => ({ resource: "", setupMin: "0", runMinPerUnit: "0", ratePerHour: "60" }),
-        },
-      },
+      // Each a table of lines and the dialog that edits one: templates (LineTables).
+      { id: "bom", label: t("MODEL_BOM") },
+      { id: "routing", label: t("MODEL_ROUTING") },
     ],
   },
   // The process page's "Similar configurations": which masterdata query to rank against, which

@@ -13,8 +13,10 @@ export function lookupSkeleton(d: ModelDef): ModelDef {
     computed: [],
     constraints: [],
     bom: [],
-    routing: [],
-    pricing: { margin: 0, quoteItemCode: "X" },
+    // The linked operations and their source: the line dialog shows each one's catalog figures
+    // ("Beas: 5"), which only a resolve can read. A pick changes the key — rare, unlike typing.
+    routing: d.routing.flatMap((o) => (o.operationId ? [{ operationId: o.operationId, setupMin: "0", runMinPerUnit: "0", ratePerHour: "0" }] : [])),
+    pricing: { margin: 0, quoteItemCode: "X", ...(d.pricing.operationTable ? { operationTable: d.pricing.operationTable } : {}) },
     batchDefaults: [1],
   };
 }
