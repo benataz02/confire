@@ -620,7 +620,7 @@ file, and the next `migrate` would then fail on it.
 ```sql
 select pg_size_pretty(pg_database_size('confire'));
 select relname, pg_size_pretty(pg_total_relation_size(relid)) from pg_stat_user_tables
-  order by pg_total_relation_size(relid) desc limit 10;   -- project_file (uploads) and config_masterdata_row (the SAP cache) grow
+  order by pg_total_relation_size(relid) desc limit 10;   -- project_file (uploads) and sap_cache (the SAP cache) grow
 select id, created_at from drizzle.__drizzle_migrations order by id;
 ```
 

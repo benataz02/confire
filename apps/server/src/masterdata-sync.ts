@@ -41,7 +41,7 @@ export const isStale = (r: MasterdataRow): boolean => {
 };
 
 // In-flight syncs, so N concurrent page loads start one walk instead of N. Same trick, and the
-// same per-process ceiling, as configs.ts' lookupCache.
+// same per-process ceiling, as config-project.ts' lookupCache.
 const inFlight = new Map<string, Promise<unknown>>();
 
 /** Refresh every stale row, off the request path. Never throws and never blocks: a cold cache

@@ -90,7 +90,7 @@ the SAP sessions and forwards an **allowlist** (`allow.go`, the security boundar
 built by `packages/b1/src/query.ts`, now on the cloud side, so most changes ship with Confire and need
 no agent update. **Printing** (`docs/superpowers/specs/2026-11-05-print-service-design.md`):
 `print.ts` resolves the document's default layout through B1's `ReportLayoutsService_GetDefaultReport`
-(per customer and item/service type, cached 2 h per company, a PLD default refused) and sends
+(per customer and item/service type, a `print_layout` entry of the SAP cache for 2 h, a PLD default refused) and sends
 `/print { entity, docEntry, layout, engine }`; the agent checks the layout's prefix against the entity
 and renders it through the SAP API Gateway or, when `sap_connection.print_engine` is `crystal`, through
 **Direct printing**: `confire-print.exe` (`apps/agent/print`, C# on .NET Framework 4.8, Crystal loaded
@@ -108,7 +108,7 @@ the root `.env` needs only `DATABASE_URL` and `BETTER_AUTH_SECRET` in dev.
 **One SAP company at a time, switched on the SAP server only** (wizard or `agent.json`). Every call
 carries `X-Confire-Company` (`agentPost`); an agent on another company answers 409 `COMPANY_CHANGED`
 before it touches SAP, and `adoptCompany` (`b1.ts`) takes the agent's company once and clears the old
-one's caches (local currency, `entity_meta`, masterdata rows). A posted quotation remembers its company
+one's caches (the tenant's whole `sap_cache`, one statement — see The SAP cache). A posted quotation remembers its company
 (`config_project.b1_company`): only there is it patched, linked or shown on the timeline. Decide a
 company-bound step off `Connector.companyDb` — the company the call itself carries — never a second
 read. Portal clients are deliberately not fenced by company (spec §6.2).
@@ -516,8 +516,8 @@ only: the portal has no assistant.
   `/reports/$id` is `ReportPage`, the report alone, and its chat is the panel: *Edit* opens it and a
   chip puts "change this" in its box (`openChat`), the panel's `report_set` re-reads the page, and a
   general chat's first `report_set` navigates there mid-answer, the same ChatView streaming on. It runs
-  live on open, and *Save to home* makes it a tile: `reports.tiles` shows the last run's first KPI (hidden after a company
-  switch); nothing re-runs it but its page (open, Refresh). A report over Confire's Configurations taints
+  live on open, and *Save to home* makes it a tile: `reports.tiles` shows the last run's first KPI (its `report` entry in the SAP
+  cache, so hidden after a company switch); nothing re-runs it but its page (open, Refresh). A report over Confire's Configurations taints
   the chat (auto mode). Not an MCP tool.
 - **The panel** (`AssistantPanel.tsx`, `docs/superpowers/specs/2026-11-06-joule-assistant-design.md`) is
   Joule's card, shell state (`AssistantProvider` around `AppShell`), and the ShellBar's toggle is the
@@ -583,16 +583,19 @@ before the engine runs. **A model holds no table definitions**: it names masterd
 `referencedTables` decides which of them a resolve actually loads.
 
 `ResolvedLookups.prices` is the same seam for **BOM material cost**. A BOM line carries no price:
-it names an item, and `pricing.priceList` (a B1 `PriceListNo`) says which price, while
-`pricing.itemTable` names the masterdata query whose cached rows hold it — both mandatory once a
-model has a BOM, `checkModel` refuses it otherwise. `bomItemCodes` decides which codes to look up:
+it names an item, and `pricing.priceList` (a B1 `PriceListNo`, mandatory, `checkModel` refuses a
+model without one) says which price. The list is cached whole by `price-list.ts`: one stored SQL
+query per list (`SELECT ItemCode, Price FROM ITM1 WHERE PriceList = <n> ORDER BY ItemCode`, created
+on first use like the open counts', so SAP must allow ITM1 in `b1s_sqltable.conf`), paged into a
+`price_list` entry of the SAP cache — filled when a model with a BOM is saved and its list is
+missing or stale, refreshed in the background after 24 h, forced by a configuration's Refresh
+(`configs.sync`). A refused read is the entry's `error`, which the process page names (no fallback).
+`bomItemCodes` decides which codes to look up:
 the string literals in each `itemCode` expression (the builder's value help writes one), plus the
 resolved domain of a bare identifier, because a parameter holding the code is the other shipped
-shape. It is also what keeps the price read small. An item with no line for
+shape. It is also what keeps the price read small. An item with no row in
 the price list costs 0 and its BOM line is flagged `unpriced`; the process page names each one as a
-warning, so one missing price never stops a calculation (or offline work). The item query declares
-**no columns** on purpose: `columns` becomes `$select`, `ItemPrices` is a complex collection B1 rejects
-selecting, so the read asks for whole rows and the cache stores them raw.
+warning, so one missing price never stops a calculation (or offline work).
 
 **Nothing is snapshotted.** One configuration is one row: `config_project` carries its own
 `entries` + `candidates` + `selection`, and a recalculate overwrites them in place. Model and
@@ -601,8 +604,8 @@ out of the router so the portal process can import it without the internal auth)
 configuration is re-priced against what the cache says now rather than what it said then —
 `quotedValue`/`quotedCost` are the only frozen numbers, captured when the quotation is posted. (A portal
 submit freezes the client's inputs and indicative prices — on its append-only event row, not the
-project.) A stored calculation is **stale** once the model or a masterdata row it reads
-(`syncTables`: synced or edited) is newer than `calculatedAt`, and every read that answers a view
+project.) A stored calculation is **stale** once the model, its price list or a masterdata row it
+reads (`syncTables`: its rows changed in a refill, or edited) is newer than `calculatedAt`, and every read that answers a view
 refreshes a stale one first while its side may write the project (`liveProject`) — a locked project
 shows its stored calculation as it is.
 
@@ -647,7 +650,7 @@ never parses `NavigationProperty`. The *services underneath* it are what got por
   the service's base and refuses one outside it.
 - `sqlQuery(code)` runs a stored `SQLQueries` entry. The home's open-document counts are one (`open-counts.ts`):
   created on first use under a code hashed from its text, with one `$count` per set when SAP refuses it, and
-  cached on `sap_connection.open_counts` for the workspace for 10 min. The tiles read it once per sign-in.
+  kept as the workspace's `open_counts` entry of the SAP cache for 10 min. The tiles read it once per sign-in.
 - `action(set, key, name)` is a bound document action (`Quotations(5)/Close`); the agent allowlists
   the names again on its side. `updateEntity(…, { replaceCollections })` sends
   `B1S-ReplaceCollectionsOnPatch` so a PATCHed `DocumentLines` replaces the stored lines.
@@ -683,33 +686,51 @@ express nothing but paging.
 `doc-chain.ts` uses `$crossjoin`, not `$expand`: B1's `$filter` has no lambda operators, and the
 file records the three verified 400s that prove it. The `DocEntry` equality **is** the join.
 
-## The masterdata cache — the runtime never touches SAP
+## The SAP cache — the runtime never touches SAP
 
-A `query` masterdata's **values** live in `config_masterdata_row`, refilled wholesale by
+Everything Confire keeps from SAP is one table, `sap_cache` (`docs/superpowers/specs/2026-11-09-sap-cache-design.md`),
+and `apps/server/src/sap-cache.ts` is its only reader and writer. A row is (tenant, `kind`, `key`,
+`seq`): **seq 0 is the entry** — its `company`, `fetched_at` and `error` say whether it may be used,
+and a one-value kind keeps its value in `data` — and a many-row kind (`masterdata`, `price_list`)
+keeps its SAP rows at seq 1…n. The kinds: `schema`, `entity_list`, `beas_schemas`, `currency`,
+`open_counts`, `print_layout`, `masterdata`, `price_list`, `report`; how long each lasts is one map,
+`LIFETIME_MS` (a masterdata's own `syncMinutes`). **The company rule**: an entry is written under the
+company the SAP call carried (`B1Transport.companyDb`), a read treats one of another company than
+`sap_connection.company_db` as absent, and `adoptCompany` deletes the tenant's rows in one
+statement — the read rule is what keeps a refill of the old company, landing after the delete,
+unseen. Every timestamp is the JS clock's. A one-value kind is read through `cached` (in-flight
+dedup per process; a failed load stores nothing); a many-row kind is refilled by `fill`.
+
+A `query` masterdata's **values** are its `masterdata` entry (key = its id), refilled wholesale by
 `masterdata-sync.ts`. `resolveLookups` reads Postgres and nothing else, which is the point: with
 the agent switched off the configurator still renders every section, parameter, BOM and routing
-line with its cached options, and a stale cache is a page message instead of a failed request.
+line with its cached options and prices, and a stale cache is a page message instead of a failed
+request.
 
-- **The sync streams.** It walks the single-page cursor and inserts each page, so a table with no
-  declared row limit still costs O(page) memory. `packages/b1`'s `readPages` buffers everything and
-  is deliberately not used here. Delete + refill share one transaction: a walk that dies partway
-  leaves the last good sync in place rather than a table truncated where it stopped.
-- **`seq` is the read's order**, and the composite primary key — that is what replays the query's
-  own `orderby` when the value help pages it back out.
-- **Rows are stored raw**, not `Val`-projected: a price list line lives inside the nested
-  `ItemPrices` collection, which no flat column list can name. Projection happens at read time.
+- **A refill streams.** `fill` walks the pages and inserts each, so a table with no declared row
+  limit still costs O(page) memory. `packages/b1`'s `readPages` buffers everything and is
+  deliberately not used here. Delete + refill share one transaction (under an advisory lock per
+  entry, so the staff and portal processes never collide): a walk that dies partway leaves the
+  last good set in place, and its failure lands on the entry's `error`.
+- **`seq` is the read's order** — that is what replays the query's own `orderby` when the value
+  help pages it back out.
+- **Rows are stored raw**, not `Val`-projected: projection happens at read time.
+- **`fetched_at` is not `changedAt`.** A many-row entry's seq-0 `data` is `{ rows, hash, changedAt }`:
+  `changedAt` moves only when a refill's rows hash differently. `fetched_at` drives the lifetime;
+  `changedAt` decides whether a stored calculation is stale, so a refill that reads the same rows
+  (the daily price list, a frequent masterdata sync) leaves every calculation and its pick alone.
 - **Freshness is a TTL checked on read**, not a schedule — there is no job runner in this repo, and
-  `ensureFresh` fires off the request path and never throws, so a cold cache serves empty and fills
-  in behind rather than hanging a page load. Failures land in `config_masterdata.syncError`.
-- `syncTables(model)` = `referencedTables` ∪ `history.table` ∪ `pricing.itemTable` — what has to be
-  kept fresh, as opposed to what a client may page. The delete guard uses it.
+  `ensureFresh`/`ensurePriceList` fire off the request path and never throw, so a cold cache serves
+  empty and fills in behind rather than hanging a page load.
+- `syncTables(model)` = `referencedTables` ∪ `history.table` ∪ `pricing.operationTable` — what has
+  to be kept fresh, as opposed to what a client may page. The delete guard uses it.
 - `cachedLookups` splits in two on purpose: the canonical resolve is memoized per (tenant, model),
-  one entry each, versioned by the model's `updatedAt` and every `syncTables` row's
-  `syncedAt`/`updatedAt` — the timestamps `isStale` reads, so neither process (staff, portal) can
-  recalculate against rows older than the ones that made it stale; there is no in-process version
-  counter. `bindEntryValues` — which loads the rows a *stored* configuration names past the
-  canonical page — stays uncached, because entries are unbounded user input and a key that grew
-  with them would leak.
+  one entry each, versioned by the model's `updatedAt`, its price list's `changedAt` and every
+  `syncTables` row's `changedAt`/`updatedAt` — the timestamps `isStale` reads, so neither process
+  (staff, portal) can recalculate against rows older than the ones that made it stale; there is no
+  in-process version counter. `bindEntryValues` — which loads the rows a *stored* configuration
+  names past the canonical page — stays uncached, because entries are unbounded user input and a
+  key that grew with them would leak.
 - **A query table is a domain only when it is whole.** The resolve reads up to 200 rows (the
   candidate cap); a bigger table keeps its first 200 marked `partial`, and a parameter over it is
   picked through the value help (a `dropdown` too), never enumerated and never "short of values" —

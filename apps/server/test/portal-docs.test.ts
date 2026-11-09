@@ -18,7 +18,7 @@ const NO_QUERY = { select: [], filter: [], orderby: [] };
 
 const f = (name: string, kind: B1Field["kind"] = "string"): B1Field => ({ name, kind, edmType: kind === "number" ? "Edm.Int32" : "Edm.String" });
 
-/** A marketing document's schema, as entity_meta caches it: enough fields to see the fence work. */
+/** A marketing document's schema, as sap_cache keeps it: enough fields to see the fence work. */
 const fixtureSchema = (name: string): B1EntitySchema => ({
   name, label: name, keys: ["DocEntry"],
   fields: [

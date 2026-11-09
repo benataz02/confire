@@ -63,7 +63,7 @@ describe("isDenied", () => {
   });
 
   test("blocks the cost, profit, purchase-price and commission fields a real B1 schema carries", () => {
-    // Read off a live tenant's cached Quotations/Orders/Invoices schemas (entity_meta).
+    // Read off a live tenant's cached Quotations/Orders/Invoices schemas (sap_cache).
     for (const n of [
       "OperatingProfit", "OperatingProfitFC", "OperatingProfitSC", "ServiceGrossProfitPercent", "StockInmPrice", "LastBuyInmPrice",
       "LastBuyDistributeSum", "LastBuyDistributeSumFc", "StockDistributesum", "StockDistributesumForeign", "CommisionPercent", "CommissionTrade",
