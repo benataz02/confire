@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { db, assistantFile, assistantSettings, assistantThread, configModel, configProject, entityMeta } from "@confire/db";
+import { db, assistantFile, assistantSettings, assistantThread, configModel, configProject, sapCache } from "@confire/db";
 import type { ModelMessage } from "@tanstack/ai";
 import { router } from "../src/orpc/router.ts";
 import { tenantConnector } from "../src/b1.ts";
@@ -113,7 +113,7 @@ describe.skipIf(!process.env.DATABASE_URL)("b1 tools", () => {
     const metadataCalls = () => agent.calls.filter((c) => c.route === "/metadata").length;
     const before = metadataCalls();
     expect((await entitySchema(w.tenantId, b1, "Orders")).keys).toEqual(["DocEntry"]);
-    const stored = await db.select({ name: entityMeta.entityName }).from(entityMeta).where(eq(entityMeta.tenantId, w.tenantId));
+    const stored = await db.select({ name: sapCache.key }).from(sapCache).where(and(eq(sapCache.tenantId, w.tenantId), eq(sapCache.kind, "schema")));
     expect(stored.map((r) => r.name).sort()).toEqual(["EmployeesInfo", "Invoices", "Orders", "Quotations"]);
     const after = metadataCalls(); // the entity list and the schema read
     expect((await entitySchema(w.tenantId, b1, "Invoices")).name).toBe("Invoices");

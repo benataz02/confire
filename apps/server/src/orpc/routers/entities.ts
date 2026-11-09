@@ -36,7 +36,7 @@ export const entitiesRouter = {
   /** One entity's field constraints (Beas' /api/metadata/{Entity}), the write rule folded in as
    *  Editable/Required. Cached with the schema; `refresh` re-reads $metadata.
    *
-   *  Field *shape* read from entity_meta in Postgres. The configurator's quote page renders a
+   *  Field *shape* read from sap_cache in Postgres. The configurator's quote page renders a
    *  Quotations draft with it, and every value-help dialog over a B1 entity adds that entity's
    *  undeclared fields as hidden columns from it. No row comes back through here. */
   metadata: userProcedure

@@ -1,12 +1,11 @@
 import { ORPCError } from "@orpc/server";
 import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
-import { db, configMasterdata, configMasterdataRow, configProject, entityMeta, sapConnection } from "@confire/db";
+import { db, configMasterdata, configMasterdataRow, configProject, sapConnection } from "@confire/db";
 import {
   agentRequester, B1Error, COMPANY_CHANGED, DirectTransport, nextLinkOf, rowsOrThrow,
   type AgentTarget, type B1Transport, type Connector,
 } from "@confire/b1";
 import { decryptSecret } from "./crypto.ts";
-import { forgetEntityList } from "./entity-meta.ts";
 import { forget } from "./sap-cache.ts";
 import { DEFAULT_PAGE, type QueryRunner } from "./lookups.ts";
 import { t } from "./i18n/index.ts";
@@ -44,7 +43,7 @@ export async function agentTarget(tenantId: string): Promise<AgentTarget> {
  * company and is left for an admin to re-pick.
  */
 export async function adoptCompany(tenantId: string, companyDb: string): Promise<boolean> {
-  const adopted = await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     const [row] = await tx.update(sapConnection).set({ companyDb, localCurrency: null })
       .where(and(eq(sapConnection.tenantId, tenantId), sql`${sapConnection.companyDb} is distinct from ${companyDb}`))
       .returning({ tenantId: sapConnection.tenantId });
@@ -52,17 +51,11 @@ export async function adoptCompany(tenantId: string, companyDb: string): Promise
     await tx.update(configProject).set({ b1Company: companyDb })
       .where(and(eq(configProject.tenantId, tenantId), isNotNull(configProject.b1DocEntry), isNull(configProject.b1Company)));
     await forget(tenantId, {}, tx);
-    await tx.delete(entityMeta).where(eq(entityMeta.tenantId, tenantId));
     await tx.delete(configMasterdataRow).where(eq(configMasterdataRow.tenantId, tenantId));
     await tx.update(configMasterdata).set({ syncedAt: null, rowCount: 0 })
       .where(and(eq(configMasterdata.tenantId, tenantId), eq(configMasterdata.kind, "query")));
     return true;
   });
-  if (adopted) {
-    // The in-process half: the entity list. The lookup cache sees the nulled syncedAt itself.
-    forgetEntityList(tenantId);
-  }
-  return adopted;
 }
 
 /** The tenant's on-prem agent, as a pair of transports. They hold nothing but config, so there is

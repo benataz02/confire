@@ -4,9 +4,10 @@ import { Hono } from "hono";
 import * as Sentry from "@sentry/bun";
 import { z } from "zod";
 import { and, eq, gt, like } from "drizzle-orm";
-import { db, entityMeta, organization, sapConnection, verification } from "@confire/db";
+import { db, organization, sapConnection, verification } from "@confire/db";
 import { agentPost } from "@confire/b1";
 import { adoptCompany, agentTarget, tenantConnector, type Connector } from "./b1.ts";
+import { forget } from "./sap-cache.ts";
 import { DEDUP_UDF } from "./config-quote.ts";
 import { ITEM_UDF } from "./doc-copy.ts";
 import { agentHost, cloudflareConfig, provisionAgent } from "./cloudflare.ts";
@@ -173,7 +174,7 @@ export function ensureUdfs(tenantId: string, conn: Connector): Promise<void> {
       created = true;
     }
     // A stored schema never expires on its own: without this the new fields stay unknown to it.
-    if (created) await db.delete(entityMeta).where(eq(entityMeta.tenantId, tenantId));
+    if (created) await forget(tenantId, { kind: "schema" });
   })();
   udfsMade.set(key, made);
   made.catch((e) => {

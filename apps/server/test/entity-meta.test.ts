@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { db, entityMeta, type B1EntitySchema } from "@confire/db";
+import { and, eq } from "drizzle-orm";
+import { db, sapCache, type B1EntitySchema } from "@confire/db";
 import type { B1Transport } from "@confire/b1";
-import { entitySchema, toConstraints } from "../src/entity-meta.ts";
+import { entityList, entitySchema, toConstraints } from "../src/entity-meta.ts";
+import { put } from "../src/sap-cache.ts";
 import { ENTITY_PROFILES } from "../src/entity-profiles.ts";
 import { makeTenant } from "./harness.ts";
 
@@ -15,11 +17,25 @@ describe.skipIf(!process.env.DATABASE_URL)("entitySchema", () => {
   test("a stored schema is served from Postgres, without touching the agent", async () => {
     const { tenantId } = await makeTenant();
     const json = { name: "Items", label: "Items", table: "OITM", keys: ["ItemCode"], fields: [] } as unknown as B1EntitySchema;
-    await db.insert(entityMeta).values({ tenantId, entityName: "Items", json, fetchedAt: new Date() });
+    await put(tenantId, "schema", [{ key: "Items", data: json }], { company: null });
 
     expect(await entitySchema(tenantId, noAgent, "Items")).toEqual(json);
     // refresh: true is the Refresh button, and it must go back to B1 rather than re-read the row.
     expect(entitySchema(tenantId, noAgent, "Items", true)).rejects.toThrow(/agent called/);
+  });
+
+  test("the entity list is kept in Postgres", async () => {
+    const { tenantId } = await makeTenant();
+    let reads = 0;
+    const xml = `<edmx:Edmx xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx" Version="4.0"><edmx:DataServices>
+      <Schema xmlns="http://docs.oasis-open.org/odata/ns/edm" Namespace="SAPB1"><EntityContainer Name="ServiceLayer">
+      <EntitySet Name="Items" EntityType="SAPB1.Item"/></EntityContainer></Schema></edmx:DataServices></edmx:Edmx>`;
+    const b1 = { metadata: async () => { reads++; return xml; } } as unknown as B1Transport;
+    expect((await entityList(tenantId, b1)).map((e) => e.name)).toEqual(["Items"]);
+    expect((await entityList(tenantId, b1)).map((e) => e.name)).toEqual(["Items"]);
+    expect(reads).toBe(1);
+    const stored = await db.select().from(sapCache).where(and(eq(sapCache.tenantId, tenantId), eq(sapCache.kind, "entity_list")));
+    expect(stored).toHaveLength(1);
   });
 });
 

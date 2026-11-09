@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { db, configMasterdata, configMasterdataRow, configModel, configProject, entityMeta, sapCache, sapConnection } from "@confire/db";
+import { db, configMasterdata, configMasterdataRow, configModel, configProject, sapCache, sapConnection } from "@confire/db";
 import { put } from "../src/sap-cache.ts";
 import { adoptCompany, tenantConnector, viaB1 } from "../src/b1.ts";
 import { router } from "../src/orpc/router.ts";
@@ -25,7 +25,7 @@ describe("following a company switch", () => {
     const t = await makeTenant();
     await connectTenant(t.tenantId, agent);
     await db.update(sapConnection).set({ localCurrency: "EUR" }).where(eq(sapConnection.tenantId, t.tenantId));
-    await db.insert(entityMeta).values({ tenantId: t.tenantId, entityName: "Items", json: { name: "Items", keys: [], fields: [], navigations: [] } as never });
+    await put(t.tenantId, "schema", [{ key: "Items", data: { name: "Items", keys: [], fields: [], navigations: [] } }], { company: "SBODEMO" });
     const [md] = await db.insert(configMasterdata).values({
       tenantId: t.tenantId, name: "items", kind: "query", syncedAt: new Date(), rowCount: 1,
       query: { target: "b1", query: { entitySet: "Items" }, columns: ["ItemCode"] },
@@ -43,7 +43,6 @@ describe("following a company switch", () => {
     expect(agent.calls.length).toBe(before);
 
     expect(await conn(t.tenantId)).toMatchObject({ companyDb: "OTHER", localCurrency: null });
-    expect(await db.select().from(entityMeta).where(eq(entityMeta.tenantId, t.tenantId))).toEqual([]);
     expect(await db.select().from(configMasterdataRow).where(eq(configMasterdataRow.tenantId, t.tenantId))).toEqual([]);
     expect((await db.select().from(configMasterdata).where(eq(configMasterdata.id, md!.id)))[0]).toMatchObject({ syncedAt: null, rowCount: 0 });
     expect(await db.select().from(sapCache).where(eq(sapCache.tenantId, t.tenantId))).toEqual([]);

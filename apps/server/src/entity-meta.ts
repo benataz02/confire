@@ -1,60 +1,33 @@
-import { and, eq, sql } from "drizzle-orm";
-import { db, entityMeta } from "@confire/db";
 import {
   parseEntityList, parseEntitySchemas,
   type B1EntityRef, type B1EntitySchema, type B1Field, type B1FieldKind, type B1Transport,
 } from "@confire/b1";
 import type { EntityProfile } from "./entity-profiles.ts";
 import { t } from "./i18n/index.ts";
+import { cached, entry, isFresh, put } from "./sap-cache.ts";
 
-// B1's $metadata, cached. The full EDMX is ~1.7 MB; both reads here use the scoped query, so a
-// schema costs one entity's worth of XML, not the lot — on 10.0 FP2608 and later. An older Service
-// Layer ignores every $metadata option and answers the whole unannotated document (verified
+// B1's $metadata, kept in sap_cache. The full EDMX is ~1.7 MB; both reads here use the scoped query,
+// so a schema costs one entity's worth of XML, not the lot — on 10.0 FP2608 and later. An older
+// Service Layer ignores every $metadata option and answers the whole unannotated document (verified
 // 2026-10-24): the parse still finds the entity, minus labels (the browser's catalog names fields).
 // That answer holds every schema, so a miss stores them all (b1-tools spec §4): no version check —
 // the answer's size is the signal — and an old SL sends the document once, not once per entity,
-// until a Refresh or a company switch (adoptCompany deletes the tenant's rows).
-// ponytail: the entity list on an old SL is still the full document once a day per process
-// (`daily`); keep its parse in Postgres too if that read shows up.
+// until a Refresh or a company switch (adoptCompany forgets the tenant's cache).
+// The entity list and Beas' whole schema set (its $metadata has no scoped read, so one ~220 KB
+// document is every schema at once) are entries too, a day each (sap-cache.ts LIFETIME_MS).
 
-const LIST_TTL_MS = 24 * 60 * 60_000;
-
-/** Bump this whenever metadata.ts changes what a parsed schema looks like. A row parsed by the
- *  old code is stale however fresh it is, and this is now the *only* thing that expires one — a
- *  stored schema is otherwise kept until someone presses Refresh, because B1 metadata changes
- *  when an admin adds a UDF, not on a clock. Without this every tenant would keep serving the old
- *  shape forever, which is how BoYesNoEnum kept rendering as a tYES/tNO dropdown after it became
- *  a boolean. */
-//  Must be a past timestamp: `Math.min` with process start so a future one can only ever be a
-//  no-op, never a re-read of $metadata on every single request.
-const PARSER_EPOCH = Math.min(Date.parse("2026-10-24T14:00:00Z"), Date.now());
-
-/** The entity list is small and shared by every browse page — a per-process cache is enough,
- *  and it self-heals on restart. The per-entity schemas go to Postgres because there are ~420
- *  of them and they outlive a deploy. Beas' whole schema set sits here too: its $metadata has no
- *  scoped read, so one ~220 KB document is every schema at once (`b1:`/`beas:` keys). */
-const cache = new Map<string, { at: number; value: Promise<unknown> }>();
-
-function daily<T>(key: string, refresh: boolean, load: () => Promise<T>): Promise<T> {
-  const hit = cache.get(key);
-  if (!refresh && hit && Date.now() - hit.at < LIST_TTL_MS) return hit.value as Promise<T>;
-  const value = load();
-  // A failed fetch must not poison the key for a day — nor drop a newer one that replaced it.
-  value.catch(() => { if (cache.get(key)?.value === value) cache.delete(key); });
-  cache.set(key, { at: Date.now(), value });
-  return value;
-}
-
-/** A company switch (b1.ts adoptCompany): both belong to the old company — Beas maps fields onto
- *  the company's own UDF columns. */
-export const forgetEntityList = (tenantId: string) => { cache.delete(`b1:${tenantId}`); cache.delete(`beas:${tenantId}`); };
+/** Each entry is written under the company the transport's calls carry. */
+const companyOf = (tr: B1Transport) => tr.companyDb ?? null;
 
 export const entityList = (tenantId: string, b1: B1Transport, refresh = false): Promise<B1EntityRef[]> =>
-  daily(`b1:${tenantId}`, refresh, () => b1.metadata({ scope: "entityset", annotation: "labelWithTable" }).then(parseEntityList));
+  cached(tenantId, "entity_list", "", async () => ({
+    company: companyOf(b1),
+    data: parseEntityList(await b1.metadata({ scope: "entityset", annotation: "labelWithTable" })),
+  }), { refresh });
 
 /** Every Beas entity set's schema: no labels, enums or navigations — Beas' EDMX carries none. */
 export const beasSchemas = (tenantId: string, beas: B1Transport, refresh = false): Promise<B1EntitySchema[]> =>
-  daily(`beas:${tenantId}`, refresh, () => beas.metadata().then(parseEntitySchemas));
+  cached(tenantId, "beas_schemas", "", async () => ({ company: companyOf(beas), data: parseEntitySchemas(await beas.metadata()) }), { refresh });
 
 /** Reject an entity name the tenant's B1 does not expose, before it can reach a URL. */
 export async function assertEntity(tenantId: string, b1: B1Transport, name: string): Promise<B1EntityRef> {
@@ -125,7 +98,7 @@ function constraintOf(f: B1Field, rule: { editable: boolean; required: boolean; 
 
 /**
  * One cached schema + the entity's write profile -> what the browser merges into its declared
- * fields. Applied on read, so the schemas already sitting in entity_meta stay valid: nothing in
+ * fields. Applied on read, so the schemas already sitting in sap_cache stay valid: nothing in
  * here is stored. `profile` absent = read-only (no Editable anywhere, `writable: false`).
  */
 export function toConstraints(schema: B1EntitySchema, profile: EntityProfile | undefined): EntityConstraints {
@@ -157,15 +130,11 @@ export async function entitySchema(
   refresh = false,
 ): Promise<B1EntitySchema> {
   if (!refresh) {
-    const [row] = await db
-      .select()
-      .from(entityMeta)
-      .where(and(eq(entityMeta.tenantId, tenantId), eq(entityMeta.entityName, name)))
-      .limit(1);
-    // A hit returns before assertEntity on purpose: the row only exists because the name was
+    const stored = await entry<B1EntitySchema>(tenantId, "schema", name);
+    // A hit returns before assertEntity on purpose: the entry only exists because the name was
     // checked against the entity list when it was written, so a stored schema costs one Postgres
     // read and no agent call at all — which is the whole point of storing it.
-    if (row && row.fetchedAt.getTime() >= PARSER_EPOCH) return row.json;
+    if (isFresh("schema", stored)) return stored!.data!;
   }
   await assertEntity(tenantId, b1, name);
 
@@ -180,17 +149,7 @@ export async function entitySchema(
   const all = parseEntitySchemas(xml, await entityList(tenantId, b1, refresh));
   const schema = all.find((s) => s.name === name);
   if (!schema) throw new Error(t("ENTITY_SET_NOT_IN_METADATA", name));
-  const fetchedAt = new Date();
-  // One entity on FP2608+; every one of them (~360) on an older Service Layer. Chunked so a
-  // statement stays a few hundred KB of jsonb.
-  for (let i = 0; i < all.length; i += 50) {
-    await db
-      .insert(entityMeta)
-      .values(all.slice(i, i + 50).map((s) => ({ tenantId, entityName: s.name, json: s, fetchedAt })))
-      .onConflictDoUpdate({
-        target: [entityMeta.tenantId, entityMeta.entityName],
-        set: { json: sql`excluded.json`, fetchedAt },
-      });
-  }
+  // One entity on FP2608+; every one of them (~360) on an older Service Layer.
+  await put(tenantId, "schema", all.map((s) => ({ key: s.name, data: s })), { company: companyOf(b1) });
   return schema;
 }

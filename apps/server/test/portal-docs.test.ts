@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { db, configModel, configProjectEvent, entityMeta } from "@confire/db";
+import { db, configModel, configProjectEvent } from "@confire/db";
 import type { B1EntitySchema, B1Field } from "@confire/b1";
 import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
 import { readRows } from "../src/entity-read.ts";
 import { savePortalSettings } from "../src/portal/settings.ts";
 import {
-  call, insertSeat, makePortalSeat, makePortalUser, makeTenant, makeUser, tenantHeaders, TEST_MODEL,
+  call, insertSeat, makePortalSeat, makePortalUser, makeTenant, makeUser, seedCache, tenantHeaders, TEST_MODEL,
 } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
@@ -36,11 +36,9 @@ const fixtureSchema = (name: string): B1EntitySchema => ({
  *  the whole $metadata setup. Settings → Portal also reads BusinessPartners (the onboarding extras). */
 async function seedDocSchemas(tenantId: string) {
   for (const name of ["Quotations", "Orders", "DeliveryNotes", "Invoices"])
-    await db.insert(entityMeta).values({ tenantId, entityName: name, json: fixtureSchema(name), fetchedAt: new Date() });
-  await db.insert(entityMeta).values({
-    tenantId, entityName: "BusinessPartners", fetchedAt: new Date(),
-    json: { name: "BusinessPartners", label: "Business partners", keys: ["CardCode"], fields: [f("CardCode"), f("CardName")] },
-  });
+    await seedCache(tenantId, "schema", name, fixtureSchema(name));
+  await seedCache(tenantId, "schema", "BusinessPartners",
+    { name: "BusinessPartners", label: "Business partners", keys: ["CardCode"], fields: [f("CardCode"), f("CardName")] });
 }
 
 let agent: MockAgent;

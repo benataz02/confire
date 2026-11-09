@@ -99,8 +99,8 @@ function TableFields({ tb, tables, checked, edit }: {
 
   // Only the column mapping depends on SAP. It failing must not block model authoring, so the map
   // cell falls back to a free-text field rather than this page refusing to render. The same cached
-  // Quotations metadata the B1 pages read: served from entity_meta, re-read from $metadata only on an
-  // explicit Refresh, so a UDF added in B1 shows up as soon as that row is refreshed.
+  // Quotations metadata the B1 pages read: served from sap_cache, re-read from $metadata only on an
+  // explicit Refresh, so a UDF added in B1 shows up as soon as that schema is refreshed.
   const schema = useFieldConstraints(items ? "Quotations" : undefined);
   const lineFields = useMemo(() => (schema.data ? lineFieldsOf(schema.data) : null), [schema.data]);
 

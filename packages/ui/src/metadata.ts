@@ -35,7 +35,7 @@ export function localizeConstraints<C extends EntityConstraints>(c: C, text: (ke
 }
 
 /** One entity's constraints. A day in the browser cache costs nothing: the server reads them from
- *  entity_meta in Postgres and only re-reads $metadata on an explicit refresh. */
+ *  sap_cache in Postgres and only re-reads $metadata on an explicit refresh. */
 export function useFieldConstraints(entity: string | undefined) {
   const { orpc } = useUiSource();
   const select = useLocalize();

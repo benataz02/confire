@@ -1,5 +1,4 @@
 import { integer, jsonb, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
-import type { B1EntitySchema } from "@confire/b1";
 
 // One row per tenant: where that tenant's on-prem agent is and how to authenticate to it, written by
 // pairing (apps/server/src/agent-pairing.ts). agentUrl is http://localhost:<port> in dev and
@@ -32,21 +31,6 @@ export const sapConnection = pgTable("sap_connection", {
 
 export type SapConnection = typeof sapConnection.$inferSelect;
 export type PrintEngine = SapConnection["printEngine"];
-
-// Parsed B1 entity schemas, cached per tenant. B1's own $metadata is the source of truth, but a
-// row here is kept until someone presses Refresh — there is no TTL, because metadata changes when
-// an admin adds a UDF, not on a clock. fetchedAt is only read against entity-meta.ts' PARSER_EPOCH.
-// ponytail: manual refresh only; no push-invalidation until a stale-UDF bug actually appears.
-export const entityMeta = pgTable(
-  "entity_meta",
-  {
-    tenantId: text("tenant_id").notNull(),
-    entityName: text("entity_name").notNull(),
-    json: jsonb("json").$type<B1EntitySchema>().notNull(),
-    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [primaryKey({ columns: [t.tenantId, t.entityName] })],
-);
 
 /** What `sap_cache` holds, one kind per copy of SAP data (spec 2026-11-09-sap-cache-design.md). */
 export const CACHE_KINDS = [

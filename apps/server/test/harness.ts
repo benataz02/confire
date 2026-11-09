@@ -1,8 +1,10 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { db, EXTERNAL_ROLES, externalRole, member, organization, portalCompany, portalRoleOf, user, type PortalRole } from "@confire/db";
+import { db, EXTERNAL_ROLES, externalRole, member, organization, portalCompany, portalRoleOf, user, type CacheKind, type PortalRole } from "@confire/db";
 import type { ModelDef } from "@confire/config-engine";
 import { auth } from "../src/auth.ts";
 import { TENANT_HEADER } from "../src/tenant.ts";
+import { tenantCompany } from "../src/b1.ts";
+import { put } from "../src/sap-cache.ts";
 
 export { call } from "@orpc/server";
 
@@ -111,3 +113,8 @@ export const TEST_MODEL: ModelDef = {
   pricing: { margin: 50, quoteItemCode: "CFG", priceList: 1 },
   batchDefaults: [100, 500],
 };
+
+/** A cache entry as the tenant's agent would have left it: under the tenant's company now. */
+export async function seedCache(tenantId: string, kind: CacheKind, key: string, data: unknown): Promise<void> {
+  await put(tenantId, kind, [{ key, data }], { company: await tenantCompany(tenantId) });
+}

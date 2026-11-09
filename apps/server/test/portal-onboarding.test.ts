@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { db, entityMeta, portalCompany, portalCompanyDomain, invitation } from "@confire/db";
+import { db, portalCompany, portalCompanyDomain, invitation } from "@confire/db";
 import type { B1EntitySchema, B1Field } from "@confire/b1";
 import { devOutbox } from "../src/mail/mailer.ts";
 import { notificationsSettled } from "../src/notify.ts";
@@ -9,7 +9,7 @@ import { portalRouter } from "../src/portal/orpc/router.ts";
 import { leadKey } from "../src/portal/onboarding-form.ts";
 import { savePortalSettings } from "../src/portal/settings.ts";
 import { portalTenantUrl } from "../src/tenant.ts";
-import { call, makePortalSeat, makePortalUser, makeTenant, makeUser, tenantHeaders } from "./harness.ts";
+import { call, makePortalSeat, makePortalUser, makeTenant, makeUser, seedCache, tenantHeaders } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
 // New-client onboarding (spec §5.1, §5.3, §5.4): an admin invites someone with no CardCode yet, the
@@ -48,7 +48,7 @@ afterAll(() => agent.stop());
 async function setup() {
   const t = await makeTenant();
   await connectTenant(t.tenantId, agent);
-  await db.insert(entityMeta).values({ tenantId: t.tenantId, entityName: "BusinessPartners", json: BP_SCHEMA, fetchedAt: new Date() });
+  await seedCache(t.tenantId, "schema", "BusinessPartners", BP_SCHEMA);
   const admin = await makeUser("admin", t.tenantId);
   const as = { context: { headers: tenantHeaders(t.slug, admin.cookie) } };
   return { ...t, admin, as };
@@ -223,7 +223,7 @@ describe("portalSettings: onboarding", () => {
     const { tenantId, as } = await setup();
     // The tab reads the four document schemas as well.
     for (const name of ["Quotations", "Orders", "DeliveryNotes", "Invoices"])
-      await db.insert(entityMeta).values({ tenantId, entityName: name, json: { ...BP_SCHEMA, name, fields: [] }, fetchedAt: new Date() });
+      await seedCache(tenantId, "schema", name, { ...BP_SCHEMA, name, fields: [] });
     await savePortalSettings(tenantId, { onboarding: { extraFields: [{ key: "SalesPersonCode", required: true }, { key: "U_Branch", required: false }] } });
     const got = await call(router.portalSettings.get, undefined, as);
     expect(got.extraOptions.map((o) => o.key)).toEqual(["Website", "U_Branch"]);

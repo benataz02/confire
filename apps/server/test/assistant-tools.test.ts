@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { db, configModel, configProject, entityMeta } from "@confire/db";
+import { db, configModel, configProject } from "@confire/db";
 import { requireAdmin } from "../src/orpc/base.ts";
 import { CHAT_TOOLS, GENERAL, pageFor } from "../src/assistant/pages.ts";
 import { CARD_FIELDS, chatTools, LIST_CAP, missingSources, procedureOf, type ToolCtx } from "../src/assistant/tools.ts";
@@ -8,7 +8,7 @@ import { newThread } from "../src/assistant/threads.ts";
 import { readsClientContent } from "../src/assistant/auto.ts";
 import { PIPELINE_INPUT } from "./fixtures/pipeline-report.ts";
 import { router } from "../src/orpc/router.ts";
-import { call, makeTenant, makeUser, tenantHeaders, TEST_MODEL } from "./harness.ts";
+import { call, makeTenant, makeUser, seedCache, tenantHeaders, TEST_MODEL } from "./harness.ts";
 import { connectTenant, startMockAgent, type MockAgent } from "./mock-agent.ts";
 
 // The chat's tools (spec §4.3, §4.5): the existing procedures, run through their own builders with
@@ -96,26 +96,20 @@ describe.skipIf(!process.env.DATABASE_URL)("through the builders", () => {
     expect(out.total).toBe(25);
 
     await connectTenant(w.tenantId, agent);
-    await db.insert(entityMeta).values({
-      tenantId: w.tenantId, entityName: "Quotations",
-      json: {
+    await seedCache(w.tenantId, "schema", "Quotations", {
         name: "Quotations", entityType: "Document", table: "OQUT", label: "Sales Quotations", entityClass: "document" as never, keys: ["DocEntry"],
         fields: CARD_FIELDS.Quotations.map((name) => ({ name, kind: name.startsWith("Doc") && name !== "DocCurrency" && name !== "DocDate" ? "number" : "string", edmType: "Edm.String" })) as never,
-      },
-    });
+      });
     const docs = await w.tool("entities_rows")({ entity: "Quotations", query: { ...NO_QUERY, select: ["DocNum"] } });
     expect(docs.rows).toHaveLength(1);
     const sent = agent.calls.filter((c) => c.route === "/entity-set").at(-1)!.body as { query: { select: string[] } };
     expect(sent.query.select).toEqual(expect.arrayContaining(CARD_FIELDS.Quotations));
 
     // Business partners are a configuration's customers: suppliers never reach the chat, whatever it asks.
-    await db.insert(entityMeta).values({
-      tenantId: w.tenantId, entityName: "BusinessPartners",
-      json: {
+    await seedCache(w.tenantId, "schema", "BusinessPartners", {
         name: "BusinessPartners", entityType: "BusinessPartner", table: "OCRD", label: "Business Partners", entityClass: "master" as never, keys: ["CardCode"],
         fields: CARD_FIELDS.BusinessPartners.map((name) => ({ name, kind: "string", edmType: "Edm.String" })) as never,
-      },
-    });
+      });
     await w.tool("entities_rows")({ entity: "BusinessPartners", query: { ...NO_QUERY, filter: [{ field: "CardName", op: "contains", value: "caf" }] } });
     const bp = agent.calls.filter((c) => c.route === "/entity-set").at(-1)!.body as { query: { filter: string } };
     expect(bp.query.filter).toContain("CardType eq 'cCustomer'");
