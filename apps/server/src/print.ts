@@ -37,7 +37,7 @@ export async function printDocument(
 ): Promise<PrintedDocument> {
   if (!PRINTABLE.has(entity)) throw new ORPCError("FORBIDDEN", { message: t("PRINT_NOT_PRINTABLE", entity) });
   const target = await agentTarget(tenantId);
-  const b1 = new DirectTransport(agentRequester(target, "b1"));
+  const b1 = new DirectTransport(agentRequester(target, "b1"), target.companyDb ?? null);
   const row = doc ?? (await viaB1(() => b1.readEntity(entity, docEntry, { select: ["CardCode", "DocType"] }))).data as
     { CardCode?: unknown; DocType?: unknown };
   const code = reportCode(entity, row.DocType);

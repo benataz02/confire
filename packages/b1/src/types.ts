@@ -64,6 +64,9 @@ export type B1Requester = (r: B1Request) => Promise<{ status: number; data: unkn
  *  production is the tenant's agent (remote.ts). Call sites are written against this and never see a
  *  URL. */
 export interface B1Transport {
+  /** The company every call through this transport carries (the agent's `X-Confire-Company`): what a
+   *  cache entry of its answer is written under. Absent on a transport that names none. */
+  readonly companyDb?: string | null;
   readEntitySet(entitySet: string, q?: QueryOptions): Promise<B1Response>;
   readEntity(entitySet: string, key: Key, q?: QueryOptions): Promise<B1Response>;
   createEntity(entitySet: string, data: unknown, o?: { prefer?: Prefer }): Promise<B1Response>;

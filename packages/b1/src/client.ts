@@ -23,7 +23,7 @@ const pageHeader = (q?: QueryOptions): Record<string, string> | undefined => {
  *  it forwards, so a cloud bug still cannot reach past it. Added over the sample: etag, prefer,
  *  expand, count, readNext, crossJoin, metadata. */
 export class DirectTransport implements B1Transport {
-  constructor(private readonly send: B1Requester) {}
+  constructor(private readonly send: B1Requester, readonly companyDb: string | null = null) {}
 
   private async get(path: string, headers?: Record<string, string>): Promise<B1Response> {
     const res = await this.send({ path, method: "GET", headers });

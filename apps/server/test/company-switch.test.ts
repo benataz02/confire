@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { db, configMasterdata, configMasterdataRow, configModel, configProject, entityMeta, sapConnection } from "@confire/db";
+import { db, configMasterdata, configMasterdataRow, configModel, configProject, entityMeta, sapCache, sapConnection } from "@confire/db";
+import { put } from "../src/sap-cache.ts";
 import { adoptCompany, tenantConnector, viaB1 } from "../src/b1.ts";
 import { router } from "../src/orpc/router.ts";
 import { portalRouter } from "../src/portal/orpc/router.ts";
@@ -30,6 +31,7 @@ describe("following a company switch", () => {
       query: { target: "b1", query: { entitySet: "Items" }, columns: ["ItemCode"] },
     } as never).returning();
     await db.insert(configMasterdataRow).values({ tenantId: t.tenantId, masterdataId: md!.id, seq: 0, row: { ItemCode: "A" } });
+    await put(t.tenantId, "entity_list", [{ key: "", data: [] }], { company: "SBODEMO" });
 
     agent.company.db = "OTHER";
     const { b1 } = await tenantConnector(t.tenantId);
@@ -44,6 +46,7 @@ describe("following a company switch", () => {
     expect(await db.select().from(entityMeta).where(eq(entityMeta.tenantId, t.tenantId))).toEqual([]);
     expect(await db.select().from(configMasterdataRow).where(eq(configMasterdataRow.tenantId, t.tenantId))).toEqual([]);
     expect((await db.select().from(configMasterdata).where(eq(configMasterdata.id, md!.id)))[0]).toMatchObject({ syncedAt: null, rowCount: 0 });
+    expect(await db.select().from(sapCache).where(eq(sapCache.tenantId, t.tenantId))).toEqual([]);
 
     // The next call is built for the new company and goes through.
     await (await tenantConnector(t.tenantId)).b1.readEntitySet("Items");

@@ -7,6 +7,7 @@ import {
 } from "@confire/b1";
 import { decryptSecret } from "./crypto.ts";
 import { forgetEntityList } from "./entity-meta.ts";
+import { forget } from "./sap-cache.ts";
 import { DEFAULT_PAGE, type QueryRunner } from "./lookups.ts";
 import { t } from "./i18n/index.ts";
 
@@ -50,6 +51,7 @@ export async function adoptCompany(tenantId: string, companyDb: string): Promise
     if (!row) return false;
     await tx.update(configProject).set({ b1Company: companyDb })
       .where(and(eq(configProject.tenantId, tenantId), isNotNull(configProject.b1DocEntry), isNull(configProject.b1Company)));
+    await forget(tenantId, {}, tx);
     await tx.delete(entityMeta).where(eq(entityMeta.tenantId, tenantId));
     await tx.delete(configMasterdataRow).where(eq(configMasterdataRow.tenantId, tenantId));
     await tx.update(configMasterdata).set({ syncedAt: null, rowCount: 0 })
@@ -68,7 +70,8 @@ export async function adoptCompany(tenantId: string, companyDb: string): Promise
 export async function tenantConnector(tenantId: string): Promise<Connector> {
   const a = await agentTarget(tenantId);
   return {
-    b1: new DirectTransport(agentRequester(a, "b1")), beas: new DirectTransport(agentRequester(a, "beas")),
+    b1: new DirectTransport(agentRequester(a, "b1"), a.companyDb ?? null),
+    beas: new DirectTransport(agentRequester(a, "beas"), a.companyDb ?? null),
     companyDb: a.companyDb ?? null,
   };
 }
