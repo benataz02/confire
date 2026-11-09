@@ -1,5 +1,5 @@
 import { useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   Bar, Button, Icon, IllustratedMessage, Menu, MenuItem, SegmentedButton, SegmentedButtonItem,
   SplitButton, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, TableSelectionMulti,
@@ -7,7 +7,7 @@ import {
   type SplitButtonDomRef,
 } from "@ui5/webcomponents-react";
 import "@ui5/webcomponents-fiori/dist/illustrations/AddColumn.js";
-import { itemsTable } from "@confire/config-engine";
+import { itemsTable, VISUALS, visualOutputKey, visualsFor } from "@confire/config-engine";
 import type { Issue, ModelDef, Param, TableDef } from "@confire/config-engine";
 import { confirm } from "@confire/ui/confirm.ts";
 import type { ParamSearch } from "./paramRoute.ts";
@@ -83,16 +83,16 @@ if (typeof document !== "undefined" && !document.getElementById("confire-params-
 /** A row with an issue: red, and the issue its tooltip. */
 const issueAttrs = (error?: string) => (error ? { "data-error": "", title: error } : {});
 
-type AddKind = "section" | "group" | "param" | "formula" | "calc" | "items";
+type AddKind = "section" | "group" | "param" | "formula" | "calc" | "items" | "visual";
 const ADD_LABEL: Record<AddKind, string> = {
   section: "MODEL_SECTION", group: "MODEL_GROUP", param: "MODEL_PARAM",
-  formula: "MODEL_FORMULA", calc: "MODEL_CALC_TABLE", items: "MODEL_ITEM_GRID",
+  formula: "MODEL_FORMULA", calc: "MODEL_CALC_TABLE", items: "MODEL_ITEM_GRID", visual: "MODEL_VISUAL",
 };
 // Same glyph on the row and on Add, so the kind is recognisable without the word that used to
 // lead Details ("section · key"). `group` is three people, so a form group uses the list glyph.
 const ADD_ICON: Record<AddKind, string> = {
   section: "folder-blank", group: "list", param: "form",
-  formula: "fx", calc: "table-view", items: "product",
+  formula: "fx", calc: "table-view", items: "product", visual: "picture",
 };
 
 /** A table's glyph follows its role (item grid or calculation table). */
@@ -170,6 +170,13 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
     if (modelId) void navigate({ to: "/$slug/models/$id/table", params: { id: modelId }, search: { key } });
     else void navigate({ to: "/$slug/models/new/table", search: { key } });
   };
+  const openVisual = (key: string) => {
+    if (modelId) void navigate({ to: "/$slug/models/$id/visual", params: { id: modelId }, search: { key } });
+    else void navigate({ to: "/$slug/models/new/visual", search: { key } });
+  };
+  // The tenant visuals this workspace may place (spec 2026-11-09-tenant-visuals): none, no Add.
+  const { slug } = useParams({ from: "/$slug" });
+  const kinds = visualsFor(slug);
   // The formula open in FormulaDialog; no `at` is one not added yet, which only its Save creates.
   const [formula, setFormula] = useState<{ at?: number; initial: ModelDef["computed"][number] } | null>(null);
   // Section/group whose heading is open in TitleDialog, with the values it opens on; `adding` is a
@@ -194,11 +201,13 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
   const rows: Row[] = [];
   const formulaRow = (i: number): Row => ({ kind: "formula", key: rowKeyOf({ kind: "formula", i }), idx: i, ref: { kind: "formula", i } });
   const defOf = (k: string): TableDef | undefined => (draft.tables ?? []).find((t) => t.key === k);
+  const visualOf = (k: string) => (draft.visuals ?? []).find((v) => v.key === k);
 
   // A formula draws under the parameter it is tied to. One tied to none (a model older than the
   // tie) or to a parameter placed nowhere draws under the last placed one, the one row guaranteed
   // to be there to hang it on.
-  const placed = draft.structure.sections.flatMap((s) => s.groups.flatMap((g) => g.params.filter((k) => !defOf(k))));
+  // Only a parameter anchors a formula: tables and visuals are leaves of another kind.
+  const placed = draft.structure.sections.flatMap((s) => s.groups.flatMap((g) => g.params.filter((k) => !defOf(k) && !visualOf(k))));
   const lastParam = placed.at(-1);
   const drawnUnder = (i: number) => {
     const p = draft.computed[i]?.param;
@@ -228,7 +237,8 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
   const errorOf = (ref: RowRef) => issueAt.get(rowKeyOf(ref));
   const paramError = (k: string) => errorOf({ kind: "param", key: k })
     ?? formulas.filter((i) => drawnUnder(i) === k).map((i) => errorOf({ kind: "formula", i })).find(Boolean);
-  const leafError = (k: string) => (defOf(k) ? errorOf({ kind: "table", key: k }) : paramError(k));
+  const leafError = (k: string) => (defOf(k) ? errorOf({ kind: "table", key: k })
+    : visualOf(k) ? errorOf({ kind: "visual", key: k }) : paramError(k));
   const groupError = (s: number, g: number) =>
     errorOf({ kind: "group", s, g }) ?? draft.structure.sections[s]!.groups[g]!.params.map(leafError).find(Boolean);
 
@@ -258,6 +268,16 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
             kind: "struct", key: rowKeyOf(ref), depth: 2, label: def.title || k,
             detail: t(def.columns.length === 1 ? "MODEL_COLUMNS_ONE" : "MODEL_COLUMNS_MANY", String(def.columns.length)),
             ref, at: { s: si, g: gi }, error: errorOf(ref),
+          });
+          return;
+        }
+        // A visual is a leaf like a table: its detail is what it draws.
+        const vis = visualOf(k);
+        if (vis) {
+          const ref: RowRef = { kind: "visual", key: k };
+          rows.push({
+            kind: "struct", key: rowKeyOf(ref), depth: 2, label: vis.title || k,
+            detail: VISUALS[vis.kind]?.label ?? vis.kind, ref, at: { s: si, g: gi }, error: errorOf(ref),
           });
           return;
         }
@@ -313,6 +333,10 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
     } else if (ref.kind === "param") {
       const p = draft.parameters.find((x) => x.key === ref.key);
       message = t("MODEL_DELETE_PARAM_MSG", p?.label || ref.key);
+    } else if (ref.kind === "visual") {
+      const vis = visualOf(ref.key);
+      const outs = Object.keys((vis && VISUALS[vis.kind]?.outputs) ?? {}).map((o) => visualOutputKey(ref.key, o)).join(", ");
+      message = t("MODEL_DELETE_VISUAL_MSG", vis?.title || ref.key, outs || ref.key);
     }
     return message === null || confirm({ title: t("MODEL_DELETE"), message, actionText: t("MODEL_DELETE"), destructive: true });
   };
@@ -367,6 +391,13 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
     const table = role === "items" ? localizeItems(itemsTable(), t) : newCalcTable(taken, t);
     return placeParam({ ...d, tables: [...(d.tables ?? []), table] }, table.key, at.s, at.g);
   });
+  // A visual goes into a group like a table, of the workspace's first kind (its page switches kind).
+  const addVisual = (at: { s: number; g: number }) => {
+    const taken = [...(draft.tables ?? []).map((x) => x.key), ...draft.parameters.map((p) => p.key), ...draft.computed.map((c) => c.key), ...(draft.visuals ?? []).map((v) => v.key)];
+    const key = uniqueKey("visual", taken);
+    update((d) => placeParam({ ...d, visuals: [...(d.visuals ?? []), { key, kind: kinds[0]!.kind, inputs: {} }] }, key, at.s, at.g));
+    openVisual(key);
+  };
   // checkModel allows at most one items table, and requires exactly one.
   const hasItems = (draft.tables ?? []).some((t) => t.role === "items");
 
@@ -377,7 +408,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
   const sections = draft.structure.sections;
   const fieldGroups = (s: number) => sections[s]?.groups.map((_, gi) => gi) ?? [];
   const lastIn = (s: number, g?: number) =>
-    sections[s]?.groups.flatMap((x, gi) => (g !== undefined && gi !== g ? [] : x.params.filter((k) => !defOf(k)))).at(-1);
+    sections[s]?.groups.flatMap((x, gi) => (g !== undefined && gi !== g ? [] : x.params.filter((k) => !defOf(k) && !visualOf(k)))).at(-1);
   const pickedRow = picked.length === 1 ? picked[0]! : undefined;
   const formulaParam = pickedRow?.ref.kind === "param" ? pickedRow.ref.key
     : pickedRow?.kind === "formula" ? drawnUnder(pickedRow.idx)
@@ -389,6 +420,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
       .find((x): x is { s: number; g: number } => x.g !== undefined);
   const addable: Record<AddKind, boolean> = {
     section: true, group: intoS >= 0, param: !!intoG, formula: !!formulaParam, calc: !!intoG, items: !!intoG && !hasItems,
+    visual: !!intoG && kinds.length > 0,
   };
   const add = (what: AddKind) => {
     if (!addable[what]) return;
@@ -396,6 +428,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
     else if (what === "formula") addFormula(formulaParam!);
     else if (what === "param") openParam(intoG!);
     else if (what === "group") addGroup(intoS);
+    else if (what === "visual") addVisual(intoG!);
     else addTable(what, intoG!);
   };
 
@@ -458,7 +491,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
             setLastAdd(kind);
             add(kind);
           }}>
-          {(Object.keys(ADD_LABEL) as AddKind[]).map((kind) => (
+          {(Object.keys(ADD_LABEL) as AddKind[]).filter((kind) => kind !== "visual" || kinds.length > 0).map((kind) => (
             <MenuItem key={kind} data-add={kind} text={t(ADD_LABEL[kind])} icon={ADD_ICON[kind]} disabled={!addable[kind]} />
           ))}
         </Menu>
@@ -493,6 +526,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
           const ref = parseRowKey(((e.detail.row as unknown) as HTMLElement).getAttribute("row-key")!);
           if (ref.kind === "formula") return setFormula({ at: ref.i, initial: draft.computed[ref.i]! });
           if (ref.kind === "table") openTable(ref.key);
+          else if (ref.kind === "visual") openVisual(ref.key);
           else if (ref.kind === "param") {
             const p = draft.parameters.find((x) => x.key === ref.key);
             if (p) openParam({ key: p.key });

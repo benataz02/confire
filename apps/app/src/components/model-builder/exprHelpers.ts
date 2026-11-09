@@ -1,4 +1,4 @@
-import { FUNCS, aggregateKey, derivedColumns, derivedKey, type LookupRef, type ModelDef, type Param, type TableColumn, type TableDef } from "@confire/config-engine";
+import { FUNCS, VISUALS, aggregateKey, derivedColumns, derivedKey, visualOutputKey, type LookupRef, type ModelDef, type Param, type TableColumn, type TableDef } from "@confire/config-engine";
 
 // Suggestion machinery for ExprInput. Completion targets the TRAILING identifier of the
 // value — the common typing flow. // ponytail: caret-aware mid-expression completion needs
@@ -6,7 +6,7 @@ import { FUNCS, aggregateKey, derivedColumns, derivedKey, type LookupRef, type M
 
 export type Suggestion = {
   text: string;
-  kind: "param" | "computed" | "var" | "function" | "derived" | "aggregate";
+  kind: "param" | "computed" | "var" | "function" | "derived" | "aggregate" | "visual";
   /** human label shown as secondary text (params and derived columns) */
   label?: string;
 };
@@ -97,10 +97,14 @@ export function scopeSuggestions(
       .filter((c) => c.type === "number")
       .map((c) => ({ text: aggregateKey(table.key, c.key), kind: "aggregate" as const, label: `Σ ${c.label}` })),
   ]);
+  // Each tenant visual's outputs, as check.ts adds them to `base`.
+  const visualOutputs = (model.visuals ?? []).flatMap((v) => Object.entries(VISUALS[v.kind]?.outputs ?? {})
+    .map(([out, o]) => ({ text: visualOutputKey(v.key, out), kind: "visual" as const, label: o.label })));
   return [
     ...model.parameters.map((p) => ({ text: p.key, kind: "param" as const, label: p.label })),
     ...derived,
     ...aggregates,
+    ...visualOutputs,
     ...model.computed.map((c) => ({ text: c.key, kind: "computed" as const })),
     ...extraVars.map((v) => ({ text: v, kind: "var" as const })),
     ...[...FUNCS].map((f) => ({ text: f, kind: "function" as const })),

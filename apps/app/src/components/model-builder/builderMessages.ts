@@ -48,6 +48,11 @@ export function rowOf(path: string, draft: ModelDef): string | undefined {
     const key = (draft.tables ?? [])[Number(t[1])]?.key;
     return key ? tableRow(draft, key) : undefined;
   }
+  const v = /^visuals\[(\d+)\]/.exec(path);
+  if (v) {
+    const key = (draft.visuals ?? [])[Number(v[1])]?.key;
+    return key ? rowKeyOf({ kind: "visual", key }) : undefined;
+  }
   // A formula is edited in a dialog its tree row opens, like a parameter on its page.
   const c = /^computed\[(\d+)\]/.exec(path);
   if (c) return rowKeyOf({ kind: "formula", i: Number(c[1]) });

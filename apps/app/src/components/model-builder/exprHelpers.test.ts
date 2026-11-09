@@ -97,3 +97,10 @@ describe("exprHelpers", () => {
     expect(matches(all, "mat_").map((s) => s.text)).toContain("mat_density");
   });
 });
+
+test("scopeSuggestions offers a visual's outputs, as check.ts admits them", async () => {
+  const { withSheet } = await import("../../features/model/visualTestModel.ts");
+  const out = scopeSuggestions(withSheet()).filter((s) => s.kind === "visual");
+  expect(out.map((s) => s.text)).toEqual(["hoja_piezas", "hoja_aprovechamiento"]);
+  expect(out[0]!.label).toBe("Piezas por formato");
+});

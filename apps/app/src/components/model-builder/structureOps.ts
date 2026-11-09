@@ -2,14 +2,15 @@ import { tokenize, type Group, type ModelDef, type Param, type TableDef } from "
 
 // Pure structure-tree edits for the Parameters tab. All functions return new ModelDefs.
 
-// Parameters and tables are the tree's leaves: a group lists both, by key (one namespace), so both
-// are addressed by key — `t:` rather than `p:` only so the tree can tell them apart when drawing a
-// row. A formula is no node of the structure (it only names the parameter it hangs under), but it
+// Parameters, tables and tenant visuals are the tree's leaves: a group lists them all, by key (one
+// namespace), so all are addressed by key — `t:`/`v:` rather than `p:` only so the tree can tell
+// them apart when drawing a row. A formula is no node of the structure (it only names the parameter it hangs under), but it
 // is a row of the same table, so it is addressed here too: by its index.
 export type RowRef =
   | { kind: "section"; s: number }
   | { kind: "group"; s: number; g: number }
   | { kind: "table"; key: string }
+  | { kind: "visual"; key: string }
   | { kind: "param"; key: string }
   | { kind: "formula"; i: number };
 
@@ -17,6 +18,7 @@ export const rowKeyOf = (r: RowRef): string =>
   r.kind === "section" ? `s:${r.s}`
   : r.kind === "group" ? `g:${r.s}.${r.g}`
   : r.kind === "table" ? `t:${r.key}`
+  : r.kind === "visual" ? `v:${r.key}`
   : r.kind === "formula" ? `c:${r.i}`
   : `p:${r.key}`;
 
@@ -27,13 +29,15 @@ export function parseRowKey(k: string): RowRef {
     const [s, g] = k.slice(2).split(".").map(Number);
     return { kind: "group", s: s!, g: g! };
   }
-  return { kind: k[0] === "t" ? "table" : "param", key: k.slice(2) };
+  return { kind: k[0] === "t" ? "table" : k[0] === "v" ? "visual" : "param", key: k.slice(2) };
 }
 
 export type Placement = "Before" | "After" | "On";
 
-/** A parameter or a table: what a group lists. They drag, delete and copy by the same rules. */
-const isLeaf = (r: RowRef): r is { kind: "param" | "table"; key: string } => r.kind === "param" || r.kind === "table";
+/** A parameter, a table or a visual: what a group lists. They drag and delete by the same rules
+ *  (a copy leaves a visual out — see copyKeys). */
+const isLeaf = (r: RowRef): r is { kind: "param" | "table" | "visual"; key: string } =>
+  r.kind === "param" || r.kind === "table" || r.kind === "visual";
 
 export function uniqueKey(base: string, taken: string[]): string {
   let k = base, n = 2;
@@ -201,6 +205,7 @@ export function deleteNodes(def: ModelDef, refs: RowRef[]): ModelDef {
     // A formula goes with the parameter it is tied to, however that parameter went.
     computed: def.computed.filter((c, i) => !formulas.has(i) && !(c.param !== undefined && keys.has(c.param))),
     tables: (def.tables ?? []).filter((t) => !keys.has(t.key)),
+    ...(def.visuals ? { visuals: def.visuals.filter((v) => !keys.has(v.key)) } : {}),
     structure: {
       sections: def.structure.sections.flatMap((s, si) => (secs.has(si) ? [] : [{
         ...s,
@@ -240,7 +245,10 @@ const poolOf = (k: CopyKey) =>
   k.kind === "group" ? `group:${k.id.slice(2).split(".")[0]}` : k.kind === "section" ? "section" : "ident";
 
 function takenIn(def: ModelDef, pool: string): string[] {
-  if (pool === "ident") return [...def.parameters.map((p) => p.key), ...def.computed.map((c) => c.key), ...(def.tables ?? []).map((t) => t.key)];
+  if (pool === "ident") return [
+    ...def.parameters.map((p) => p.key), ...def.computed.map((c) => c.key), ...(def.tables ?? []).map((t) => t.key),
+    ...(def.visuals ?? []).map((v) => v.key),
+  ];
   if (pool === "section") return def.structure.sections.map((s) => s.key);
   const s = Number(pool.slice("group:".length));
   return def.structure.sections[s]?.groups.map((g) => g.key) ?? [];
@@ -261,7 +269,10 @@ export function copyKeys(def: ModelDef, refs: RowRef[]): CopyKey[] {
     taken.push(k.key);
     out.push(k);
   };
+  // A copy leaves a visual out, as it leaves the items grid out: one per group, and tenant code.
+  const isVisual = (k: string) => (def.visuals ?? []).some((v) => v.key === k);
   const leaf = (k: string) => {
+    if (isVisual(k)) return;
     if (!isTable(def, k)) add(`p:${k}`, "param", k);
     else if (!isItemsTable(def, k)) add(`t:${k}`, "table", k);
   };

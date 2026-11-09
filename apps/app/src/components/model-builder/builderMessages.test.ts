@@ -92,3 +92,8 @@ test("a line issue is a message anchored on its row", () => {
   expect(out.cells?.routing).toBeUndefined();
   expect(out.other).toContainEqual(expect.objectContaining({ section: "outputs", anchor: '[data-line="routing:1"]', detail: "Routing, line 2" }));
 });
+
+test("a visual's issue points at its tree row", async () => {
+  const { withSheet } = await import("../../features/model/visualTestModel.ts");
+  expect(rowOf("visuals[0].inputs.gapX", withSheet())).toBe("v:hoja");
+});

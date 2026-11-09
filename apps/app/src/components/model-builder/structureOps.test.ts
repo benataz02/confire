@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { checkModel, placedTables, type ModelDef } from "@confire/config-engine";
 import { starterModel } from "./starterModel.ts";
 import { commitParam } from "../../features/model/parameter.ts";
+import { withSheet } from "../../features/model/visualTestModel.ts";
 
 // The starter cannot name a price list — only the admin can pick one. Every other issue would be
 // a real structural problem, which is what these assertions are watching for.
@@ -218,4 +219,23 @@ test("a new parameter whose position holds no group lands in the last one", () =
   }
   const noGroup = { ...model(), structure: { sections: [{ key: "main", title: "Main", groups: [] }] } };
   expect(commitParam(noGroup, p, undefined, { s: 0, g: 0 })).toBe(noGroup);
+});
+
+test("a visual row round-trips its key", () => {
+  expect(rowKeyOf({ kind: "visual", key: "hoja" })).toBe("v:hoja");
+  expect(parseRowKey("v:hoja")).toEqual({ kind: "visual", key: "hoja" });
+});
+
+test("deleting a visual, or its group, drops its definition", () => {
+  expect(deleteNodes(withSheet(), [{ kind: "visual", key: "hoja" }]).visuals).toEqual([]);
+  expect(deleteNodes(withSheet(), [{ kind: "visual", key: "hoja" }]).structure.sections[0]!.groups[0]!.params).toEqual(["width"]);
+  expect(deleteNodes(withSheet(), [{ kind: "group", s: 0, g: 0 }]).visuals).toEqual([]);
+});
+
+test("a duplicated group leaves its visual out, and copies avoid visual keys", () => {
+  expect(copyKeys(withSheet(), [{ kind: "group", s: 0, g: 0 }]).map((k) => k.from)).not.toContain("hoja");
+  const m = withSheet({ key: "width2" }, { structure: { sections: [{ key: "s", title: "S", groups: [
+    { key: "g", title: "G", params: ["width", "width2"] }, { key: "it", title: "I", params: ["items"] },
+  ] }] } });
+  expect(copyKeys(m, [{ kind: "param", key: "width" }])[0]!.key).toBe("width3");
 });
