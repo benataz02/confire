@@ -8,7 +8,7 @@ const full = { material: "steel", section: 16, coated: true, color: "black" };
 describe("computeOutputs", () => {
   test("coated steel 16mm² at batch 100 — hand-computed", () => {
     const o = computeOutputs(model, lookups, full, 100);
-    expect(o.bom.map((l) => l.id)).toEqual(["conductor", "coating"]);
+    expect(o.bom.map((l) => l.itemCode)).toEqual(["COND-steel", "COAT-1"]);
     const [cond, coat] = o.bom;
     expect(cond!.itemCode).toBe("COND-steel");
     expect(cond!.desc).toBe("conductor");
@@ -20,7 +20,7 @@ describe("computeOutputs", () => {
     expect(coat!.unitPrice).toBeCloseTo(0.8); // from lookups.prices, not the model
     expect(o.materialPerUnit).toBeCloseTo(1.28);
 
-    expect(o.ops.map((op) => op.id)).toEqual(["cut", "coat"]);
+    expect(o.ops.map((op) => op.resource)).toEqual(["SAW", "COATER"]);
     const coatOp = o.ops[1]!;
     expect(coatOp.runMinPerUnit).toBeCloseTo(3.2);
     expect(coatOp.totalMin).toBeCloseTo(350);
@@ -52,8 +52,8 @@ describe("computeOutputs", () => {
 
   test("uncoated: conditional line and op drop out", () => {
     const o = computeOutputs(model, lookups, { material: "steel", section: 16, coated: false }, 100);
-    expect(o.bom.map((l) => l.id)).toEqual(["conductor"]);
-    expect(o.ops.map((op) => op.id)).toEqual(["cut"]);
+    expect(o.bom.map((l) => l.itemCode)).toEqual(["COND-steel"]);
+    expect(o.ops.map((op) => op.resource)).toEqual(["SAW"]);
   });
 
   test("setup amortization: bigger batch -> lower unit price", () => {

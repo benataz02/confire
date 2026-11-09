@@ -24,7 +24,7 @@ const model: ModelDef = {
     ],
   }],
   constraints: [],
-  bom: [{ id: "sheet", itemCode: '"SHEET"', qty: "1" }],
+  bom: [{ itemCode: '"SHEET"', qty: "1" }],
   routing: [],
   pricing: { margin: 50, quoteItemCode: "SHEET-CFG", priceList: 1 },
   batchDefaults: [3],
@@ -86,8 +86,8 @@ describe("costBreakdown", () => {
     // resource. unitCost = 10 material + 16 labor, so the lines must add up to 26 * 3.
     const withOps: ModelDef = {
       ...model,
-      bom: [{ id: "sheet", itemCode: '"SHEET"', qty: "1", desc: "Steel sheet" }],
-      routing: [{ id: "cut", resource: "Laser", setupMin: "30", runMinPerUnit: "6", ratePerHour: "60" }],
+      bom: [{ itemCode: '"SHEET"', qty: "1", desc: "Steel sheet" }],
+      routing: [{ resource: "Laser", setupMin: "30", runMinPerUnit: "6", ratePerHour: "60" }],
     };
     const [m] = breakdown([{ candidateIdx: 0, batchQty: 3 }], withOps);
     expect(m!.materials).toEqual([{ kind: "material", label: "Steel sheet", amount: 30 }]);
@@ -98,7 +98,7 @@ describe("costBreakdown", () => {
   });
 
   test("an unnamed BOM line falls back to its item code, and repeats merge", () => {
-    const twice: ModelDef = { ...model, bom: [{ id: "a", itemCode: '"SHEET"', qty: "1" }, { id: "b", itemCode: '"SHEET"', qty: "2" }] };
+    const twice: ModelDef = { ...model, bom: [{ itemCode: '"SHEET"', qty: "1" }, { itemCode: '"SHEET"', qty: "2" }] };
     const [m] = breakdown([], twice);
     expect(m!.materials).toEqual([{ kind: "material", label: "SHEET", amount: 90 }]); // (1 + 2) x 3 sheets
   });

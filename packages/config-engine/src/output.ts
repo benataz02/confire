@@ -4,7 +4,6 @@ import type { Entries, ModelDef, ResolvedLookups, TableRows } from "./model";
 import { bindings, paramPrices, type CostElement } from "./propagate";
 
 export type BomResult = {
-  id: string;
   itemCode: string;
   desc: string;
   qtyPerUnit: number;
@@ -15,7 +14,6 @@ export type BomResult = {
   unpriced?: true;
 };
 export type OpResult = {
-  id: string;
   resource: string;
   desc: string;
   setupMin: number;
@@ -57,9 +55,10 @@ export function computeOutputs(
 
   const bom: BomResult[] = [];
   let materialPerUnit = 0;
-  for (const l of model.bom) {
+  // A line is named by its place, the builder grid's `#` column: it has no other name.
+  for (const [i, l] of model.bom.entries()) {
     if (!included(l.condition)) continue;
-    const qtyPerUnit = numeric(l.qty, `bom '${l.id}' qty`);
+    const qtyPerUnit = numeric(l.qty, `BOM line ${i + 1} qty`);
     const itemCode = String(evaluate(l.itemCode, scope) ?? "");
     // An item the resolve could not price (not in the price list, not synced yet, or a code only
     // decidable here) costs 0 and is flagged rather than stopping the calculation — so a cache
@@ -69,28 +68,22 @@ export function computeOutputs(
     const desc = l.desc ?? "";
     const totalQty = qtyPerUnit * batchQty;
     bom.push({
-      id: l.id, itemCode, desc, qtyPerUnit, totalQty, unitPrice, lineTotal: totalQty * unitPrice,
+      itemCode, desc, qtyPerUnit, totalQty, unitPrice, lineTotal: totalQty * unitPrice,
       ...(listed === undefined ? { unpriced: true as const } : {}),
     });
     materialPerUnit += qtyPerUnit * unitPrice;
   }
   const ops: OpResult[] = [];
   let laborPerUnit = 0;
-  const pushOp = (id: string, resource: string, desc: string, setupMin: number, runMinPerUnit: number, rate: number) => {
-    const totalMin = setupMin + runMinPerUnit * batchQty;
-    ops.push({ id, resource, desc, setupMin, runMinPerUnit, totalMin, ratePerHour: rate, cost: (totalMin / 60) * rate });
-    laborPerUnit += ((setupMin / batchQty + runMinPerUnit) / 60) * rate;
-  };
-  for (const o of model.routing) {
+  for (const [i, o] of model.routing.entries()) {
     if (!included(o.condition)) continue;
-    pushOp(
-      o.id,
-      o.resource,
-      o.desc ?? "",
-      numeric(o.setupMin, `routing '${o.id}' setupMin`),
-      numeric(o.runMinPerUnit, `routing '${o.id}' runMinPerUnit`),
-      numeric(o.ratePerHour, `routing '${o.id}' ratePerHour`),
-    );
+    const at = `Routing line ${i + 1}`;
+    const setupMin = numeric(o.setupMin, `${at} setupMin`);
+    const runMinPerUnit = numeric(o.runMinPerUnit, `${at} runMinPerUnit`);
+    const rate = numeric(o.ratePerHour, `${at} ratePerHour`);
+    const totalMin = setupMin + runMinPerUnit * batchQty;
+    ops.push({ resource: o.resource, desc: o.desc ?? "", setupMin, runMinPerUnit, totalMin, ratePerHour: rate, cost: (totalMin / 60) * rate });
+    laborPerUnit += ((setupMin / batchQty + runMinPerUnit) / 60) * rate;
   }
 
   const other = paramPrices(model, b, lookups.tables);

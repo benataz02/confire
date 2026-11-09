@@ -67,21 +67,19 @@ export const model: ModelDef = {
   ],
   bom: [
     {
-      id: "conductor",
       itemCode: 'CONCAT("COND-", material)',
       desc: "conductor",
       qty: "section * 0.02",
     },
     {
-      id: "coating",
       itemCode: '"COAT-1"',
       condition: "coated",
       qty: "1",
     },
   ],
   routing: [
-    { id: "cut", resource: "SAW", setupMin: "10", runMinPerUnit: "0.5", ratePerHour: "60" },
-    { id: "coat", resource: "COATER", condition: "coated", setupMin: "30", runMinPerUnit: "0.2 * section", ratePerHour: "60" },
+    { resource: "SAW", setupMin: "10", runMinPerUnit: "0.5", ratePerHour: "60" },
+    { resource: "COATER", condition: "coated", setupMin: "30", runMinPerUnit: "0.2 * section", ratePerHour: "60" },
   ],
   pricing: { margin: 50, quoteItemCode: "CABLE-CFG", priceList: 1, itemTable: "items" },
   batchDefaults: [100, 500, 1000],

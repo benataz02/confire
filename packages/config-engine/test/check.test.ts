@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from "bun:test";
-import { bomItemCodes, checkModel, referencedTables, syncTables } from "../src/check";
+import { bomItemCodes, checkModel, referencedTables, renameTable, syncTables } from "../src/check";
 import { itemsTable, type ModelDef } from "../src/model";
 import { fieldGroup, model } from "./fixture";
 
@@ -314,6 +314,24 @@ describe("syncTables", () => {
   });
 });
 
+describe("renameTable", () => {
+  it("carries a masterdata rename into every place syncTables reads, and nowhere else", () => {
+    const m = structuredClone(model);
+    m.parameters[0]!.domain = { kind: "options", ref: { source: "table", table: "prices", valueCol: "code" } };
+    // The same text as a key or an argument is a value, not the table: it stays.
+    m.bom[0]!.qty = 'LOOKUP("prices", "code", "prices", "price") + LOOKUP("margins", "k", "std", "v")';
+    m.tables = [{ ...itemsTable(), basisExpr: 'LOOKUP("prices", "code", "x", "price")' }];
+    m.history = { table: "prices", mappings: [], display: [] };
+    m.pricing = { ...m.pricing, itemTable: "prices" };
+
+    const r = renameTable(m, "prices", "price_list");
+    expect([...syncTables(r)].sort()).toEqual(["margins", "price_list"]);
+    expect(r.bom[0]!.qty).toBe('LOOKUP("price_list", "code", "prices", "price") + LOOKUP("margins", "k", "std", "v")');
+    expect(r.tables![0]).toMatchObject({ basisExpr: 'LOOKUP("price_list", "code", "x", "price")' });
+    expect(renameTable(model, "nope", "x")).toEqual(model);
+  });
+});
+
 describe("pricing.itemTable", () => {
   it("is required once a model has a BOM, and must name a known table", () => {
     const noTable = { ...model, pricing: { ...model.pricing, itemTable: undefined } };
@@ -332,7 +350,7 @@ describe("pricing.itemTable", () => {
 describe("bomItemCodes", () => {
   const withItem = (itemCode: string): ModelDef => {
     const m = structuredClone(model);
-    m.bom = [{ id: "l", itemCode, qty: "1" }];
+    m.bom = [{ itemCode, qty: "1" }];
     return m;
   };
 

@@ -107,7 +107,7 @@ export const TEST_MODEL: ModelDef = {
   // No BOM: a priced BOM is a live price-list read, and the tests that use this model are the
   // ones that must resolve without an agent. BOM pricing is covered in config-engine's own tests.
   bom: [],
-  routing: [{ id: "cut", resource: "SAW", setupMin: "10", runMinPerUnit: "0.5", ratePerHour: "60" }],
+  routing: [{ resource: "SAW", setupMin: "10", runMinPerUnit: "0.5", ratePerHour: "60" }],
   pricing: { margin: 50, quoteItemCode: "CFG", priceList: 1 },
   batchDefaults: [100, 500],
 };

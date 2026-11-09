@@ -21,8 +21,8 @@ const model: ModelDef = {
   structure: { sections: [{ key: "s", title: "S", groups: [{ key: "g", title: "G", params: ["grade", "secret", "locked"] }, { key: "items_g", title: "", params: ["items"] }] }] },
   computed: [{ key: "margin", expr: "0.4" }],
   constraints: [{ kind: "expr", assert: "grade != \"Z\"", message: "Z is out" }],
-  bom: [{ id: "b", itemCode: '"BODY"', qty: "1" }],
-  routing: [{ id: "r", resource: "SAW", setupMin: "1", runMinPerUnit: "1", ratePerHour: "60" }],
+  bom: [{ itemCode: '"BODY"', qty: "1" }],
+  routing: [{ resource: "SAW", setupMin: "1", runMinPerUnit: "1", ratePerHour: "60" }],
   tables: [{
     key: "items", title: "Items", role: "items", basisExpr: "quantity * margin", map: { itemcode: "U_CF_ItemCode" },
     columns: [

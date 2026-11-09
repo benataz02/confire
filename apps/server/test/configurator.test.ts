@@ -25,8 +25,8 @@ const model: ModelDef = {
   structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["size", "grade"] }] }] },
   computed: [],
   constraints: [],
-  bom: [{ id: "body", itemCode: '"BODY"', qty: 'size == "S" ? 1 : 2' }],
-  routing: [{ id: "cut", resource: "SAW", setupMin: "10", runMinPerUnit: "1", ratePerHour: "60" }],
+  bom: [{ itemCode: '"BODY"', qty: 'size == "S" ? 1 : 2' }],
+  routing: [{ resource: "SAW", setupMin: "10", runMinPerUnit: "1", ratePerHour: "60" }],
   pricing: { margin: 50, quoteItemCode: "BOX", priceList: 1, itemTable: "catalog" },
   batchDefaults: [10],
 };
@@ -177,7 +177,7 @@ describe.skipIf(!process.env.DATABASE_URL)("calculateProject (integration)", () 
       structure: { sections: [{ key: "main", title: "Main", groups: [{ key: "g", title: "G", params: ["material"] }] }] },
       computed: [],
       constraints: [],
-      bom: [{ id: "body", itemCode: "material", qty: "1" }],
+      bom: [{ itemCode: "material", qty: "1" }],
       routing: [],
       pricing: { margin: 0, quoteItemCode: "BOX", priceList: 1, itemTable: "catalog" },
       batchDefaults: [1],
@@ -322,9 +322,9 @@ describe("config tables (integration)", () => {
       },
     ],
     constraints: [],
-    bom: [{ id: "sheet", itemCode: '"SHEET"', qty: "1" }],
+    bom: [{ itemCode: '"SHEET"', qty: "1" }],
     // the table's sum is the whole point: drilling time comes from the rows, not from a parameter
-    routing: [{ id: "drill", resource: "CNC", setupMin: "5", runMinPerUnit: "holes_minutes", ratePerHour: "60" }],
+    routing: [{ resource: "CNC", setupMin: "5", runMinPerUnit: "holes_minutes", ratePerHour: "60" }],
     pricing: { margin: 50, quoteItemCode: "SHEET-CFG", priceList: 1, itemTable: "catalog" },
     batchDefaults: [3],
   };

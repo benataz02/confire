@@ -27,7 +27,7 @@ test("an issue lands on its field, a grid's on its cell, the rest under its sect
   const d: ModelDef = {
     ...named(),
     parameters: [{ key: "width", label: "Width", type: "number", ui: "input" }],
-    bom: [{ id: "l1", itemCode: '"A"', qty: "1" }, { id: "l2", itemCode: '"B"', qty: "nope" }],
+    bom: [{ itemCode: '"A"', qty: "1" }, { itemCode: '"B"', qty: "nope" }],
     constraints: [
       { kind: "expr", assert: "width >", message: "m" },
       { kind: "table", params: ["width", "x"], rows: [], mode: "allow" },

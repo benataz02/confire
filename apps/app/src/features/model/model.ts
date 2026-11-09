@@ -1,5 +1,5 @@
 import { cfl } from "@confire/ui/cfl/cfl-configs.ts";
-import type { Row, Section } from "@confire/ui/types.ts";
+import type { Section } from "@confire/ui/types.ts";
 
 // The model builder's object page, declared like a B1 record's (features/b1/documents.tsx): what is
 // a plain field or grid is data here; the structure tree and the combination list are templates
@@ -7,13 +7,6 @@ import type { Row, Section } from "@confire/ui/types.ts";
 // control kinds (controls.tsx), named by `controlType`. The record is record.ts's.
 
 type Translate = (key: string, ...params: string[]) => string;
-
-const newId = (prefix: string, taken: unknown[]) => {
-  let n = taken.length + 1;
-  while (taken.includes(`${prefix}${n}`)) n++;
-  return `${prefix}${n}`;
-};
-const ids = (rows: Row[]) => rows.map((r) => r.id);
 
 /** Section ids, also the issue mapping's (builderMessages' sectionOf). */
 export const MODEL_SECTIONS = { settings: "settings", params: "params", rules: "rules", outputs: "outputs", history: "history" } as const;
@@ -105,14 +98,14 @@ export const modelSections = (t: Translate): Section[] => [
         table: {
           key: "bom",
           columns: [
-            // A line's id is an internal key (error messages name it); the visible counter is its place.
+            // A line is its place: the counter is what a calculation's error names.
             { key: "VisualOrder", label: "#", width: 48, readonly: true },
             { key: "itemCode", label: t("MODEL_ITEM"), width: 240, controlType: "itemCode", required: true },
             { key: "desc", label: t("MODEL_DESC"), controlType: "text", placeholder: t("MODEL_DESC_FROM_ITEM") },
             { key: "condition", label: t("MODEL_CONDITION"), controlType: "lineExpr", placeholder: t("MODEL_COND_EMPTY") },
             { key: "qty", label: t("MODEL_QTY_PER"), width: 144, controlType: "lineExpr", required: true },
           ],
-          newRow: (rows) => ({ id: newId("line", ids(rows)), itemCode: '""', qty: "1" }),
+          newRow: () => ({ itemCode: '""', qty: "1" }),
         },
       },
       {
@@ -128,7 +121,7 @@ export const modelSections = (t: Translate): Section[] => [
             { key: "runMinPerUnit", label: t("MODEL_RUN"), controlType: "lineExpr", required: true },
             { key: "ratePerHour", label: t("MODEL_RATE"), controlType: "lineExpr", required: true },
           ],
-          newRow: (rows) => ({ id: newId("op", ids(rows)), resource: "", setupMin: "0", runMinPerUnit: "0", ratePerHour: "60" }),
+          newRow: () => ({ resource: "", setupMin: "0", runMinPerUnit: "0", ratePerHour: "60" }),
         },
       },
     ],

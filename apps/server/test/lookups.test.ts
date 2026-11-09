@@ -18,7 +18,7 @@ const model: ModelDef = {
   structure: { sections: [{ key: "s", title: "S", groups: [{ key: "g", title: "G", params: ["grade"] }] }] },
   computed: [],
   constraints: [],
-  bom: [{ id: "b", itemCode: "grade", qty: "1" }],
+  bom: [{ itemCode: "grade", qty: "1" }],
   routing: [],
   pricing: { margin: 0, quoteItemCode: "X", priceList: 2, itemTable: "catalog" },
   batchDefaults: [1],
@@ -65,7 +65,7 @@ describe("resolveLookups over cached masterdata", () => {
   });
 
   test("prices come out of the nested ItemPrices collection, for this model's list only", async () => {
-    const both = { ...model, parameters: [], bom: [{ id: "b", itemCode: '"A"', qty: "1" }] };
+    const both = { ...model, parameters: [], bom: [{ itemCode: '"A"', qty: "1" }] };
     const lookups = await resolveLookups(both, rows, cacheOf({ c: CATALOG }));
     expect(lookups.prices).toEqual({ A: 7 });
   });
@@ -73,7 +73,7 @@ describe("resolveLookups over cached masterdata", () => {
   test("an item with no line for the price list is absent, not zero", async () => {
     // Absent is what makes computeOutputs refuse the BOM line by name; a 0 would quietly ship a
     // free material into a quotation.
-    const onlyB = { ...model, parameters: [], bom: [{ id: "b", itemCode: '"B"', qty: "1" }] };
+    const onlyB = { ...model, parameters: [], bom: [{ itemCode: '"B"', qty: "1" }] };
     const lookups = await resolveLookups(onlyB, rows, cacheOf({ c: CATALOG }));
     expect(lookups.prices).toEqual({});
     expect("B" in (lookups.prices ?? {})).toBe(false);

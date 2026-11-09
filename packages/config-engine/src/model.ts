@@ -103,7 +103,6 @@ export type Constraint = z.infer<typeof ConstraintZ>;
 // from `pricing.priceList` on every calculate (ResolvedLookups.prices). A stored price would be
 // the one number in a configuration that is a snapshot — see the "nothing is snapshotted" rule.
 export const BomLineZ = z.object({
-  id: z.string(),
   itemCode: z.string(), // expr -> a B1 item code
   // Plain text, not an expression: it is the item's name, filled from B1 when the line is picked.
   desc: z.string().optional(),
@@ -112,7 +111,6 @@ export const BomLineZ = z.object({
 });
 
 export const OperationZ = z.object({
-  id: z.string(),
   resource: z.string(),
   // Plain text, not an expression, like BomLineZ.desc: what the operation does, for the salesperson.
   desc: z.string().optional(),

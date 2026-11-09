@@ -30,7 +30,7 @@ const PRICED: ModelDef = {
     { role: "calc", key: "holes", title: "Holes", columns: [{ key: "d", label: "D", type: "number", cell: { kind: "input" } }] },
   ],
   constraints: [],
-  bom: [{ id: "body", itemCode: '"BODY"', qty: 'size == "S" ? 1 : 2' }],
+  bom: [{ itemCode: '"BODY"', qty: 'size == "S" ? 1 : 2' }],
   routing: [],
   pricing: { margin: 50, quoteItemCode: "BOX", priceList: 1, itemTable: "catalog" },
   batchDefaults: [10, 20],
@@ -141,7 +141,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the configuration process", () => {
   });
 
   test("a calculation that cannot complete keeps the inputs and says why; duplicate keeps such a copy", async () => {
-    const broken: ModelDef = { ...PRICED, routing: [{ id: "cut", resource: "SAW", setupMin: "size", runMinPerUnit: "1", ratePerHour: "60" }] };
+    const broken: ModelDef = { ...PRICED, routing: [{ resource: "SAW", setupMin: "size", runMinPerUnit: "1", ratePerHour: "60" }] };
     const s = await setup(broken);
     const id = await s.create();
     const v = await s.calc({ id, set: { size: "S" }, tables: { items: ITEMS } });
