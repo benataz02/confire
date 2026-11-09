@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { applyModelPatch, diffModel, isEmptyPatch, ModelPatchZ } from "../src/model-patch";
 import type { ModelDef } from "../src/model";
-import { fieldGroup, model } from "./fixture";
+import { fieldGroup, model, withSheet } from "./fixture";
 
 const roundTrip = (a: ModelDef, b: ModelDef) => applyModelPatch(a, ModelPatchZ.parse(diffModel(a, b)));
 /** Every object's keys in reverse, as a jsonb read hands them back in an order of its own. */
@@ -124,5 +124,21 @@ describe("applyModelPatch", () => {
     const mine = structuredClone(stored);
     mine.description = "x";
     expect(applyModelPatch(stored, diffModel(stored, mine)).parameters.map((x) => x.key)).not.toContain("lost");
+  });
+});
+
+describe("model patch: visuals", () => {
+  const bare = (): ModelDef => {
+    const m = withSheet();
+    delete m.visuals;
+    return { ...m, computed: [], structure: { sections: [{ key: "s", title: "S", groups: [{ key: "g", title: "G", params: ["width"] }, { key: "it", title: "Items", params: ["items"] }] }] } };
+  };
+  test("a visual added is one keyed upsert, and the patch rebuilds the model", () => {
+    const p = diffModel(bare(), withSheet());
+    expect(p.visuals).toEqual({ upsert: [withSheet().visuals![0]!] });
+    expect(roundTrip(bare(), withSheet())).toEqual(withSheet());
+  });
+  test("a visual removed is a keyed remove", () => {
+    expect(diffModel(withSheet(), { ...withSheet(), visuals: [] }).visuals).toEqual({ remove: ["hoja"] });
   });
 });

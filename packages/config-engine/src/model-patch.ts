@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ModelDefZ, ParamZ, TableDefZ, type ModelDef } from "./model";
+import { ModelDefZ, ParamZ, TableDefZ, VisualZ, type ModelDef } from "./model";
 
 // A model is saved as what changed since the last save, not as the whole document: the builder
 // diffs its draft against the definition it loaded (`diffModel`) and the server lays that over the
@@ -7,7 +7,7 @@ import { ModelDefZ, ParamZ, TableDefZ, type ModelDef } from "./model";
 // different parameters both keep their edit; the same item edited by both is the later save's.
 // The keyless parts go whole, and only when they changed.
 
-const KEYED = ["parameters", "computed", "tables"] as const;
+const KEYED = ["parameters", "computed", "tables", "visuals"] as const;
 const WHOLE = ["name", "description", "instructions", "structure", "constraints", "bom", "routing", "history", "pricing", "batchDefaults"] as const;
 // A ModelDef key in neither list would silently stop being saved.
 const _covered: Exclude<keyof ModelDef, (typeof KEYED)[number] | (typeof WHOLE)[number]> extends never ? true : never = true;
@@ -30,6 +30,7 @@ export const ModelPatchZ = z.object({
   parameters: keyed(ParamZ),
   computed: keyed(S.computed.element),
   tables: keyed(TableDefZ),
+  visuals: keyed(VisualZ),
   structure: S.structure.optional(),
   constraints: S.constraints.optional(),
   bom: S.bom.optional(),

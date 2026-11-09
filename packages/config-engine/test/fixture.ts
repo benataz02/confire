@@ -1,4 +1,4 @@
-import { itemsTable, type Group, type ModelDef, type ResolvedLookups } from "../src/model";
+import { itemsTable, type Group, type ModelDef, type ResolvedLookups, type Visual } from "../src/model";
 
 /** A group of the fixture, so tests can push params. */
 export const fieldGroup = (m: ModelDef, s = 0, g = 0): Group => m.structure.sections[s]!.groups[g]!;
@@ -123,3 +123,24 @@ export const linkedModel = (): ModelDef => {
   m.pricing.operationTable = "ops";
   return m;
 };
+
+/** Inputs of hera's sheet layout on its laser reference: 1000×500, 120×70, paso 3, margen 10 → 48. */
+export const SHEET_INPUTS = { sheetLength: "1000", sheetWidth: "500", pieceLength: "120", pieceWidth: "70", gapX: "3", gapY: "3", marginX: "10", marginY: "10" };
+
+/** A model placing hera's sheet visual `hoja` in a group with one parameter (`width`, no default, so
+ *  an input reading it is unbound), the items grid in a group of its own, and a computed value that
+ *  reads the visual's count. */
+export const withSheet = (over: Partial<Visual> = {}, extra: Partial<ModelDef> = {}): ModelDef => ({
+  name: "Sheet",
+  parameters: [{ key: "width", label: "Width", type: "number", ui: "input" }],
+  structure: { sections: [{ key: "s", title: "S", groups: [
+    { key: "g", title: "G", params: ["width", "hoja"] },
+    { key: "it", title: "Items", params: ["items"] },
+  ] }] },
+  computed: [{ key: "perSheet", expr: "hoja_piezas" }],
+  tables: [itemsTable()], constraints: [], bom: [], routing: [],
+  pricing: { margin: 20, quoteItemCode: "Q", priceList: 1 },
+  batchDefaults: [1],
+  visuals: [{ key: "hoja", kind: "hera.sheetLayout", inputs: SHEET_INPUTS, ...over }],
+  ...extra,
+});

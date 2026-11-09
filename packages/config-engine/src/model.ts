@@ -239,6 +239,21 @@ export const TableRowsZ = z.record(
 /** Scalar a table contributes to every expression scope, e.g. holes_perimeter, holes_count. */
 export const aggregateKey = (tableKey: string, col: string) => `${tableKey}_${col}`;
 
+/** A tenant visual placed in the model (spec 2026-11-09-tenant-visuals): `kind` names one of the
+ *  engine's VISUALS, which also says which tenants may use it; each of its declared inputs gets a
+ *  formula here. Its key shares the parameters' namespace and a group's `params` list places it like
+ *  a table; its outputs are values every formula reads (`visualOutputKey`). */
+export const VisualZ = z.object({
+  key: KeyZ,
+  kind: z.string().min(1),
+  title: z.string().optional(),
+  inputs: z.record(z.string(), z.string()),
+});
+export type Visual = z.infer<typeof VisualZ>;
+
+/** A visual's output as formulas read it, e.g. hoja_piezas — the `<param>_<column>` pattern. */
+export const visualOutputKey = (key: string, output: string) => `${key}_${output}`;
+
 /** A section's groups, each rendered as one UI5 FormGroup. A group lists its fields in render
  *  order: parameter keys and table keys alike — they share one namespace (checkModel), so a key
  *  names one or the other. A table draws across the whole form, titled from its TableDef, so a
@@ -284,6 +299,8 @@ export const ModelDefZ = z.object({
   // optional, not .default([]): a zod default lands in the inferred type as *required*, which
   // would force `tables: []` into every existing ModelDef literal.
   tables: z.array(TableDefZ).optional(),
+  // optional for the same reason; tenant code, so a kind is only valid where checkModel says.
+  visuals: z.array(VisualZ).optional(),
   constraints: z.array(ConstraintZ),
   bom: z.array(BomLineZ),
   routing: z.array(OperationZ),

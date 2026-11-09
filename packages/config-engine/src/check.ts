@@ -1,5 +1,6 @@
 import { type Ast, assertCallArity, DslError, parse } from "./dsl";
-import { aggregateKey, derivedKey, historyFields, historyKey, type LookupRef, type ModelDef, type TableDef, derivedColumns, refKeyCols, COST_COL, PRICE_COL, QTY_COL, OPERATION_VARS } from "./model";
+import { aggregateKey, derivedKey, historyFields, historyKey, type LookupRef, type ModelDef, type TableDef, derivedColumns, refKeyCols, visualOutputKey, COST_COL, PRICE_COL, QTY_COL, OPERATION_VARS } from "./model";
+import { VISUALS } from "./visuals/index.ts";
 
 export type Issue = { path: string; message: string; from?: number; to?: number };
 
@@ -53,7 +54,9 @@ function collectRefs(n: Ast, out: Ref[]): void {
   }
 }
 
-export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Issue[] {
+/** `tenant` is the workspace's slug: the server's save passes it, so a visual written for another
+ *  tenant is refused there. The builder's own checks pass none — it only offers the tenant's kinds. */
+export function checkModel(model: ModelDef, knownTables: KnownTable[] = [], tenant?: string): Issue[] {
   const issues: Issue[] = [];
   const paramKeys = model.parameters.map((p) => p.key);
   const computedKeys = model.computed.map((c) => c.key);
@@ -118,8 +121,33 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
   if (!tableDefs.some((t) => t.role === "items"))
     issues.push({ path: "tables", message: "a model needs an items table — it is what becomes the quotation lines" });
 
+  // tenant visuals: the kind (and, given the tenant, whether it may use it), the key, and the outputs
+  // they add to scope — collision-checked like aggregates, for the same reason.
+  const visualDefs = model.visuals ?? [];
+  const visualKeys = new Set<string>();
+  const outputs: string[] = [];
+  const ownOutputs = visualDefs.map((v, i) => {
+    if (baseKeys.has(v.key) || seenTable.has(v.key) || visualKeys.has(v.key))
+      issues.push({ path: `visuals[${i}]`, message: `A parameter, computed value, table or visual is already called '${v.key}'.` });
+    visualKeys.add(v.key);
+    const calc = VISUALS[v.kind];
+    if (!calc) {
+      issues.push({ path: `visuals[${i}].kind`, message: `unknown visual '${v.kind}'` });
+      return [];
+    }
+    if (tenant !== undefined && !calc.tenants.includes(tenant))
+      issues.push({ path: `visuals[${i}].kind`, message: "This visual is not available in this workspace." });
+    return Object.keys(calc.outputs).map((out) => {
+      const k = visualOutputKey(v.key, out);
+      if (baseKeys.has(k)) issues.push({ path: `visuals[${i}]`, message: `Formulas would get '${k}' from this visual, but that name is already taken — rename the visual or the field.` });
+      baseKeys.add(k);
+      outputs.push(k);
+      return k;
+    });
+  });
+
   const derivedSet = new Set(derived);
-  const base = new Set([...paramKeys, ...computedKeys, ...derived, ...aggregates]);
+  const base = new Set([...paramKeys, ...computedKeys, ...derived, ...aggregates, ...outputs]);
   const withQty = new Set([...base, "qty"]);
   // A linked routing line's figures may read its operation's catalog figures; its condition may
   // not — the operation has to be known before its figures are.
@@ -152,6 +180,20 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
     checkExpr(p.priceExpr, `parameters[${i}].priceExpr`, base);
   });
   model.computed.forEach((c, i) => checkExpr(c.expr, `computed[${i}].expr`, base));
+  // A visual's input sees the model scope but never its own outputs: they are what it computes.
+  visualDefs.forEach((v, i) => {
+    const calc = VISUALS[v.kind];
+    if (!calc) return;
+    const own = new Set(ownOutputs[i]);
+    const allowed = new Set([...base].filter((k) => !own.has(k)));
+    for (const name of Object.keys(calc.inputs)) {
+      const src = v.inputs[name];
+      if (src === undefined || !src.trim()) issues.push({ path: `visuals[${i}].inputs.${name}`, message: "Give this input a formula" });
+      else checkExpr(src, `visuals[${i}].inputs.${name}`, allowed);
+    }
+    for (const name of Object.keys(v.inputs))
+      if (!Object.hasOwn(calc.inputs, name)) issues.push({ path: `visuals[${i}].inputs.${name}`, message: `'${name}' is not an input of this visual` });
+  });
   model.constraints.forEach((c, i) => {
     if (c.kind === "expr") {
       checkExpr(c.when, `constraints[${i}].when`, base);
@@ -241,16 +283,22 @@ export function checkModel(model: ModelDef, knownTables: KnownTable[] = []): Iss
     });
   });
 
-  // structure references: a group's key is a parameter's or a table's, each placed once.
+  // structure references: a group's key is a parameter's, a table's or a visual's, each placed once;
+  // a group draws one visual at most (it takes half the group's width). An unplaced visual is allowed:
+  // its outputs still compute.
   const seenPlaced = new Set<string>();
-  for (const g of model.structure.sections.flatMap((s) => s.groups))
+  for (const g of model.structure.sections.flatMap((s) => s.groups)) {
+    let visualsHere = 0;
     for (const k of g.params) {
-      if (seenTable.has(k)) {
-        if (seenPlaced.has(k)) issues.push({ path: "structure", message: `table '${k}' is placed more than once` });
+      if (seenTable.has(k) || visualKeys.has(k)) {
+        if (seenPlaced.has(k)) issues.push({ path: "structure", message: `${seenTable.has(k) ? "table" : "visual"} '${k}' is placed more than once` });
         seenPlaced.add(k);
+        if (visualKeys.has(k)) visualsHere++;
       } else if (!base.has(k) || compSet.has(k) || derivedSet.has(k))
         issues.push({ path: "structure", message: `structure references unknown parameter '${k}'` });
     }
+    if (visualsHere > 1) issues.push({ path: "structure", message: "A group shows at most one visual." });
+  }
 
   // LOOKUP table names when statically known (first arg is a string literal)
   const tables = new Set(knownTables.map((t) => t.name));

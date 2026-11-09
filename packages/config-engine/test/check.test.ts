@@ -1,7 +1,7 @@
 import { describe, expect, it, test } from "bun:test";
 import { bomItemCodes, checkModel, referencedTables, renameTable, routingOperationIds, syncTables } from "../src/check";
 import { itemsTable, ModelDefZ, type ModelDef } from "../src/model";
-import { fieldGroup, linkedModel, model } from "./fixture";
+import { fieldGroup, linkedModel, model, SHEET_INPUTS, withSheet } from "./fixture";
 
 // The model's namespace: the manual price table it LOOKUPs, and the `Items` query its BOM is
 // costed from. The latter declares no columns on purpose — an Items read sends no $select, so the
@@ -403,5 +403,43 @@ describe("Beas operations", () => {
   });
   test("syncTables keeps the operations source fresh", () => {
     expect(syncTables(linked).has("ops")).toBe(true);
+  });
+});
+
+describe("checkModel: tenant visuals", () => {
+  const paths = (m: ModelDef, tenant?: string) => checkModel(m, [], tenant).map((i) => i.path);
+  const param = (key: string) => ({ key, label: key, type: "number" as const, ui: "input" as const });
+
+  test("a placed visual whose outputs a formula reads passes", () => {
+    expect(checkModel(withSheet(), [], "hera")).toEqual([]);
+    expect(checkModel(withSheet(), [])).toEqual([]); // the builder passes no tenant
+  });
+  test("another tenant's or an unknown kind is refused on the kind", () => {
+    expect(paths(withSheet(), "acme")).toContain("visuals[0].kind");
+    expect(paths(withSheet({ kind: "nope" }), "hera")).toContain("visuals[0].kind");
+  });
+  test("inputs: each declared one needs a formula, no extra ones, never its own outputs", () => {
+    const { gapX: _g, ...rest } = SHEET_INPUTS;
+    expect(paths(withSheet({ inputs: rest }), "hera")).toContain("visuals[0].inputs.gapX");
+    expect(paths(withSheet({ inputs: { ...SHEET_INPUTS, foo: "1" } }), "hera")).toContain("visuals[0].inputs.foo");
+    expect(paths(withSheet({ inputs: { ...SHEET_INPUTS, sheetLength: "hoja_piezas" } }), "hera")).toContain("visuals[0].inputs.sheetLength");
+  });
+  test("keys: the visual's own and its outputs share the formula namespace", () => {
+    for (const clash of ["hoja", "hoja_piezas"]) {
+      const m = withSheet({}, { parameters: [param("width"), param(clash)] });
+      expect(paths(m, "hera")).toContain("visuals[0]");
+    }
+  });
+  test("structure: a visual is placed at most once, and a group holds at most one", () => {
+    const twice = withSheet({}, { structure: { sections: [{ key: "s", title: "S", groups: [
+      { key: "g", title: "G", params: ["width", "hoja"] }, { key: "h", title: "H", params: ["hoja"] }, { key: "it", title: "I", params: ["items"] },
+    ] }] } });
+    const said = (m: ModelDef) => checkModel(m, [], "hera").filter((i) => i.path === "structure").map((i) => i.message);
+    expect(said(twice)).toEqual(["visual 'hoja' is placed more than once"]);
+    const two = withSheet({}, {
+      visuals: [{ key: "hoja", kind: "hera.sheetLayout", inputs: SHEET_INPUTS }, { key: "hoja2", kind: "hera.sheetLayout", inputs: SHEET_INPUTS }],
+      structure: { sections: [{ key: "s", title: "S", groups: [{ key: "g", title: "G", params: ["width", "hoja", "hoja2"] }, { key: "it", title: "I", params: ["items"] }] }] },
+    });
+    expect(said(two)).toEqual(["A group shows at most one visual."]);
   });
 });
