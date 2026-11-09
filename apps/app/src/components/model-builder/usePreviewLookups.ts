@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { ModelDef } from "@confire/config-engine";
 import { orpc } from "../../orpc.ts";
+import { linkedForPreview } from "./lines.ts";
 
 // Only domain refs affect lookup resolution. Sending this skeleton (instead of the full draft)
 // keeps the TanStack query key stable while the admin types expressions, so the agent is only hit
@@ -13,9 +14,9 @@ export function lookupSkeleton(d: ModelDef): ModelDef {
     computed: [],
     constraints: [],
     bom: [],
-    // The linked operations and their source: the line dialog shows each one's catalog figures
+    // The literal operations and their source: the line dialog shows each one's catalog figures
     // ("Beas: 5"), which only a resolve can read. A pick changes the key — rare, unlike typing.
-    routing: d.routing.flatMap((o) => (o.operationId ? [{ operationId: o.operationId, setupMin: "0", runMinPerUnit: "0", ratePerHour: "0" }] : [])),
+    routing: linkedForPreview(d.routing),
     pricing: { margin: 0, quoteItemCode: "X", ...(d.pricing.operationTable ? { operationTable: d.pricing.operationTable } : {}) },
     batchDefaults: [1],
   };

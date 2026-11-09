@@ -13,8 +13,9 @@ import { useI18n } from "../../i18n.ts";
 import { ExprInput } from "./ExprInput.tsx";
 import type { TableCols } from "./exprHelpers.ts";
 import {
-  asCode, FIGURES, missingFields, newBomLine, newOpLine, pickOperation, withCatalogFigures, type BomLine, type OpLine,
+  asCode, FIGURES, missingFields, newBomLine, newOpLine, pickOperation, withCatalogFigures, withoutCatalogFigures, type BomLine, type OpLine,
 } from "./lines.ts";
+import { usePreviewLookups } from "./usePreviewLookups.ts";
 
 // The Outputs section's BOM and routing (spec 2026-11-08): a table that only shows the lines, and
 // one dialog that edits a line — picked from SAP Items or the Beas catalog, or chosen by a formula.
@@ -170,14 +171,19 @@ function LineDialog({ kind, draft, lookups, tables, at, initial, onCancel, onOk 
   const [mode, setMode] = useState<"pick" | "formula">(() => (!expr.trim() || asCode(expr) !== undefined ? "pick" : "formula"));
   const op = kind === "routing" ? (line as OpLine) : undefined;
   const opCode = op?.operationId === undefined ? undefined : asCode(op.operationId);
-  const catalog = opCode === undefined ? undefined : lookups?.operations?.[opCode];
+  // The catalog figures come from a resolve asked about this very line — the page's lookups were
+  // resolved for the saved draft, which does not hold a fresh pick yet. Until that answer is in
+  // (`isPlaceholderData` = the previous line's), no hint: "not in the source" would be a guess.
+  const preview = usePreviewLookups(scope);
+  const resolved = !!preview.data && !preview.isPlaceholderData;
+  const catalog = opCode === undefined ? undefined : preview.data?.operations?.[opCode];
   const figureVars = useMemo(() => ["qty", ...(op?.operationId ? OPERATION_VARS : [])], [op?.operationId]);
   const qtyVars = useMemo(() => ["qty"], []);
 
   const setExpr = (v: string | undefined) => setLine((l) => (kind === "bom"
     ? { ...(l as BomLine), itemCode: v ?? "" }
     // A routing line linked by formula follows the catalog like a picked one; unlinked, it is manual.
-    : v?.trim() ? withCatalogFigures({ ...(l as OpLine), operationId: v }) : { ...(l as OpLine), operationId: undefined }));
+    : v?.trim() ? withCatalogFigures({ ...(l as OpLine), operationId: v }) : withoutCatalogFigures({ ...(l as OpLine), operationId: undefined })));
   const switchMode = (next: "pick" | "formula") => {
     // A formula has no single code to show in a picker: switching empties it (Cancel undoes).
     if (next === "pick" && asCode(expr) === undefined) setExpr(undefined);
@@ -185,7 +191,7 @@ function LineDialog({ kind, draft, lookups, tables, at, initial, onCancel, onOk 
   };
   const can = mode === "formula" && expr.trim() ? codesOfLine(kind, draft, line, lookups?.domains) : [];
   const hint = (f: (typeof FIGURES)[number]) => {
-    if (opCode === undefined || !lookups) return null;
+    if (opCode === undefined || !resolved) return null;
     if (!catalog) return <Text style={SUB}>{t("MODEL_NOT_IN_OPS")}</Text>;
     const v = f === "setupMin" ? catalog.setupMin : f === "runMinPerUnit" ? catalog.runMinPerUnit : catalog.ratePerHour;
     return <Text style={SUB}>{t("MODEL_FROM_BEAS", String(v))}</Text>;

@@ -73,10 +73,16 @@ function issuesOf(live: Pick<LiveProject, "row" | "model" | "md" | "lookups" | "
       message: list ? t("NOTICE_UNPRICED_LIST", code, list) : t("NOTICE_UNPRICED", code),
     });
   // The routing's twin: a linked operation the cache lacks costed its Beas figures at 0.
-  const uncatalogued = new Set(row.candidates.flatMap((c) => c.perBatch.flatMap((b) => b.outputs.ops.flatMap((o) => (o.uncatalogued && o.operationId ? [o.operationId] : [])))));
-  for (const id of uncatalogued)
+  for (const id of uncataloguedOperations(row.candidates))
     out.push({ code: "uncatalogued", params: [id], message: t("NOTICE_UNCATALOGUED", id) });
   return out;
+}
+
+/** The operations the stored candidates costed without their catalog figures, each once. A code a
+ *  formula evaluated to nothing is named as `""`: its line still costed 0, and that is never silent. */
+export function uncataloguedOperations(candidates: ConfigCandidate[]): string[] {
+  return [...new Set(candidates.flatMap((c) => c.perBatch.flatMap((b) =>
+    b.outputs.ops.flatMap((o) => (o.uncatalogued ? [o.operationId || '""'] : [])))))];
 }
 
 /** The view, from a live project. Pure: everything it reads is already loaded. */

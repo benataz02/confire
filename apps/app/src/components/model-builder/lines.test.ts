@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { asCode, isReplaceable, missingFields, newBomLine, newOpLine, pickOperation, withCatalogFigures, type OpLine } from "./lines.ts";
+import { asCode, isReplaceable, linkedForPreview, missingFields, newBomLine, newOpLine, pickOperation, withCatalogFigures, withoutCatalogFigures, type OpLine } from "./lines.ts";
 
 test("asCode reads a single quoted literal, and nothing else", () => {
   expect(asCode('"AL-6060"')).toBe("AL-6060");
@@ -33,4 +33,18 @@ test("missingFields names the empty required fields", () => {
 
 test("a manual line is complete without an operation", () => {
   expect(missingFields("routing", { resource: "SAW", setupMin: "10", runMinPerUnit: "0.5", ratePerHour: "60" })).toEqual([]);
+});
+
+test("linkedForPreview asks the resolve for literal operations only, so typing a formula never refetches", () => {
+  const routing: OpLine[] = [
+    { operationId: '"ACA_AGUJEROS"', setupMin: "beasSetup", runMinPerUnit: "beasRun * holes", ratePerHour: "beasRate" },
+    { operationId: 'finish == "a" ? "X" : "Y"', setupMin: "1", runMinPerUnit: "1", ratePerHour: "1" },
+    { resource: "SAW", setupMin: "1", runMinPerUnit: "1", ratePerHour: "1" },
+  ];
+  expect(linkedForPreview(routing)).toEqual([{ operationId: '"ACA_AGUJEROS"', setupMin: "0", runMinPerUnit: "0", ratePerHour: "0" }]);
+});
+
+test("unlinking clears the bare catalog names a pick wrote, and keeps the author's formulas", () => {
+  expect(withoutCatalogFigures({ setupMin: "beasSetup", runMinPerUnit: "beasRun * holes", ratePerHour: "beasRate" }))
+    .toEqual({ setupMin: "", runMinPerUnit: "beasRun * holes", ratePerHour: "" });
 });

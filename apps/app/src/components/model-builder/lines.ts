@@ -32,6 +32,19 @@ export const withCatalogFigures = (line: OpLine): OpLine => ({
   ...Object.fromEntries(FIGURES.filter((f) => isReplaceable(line[f])).map((f) => [f, CATALOG_NAME[f]])),
 });
 
+/** Unlinking's mirror: the bare catalog names a pick wrote go back to empty — they mean nothing on
+ *  a line with no operation — and the author's own formulas stay. */
+export const withoutCatalogFigures = (line: OpLine): OpLine => ({
+  ...line,
+  ...Object.fromEntries(FIGURES.filter((f) => NAMES.has(line[f].trim())).map((f) => [f, ""])),
+});
+
+/** The routing lines the builder's preview resolve is asked about: literal operations only, as a
+ *  dialog's catalog hint is only ever shown for one — so typing a formula never refetches. */
+export const linkedForPreview = (routing: OpLine[]): OpLine[] =>
+  routing.flatMap((o) => (o.operationId !== undefined && asCode(o.operationId) !== undefined
+    ? [{ operationId: o.operationId, setupMin: "0", runMinPerUnit: "0", ratePerHour: "0" }] : []));
+
 const trimmed = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
 /** A picked OperationsCatalog row laid over the line: its code as a literal, its description and

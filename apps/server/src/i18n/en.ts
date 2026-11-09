@@ -99,6 +99,7 @@ export const en = {
   NOTICE_UNPRICED_LIST: "No price for {0} in price list {1} — its material is costed at 0",
   NOTICE_UNPRICED: "No price for {0} in the price list — its material is costed at 0",
   NOTICE_UNCATALOGUED: "Operation {0} is not in the operations source — its Beas figures counted as 0",
+  BEAS_NEEDS_SORT: "Beas sent only part of {0}: set the query's Sort (for example its key), so it can be read page by page",
 
   // Quotations (config-quote.ts)
   QUOTE_NEEDS_CUSTOMER: "Customer is required before quoting",

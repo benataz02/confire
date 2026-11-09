@@ -94,6 +94,7 @@ export const eu: Partial<Record<keyof typeof en, string>> = {
   NOTICE_UNPRICED_LIST: "{0} artikuluak ez du preziorik {1} prezio-zerrendan — materiala 0an kosteatzen da",
   NOTICE_UNPRICED: "{0} artikuluak ez du preziorik prezio-zerrendan — materiala 0an kosteatzen da",
   NOTICE_UNCATALOGUED: "{0} eragiketa ez dago eragiketen iturrian — bere Beas balioak 0 dira",
+  BEAS_NEEDS_SORT: "Beasek {0}-ren zati bat bakarrik bidali du: ezarri kontsultaren Ordena (adibidez bere gakoa), orrika irakurtzeko",
 
   QUOTE_NEEDS_CUSTOMER: "Adierazi bezeroa eskaintza egin aurretik",
   QUOTE_INCOMPLETE: "Osatu konfigurazioa eskaintza egin aurretik: {0}",

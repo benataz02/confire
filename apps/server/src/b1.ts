@@ -172,7 +172,7 @@ const trimmed = (r: Record<string, unknown>): Record<string, unknown> =>
 export function runnerFor(conn: Connector): QueryRunner {
   return (target, query, columns, opts) =>
     viaB1(async () => {
-      const t = transportFor(conn, target);
+      const transport = transportFor(conn, target);
       const base = {
         filter: query.filter,
         orderby: query.orderby,
@@ -188,15 +188,19 @@ export function runnerFor(conn: Connector): QueryRunner {
         // order it cannot page at all: one read, everything it answers — the sync's old behaviour.
         // Its char columns come back padded ("ACA_ACABADO         "), so strings are trimmed here,
         // for the value helps and the cache alike.
-        const res = await t.readEntitySet(query.entitySet, query.orderby ? { ...base, top: size, skip: opts?.skip ?? 0 } : base);
+        const res = await transport.readEntitySet(query.entitySet, query.orderby ? { ...base, top: size, skip: opts?.skip ?? 0 } : base);
         const rows = rowsOrThrow(res.data, `Lookup ${target} ${query.entitySet}`).map(trimmed);
+        // Unsorted, there is no way to ask for the rest: a cut-short answer would be cached as the
+        // whole table and its missing rows priced as "not in the source". Refuse it — the sync's
+        // syncError tells the admin to sort the query.
+        if (!query.orderby && nextLinkOf(res.data)) throw new Error(t("BEAS_NEEDS_SORT", query.entitySet));
         return { rows, ...(query.orderby && rows.length === size ? { nextSkip: (opts?.skip ?? 0) + size } : {}) };
       }
       // Page size is `Prefer: odata.maxpagesize`, not `$top`: `$top` bounds the whole result set,
       // so B1 stops emitting `@odata.nextLink` once it is exhausted and the value help would page
       // exactly once. `$skip` stays the cursor here — see the note in CLAUDE.md; the entity list
       // uses the nextLink itself, but a value help's cursor must stay a plain offset.
-      const res = await t.readEntitySet(query.entitySet, { ...base, maxPageSize: size, skip: opts?.skip });
+      const res = await transport.readEntitySet(query.entitySet, { ...base, maxPageSize: size, skip: opts?.skip });
       const rows = rowsOrThrow(res.data, `Lookup ${target} ${query.entitySet}`);
       // @odata.nextLink is B1's own "there is more", so paging no longer depends on the page it
       // returned matching the $top we asked for. The cursor stays a plain $skip offset.
