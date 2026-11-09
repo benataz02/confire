@@ -172,6 +172,25 @@ export function sheetPieces(v: SheetView): { x: number; y: number; w: number; h:
   return out;
 }
 
+/** One drawable tile per block: its outline, and the cell its piece repeats in (piece + gap) — so a
+ *  drawing fills each tile with one repeating pattern and costs a shape per block, not per piece. */
+export type SheetTile = {
+  x: number; y: number; width: number; height: number;
+  cellW: number; cellH: number; pieceW: number; pieceH: number;
+  columns: number; rows: number; rotated: boolean;
+};
+
+export function sheetTiles(v: SheetView): SheetTile[] {
+  return v.blocks.map((k) => {
+    const [pieceW, pieceH] = k.rotated ? [v.piece[1], v.piece[0]] : v.piece;
+    const cellW = pieceW + v.gap[0], cellH = pieceH + v.gap[1];
+    return {
+      x: k.x, y: k.y, width: k.columns * cellW - v.gap[0], height: k.rows * cellH - v.gap[1],
+      cellW, cellH, pieceW, pieceH, columns: k.columns, rows: k.rows, rotated: k.rotated,
+    };
+  });
+}
+
 const mm = (label: string) => ({ type: "number" as const, label });
 
 export const sheetLayout: VisualCalc = {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { nest, sheetLayout, sheetPieces, type SheetInputs } from "../src/visuals/hera/sheetLayout.ts";
+import { nest, sheetLayout, sheetPieces, sheetTiles, type SheetInputs } from "../src/visuals/hera/sheetLayout.ts";
 
 const laser: SheetInputs = { sheetLength: 1000, sheetWidth: 500, pieceLength: 120, pieceWidth: 70, gapX: 3, gapY: 3, marginX: 10, marginY: 10 };
 const punz: SheetInputs = { ...laser, gapX: 5, gapY: 12, marginX: 45, marginY: 50 };
@@ -77,4 +77,20 @@ describe("hera sheet layout: the time budget holds for any size", () => {
       expect(v.count).toBeGreaterThanOrEqual(uniform);
     }
   }, 30_000);
+});
+
+describe("hera sheet layout: the drawing's size", () => {
+  test("one tile per block however many pieces: a tile repeats one cell across its columns and rows", () => {
+    const v = nest({ sheetLength: 3000, sheetWidth: 1500, pieceLength: 6.37, pieceWidth: 9.11, gapX: 0.37, gapY: 0.37, marginX: 10, marginY: 10 })!;
+    expect(v.count).toBeGreaterThan(10_000);
+    const tiles = sheetTiles(v);
+    expect(tiles.length).toBe(v.blocks.length);
+    expect(tiles.reduce((n, t) => n + t.columns * t.rows, 0)).toBe(v.count);
+    for (const [t, b] of tiles.map((t, i) => [t, v.blocks[i]!] as const)) {
+      expect([t.x, t.y, t.rotated]).toEqual([b.x, b.y, b.rotated]);
+      expect(t.width).toBeCloseTo(b.columns * t.cellW - v.gap[0]);
+      expect(t.height).toBeCloseTo(b.rows * t.cellH - v.gap[1]);
+      expect([t.pieceW, t.pieceH]).toEqual(b.rotated ? [v.piece[1], v.piece[0]] : v.piece);
+    }
+  });
 });
