@@ -63,3 +63,18 @@ describe("hera sheet layout", () => {
     expect(sheetLayout.compute({ ...laser, pieceLength: "120" })).toBeUndefined();
   });
 });
+
+describe("hera sheet layout: the time budget holds for any size", () => {
+  test("decimal pieces on a big sheet stay within 50 ms, never below the uniform layout", () => {
+    for (const [l, w, g] of [[9.55, 7.34, 0], [6.37, 9.11, 0.37], [4.204, 3.09, 0]] as const) {
+      const i: SheetInputs = { sheetLength: 3000, sheetWidth: 1500, pieceLength: l, pieceWidth: w, gapX: g, gapY: g, marginX: 10, marginY: 10 };
+      nest(i); // warm the JIT
+      const t = performance.now();
+      const v = nest(i)!;
+      expect(performance.now() - t).toBeLessThan(50);
+      const X = 3000 - 20 + g, Y = 1500 - 20 + g;
+      const uniform = Math.max(Math.floor(X / (l + g)) * Math.floor(Y / (w + g)), Math.floor(X / (w + g)) * Math.floor(Y / (l + g)));
+      expect(v.count).toBeGreaterThanOrEqual(uniform);
+    }
+  }, 30_000);
+});

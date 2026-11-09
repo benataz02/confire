@@ -25,6 +25,10 @@ export type SheetView = {
 };
 
 const EPS = 1e-9;
+/** Sums one pass may enumerate into its raster before the search is judged too big. */
+const RASTER_CAP = 150_000;
+/** Raster points × strip heights over both passes: what fits the spec's 50 ms per calculation. */
+const STEP_BUDGET = 5_000_000;
 /** Floor that keeps a decimal exact fit (0.3 / 0.1) from losing its last piece to float error. */
 const fl = (v: number) => Math.floor(v + EPS);
 
@@ -44,7 +48,7 @@ type Strip = { h: number; upright: number; value: number };
  * column stacking ⌊h/b⌋ or ⌊h/d⌋ cells. Cells are inflated by the gaps (see `nest`). Returns the
  * strips chosen, bottom-up, and their piece count.
  */
-function stripStack(X: number, Y: number, a: number, b: number, c: number, d: number): { strips: Strip[]; count: number } {
+function stripStack(X: number, Y: number, a: number, b: number, c: number, d: number, R: Float64Array): { strips: Strip[]; count: number } {
   const heights = new Set<number>();
   for (let k = 1; k * b <= Y + EPS; k++) heights.add(Math.round(k * b * 1e6) / 1e6);
   for (let k = 1; k * d <= Y + EPS; k++) heights.add(Math.round(k * d * 1e6) / 1e6);
@@ -58,9 +62,8 @@ function stripStack(X: number, Y: number, a: number, b: number, c: number, d: nu
     return best;
   });
 
-  // g[j]: most pieces in a stack no taller than R[j]. Each strip keeps a pointer to ⌊R[j] − h⌋, which
-  // only moves forward as j grows — no search per step.
-  const R = raster(Y, b, d);
+  // g[j]: most pieces in a stack no taller than R[j] (R = raster(Y, b, d)). Each strip keeps a pointer
+  // to ⌊R[j] − h⌋, which only moves forward as j grows — no search per step.
   const g = new Int32Array(R.length);
   const choice = new Int32Array(R.length).fill(-1);
   const prev = new Int32Array(R.length);
@@ -128,11 +131,18 @@ export function nest(i: SheetInputs): SheetView | undefined {
   const c = i.pieceWidth + i.gapX, d = i.pieceLength + i.gapY; // rotated cell
   const place = (k: SheetBlock): SheetBlock => ({ ...k, x: k.x + i.marginX, y: k.y + i.marginY });
 
-  // A sliver of a piece on a big sheet would make the raster huge: past this many cell positions the
-  // best uniform layout stands in (still valid, rarely far off with that many pieces).
-  // ponytail: uniform fallback past ~1M raster positions; a coarser raster if a real input lands here.
-  const work = (fl(Y / b) + 1) * (fl(Y / d) + 1) + (fl(X / a) + 1) * (fl(X / c) + 1);
-  if (work > 1_000_000) {
+  // The search costs about (raster points × strip heights) per pass, and it runs on the server inside
+  // every calculation: small decimal pieces on a big sheet (distinct sums everywhere) would take
+  // seconds. So the budget is checked before it starts — enumerating the raster first only while that
+  // is cheap — and past it the best uniform layout stands in: still valid, and with that many pieces
+  // rarely far off. Integer pieces of 6 mm on a 3000×1500 sheet still run the search (≈1.4M steps).
+  // ponytail: uniform fallback past the budget; a coarser raster (strip heights rounded up) if a real
+  // quote ever needs mixing there.
+  const heights = (span: number, s1: number, s2: number) => fl(span / s1) + fl(span / s2);
+  const sums = (span: number, s1: number, s2: number) => (fl(span / s1) + 1) * (fl(span / s2) + 1);
+  const rasters = sums(Y, b, d) <= RASTER_CAP && sums(X, a, c) <= RASTER_CAP
+    ? [raster(Y, b, d), raster(X, a, c)] as const : undefined;
+  if (!rasters || rasters[0].length * heights(Y, b, d) + rasters[1].length * heights(X, a, c) > STEP_BUDGET) {
     const up = fl(X / a) * fl(Y / b), rot = fl(X / c) * fl(Y / d);
     const k: SheetBlock = up >= rot
       ? { x: 0, y: 0, columns: fl(X / a), rows: fl(Y / b), rotated: false }
@@ -140,10 +150,10 @@ export function nest(i: SheetInputs): SheetView | undefined {
     return view(k.columns > 0 && k.rows > 0 ? [place(k)] : []);
   }
 
-  const along = stripStack(X, Y, a, b, c, d);
+  const along = stripStack(X, Y, a, b, c, d, rasters[0]);
   // The same search with the axes swapped: strips stacked along X. In that run the upright cell is
   // (b, a) and the rotated one (d, c); a block found at (u, v), p × q, is (v, u), q × p on the sheet.
-  const across = stripStack(Y, X, b, a, d, c);
+  const across = stripStack(Y, X, b, a, d, c, rasters[1]);
   const blocks = along.count >= across.count
     ? blocksOf(along.strips, X, a, b, c, d)
     : blocksOf(across.strips, Y, b, a, d, c).map((k) => ({ x: k.y, y: k.x, columns: k.rows, rows: k.columns, rotated: k.rotated }));
