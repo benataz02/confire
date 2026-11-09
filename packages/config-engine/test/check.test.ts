@@ -443,3 +443,13 @@ describe("checkModel: tenant visuals", () => {
     expect(said(two)).toEqual(["A group shows at most one visual."]);
   });
 });
+
+describe("tenant visuals: their inputs are expressions like any other", () => {
+  const lookupGap = () => withSheet({ inputs: { ...SHEET_INPUTS, gapX: 'LOOKUP("MEC", "metodo", "Corte laser fibra", "pasox")' } });
+  test("a LOOKUP in an input loads its masterdata", () => {
+    expect([...referencedTables(lookupGap())]).toContain("MEC");
+  });
+  test("a masterdata rename follows into an input", () => {
+    expect(renameTable(lookupGap(), "MEC", "MEC_Metodos").visuals![0]!.inputs.gapX).toBe('LOOKUP("MEC_Metodos", "metodo", "Corte laser fibra", "pasox")');
+  });
+});

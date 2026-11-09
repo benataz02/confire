@@ -514,6 +514,9 @@ function mapExprs(model: ModelDef, fn: (e: string) => string): ModelDef {
           })),
         }
       : {}),
+    ...(model.visuals
+      ? { visuals: model.visuals.map((v) => ({ ...v, inputs: Object.fromEntries(Object.entries(v.inputs).map(([k, src]) => [k, fn(src)])) })) }
+      : {}),
   };
 }
 
