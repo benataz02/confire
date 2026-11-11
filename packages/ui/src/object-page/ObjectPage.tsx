@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  Bar, Button, Dialog, FlexBox, Menu, MenuItem, MessageStrip, ObjectPage as Ui5ObjectPage, SplitButton, Tab, TabContainer,
+  Bar, Button, Dialog, Menu, MenuItem, MessageStrip, ObjectPage as Ui5ObjectPage, SplitButton, Tab, TabContainer,
   ToolbarButton, ToolbarItem, type ObjectPageDomRef,
 } from "@ui5/webcomponents-react";
 import { useUiI18n } from "../i18n.ts";
@@ -46,7 +46,7 @@ type PageProps = Templates & {
   navigation?: RecordNavigation;
   /** the parent pages, above the title */
   breadcrumbs?: Crumb[];
-  /** an informational strip above the first section — information, never a problem */
+  /** an informational strip in the header — information, never a problem */
   notice?: ReactNode;
   /** the caller's own messages beside the record's: a failed read, a refused Delete */
   messages?: PageMessage[];
@@ -167,9 +167,7 @@ function Page({ record: r, ...p }: PageProps & { record: ObjectRecord }) {
   const saveStrip = p.noMessages && r.saveError
     ? <MessageStrip design="Negative" hideCloseButton>{r.saveError}</MessageStrip>
     : null;
-  const banner = saveStrip || p.notice ? (
-    <FlexBox direction="Column" style={{ gap: "0.5rem", marginBottom: "0.5rem" }}>{saveStrip}{p.notice}</FlexBox>
-  ) : null;
+  const banner = saveStrip ? <div style={{ marginBottom: "0.5rem" }}>{saveStrip}</div> : null;
 
   const layoutControl = p.localViews ? undefined : (
     <>
@@ -201,7 +199,7 @@ function Page({ record: r, ...p }: PageProps & { record: ObjectRecord }) {
           ),
           layout: layoutControl,
         })}
-        headerArea={objectPageHeaderArea(p.header.facets, r.formData, fields)}
+        headerArea={objectPageHeaderArea(p.header.facets, r.formData, fields, p.notice)}
         footerArea={r.isEditMode ? (
           <Bar design="FloatingFooter" endContent={
             <>

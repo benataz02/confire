@@ -279,14 +279,24 @@ export async function quoteDraft(tenantId: string, projectId: string) {
   const { model, lookups } = await liveEngine(tenantId, project);
   const here = quotationIn(project, await tenantCompany(tenantId));
   const done = quotedOrLater(project.status) && here;
-  const sapItems = await viaB1(async () => sapItemsOf((await tenantConnector(tenantId)).b1, project, model.definition));
+  const replaces = !done && here ? project.b1DocEntry! : null;
+  const { sapItems, docNum } = await viaB1(async () => {
+    const { b1 } = await tenantConnector(tenantId);
+    return {
+      sapItems: await sapItemsOf(b1, project, model.definition),
+      // The title names the quotation being updated by the number users know it by. Cosmetic:
+      // a failed read falls back to the DocEntry rather than blocking the page.
+      docNum: replaces === null ? null : await b1.readEntity("Quotations", replaces, { select: ["DocNum"] })
+        .then((r) => Number((r.data as Record<string, unknown>).DocNum) || null, () => null),
+    };
+  });
   return {
     commandId: commandIdOf(tenantId, project, here),
     data: buildQuoteSeed(project, model.definition, lookups, await tenantCurrency(tenantId), sapItems),
     totals: quotedTotals(project, model.definition, lookups),
     quoted: done ? { docEntry: project.b1DocEntry!, quotedAt: project.quotedAt } : null,
     // A reopened project re-quotes its quotation (§7.3): the page says so before the user posts.
-    replaces: !done && here ? { docEntry: project.b1DocEntry! } : null,
+    replaces: replaces === null ? null : { docEntry: replaces, docNum },
     portal: project.portalCardCode !== null,
     name: project.name, // the page's breadcrumb back to the configuration
   };

@@ -194,6 +194,7 @@
   "patchedDependencies": {
     "@better-auth/mcp@1.7.15": "patches/@better-auth%2Fmcp@1.7.15.patch",
     "@ui5/webcomponents-base@2.27.2": "patches/@ui5%2Fwebcomponents-base@2.27.2.patch",
+    "@ui5/webcomponents-react@2.27.2": "patches/@ui5%2Fwebcomponents-react@2.27.2.patch",
   },
   "packages": {
     "@ag-ui/core": ["@ag-ui/core@1.0.0", "", { "peerDependencies": { "zod": "^3.25.18 || ^4.0.0" }, "optionalPeers": ["zod"] }, "sha512-yCRhsQvb4+lmGMrDsi4TOJxqKpm/kb3H64wwL+Z90jNVrkhy17RErfzsNgybfbjNKLM0nenEDYDVJsZHJJSigQ=="],

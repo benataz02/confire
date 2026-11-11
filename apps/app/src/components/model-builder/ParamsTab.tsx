@@ -435,15 +435,17 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
   return (
     // Form's shell (.ui5-form-root) is the rounded card: 0.75rem and the group background. Table
     // exposes no CSS part for its frame, so the title bar and the rows share this card and overflow
-    // clips them to the curve. The card grows with its rows and the ObjectPage scrolls it, header
-    // row included: a sticky one would stick under the page's own sticky title and tab bar, whose
-    // height UI5 computes in JS and does not expose. The section already pads the top and the start.
+    // clips them to the curve — `clip`, not `hidden`: a hidden overflow makes the card the header
+    // row's scroll container, and a sticky row would stick to the card and never move. The card grows
+    // with its rows and the ObjectPage scrolls it; the header row sticks under the page's own sticky
+    // title and tab bar, whose height the ObjectPage publishes as --_ui5wcr_ObjectPage_header_height.
+    // The section already pads the top and the start.
     // The dialogs sit inside: they are top-layer popups, which the clip does not reach.
     <div style={{
       minInlineSize: 0,
       margin: "0 1rem 1rem 0",
       backgroundColor: "var(--sapGroup_ContentBackground)",
-      borderRadius: "0.75rem", overflow: "hidden",
+      borderRadius: "0.75rem", overflow: "clip",
     }}>
       {/* The table's toolbar: Add lands at the bottom (see `add`); Duplicate and Delete act on the
           selection. marginTop cancels the Subheader's -1px overlap, which the clip would shave. */}
@@ -500,6 +502,13 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
       <Table
         accessibleName={t("MODEL_FORM_STRUCTURE")}
         className="confire-params-struct"
+        // The header row sticks to the ObjectPage's scroller: Popin, because Scroll's overflow-x makes
+        // the table its own scroll container and the row would stick inside it. A narrow page folds
+        // the last columns under each row instead of scrolling sideways.
+        // ponytail: Table's stickyTop is non-public (no wrapper prop, so the attribute) and the variable
+        // is webcomponents-react's private one; recheck both on a UI5 upgrade.
+        overflowMode="Popin"
+        sticky-top="var(--_ui5wcr_ObjectPage_header_height, 0px)"
         noData={
           <IllustratedMessage name="AddColumn" design="Dot" titleText={t("MODEL_NO_STRUCTURE")}
             subtitleText={t("MODEL_NO_STRUCTURE_SUB")} />
@@ -541,7 +550,7 @@ export function ParamsTab({ modelId, draft, update, issues, tables }: {
           }
         }}
         headerRow={
-          <TableHeaderRow>
+          <TableHeaderRow sticky>
             <TableHeaderCell width="45%"><span>{t("MODEL_STRUCTURE")}</span></TableHeaderCell>
             <TableHeaderCell width="8rem"><span>{t("MODEL_MANDATORY")}</span></TableHeaderCell>
             <TableHeaderCell width="8rem"><span>{t("MODEL_COL_EXCLUDE")}</span></TableHeaderCell>

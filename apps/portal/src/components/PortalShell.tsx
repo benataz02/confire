@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import type { MouseEvent } from "react";
 import { Outlet, useCanGoBack, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -77,12 +76,14 @@ export function PortalShell() {
   const unread = useUnreadCount(notifications);
   const [bellOpener, setBellOpener] = useState<HTMLElement | null>(null);
   const layout = useRef<NavigationLayoutDomRef>(null);
-  const [navMode, setNavMode] = useState<NavigationLayoutPropTypes["mode"]>("Auto");
-  const toggleNav = () => setNavMode(layout.current?.isSideCollapsed() ? "Expanded" : "Collapsed");
-  // As in AppShell: touching the content collapses the nav; the chrome is excluded by host tag.
-  const collapseOnContentClick = (e: MouseEvent<HTMLElement>) => {
-    if ((e.target as HTMLElement).closest("ui5-side-navigation, ui5-shellbar, ui5-user-menu")) return;
-    if (!layout.current?.isSideCollapsed()) setNavMode("Collapsed");
+  // As in AppShell: the user's last choice survives a reload, "Auto" only until they first press the menu button.
+  const [navMode, setNavMode] = useState<NavigationLayoutPropTypes["mode"]>(
+    () => (localStorage.getItem("navMode") as NavigationLayoutPropTypes["mode"] | null) ?? "Auto");
+  // Read the real collapsed state off the ref so the first click is correct on any screen size.
+  const toggleNav = () => {
+    const next = layout.current?.isSideCollapsed() ? "Expanded" : "Collapsed";
+    localStorage.setItem("navMode", next);
+    setNavMode(next);
   };
 
   const onSelect: SideNavigationPropTypes["onSelectionChange"] = (e) => {
@@ -110,14 +111,13 @@ export function PortalShell() {
     <NavigationLayout
       ref={layout}
       mode={navMode}
-      onClick={collapseOnContentClick}
       header={
         <>
           <ShellBar
             startButton={
               <>
                 <Button icon="nav-back" tooltip={i18n.getText("UI_GO_BACK")} disabled={!canGoBack} onClick={() => router.history.back()} />
-                <Button icon="menu" tooltip={i18n.getText("PORTAL_MENU")} onClick={toggleNav} />
+                <Button icon="menu2" tooltip={i18n.getText("PORTAL_MENU")} onClick={toggleNav} />
               </>
             }
             branding={

@@ -53,6 +53,7 @@
   },
   "patchedDependencies": {
     "@ui5/webcomponents-base@2.27.2": "patches/@ui5%2Fwebcomponents-base@2.27.2.patch",
-    "@better-auth/mcp@1.7.15": "patches/@better-auth%2Fmcp@1.7.15.patch"
+    "@better-auth/mcp@1.7.15": "patches/@better-auth%2Fmcp@1.7.15.patch",
+    "@ui5/webcomponents-react@2.27.2": "patches/@ui5%2Fwebcomponents-react@2.27.2.patch"
   }
 }

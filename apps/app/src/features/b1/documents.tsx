@@ -232,6 +232,8 @@ export function documentFeature(entity: string, o: {
             key: "DocumentLines",
             columns: [
               { key: "VisualOrder", width: 60, readonly: true },
+              // Only a quotation has alternative lines: B1 leaves them out of DocTotal (an offer's options).
+              ...(entity === "Quotations" ? [{ key: "LineType", width: 60, readonly: true }] : []),
               {
                 key: "ItemCode", width: 160, cflConfig: cfl.items(), linkConfig: { route: "/b1/Items" },
                 onRowSelect: (row) => ({ ItemDescription: row.ItemName ?? null }),
@@ -241,7 +243,6 @@ export function documentFeature(entity: string, o: {
               { key: "RemainingOpenQuantity", width: 110, readonly: true },
               { key: "WarehouseCode", width: 120, cflConfig: cfl.warehouses() },
               { key: "UnitPrice", width: 120 },
-              { key: "DiscountPercent", width: 100 },
               { key: "LineTotal", width: 130, readonly: true },
               { key: "LineStatus", width: 110, readonly: true },
               // Offered in the grid's settings. The calculated ones are SAP's, never sent.

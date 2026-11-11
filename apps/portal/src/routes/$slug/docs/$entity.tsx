@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { BusyIndicator } from "@ui5/webcomponents-react";
 import { ListReport } from "@confire/ui/list-report/ListReport.tsx";
@@ -8,7 +9,7 @@ import { useListView } from "@confire/ui/useListView.ts";
 import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import type { ListQuery, Row } from "@confire/ui/types.ts";
 import { viewsQuery } from "@confire/ui/views.ts";
-import { orpc } from "../../../orpc.ts";
+import { meQuery, orpc } from "../../../orpc.ts";
 import { docFeature, isDocEntity, type DocEntity } from "../../../features/documents.ts";
 import { useI18n } from "../../../i18n.ts";
 
@@ -34,7 +35,8 @@ const NO_QUERY: ListQuery = { select: [], filter: [], orderby: [] };
 function DocList({ entity }: { entity: DocEntity }) {
   const i18n = useI18n();
   const meta = useFieldConstraints(entity);
-  const feature = meta.data ? docFeature(entity, meta.data, i18n.getText.bind(i18n)) : null;
+  const supplier = useQuery(meQuery).data?.tenant.name;
+  const feature = meta.data ? docFeature(entity, meta.data, i18n.getText.bind(i18n), supplier) : null;
   const [query, setQuery] = useState<ListQuery | null>(null);
   // The cursor is B1's own @odata.nextLink, sealed to this company server-side; page 1 asks for the count.
   const data = useListView(

@@ -308,3 +308,8 @@ ui5-shellbar-search.confire-shellbar-search {
 .confire-list-frame [data-component-name="AnalyticalTableContainer"]::after {
   display: none;
 }
+/* A List Report's cells hold one line, not CELL_TEXT's two; the whole value is the cell's title. */
+.confire-list-frame .confire-cell-text {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}

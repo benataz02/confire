@@ -29,24 +29,31 @@ const DOC_STATUS_KEY: Record<string, string> = {
 
 export const isDocEntity = (e: string): e is DocEntity => Object.hasOwn(DOC_PAGES, e);
 
-const WIDTH: Record<string, number> = { DocNum: 110, DocDate: 120, DocDueDate: 120, DocumentStatus: 120, DocTotal: 130, DocCurrency: 90 };
+const WIDTH: Record<string, number> = { DocNum: 110, DocDate: 120, DocDueDate: 120, DocumentStatus: 120, DocTotal: 150 };
+/** SAP's labels are the supplier's side of the document: to the client, DocNum is the supplier's
+ *  reference ("Reference <supplier>", the key's {0}) and NumAtCard ("Customer Ref. No.") its own. */
+const CLIENT_LABEL: Record<string, string> = { DocNum: "PORTAL_DOC_NUMBER", NumAtCard: "PORTAL_DOC_YOUR_REF" };
+/** Drawn after the total (`unitField`), not a field of its own. */
+const UNIT = "DocCurrency";
 /** Newest first — DocEntry, not DocNum, which restarts per series. */
 const NEWEST = [{ field: "DocEntry", direction: "desc" as const }];
 const LINES = "DocumentLines";
 /** Named on the row by docs.rows/one, not SAP fields: SAP can neither sort nor filter on them. */
 const NAMED = { sortable: false, filterable: false } as const;
 
-export function docFeature(entity: DocEntity, c: EntityConstraints, t: TextFn): EntityFeature {
+/** `supplier`: the tenant's name, in DocNum's label. */
+export function docFeature(entity: DocEntity, c: EntityConstraints, t: TextFn, supplier = ""): EntityFeature {
   const page = DOC_PAGES[entity];
   const label = t(page.labelKey);
-  const scalars = Object.entries(c.fields).filter(([k, m]) => k !== "DocEntry" && m.Type !== "collection").map(([k]) => k);
+  const scalars = Object.entries(c.fields).filter(([k, m]) => k !== "DocEntry" && k !== UNIT && m.Type !== "collection").map(([k]) => k);
   const lines = Object.keys(c.fields[LINES]?.Fields ?? {});
   // A sales employee is a number in SAP: the page shows the name the server puts beside it.
   const shown = (key: string) => key === "SalesPersonCode"
     ? { key: "SalesPersonName", label: c.fields.SalesPersonCode?.Label ?? key }
-    : { key };
+    : { key, ...(CLIENT_LABEL[key] ? { label: t(CLIENT_LABEL[key], supplier).trim() } : {}) };
   const columns: ListColumn[] = scalars.map((key) => ({
     ...shown(key), ...(key === "SalesPersonCode" ? NAMED : {}), ...(WIDTH[key] ? { width: WIDTH[key] } : {}),
+    ...(key === "DocTotal" ? { unitField: UNIT } : {}),
   }));
   // A quotation's project, when it is one of the company's own: after the number, a link to it.
   if (entity === "Quotations")
@@ -63,7 +70,7 @@ export function docFeature(entity: DocEntity, c: EntityConstraints, t: TextFn): 
       tableId: `portal:docs:${entity}`,
       title: label,
       columns,
-      filterFields: [{ key: "DocNum", exact: true }, { key: "DocDate" }, { key: "DocumentStatus" }],
+      filterFields: [{ ...shown("DocNum"), exact: true }, { key: "DocDate" }, { key: "DocumentStatus" }],
       systemViews: [
         { key: "default", name: t("PORTAL_VIEW_ALL"), isDefault: true, state: { sortBy: NEWEST } },
         { key: "open", name: t("PORTAL_VIEW_OPEN"), state: { sortBy: NEWEST, filterValues: { DocumentStatus: ["bost_Open"] } } },
@@ -75,7 +82,7 @@ export function docFeature(entity: DocEntity, c: EntityConstraints, t: TextFn): 
         subtitleFields: ["DocDate"],
         facets: [
           { field: "DocumentStatus", type: "status", statusMapping },
-          { field: "DocTotal", type: "numeric", unitField: "DocCurrency" },
+          { field: "DocTotal", type: "numeric", unitField: UNIT },
         ],
       },
       sections: [

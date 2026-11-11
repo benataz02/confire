@@ -62,6 +62,8 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
   if (meta.error) return <PageError error={meta.error} />;
 
   const d = draft.data;
+  // The quotation a re-quote updates, by the number users know it by (DocEntry if SAP did not say).
+  const replacedNum = d.replaces ? String(d.replaces.docNum ?? d.replaces.docEntry) : "";
   if (d.quoted) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "1rem" }}>
@@ -90,7 +92,7 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
       constraints={meta.data}
       data={d.data}
       sections={quotations.detail.sections}
-      header={{ ...quotations.detail.header, createTitle: t("CONFIG_NEW_QUOTATION") }}
+      header={{ ...quotations.detail.header, createTitle: d.replaces ? t("CONFIG_UPDATE_QUOTATION", replacedNum) : t("CONFIG_NEW_QUOTATION") }}
       noMessages={quotations.detail.noMessages}
       lockedFields={d.portal ? LOCKED_REQUEST : LOCKED}
       localViews
@@ -99,7 +101,7 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
       // A reopened request re-quotes its quotation (spec §7.3) — said before the post, not after.
       notice={d.replaces ? (
         <MessageStrip design="Information" hideCloseButton>
-          {t("CONFIG_REPLACES", String(d.replaces.docEntry))}
+          {t("CONFIG_REPLACES", replacedNum)}
         </MessageStrip>
       ) : undefined}
       tableActions={tableActions}
@@ -117,16 +119,22 @@ export function QuoteCreatePage({ projectId }: { projectId: string }) {
         void qc.invalidateQueries({ queryKey: orpc.configs.get.queryOptions({ input: { id: projectId } }).queryKey });
         void qc.invalidateQueries({ queryKey: orpc.requests.rows.key() });
         void qc.invalidateQueries({ queryKey: orpc.timeline.list.queryOptions({ input: { projectId } }).queryKey });
+        // SAP had closed the quotation since the reopen, so createQuote posted a new one instead —
+        // the page promised an update, so say what happened.
+        const replaced = d.replaces && r.mode === "created"
+          ? t("CONFIG_TOAST_QUOTE_REPLACED", replacedNum, String(r.docNum ?? r.docEntry))
+          : null;
         // A request goes back to the request: its status and timeline are what moved.
         if (d.portal) {
-          toast(r.mode === "updated" ? t("CONFIG_TOAST_QUOTE_UPDATED") : t("CONFIG_TOAST_QUOTE_SENT"));
+          toast(replaced ?? (r.mode === "updated" ? t("CONFIG_TOAST_QUOTE_UPDATED") : t("CONFIG_TOAST_QUOTE_SENT")));
           void navigate({ to: "/$slug/configs/$id", params: { id: projectId } });
           return;
         }
         // SAP answers the POST with the whole document, which is exactly what entities.one reads —
         // so seed it and the quotation opens without a second Service Layer round trip. Absent when
         // the dedup UDF found the document instead of creating it; then the page reads it itself.
-        if (r.mail) toast(withMail(t("CONFIG_TOAST_QUOTE_CREATED", String(r.docNum ?? r.docEntry)), r.mail, t));
+        if (replaced) toast(withMail(replaced, r.mail, t));
+        else if (r.mail) toast(withMail(t("CONFIG_TOAST_QUOTE_CREATED", String(r.docNum ?? r.docEntry)), r.mail, t));
         if (r.row) {
           qc.setQueryData(
             orpc.entities.one.queryOptions({ input: { entity: "Quotations", key: r.docEntry } }).queryKey,

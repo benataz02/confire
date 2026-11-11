@@ -27,7 +27,7 @@ const trimmed = (v: unknown) => (typeof v === "string" ? v.trim() : v);
 export function CflField({
   config, value, onValueChange, onRowSelect, onExistenceError, onCheckStarted,
   editable = true, disabled, placeholder, maxLength, error, required, requiredState, link, formData, mustExist: mustExistProp,
-  accessibleName, commitOnly,
+  accessibleName, commitOnly, knownLabel,
 }: {
   config: CflFieldConfig;
   /** single: the key; multi-select: the token rows */
@@ -55,6 +55,8 @@ export function CflField({
   /** Report the value on change (blur, Enter, a pick), never per keystroke: for a consumer whose
    *  every value change is a server call (the configurator). The typed text shows meanwhile. */
   commitOnly?: boolean;
+  /** The value's label, already known (a field whose codeNames list holds it): no lookup. */
+  knownLabel?: string;
 }) {
   const i18n = useUiI18n();
   const showAll = (n: number) => i18n.getText("UI_SHOW_ALL_N", String(n));
@@ -95,12 +97,12 @@ export function CflField({
   const label = useQuery({
     queryKey: probeKey(config, value),
     queryFn: () => fetchPage(client, src, probeRequest(config, value)),
-    enabled: labelMode && !isBlank(value),
+    enabled: labelMode && !isBlank(value) && knownLabel === undefined,
     staleTime: 5 * 60_000,
     retry: false,
   });
   const labelRow = label.data?.rows.find((r) => String(r[key] ?? "").trim() === raw.trim()) ?? label.data?.rows[0];
-  const labelText = labelRow ? (d.displayColumns ?? []).map((c) => formatValue(labelRow[c])).filter(Boolean).join("  ") : "";
+  const labelText = knownLabel ?? (labelRow ? (d.displayColumns ?? []).map((c) => formatValue(labelRow[c])).filter(Boolean).join("  ") : "");
 
   const setErr = (m: string | null) => {
     setOwnError(m);

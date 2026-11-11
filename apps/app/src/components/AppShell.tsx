@@ -11,7 +11,7 @@ import { authUrl, hardRedirect, tenantPath } from "@confire/ui/host.ts";
 import { initials } from "@confire/ui/format.ts";
 import { useEntityNav } from "@confire/ui/EntityLink.tsx";
 import { NotificationsPopover, useUnreadCount } from "@confire/ui/notifications/Notifications.tsx";
-import { B1_FEATURES } from "../features/b1/index.ts";
+import { B1_DOCUMENTS, B1_FEATURES } from "../features/b1/index.ts";
 import { b1Label } from "../features/b1/localize.ts";
 import { GlobalSearch, type SearchHit } from "./GlobalSearch.tsx";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
@@ -32,14 +32,14 @@ const SALES_PERSON_KEY = "b1:salesPerson";
 const THEME_KEY: Record<string, string> = {
   sap_horizon: "SHELL_THEME_MORNING_HORIZON",
   sap_horizon_dark: "SHELL_THEME_EVENING_HORIZON",
-  sap_horizon_hcb: "SHELL_THEME_HCB",
-  sap_horizon_hcw: "SHELL_THEME_HCW",
-  sap_horizon_auto: "SHELL_THEME_AUTO",
-  sap_horizon_hc_auto: "SHELL_THEME_HC_AUTO",
+  // sap_horizon_hcb: "SHELL_THEME_HCB",
+  // sap_horizon_hcw: "SHELL_THEME_HCW",
+  // sap_horizon_auto: "SHELL_THEME_AUTO",
+  // sap_horizon_hc_auto: "SHELL_THEME_HC_AUTO",
   sap_fiori_3: "SHELL_THEME_QUARTZ_LIGHT",
   sap_fiori_3_dark: "SHELL_THEME_QUARTZ_DARK",
-  sap_fiori_3_hcb: "SHELL_THEME_QUARTZ_HCB",
-  sap_fiori_3_hcw: "SHELL_THEME_QUARTZ_HCW",
+  // sap_fiori_3_hcb: "SHELL_THEME_QUARTZ_HCB",
+  // sap_fiori_3_hcw: "SHELL_THEME_QUARTZ_HCW",
 };
 
 // The app shell for every signed-in page. The workspace is the path's first segment; the auth gate
@@ -109,19 +109,27 @@ function Shell() {
   // The side nav, which is also the search's pages: one list, the admin cut made once.
   const home: SearchHit = { text: t("NAV_HOME"), icon: "home", to: "/" };
   const settings: SearchHit = { text: t("NAV_SETTINGS"), icon: "action-settings", to: "/settings" };
+  const b1 = (docs: boolean): SearchHit[] => Object.values(B1_FEATURES).filter((f) => B1_DOCUMENTS.has(f.entity) === docs)
+    .map((f) => ({ text: b1Label(f.entity, t), icon: f.icon, to: `/b1/${f.entity}` }));
   const groups: { text: string; items: SearchHit[] }[] = [
-    { text: t("NAV_SAP"), items: Object.values(B1_FEATURES).map((f) => ({ text: b1Label(f.entity, t), icon: f.icon, to: `/b1/${f.entity}` })) },
+    { text: t("NAV_SALES"), items: [{ text: t("NAV_CONFIGS"), icon: "sales-quote", to: "/configs" }, ...b1(true)] },
     {
-      text: t("NAV_CONFIGURATOR"), items: [
-        { text: t("NAV_CONFIGS"), icon: "sales-quote", to: "/configs" },
+      text: t("NAV_MASTER_DATA"), items: [
+        ...b1(false),
         ...(isAdmin ? [
           { text: t("NAV_MODELS"), icon: "tree", to: "/models" },
           { text: t("NAV_MASTERDATA"), icon: "table-view", to: "/masterdata" },
         ] : []),
       ],
     },
-    // What the assistant costs, for admins (assistant spec §4.7). The assistant itself is the ShellBar's toggle.
-    ...(isAdmin ? [{ text: t("NAV_AI"), items: [{ text: t("NAV_AI_USAGE"), icon: "area-chart", to: "/usage" }] }] : []),
+    // Reports are every member's own; what the assistant costs is for admins (assistant spec §4.7).
+    // The assistant itself is the ShellBar's toggle.
+    {
+      text: t("NAV_AI"), items: [
+        { text: t("HOME_REPORTS"), icon: "business-objects-experience", to: "/reports" },
+        ...(isAdmin ? [{ text: t("NAV_AI_USAGE"), icon: "area-chart", to: "/usage" }] : []),
+      ],
+    },
     // The customer portal (spec §10): Requests for every member, the rest for admins.
     {
       text: t("NAV_PORTAL"), items: [

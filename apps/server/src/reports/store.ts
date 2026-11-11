@@ -2,6 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, assistantReport, assistantThread, type ReportDef } from "@confire/db";
 import { forget, header, put, type Tx } from "../sap-cache.ts";
+import { compileQuery, listPage, TOTAL, type ListPageInput, type SqlFields } from "../list-sql.ts";
 import type { ReportResult } from "./types.ts";
 
 // A user's reports and their chats (reports spec §4): personal — every read and write is on
@@ -51,6 +52,31 @@ export async function savedReports(tenantId: string, userId: string): Promise<St
     .innerJoin(assistantThread, eq(assistantThread.reportId, assistantReport.id))
     .where(and(eq(assistantReport.tenantId, tenantId), eq(assistantReport.userId, userId), eq(assistantReport.saved, true)))
     .orderBy(desc(assistantReport.updatedAt)) as StoredReport[];
+}
+
+const SUBTITLE = sql<string>`coalesce(${assistantReport.definition}->>'subtitle', '')`;
+const reportFields: SqlFields = {
+  title: { col: assistantReport.title, kind: "string" },
+  subtitle: { col: SUBTITLE, kind: "string" },
+  createdAt: { col: assistantReport.createdAt, kind: "date" },
+  updatedAt: { col: assistantReport.updatedAt, kind: "date" },
+};
+
+/** The Reports list: the user's own, latest first unless the view sorts. */
+export async function reportRows(tenantId: string, userId: string, input: ListPageInput) {
+  const { where, orderBy } = compileQuery(reportFields, input.query);
+  const raw = await db
+    .select({
+      id: assistantReport.id, title: assistantReport.title, subtitle: SUBTITLE, saved: assistantReport.saved,
+      createdAt: assistantReport.createdAt, updatedAt: assistantReport.updatedAt, _total: TOTAL,
+    })
+    .from(assistantReport)
+    .where(and(eq(assistantReport.tenantId, tenantId), eq(assistantReport.userId, userId), where))
+    // `id` last: OFFSET paging needs a total order.
+    .orderBy(...orderBy, desc(assistantReport.updatedAt), assistantReport.id)
+    .limit(input.top)
+    .offset(input.skip ?? 0);
+  return listPage(raw, input.top, input.skip);
 }
 
 /** The chat's `set`: the definition and its run. The title follows the definition's until the user

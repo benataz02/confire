@@ -7,7 +7,8 @@ import { viaB1 } from "../../b1.ts";
 import { ownThread, withThread } from "../../assistant/threads.ts";
 import { summarize } from "../../reports/aggregate.ts";
 import { ReportInvalid, runReport } from "../../reports/run.ts";
-import { adoptReport, deleteReport, getReport, savedReports, setReport, storeResult, storeRun } from "../../reports/store.ts";
+import { adoptReport, deleteReport, getReport, reportRows, savedReports, setReport, storeResult, storeRun } from "../../reports/store.ts";
+import { ListPageZ } from "../../list-sql.ts";
 import type { KpiResult, ReportResult } from "../../reports/types.ts";
 import { t } from "../../i18n/index.ts";
 
@@ -71,6 +72,9 @@ export const reportsRouter = {
     const r = await getReport(context.tenantId, context.userId, input.id);
     await withThread(r.threadId, () => deleteReport(context.tenantId, r.id));
   }),
+
+  /** The Reports list (side nav, AI): the user's own, paged and filtered like every SQL list. */
+  rows: userProcedure.input(ListPageZ).handler(({ input, context }) => reportRows(context.tenantId, context.userId, input)),
 
   /** The home's Reports group: each saved report's headline (its first KPI) from its last run — no
    *  SAP call here, nor behind it: a report reads SAP only when its page opens or Refreshes, which

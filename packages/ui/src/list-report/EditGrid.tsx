@@ -1,6 +1,7 @@
 import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import { Button } from "@ui5/webcomponents-react";
+import { Button, ObjectStatus } from "@ui5/webcomponents-react";
+import { formatValue } from "../format.ts";
 import { useUiI18n } from "../i18n.ts";
 import { FormField } from "../object-page/FormField.tsx";
 import { allExist, notFoundMessage } from "../cfl/existence.ts";
@@ -77,6 +78,17 @@ const sameColumn = (a: ListColumn, b: ListColumn) => {
 
 /** B1's "#": VisualOrder counts from 0, and a line not yet in SAP has none — its place is its number. */
 const lineNo: CellTemplate = (row) => <span>{Number(row.VisualOrder ?? row[IDX]) + 1}</span>;
+/** A B1 line's regular/alternative mark: the type's initial, its name as the tooltip. A line that
+ *  never said is regular — B1's default, and how the quote draft sends its first pair. */
+const lineType: CellTemplate = (row, c) => {
+  const v = row.LineType ?? "dlt_Regular";
+  const text = formatValue(v, c.type, c.options);
+  return (
+    <ObjectStatus inverted state={v === "dlt_Alternative" ? "Information" : "None"} title={text} aria-label={text}>
+      {text.charAt(0).toUpperCase()}
+    </ObjectStatus>
+  );
+};
 
 export function EditGrid({
   title, table, columns, rows, onChange, readOnly, fixedRows, newRow, errors, controls, toolbarActions, onColumnsChange, noExport,
@@ -140,6 +152,7 @@ export function EditGrid({
   const cellTemplates = useMemo(
     () => ({
       VisualOrder: lineNo,
+      LineType: lineType,
       ...(readOnly ? {} : Object.fromEntries(visible.filter(cellEditable).map((c): [string, CellTemplate] => [c.key, (row) => {
         const i = row[IDX] as number;
         const r = latest.current.rows[i] ?? {};

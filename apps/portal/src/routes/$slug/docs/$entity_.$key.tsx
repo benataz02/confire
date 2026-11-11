@@ -6,7 +6,7 @@ import { ObjectPageSkeleton, PageError } from "@confire/ui/object-page/ObjectPag
 import { useDetailView } from "@confire/ui/useDetailView.ts";
 import { PrintActions } from "@confire/ui/PrintActions.tsx";
 import type { HeaderConfig } from "@confire/ui/types.ts";
-import { orpc } from "../../../orpc.ts";
+import { meQuery, orpc } from "../../../orpc.ts";
 import { DOC_PAGES, docFeature, isDocEntity, type DocEntity } from "../../../features/documents.ts";
 import { useI18n } from "../../../i18n.ts";
 
@@ -26,7 +26,8 @@ function DocRecord() {
   const { entity: raw, key } = Route.useParams();
   const entity = raw as DocEntity;
   const d = useDetailView({ entity, routeKey: key, route: `/docs/${entity}` });
-  const feature = d.constraints ? docFeature(entity, d.constraints, i18n.getText.bind(i18n)) : null;
+  const supplier = useQuery(meQuery).data?.tenant.name;
+  const feature = d.constraints ? docFeature(entity, d.constraints, i18n.getText.bind(i18n), supplier) : null;
   const header: HeaderConfig | undefined = feature ? {
     ...feature.detail.header,
     actions: (ctx) => {

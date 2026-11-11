@@ -105,9 +105,13 @@ export const entityPath = (entitySet: string, key: Key, q?: QueryOptions): strin
 export const actionPath = (entitySet: string, key: Key, name: string): string =>
   `${entityPath(entitySet, key)}/${assertName(name, "action")}`;
 
-/** `SQLQueries('cf_x')/List` — runs a stored SQL query (B1 10.0 FP 2011+): a GET the agent's
- *  allowlist already passes. No parameters: Confire's queries take none. */
-export const sqlQueryPath = (code: string): string => `${entityPath("SQLQueries", code)}/List`;
+/** `SQLQueries('cf_x')/List?CardCode='C1'` — runs a stored SQL query (B1 10.0 FP 2011+): a GET the
+ *  agent's allowlist already passes. Each param fills the query's `:name`, an OData literal (a string
+ *  quoted, its quotes doubled) percent-encoded. ponytail: unverified (spec §16): a quoted string in
+ *  the GET form (SAP's manual shows it; its POST `ParamList` is the other form). */
+export const sqlQueryPath = (code: string, params?: Record<string, string | number>): string =>
+  withQuery(`${entityPath("SQLQueries", code)}/List`, Object.entries(params ?? {})
+    .map(([k, v]) => `${assertName(k, "parameter")}=${encodeURIComponent(literal(v))}`).join("&"));
 
 /** `$crossjoin(A,A/B)?$expand=A($select=…),A/B($select=…)&$filter=…` — B1 wants the expand
  *  clause unencoded, so it is composed by hand and only the values are escaped. */

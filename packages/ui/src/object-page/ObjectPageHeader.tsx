@@ -120,11 +120,14 @@ function FacetValue({ facet, formData, meta }: { facet: Facet; formData: Row; me
 /** The KPI strip: one block per facet with a value on the record. */
 export function objectPageHeaderArea(
   facets: Facet[] | undefined, formData: Row, fields: Record<string, FieldConstraint> | undefined,
+  /** page-level information (what posting this record will do), above the facets */
+  notice?: ReactNode,
 ): ReactElement<ObjectPageHeaderPropTypes> | undefined {
   const shown = (facets ?? []).filter((f) => formData[f.field] !== undefined && formData[f.field] !== null && formData[f.field] !== "");
-  if (!shown.length) return undefined;
+  if (!shown.length && !notice) return undefined;
   return (
     <ObjectPageHeader>
+      {notice ? <div style={{ marginBottom: shown.length ? "1rem" : undefined }}>{notice}</div> : null}
       <FlexBox wrap="Wrap" style={{ gap: "2rem" }}>
         {shown.map((f) => (
           <FlexBox key={f.field} direction="Column" style={{ gap: "0.25rem" }}>

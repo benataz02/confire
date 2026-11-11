@@ -54,7 +54,9 @@ export function FormField({
       <CflField config={field.cfl} value={value} onValueChange={onChange} onRowSelect={onRowSelect}
         onExistenceError={onExistenceError} onCheckStarted={onCheckStarted}
         editable={editable} disabled={disabled} placeholder={placeholder} error={error ?? null} maxLength={field.validators?.maxLength}
-        link={field.link} formData={formData} accessibleName={label} />
+        link={field.link} formData={formData} accessibleName={label}
+        // The feature's codeNames already read the code table: its label saves the per-key lookup.
+        knownLabel={field.options?.find((o) => String(o.value) === String(value))?.label} />
     );
 
   if (!editable) {

@@ -1,11 +1,13 @@
+import { createHash } from "node:crypto";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { and, eq, inArray, notInArray, or } from "drizzle-orm";
 import { db, configProject } from "@confire/db";
-import { escapeLiteral, rowsOf } from "@confire/b1";
+import { escapeLiteral, rowsOf, type B1Transport } from "@confire/b1";
 import { portalMemberProcedure } from "./base.ts";
 import { tenantConnector, viaB1 } from "../../b1.ts";
 import { ALWAYS, type DocEntity } from "../doc-fields.ts";
+import { DOCS, refused, storedQueryRows } from "../../open-counts.ts";
 import { advanceSapSteps } from "../../project-timeline.ts";
 import { getUserState, setUserState } from "../../ui-views.ts";
 import { figuresOf, FINISHED, isFinished, journeyOf, rankOf, type Next } from "../journey.ts";
@@ -18,6 +20,37 @@ const doc = (entity: DocEntity, r: Record<string, unknown>) => ({
   entity, docEntry: Number(r.DocEntry), docNum: Number(r.DocNum ?? 0), docDate: String(r.DocDate ?? ""),
   docTotal: Number(r.DocTotal ?? 0), currency: String(r.DocCurrency ?? ""), status: String(r.DocumentStatus ?? ""),
 });
+
+/** The four sets newest first in one query; the company is its parameter, so one entry serves every
+ *  company. ObjType says which set a row is from (open-counts.ts' DOCS). */
+const LATEST_SQL = Object.values(DOCS)
+  .map((d) => `SELECT ObjType, DocEntry, DocNum, DocDate, DocTotal, DocTotalFC, DocCur, DocStatus FROM ${d.table} WHERE CardCode = :CardCode`)
+  .join(" UNION ALL ") + " ORDER BY DocDate DESC, DocEntry DESC";
+const LATEST = { code: `CF_LD_${createHash("sha1").update(LATEST_SQL).digest("hex").slice(0, 8)}`, name: "Confire: latest documents", text: LATEST_SQL };
+const ENTITY_OF = new Map(Object.entries(DOCS).map(([set, d]) => [d.objType, set as DocEntity]));
+
+/** A SQL row as `doc`'s shape. Keys lower-cased, because HANA may upper-case them; the date cut to its
+ *  day (`2026-11-09T00:00:00Z` or `20261109`); DocTotalFC is the total in a foreign currency, 0 in the local one. */
+function sqlDoc(raw: Record<string, unknown>) {
+  const r = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k.toLowerCase(), v]));
+  const d = String(r.docdate ?? "").replace(/-/g, "").slice(0, 8);
+  return {
+    entity: ENTITY_OF.get(String(r.objtype))!, docEntry: Number(r.docentry), docNum: Number(r.docnum ?? 0),
+    docDate: d.length === 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}` : "",
+    docTotal: Number(r.doctotalfc) || Number(r.doctotal ?? 0), currency: String(r.doccur ?? ""),
+    status: r.docstatus === "O" ? "bost_Open" : "bost_Close",
+  };
+}
+
+/** The old way, a read per set, for a SAP that refuses the SQL query (open-counts.ts' byCount). */
+async function perSet(b1: B1Transport, cardCode: string) {
+  const fence = `CardCode eq '${escapeLiteral(cardCode)}'`;
+  const entities: DocEntity[] = ["Quotations", "Orders", "DeliveryNotes", "Invoices"];
+  const reads = await Promise.all(entities.map((entity) =>
+    b1.readEntitySet(entity, { filter: fence, select: ALWAYS, orderby: "DocDate desc,DocEntry desc", top: 5 })));
+  return reads.flatMap((r, i) => rowsOf(r.data).map((row) => doc(entities[i]!, row)))
+    .sort((a, b) => b.docDate.localeCompare(a.docDate) || b.docEntry - a.docEntry).slice(0, 5);
+}
 
 export type HomeInquiry = { id: string; name: string; pinned: boolean; step: number; next: Next; at: string; quotedValue: number | null };
 
@@ -82,16 +115,17 @@ export const homeRouter = {
 
   /** The company's five newest documents across quotations, orders, deliveries and invoices (an open
    *  invoice is the page's to flag, off `status`). ALWAYS fields only — every portal schema shows
-   *  those — and the same CardCode fence as docs.rows. */
+   *  those — and the same CardCode fence as docs.rows. One stored query, not a read per set: the
+   *  agent's one session answers one call at a time (open-counts.ts). */
   documents: portalMemberProcedure.handler(async ({ context }) => {
     const { b1 } = await tenantConnector(context.tenantId);
-    const fence = `CardCode eq '${escapeLiteral(context.cardCode)}'`;
-    const read = (entity: DocEntity) =>
-      viaB1(() => b1.readEntitySet(entity, { filter: fence, select: ALWAYS, orderby: "DocDate desc,DocEntry desc", top: 5 }));
-    const entities: DocEntity[] = ["Quotations", "Orders", "DeliveryNotes", "Invoices"];
-    const reads = await Promise.all(entities.map(read));
-    const recent = reads.flatMap((r, i) => rowsOf(r.data).map((row) => doc(entities[i]!, row)))
-      .sort((a, b) => b.docDate.localeCompare(a.docDate) || b.docEntry - a.docEntry).slice(0, 5);
+    const recent = await viaB1(() => storedQueryRows(b1, LATEST, { maxPageSize: 5, params: { CardCode: context.cardCode } })
+      .then((rows) => rows.map(sqlDoc))
+      .catch((e: unknown) => {
+        if (!refused(e)) throw e;
+        console.warn(`[portal home] ${context.tenantId}: SQL query refused, reading per set:`, e instanceof Error ? e.message : e);
+        return perSet(b1, context.cardCode);
+      }));
     return { recent };
   }),
 
